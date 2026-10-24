@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use gitbello_core::config::{Config, DEFAULT_WORKTREE_TEMPLATE};
 use gitbello_core::git::GitErrorKind;
 use gitbello_core::ops::{NewTask, WorktreeOp};
-use gitbello_core::runtime::{Runtime, RuntimeEvent};
+use gitbello_core::runtime::{normalize, Runtime, RuntimeEvent};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use support::rt::{ok, open, outcome, poll_until, settle};
 use support::TestRepo;
@@ -22,10 +22,12 @@ fn worktree_paths(rt: &Runtime, key: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// git reports resolved paths (`/private/var` on macOS, long names on
+/// Windows), so compare normalized ones.
 fn listed(rt: &Runtime, key: &Path, path: &Path) -> bool {
     worktree_paths(rt, key)
         .iter()
-        .any(|p| p.components().eq(path.components()))
+        .any(|p| normalize(p) == normalize(path))
 }
 
 /// Waits until the worktree list (refreshed by worktree jobs) is current.
@@ -68,9 +70,13 @@ fn add_lock_remove_and_prune_worktrees() {
     };
     ok(&mut rt, &key, |rt| rt.worktree_op(&key, lock));
     let locked = |rt: &Runtime| {
-        rt.repo(&key).unwrap().worktrees().unwrap()[1]
-            .locked
-            .clone()
+        rt.repo(&key)
+            .unwrap()
+            .worktrees()
+            .unwrap()
+            .iter()
+            .find(|wt| normalize(&wt.path) == normalize(&existing))
+            .and_then(|wt| wt.locked.clone())
     };
     settle_worktrees(&mut rt, &key);
     assert_eq!(locked(&rt).as_deref(), Some("on a usb disk"));
@@ -95,9 +101,15 @@ fn add_lock_remove_and_prune_worktrees() {
     // A deleted folder shows as prunable until pruned.
     fs::remove_dir_all(&existing).unwrap();
     settle_worktrees(&mut rt, &key);
-    assert!(rt.repo(&key).unwrap().worktrees().unwrap()[1]
-        .prunable
-        .is_some());
+    let prunable = rt
+        .repo(&key)
+        .unwrap()
+        .worktrees()
+        .unwrap()
+        .iter()
+        .filter(|wt| wt.prunable.is_some())
+        .count();
+    assert_eq!(prunable, 1, "the deleted one is prunable");
     ok(&mut rt, &key, |rt| rt.worktree_op(&key, WorktreeOp::Prune));
     settle_worktrees(&mut rt, &key);
     assert_eq!(worktree_paths(&rt, &key).len(), 1);

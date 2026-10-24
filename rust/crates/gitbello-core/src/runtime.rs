@@ -1511,10 +1511,11 @@ fn new_task_job(
     };
     // Rolling back must not be cut short by a cancel.
     let restore = CancelToken::new();
-    let registered = backend.worktrees(repo, &restore).is_ok_and(|list| {
-        list.iter()
-            .any(|wt| wt.path.components().eq(task.path.components()))
-    });
+    // git reports resolved paths (no symlinks or short names): compare those.
+    let target = normalize(&task.path);
+    let registered = backend
+        .worktrees(repo, &restore)
+        .is_ok_and(|list| list.iter().any(|wt| normalize(&wt.path) == target));
     if registered {
         let remove = WorktreeOp::Remove {
             path: task.path.clone(),
