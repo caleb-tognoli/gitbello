@@ -19,8 +19,10 @@ func _ready() -> void:
 		return
 	var view: HistoryView = (load("res://app/history/history_view.tscn") as PackedScene).instantiate() as HistoryView
 	add_child(view)
+	var session: RepoSession = Core.open_session(repo)
+	add_child(session)
 	view.repo_loaded.connect(func(_rows: int, _error: String) -> void: _loaded = true)
-	view.open_repo(repo)
+	view.session = session
 	var deadline: int = Time.get_ticks_msec() + LOAD_TIMEOUT_MS
 	while not _loaded and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
