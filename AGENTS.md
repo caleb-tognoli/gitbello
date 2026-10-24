@@ -73,6 +73,7 @@ Run `cargo xtask check` before declaring any task done.
   - proposed adjustments to the next milestone
 - If a task turns out much larger than planned, stop and propose a split instead of pushing through.
 - Commit in small, focused commits using Conventional Commits (`feat(core): ...`, `fix(ui): ...`).
+- Commits are Caleb's alone: no `Co-Authored-By` or other AI attribution trailers in commit messages or PR descriptions.
 
 ## Conventions
 
