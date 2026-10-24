@@ -1,7 +1,11 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://app/main/main.gd" id="1_main"]
-[ext_resource type="PackedScene" path="res://app/history/history_view.tscn" id="2_history"]
+[ext_resource type="PackedScene" path="res://app/welcome/welcome.tscn" id="2_welcome"]
+[ext_resource type="Script" path="res://app/log_panel/log_panel.gd" id="3_log"]
+[ext_resource type="Script" path="res://app/toasts/toasts.gd" id="4_toasts"]
+[ext_resource type="PackedScene" path="res://app/palette/command_palette.tscn" id="5_palette"]
+[ext_resource type="Script" path="res://app/shortcuts_dialog/shortcuts_dialog.gd" id="6_shortcuts"]
 
 [node name="Main" type="PanelContainer"]
 anchors_preset = 15
@@ -13,17 +17,89 @@ script = ExtResource("1_main")
 
 [node name="Layout" type="VBoxContainer" parent="."]
 layout_mode = 2
+theme_type_variation = &"ShellLayout"
 
-[node name="HistoryView" parent="Layout" instance=ExtResource("2_history")]
+[node name="TabStrip" type="PanelContainer" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"TabStrip"
+
+[node name="TabRow" type="HBoxContainer" parent="Layout/TabStrip"]
+layout_mode = 2
+
+[node name="Tabs" type="TabBar" parent="Layout/TabStrip/TabRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tab_close_display_policy = 2
+drag_to_rearrange_enabled = true
+
+[node name="AddButton" type="Button" parent="Layout/TabStrip/TabRow"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Open repository"
+flat = true
+text = "+"
+
+[node name="Body" type="VSplitContainer" parent="Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Content" type="Control" parent="Layout/Body"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="StatusBar" type="HBoxContainer" parent="Layout"]
-layout_mode = 2
-alignment = 2
+[node name="Welcome" parent="Layout/Body/Content" instance=ExtResource("2_welcome")]
+unique_name_in_owner = true
+layout_mode = 1
 
-[node name="VersionLabel" type="Label" parent="Layout/StatusBar"]
+[node name="GitLog" type="Tree" parent="Layout/Body"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+script = ExtResource("3_log")
+
+[node name="StatusBar" type="PanelContainer" parent="Layout"]
+layout_mode = 2
+theme_type_variation = &"StatusBar"
+
+[node name="Row" type="HBoxContainer" parent="Layout/StatusBar"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="Layout/StatusBar/Row"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DimLabel"
+text_overrun_behavior = 3
+
+[node name="VersionLabel" type="Label" parent="Layout/StatusBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
 text = "gitbello"
+
+[node name="Overlay" type="Control" parent="."]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Toasts" type="VBoxContainer" parent="Overlay"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("4_toasts")
+
+[node name="Palette" parent="Overlay" instance=ExtResource("5_palette")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="ShortcutsDialog" type="AcceptDialog" parent="."]
+unique_name_in_owner = true
+script = ExtResource("6_shortcuts")
