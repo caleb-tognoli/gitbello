@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
+mod themes;
+
 const USAGE: &str = "usage: cargo xtask <command> [options]
 
 commands:
@@ -23,6 +25,7 @@ commands:
   bench-graph <path> [--ui] [--record]
                           time a graph load of <path> (read-only); --ui adds the
                           windowed scroll benchmark; --record appends to docs/perf.md
+  themes                  regenerate godot/themes/{dark,light}.tres
 
 environment:
   GODOT                   path to the Godot executable (default: `godot` on PATH)";
@@ -51,6 +54,7 @@ fn main() -> Result<()> {
         "check" => check(),
         "smoke" => smoke(),
         "bench-graph" => bench_graph(rest),
+        "themes" => themes::run(&godot_project_dir().join("themes")),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())
