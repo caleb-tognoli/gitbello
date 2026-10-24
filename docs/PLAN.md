@@ -42,7 +42,7 @@ GitHub, GitLab or any hosting integration (gitbello is pure git) · interactive 
 
 - ~~**O1 License.**~~ **Decided: MIT OR Apache-2.0** (2026-10-24).
 - **O2 Terminal approach** (M10). A full embedded terminal or "open system terminal here". See §3.13.
-- **O3 Default worktree path template.** Suggested: `{repo_parent}/{repo_name}.worktrees/{branch_slug}`.
+- ~~**O3 Default worktree path template.**~~ **Decided: `{repo_parent}/{repo_name}.worktrees/{branch_slug}`** (2026-10-24); editable in Settings.
 
 ---
 
@@ -317,12 +317,14 @@ Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work
 *Result:* `tests/sync.rs` covers fetch, fast-forward/merge/rebase pulls over local changes, pushes with and without an upstream, a rejected push, and auto-fetch (interval, one failure report per streak); `tests/branches.rs` covers branch create/rename/delete (unmerged needs force), remote and detached checkouts, upstreams, the stash-switch-re-apply flow (including a conflicting re-apply and a failed switch), tags and cherry-picks (merges against the first parent, aborting a conflict). `sync_smoke.gd` and `branches_smoke.gd` drive the UI. Fetch runs as a scheduler read, so commits never wait for the network; auto-fetch goes one repository at a time and skips repositories with a write queued. The minimal stash and re-apply of the checkout flow was pulled forward from M7; branches joined the palette.
 
 ### M6 — Worktrees (≈1.5 weeks) → daily-driver point
-- [ ] Worktrees nested in the sidebar with badges; open a worktree as a tab
-- [ ] New-task flow (§4) with path template and rollback
-- [ ] Cleanup-merged flow (§4)
-- [ ] Add, remove, lock, unlock and prune worktrees; handle a missing worktree folder gracefully
+- [x] Worktrees nested in the sidebar with badges; open a worktree as a tab
+- [x] New-task flow (§4) with path template and rollback
+- [x] Cleanup-merged flow (§4)
+- [x] Add, remove, lock, unlock and prune worktrees; handle a missing worktree folder gracefully
 
 **Accept when** Caleb uses gitbello instead of GitHub Desktop for a full week. Collect friction notes for the next milestones.
+
+*Result:* `tests/worktrees.rs` covers add/lock/unlock/remove/prune, the new-task job (fetching the base, no tracking of it, refusing an existing branch, rolling back the branch git creates before refusing a folder), cleanup (merged and upstream-gone worktrees, a dirty one refused without force while the others go), a deleted worktree folder reported once, and badges following changes in another open worktree; `worktrees_smoke.gd` drives the UI. A Settings dialog (pull mode, auto-fetch, editor, terminal, worktree template) came with it, and a branch checked out in another worktree cannot be deleted. The setup action of the new-task flow waits for custom actions (M9). Not yet done: the week of daily use.
 
 ### M7 — Merge and stash workflows (≈3 weeks)
 - [ ] Merge with `merge-tree` preview (§4)
