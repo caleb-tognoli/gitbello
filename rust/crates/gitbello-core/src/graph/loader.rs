@@ -17,6 +17,9 @@ use super::log::{LogParseError, LogRecord, RecordSplitter, LOG_ARGS};
 use crate::git::{CancelToken, GitError, GitErrorKind, GitRunner};
 use crate::jobs::{JobId, JobOutput, JobScheduler, JobSpec};
 
+/// Label of graph-load jobs on the scheduler.
+pub const GRAPH_JOB_LABEL: &str = "load graph";
+
 /// Rows that count as "the first screen" for the first-page timing.
 pub const FIRST_PAGE_ROWS: usize = 100;
 
@@ -96,7 +99,7 @@ impl GraphLoader {
     /// Loads as a read job on `scheduler`; cancelling the loader cancels the job.
     pub fn submit(scheduler: &JobScheduler, runner: GitRunner, repo: PathBuf) -> (Self, JobId) {
         let (loader, task) = Self::unstarted();
-        let spec = JobSpec::read(repo.clone(), "load graph", move |_| {
+        let spec = JobSpec::read(repo.clone(), GRAPH_JOB_LABEL, move |_| {
             match task.run(&runner, repo) {
                 LoadState::Done | LoadState::Loading => Ok(JobOutput::Done),
                 LoadState::Cancelled => Err(GitError::new("log", GitErrorKind::Cancelled, "")),

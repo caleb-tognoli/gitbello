@@ -13,6 +13,8 @@ const RECORD_SEP: u8 = 0;
 /// author email, author time, subject.
 pub const LOG_ARGS: &[&str] = &[
     "log",
+    // Stashes are listed separately; their commits would clutter the graph.
+    "--exclude=refs/stash",
     "--all",
     "--topo-order",
     "-z",

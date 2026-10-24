@@ -59,6 +59,12 @@ impl CommandLog {
         }
     }
 
+    /// Sequence number of the newest record (0 when empty).
+    pub fn latest_seq(&self) -> u64 {
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        inner.next_seq - 1
+    }
+
     /// Records with `seq > after`, oldest first. Pass 0 for everything kept.
     pub fn records_since(&self, after: u64) -> Vec<CommandRecord> {
         let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);

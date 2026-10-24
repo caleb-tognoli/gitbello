@@ -19,7 +19,7 @@ use std::thread::{self, JoinHandle};
 
 use crate::backend::GitBackend;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
-use crate::repo::{Operation, Ref, RepoStatus, StashEntry, Worktree};
+use crate::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 
 pub type JobId = u64;
 
@@ -44,6 +44,11 @@ impl RefreshKind {
 
     fn bit(self) -> u8 {
         1 << (self as u8)
+    }
+
+    /// The kind whose refresh jobs carry `label`.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.label() == label)
     }
 
     pub fn label(self) -> &'static str {
@@ -123,6 +128,11 @@ pub enum JobOutput {
     Worktrees(Vec<Worktree>),
     Operation(Option<Operation>),
     Stashes(Vec<StashEntry>),
+    /// A repository was opened: its worktree root and git directories.
+    Opened {
+        toplevel: PathBuf,
+        paths: RepoPaths,
+    },
     /// Jobs whose effect is elsewhere (writes, graph loads).
     Done,
 }

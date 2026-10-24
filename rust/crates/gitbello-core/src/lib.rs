@@ -5,11 +5,14 @@
 
 pub mod backend;
 pub mod config;
+pub mod fuzzy;
 pub mod git;
 pub mod graph;
 pub mod jobs;
 pub mod paths;
 pub mod repo;
+pub mod runtime;
+pub mod sidebar;
 pub mod watch;
 
 /// Version of the core crate, as reported to the UI and CLI.
