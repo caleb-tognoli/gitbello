@@ -4,9 +4,11 @@
 //! live here. This crate must never depend on Godot.
 
 pub mod backend;
+pub mod config;
 pub mod git;
 pub mod graph;
 pub mod jobs;
+pub mod paths;
 pub mod repo;
 pub mod watch;
 
