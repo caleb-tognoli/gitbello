@@ -144,6 +144,8 @@ pub enum JobOutput {
     },
     /// The HEAD commit's message.
     HeadMessage(String),
+    /// A discard finished; these `(path, blob id)` backups can undo it.
+    Discarded(Vec<(PathBuf, String)>),
     /// A repository was opened: its worktree root and git directories.
     Opened {
         toplevel: PathBuf,

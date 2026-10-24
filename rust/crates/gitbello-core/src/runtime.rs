@@ -12,10 +12,12 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use crate::backend::{CliBackend, GitBackend};
+use crate::backend::{CliBackend, GitBackend, PatchGuard};
 use crate::changes::{self, ChangeGroup, ChangeLists};
 use crate::config::{Config, ConfigError};
-use crate::diff::{DiffTarget, FileDiff, LARGE_DIFF_BYTES};
+use crate::diff::{
+    build_patch, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode, LARGE_DIFF_BYTES,
+};
 use crate::git::{CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress};
 use crate::graph::{GraphLoader, GRAPH_JOB_LABEL};
 use crate::jobs::{
@@ -34,6 +36,11 @@ pub const HEAD_MESSAGE_JOB_LABEL: &str = "read HEAD message";
 pub const STAGE_JOB_LABEL: &str = "stage";
 pub const UNSTAGE_JOB_LABEL: &str = "unstage";
 pub const COMMIT_JOB_LABEL: &str = "commit";
+pub const DISCARD_JOB_LABEL: &str = "discard";
+pub const UNDO_DISCARD_JOB_LABEL: &str = "undo discard";
+
+/// Discards remembered for undo, per repository.
+pub const MAX_DISCARD_UNDO: usize = 20;
 
 /// Repositories remembered for the "recent" list.
 pub const MAX_KNOWN_REPOS: usize = 20;
@@ -107,6 +114,8 @@ pub struct RepoState {
     changes: ChangeLists,
     worktree_badges: HashMap<PathBuf, Badge>,
     diff: Option<DiffState>,
+    /// Backups of recent discards, newest last.
+    discards: Vec<Vec<(PathBuf, String)>>,
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
     open_error: Option<GitError>,
@@ -127,6 +136,7 @@ impl RepoState {
             changes: ChangeLists::default(),
             worktree_badges: HashMap::new(),
             diff: None,
+            discards: Vec::new(),
             graph: None,
             graph_dirty_since: None,
             open_error: None,
@@ -209,6 +219,32 @@ impl RepoState {
 
     pub fn diff(&self) -> Option<&DiffState> {
         self.diff.as_ref()
+    }
+
+    /// Whether the selected diff's lines can be used with `mode`: a loaded
+    /// text diff of the matching kind (unstaged for stage and discard,
+    /// staged for unstage), not a rename or copy.
+    pub fn can_apply_lines(&self, mode: PatchMode) -> bool {
+        let Some(state) = &self.diff else {
+            return false;
+        };
+        let kind_ok = match mode {
+            PatchMode::Stage | PatchMode::Discard => state.target.kind == DiffKind::Unstaged,
+            PatchMode::Unstage => state.target.kind == DiffKind::Staged,
+        };
+        let Some(diff) = &state.diff else {
+            return false;
+        };
+        kind_ok
+            && diff.content == DiffContent::Text
+            && !diff.hunks.is_empty()
+            && diff.header.renamed_from.is_none()
+            && diff.header.copied_from.is_none()
+    }
+
+    /// Whether there is a discard to undo.
+    pub fn can_undo_discard(&self) -> bool {
+        !self.discards.is_empty()
     }
 
     /// Whether a commit can be made: no conflicts, and something staged (or
@@ -457,6 +493,105 @@ impl Runtime {
         )))
     }
 
+    /// Stages, unstages or discards the selected lines (indices into the
+    /// selected diff; a hunk header takes its whole hunk). `None` when the
+    /// diff does not allow it or no change is selected.
+    pub fn apply_lines(&self, key: &Path, lines: &[usize], mode: PatchMode) -> Option<JobId> {
+        let state = self.repos.get(key)?;
+        if !state.can_apply_lines(mode) {
+            return None;
+        }
+        let toplevel = self.toplevel_of(key)?;
+        let diff_state = state.diff.as_ref()?;
+        let diff = diff_state.diff.as_ref()?;
+        let path = diff_state.target.path.clone();
+        let git_path = path.to_string_lossy().replace('\\', "/");
+        let patch = build_patch(diff, &git_path, lines, mode)?;
+        let real = |oid: &Option<String>| {
+            oid.as_ref()
+                .filter(|o| !o.chars().all(|c| c == '0'))
+                .cloned()
+        };
+        let (old, new) = (&diff.header.old_oid, &diff.header.new_oid);
+        let guard = match mode {
+            PatchMode::Stage => PatchGuard {
+                path: path.clone(),
+                index_oid: real(old),
+                worktree_oid: None,
+            },
+            PatchMode::Unstage => PatchGuard {
+                path: path.clone(),
+                index_oid: real(new),
+                worktree_oid: None,
+            },
+            PatchMode::Discard => PatchGuard {
+                path: path.clone(),
+                index_oid: real(old),
+                worktree_oid: real(new),
+            },
+        };
+        let label = match mode {
+            PatchMode::Stage => STAGE_JOB_LABEL,
+            PatchMode::Unstage => UNSTAGE_JOB_LABEL,
+            PatchMode::Discard => DISCARD_JOB_LABEL,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            label,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let backups = if mode == PatchMode::Discard {
+                    backend.backup(&toplevel, std::slice::from_ref(&path), cancel)?
+                } else {
+                    Vec::new()
+                };
+                backend.apply_patch(&toplevel, &patch, mode, &guard, cancel)?;
+                Ok(if mode == PatchMode::Discard {
+                    JobOutput::Discarded(backups)
+                } else {
+                    JobOutput::Done
+                })
+            },
+        )))
+    }
+
+    /// Restores `paths` in the working tree from the index, after backing
+    /// up their current content for [`Runtime::undo_discard`].
+    pub fn discard_files(&self, key: &Path, paths: Vec<PathBuf>) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        if paths.is_empty() {
+            return None;
+        }
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            DISCARD_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let backups = backend.backup(&toplevel, &paths, cancel)?;
+                backend.discard(&toplevel, &paths, cancel)?;
+                Ok(JobOutput::Discarded(backups))
+            },
+        )))
+    }
+
+    /// Writes back the files of the most recent discard.
+    pub fn undo_discard(&mut self, key: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let files = self.repos.get_mut(key)?.discards.pop()?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNDO_DISCARD_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .restore_backup(&toplevel, &files, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
     /// Commits the index (or amends HEAD) with `message`.
     pub fn commit(&self, key: &Path, message: String, amend: bool) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
@@ -585,6 +720,13 @@ impl Runtime {
             }
             return;
         }
+        if let EventKind::Finished(Ok(JobOutput::Discarded(backups))) = &kind {
+            if !backups.is_empty() {
+                state.discards.push(backups.clone());
+                let excess = state.discards.len().saturating_sub(MAX_DISCARD_UNDO);
+                state.discards.drain(..excess);
+            }
+        }
         let state = match kind {
             EventKind::Started => JobState::Started,
             EventKind::Progress(progress) => JobState::Progress(progress),
@@ -657,7 +799,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         JobOutput::Opened { .. }
         | JobOutput::Done
         | JobOutput::Diff { .. }
-        | JobOutput::HeadMessage(_) => {}
+        | JobOutput::HeadMessage(_)
+        | JobOutput::Discarded(_) => {}
     }
 }
 

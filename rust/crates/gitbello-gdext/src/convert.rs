@@ -39,6 +39,7 @@ pub fn error_kind_id(kind: GitErrorKind) -> &'static str {
         GitErrorKind::LockExists => "lock_exists",
         GitErrorKind::Cancelled => "cancelled",
         GitErrorKind::UnexpectedOutput => "unexpected_output",
+        GitErrorKind::Stale => "stale",
         _ => "other",
     }
 }

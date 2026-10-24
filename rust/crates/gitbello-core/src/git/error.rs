@@ -38,6 +38,8 @@ pub enum GitErrorKind {
     Cancelled,
     #[error("unexpected git output")]
     UnexpectedOutput,
+    #[error("the file changed since it was shown")]
+    Stale,
     #[error("git failed")]
     Other,
 }

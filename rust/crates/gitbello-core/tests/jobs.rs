@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use gitbello_core::backend::GitBackend;
-use gitbello_core::diff::{DiffTarget, FileDiff};
+use gitbello_core::backend::{GitBackend, PatchGuard};
+use gitbello_core::diff::{DiffTarget, FileDiff, PatchMode};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
@@ -71,6 +71,35 @@ impl GitBackend for FakeBackend {
         Ok(())
     }
     fn commit(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn apply_patch(
+        &self,
+        _: &Path,
+        _: &[u8],
+        _: PatchMode,
+        _: &PatchGuard,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn backup(
+        &self,
+        _: &Path,
+        _: &[PathBuf],
+        _: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        Ok(Vec::new())
+    }
+    fn discard(&self, _: &Path, _: &[PathBuf], _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn restore_backup(
+        &self,
+        _: &Path,
+        _: &[(PathBuf, String)],
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
         Ok(())
     }
 }
