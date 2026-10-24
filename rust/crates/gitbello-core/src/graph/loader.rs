@@ -5,7 +5,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -14,7 +14,8 @@ use thiserror::Error;
 
 use super::index::GraphIndex;
 use super::log::{LogParseError, LogRecord, RecordSplitter, LOG_ARGS};
-use crate::git::{GitError, GitRunner};
+use crate::git::{CancelToken, GitError, GitErrorKind, GitRunner};
+use crate::jobs::{JobId, JobOutput, JobScheduler, JobSpec};
 
 /// Rows that count as "the first screen" for the first-page timing.
 pub const FIRST_PAGE_ROWS: usize = 100;
@@ -57,7 +58,7 @@ impl LoadProgress {
 struct Shared {
     index: RwLock<GraphIndex>,
     rows: AtomicUsize,
-    cancel: AtomicBool,
+    cancel: CancelToken,
     status: Mutex<Status>,
     started: Instant,
 }
@@ -77,11 +78,47 @@ pub struct GraphLoader {
 }
 
 impl GraphLoader {
+    /// Loads on a dedicated thread. Prefer [`GraphLoader::submit`] inside the app.
     pub fn start(runner: GitRunner, repo: PathBuf) -> Self {
+        let (mut loader, task) = Self::unstarted();
+        loader.handle = thread::Builder::new()
+            .name("gitbello-graph".into())
+            .spawn(move || {
+                task.run(&runner, repo);
+            })
+            .ok();
+        if loader.handle.is_none() {
+            loader.set_state(LoadState::Cancelled);
+        }
+        loader
+    }
+
+    /// Loads as a read job on `scheduler`; cancelling the loader cancels the job.
+    pub fn submit(scheduler: &JobScheduler, runner: GitRunner, repo: PathBuf) -> (Self, JobId) {
+        let (loader, task) = Self::unstarted();
+        let spec = JobSpec::read(repo.clone(), "load graph", move |_| {
+            match task.run(&runner, repo) {
+                LoadState::Done | LoadState::Loading => Ok(JobOutput::Done),
+                LoadState::Cancelled => Err(GitError::new("log", GitErrorKind::Cancelled, "")),
+                LoadState::Failed(GraphLoadError::Git(err)) => Err(err),
+                LoadState::Failed(GraphLoadError::Parse(err)) => Err(GitError::new(
+                    "log",
+                    GitErrorKind::UnexpectedOutput,
+                    err.to_string(),
+                )),
+            }
+        })
+        .with_cancel(loader.shared.cancel.clone());
+        let id = scheduler.submit(spec);
+        (loader, id)
+    }
+
+    /// A loader handle and the task that fills it, to run wherever the caller likes.
+    fn unstarted() -> (Self, GraphLoadTask) {
         let shared = Arc::new(Shared {
             index: RwLock::new(GraphIndex::new()),
             rows: AtomicUsize::new(0),
-            cancel: AtomicBool::new(false),
+            cancel: CancelToken::new(),
             status: Mutex::new(Status {
                 state: LoadState::Loading,
                 first_page: None,
@@ -89,27 +126,21 @@ impl GraphLoader {
             }),
             started: Instant::now(),
         });
-        let worker = Arc::clone(&shared);
-        let handle = thread::Builder::new()
-            .name("gitbello-graph".into())
-            .spawn(move || {
-                let state = match load(&runner, repo, &worker) {
-                    Ok(true) => LoadState::Done,
-                    Ok(false) => LoadState::Cancelled,
-                    Err(err) => LoadState::Failed(err),
-                };
-                let mut status = worker.status.lock().unwrap_or_else(PoisonError::into_inner);
-                let elapsed = worker.started.elapsed();
-                status.first_page.get_or_insert(elapsed);
-                status.total = Some(elapsed);
-                status.state = state;
-            })
-            .ok();
-        if handle.is_none() {
-            let mut status = shared.status.lock().unwrap_or_else(PoisonError::into_inner);
-            status.state = LoadState::Cancelled;
-        }
-        Self { shared, handle }
+        let task = GraphLoadTask {
+            shared: Arc::clone(&shared),
+        };
+        (
+            Self {
+                shared,
+                handle: None,
+            },
+            task,
+        )
+    }
+
+    fn set_state(&self, state: LoadState) {
+        let mut status = self.shared.status.lock().unwrap_or_else(PoisonError::into_inner);
+        status.state = state;
     }
 
     /// Rows indexed so far. Cheap: one atomic load.
@@ -140,7 +171,7 @@ impl GraphLoader {
     }
 
     pub fn cancel(&self) {
-        self.shared.cancel.store(true, Ordering::Release);
+        self.shared.cancel.cancel();
     }
 
     /// Blocks until loading ends. For the CLI and tests, never the UI thread.
@@ -148,7 +179,38 @@ impl GraphLoader {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
-        self.progress()
+        loop {
+            let progress = self.progress();
+            if progress.is_finished() {
+                return progress;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+/// The work of one graph load; see [`GraphLoader::submit`].
+struct GraphLoadTask {
+    shared: Arc<Shared>,
+}
+
+impl GraphLoadTask {
+    fn run(self, runner: &GitRunner, repo: PathBuf) -> LoadState {
+        let state = match load(runner, repo, &self.shared) {
+            Ok(true) => LoadState::Done,
+            Ok(false) => LoadState::Cancelled,
+            Err(err) => LoadState::Failed(err),
+        };
+        let mut status = self
+            .shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let elapsed = self.shared.started.elapsed();
+        status.first_page.get_or_insert(elapsed);
+        status.total = Some(elapsed);
+        status.state = state.clone();
+        state
     }
 }
 
@@ -165,7 +227,7 @@ fn load(runner: &GitRunner, repo: PathBuf, shared: &Shared) -> Result<bool, Grap
     let mut splitter = RecordSplitter::new();
     let mut buf = vec![0u8; READ_CHUNK];
     loop {
-        if shared.cancel.load(Ordering::Acquire) {
+        if shared.cancel.is_cancelled() {
             stream.kill();
             return Ok(false);
         }

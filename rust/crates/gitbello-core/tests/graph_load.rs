@@ -178,3 +178,53 @@ fn large_history_slices_match_and_parents_resolve() {
     }
     assert!(index.max_width() >= 3);
 }
+
+#[test]
+fn loads_as_a_scheduler_job_and_reports_events() {
+    use gitbello_core::backend::CliBackend;
+    use gitbello_core::jobs::{EventKind, JobOutput, JobScheduler};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let repo = TestRepo::init();
+    for i in 0..3 {
+        repo.commit("f.txt", &format!("{i}\n"), &format!("c{i}"));
+    }
+    let (scheduler, events) =
+        JobScheduler::new(Arc::new(CliBackend::new(repo.runner().clone())), 2);
+    let (loader, job) =
+        GraphLoader::submit(&scheduler, repo.runner().clone(), repo.path().to_path_buf());
+    let finished = loop {
+        let event = events.recv_timeout(Duration::from_secs(10)).unwrap();
+        if event.job == job && !matches!(event.kind, EventKind::Started) {
+            break event.kind;
+        }
+    };
+    assert_eq!(finished, EventKind::Finished(Ok(JobOutput::Done)));
+    assert_eq!(loader.index().row_count(), 3);
+    assert_eq!(loader.progress().state, LoadState::Done);
+}
+
+#[test]
+fn scheduler_graph_job_reports_git_errors() {
+    use gitbello_core::backend::CliBackend;
+    use gitbello_core::jobs::{EventKind, JobScheduler};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let repo = TestRepo::init();
+    let (scheduler, events) =
+        JobScheduler::new(Arc::new(CliBackend::new(repo.runner().clone())), 1);
+    let (loader, job) = GraphLoader::submit(&scheduler, repo.runner().clone(), repo.non_repo_dir());
+    let finished = loop {
+        let event = events.recv_timeout(Duration::from_secs(10)).unwrap();
+        if event.job == job && !matches!(event.kind, EventKind::Started) {
+            break event.kind;
+        }
+    };
+    assert!(
+        matches!(&finished, EventKind::Finished(Err(err)) if err.kind == GitErrorKind::NotARepository),
+        "{finished:?}"
+    );
+    assert!(matches!(loader.progress().state, LoadState::Failed(_)));
+}
