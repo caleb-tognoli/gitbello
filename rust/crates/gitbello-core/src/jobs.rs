@@ -18,8 +18,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use crate::backend::GitBackend;
+use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use crate::sidebar::Badge;
 
 pub type JobId = u64;
 
@@ -31,15 +33,18 @@ pub enum RefreshKind {
     Worktrees,
     Operation,
     Stashes,
+    /// Status of every linked worktree, reduced to badges.
+    WorktreeBadges,
 }
 
 impl RefreshKind {
-    pub const ALL: [RefreshKind; 5] = [
+    pub const ALL: [RefreshKind; 6] = [
         Self::Status,
         Self::Refs,
         Self::Worktrees,
         Self::Operation,
         Self::Stashes,
+        Self::WorktreeBadges,
     ];
 
     fn bit(self) -> u8 {
@@ -58,6 +63,7 @@ impl RefreshKind {
             Self::Worktrees => "refresh worktrees",
             Self::Operation => "refresh operation",
             Self::Stashes => "refresh stashes",
+            Self::WorktreeBadges => "refresh worktree badges",
         }
     }
 }
@@ -80,6 +86,7 @@ impl RefreshSet {
             RefreshKind::Status,
             RefreshKind::Refs,
             RefreshKind::Operation,
+            RefreshKind::WorktreeBadges,
         ]
         .into_iter()
         .collect()
@@ -128,6 +135,15 @@ pub enum JobOutput {
     Worktrees(Vec<Worktree>),
     Operation(Option<Operation>),
     Stashes(Vec<StashEntry>),
+    /// Badge per linked worktree path.
+    WorktreeBadges(Vec<(PathBuf, Badge)>),
+    /// A diff load; `generation` tells a stale result from the current one.
+    Diff {
+        generation: u64,
+        diff: FileDiff,
+    },
+    /// The HEAD commit's message.
+    HeadMessage(String),
     /// A repository was opened: its worktree root and git directories.
     Opened {
         toplevel: PathBuf,
@@ -316,6 +332,9 @@ impl Inner {
                 RefreshKind::Worktrees => backend.worktrees(repo, cancel).map(JobOutput::Worktrees),
                 RefreshKind::Operation => backend.operation(repo, cancel).map(JobOutput::Operation),
                 RefreshKind::Stashes => backend.stashes(repo, cancel).map(JobOutput::Stashes),
+                RefreshKind::WorktreeBadges => {
+                    worktree_badges(backend, repo, cancel).map(JobOutput::WorktreeBadges)
+                }
             }
         });
         Self::enqueue(state, spec, Some(kind))
@@ -333,6 +352,25 @@ impl Inner {
         });
         id
     }
+}
+
+/// Status of each worktree of `repo` that is present on disk.
+fn worktree_badges(
+    backend: &dyn GitBackend,
+    repo: &Path,
+    cancel: &CancelToken,
+) -> Result<Vec<(PathBuf, Badge)>, GitError> {
+    let mut badges = Vec::new();
+    for worktree in backend.worktrees(repo, cancel)? {
+        if worktree.bare || worktree.prunable.is_some() || !worktree.path.is_dir() {
+            continue;
+        }
+        // A worktree that cannot be read just has no badge.
+        if let Ok(status) = backend.status(&worktree.path, cancel) {
+            badges.push((worktree.path, Badge::new(Some(&status), None)));
+        }
+    }
+    Ok(badges)
 }
 
 /// Index of the first job allowed to start now.

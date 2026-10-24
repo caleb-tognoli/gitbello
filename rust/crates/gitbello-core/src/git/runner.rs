@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -47,6 +48,8 @@ pub struct GitRunner {
     git: PathBuf,
     version: GitVersion,
     log: CommandLog,
+    /// Extra environment for every command (tests pin identity and config).
+    env: Arc<[(OsString, OsString)]>,
 }
 
 impl GitRunner {
@@ -96,7 +99,17 @@ impl GitRunner {
             git,
             version,
             log: CommandLog::default(),
+            env: Arc::new([]),
         })
+    }
+
+    /// Adds `key=value` to the environment of every command this runner (and
+    /// its later clones) starts.
+    pub fn with_env(mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        let mut env = self.env.to_vec();
+        env.push((key.as_ref().to_owned(), value.as_ref().to_owned()));
+        self.env = env.into();
+        self
     }
 
     pub fn executable(&self) -> &Path {
@@ -124,6 +137,7 @@ impl GitRunner {
 
     pub fn command(&self, repo: &Path, access: Access) -> GitCommand {
         let mut cmd = base_command(&self.git, access);
+        cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
         cmd.arg("-C")
             .arg(repo)
             .args(["-c", "core.quotepath=false", "-c", "color.ui=false"]);

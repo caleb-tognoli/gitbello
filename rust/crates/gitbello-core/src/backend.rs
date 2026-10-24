@@ -1,10 +1,15 @@
 //! The `GitBackend` trait and its git CLI implementation (PLAN §3.3).
 //!
-//! M2 covers reads. Writes are added by the milestones that need them.
+//! Reads, plus the writes of the milestones so far (staging and commits).
+//! Commands that take paths run in the worktree root with literal pathspecs,
+//! so status paths can be passed back unchanged.
 
+use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::git::{CancelToken, GitError, GitErrorKind, GitOutput, GitRunner};
+use crate::diff::{parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff};
+use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner};
 use crate::repo::{
     detect_operation, parse_refs, parse_remotes, parse_repo_paths, parse_stash_list, parse_status,
     parse_worktrees, Operation, ParseError, Ref, RepoPaths, RepoStatus, StashEntry, Worktree,
@@ -30,6 +35,42 @@ pub trait GitBackend: Send + Sync {
         paths: &[PathBuf],
         cancel: &CancelToken,
     ) -> Result<Vec<PathBuf>, GitError>;
+
+    /// Diff of one file. `toplevel` is the worktree root. Output larger than
+    /// `limit` bytes is not parsed and comes back as [`DiffContent::TooLarge`].
+    fn diff(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        limit: Option<usize>,
+        cancel: &CancelToken,
+    ) -> Result<FileDiff, GitError>;
+    /// Full message of the HEAD commit (for amending).
+    fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError>;
+
+    /// `git add -A` of `paths` (worktree-root relative), or of everything.
+    fn stage(
+        &self,
+        toplevel: &Path,
+        paths: Option<&[PathBuf]>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Resets `paths` (or the whole index) to HEAD; works on an unborn branch.
+    fn unstage(
+        &self,
+        toplevel: &Path,
+        paths: Option<&[PathBuf]>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Commits the index with `message` (passed on stdin). Hooks run; their
+    /// output is in the error's stderr when they reject the commit.
+    fn commit(
+        &self,
+        toplevel: &Path,
+        message: &str,
+        amend: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
 }
 
 /// [`GitBackend`] over the system git executable.
@@ -56,6 +97,30 @@ impl CliBackend {
         self.runner.read(repo).args(args).cancel_token(cancel).run()
     }
 }
+
+/// NUL-separated paths for `--pathspec-from-file=- --pathspec-file-nul`.
+fn pathspec_input(paths: &[PathBuf]) -> Vec<u8> {
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path.to_string_lossy().as_bytes());
+        input.push(0);
+    }
+    input
+}
+
+const PATHSPEC_STDIN: [&str; 2] = ["--pathspec-from-file=-", "--pathspec-file-nul"];
+
+/// `git diff` arguments that keep the output stable whatever the user's
+/// config: no external diff or textconv, standard prefixes, full-tree paths.
+const DIFF_ARGS: &[&str] = &[
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-relative",
+    "--no-color",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
 
 fn unexpected(args: &[&str], err: ParseError) -> GitError {
     GitError::new(
@@ -120,11 +185,7 @@ impl GitBackend for CliBackend {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
-        let mut input = Vec::new();
-        for path in paths {
-            input.extend_from_slice(path.to_string_lossy().as_bytes());
-            input.push(0);
-        }
+        let input = pathspec_input(paths);
         let result = self
             .runner
             .read(repo)
@@ -144,4 +205,195 @@ impl GitBackend for CliBackend {
             Err(err) => Err(err),
         }
     }
+
+    fn diff(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        limit: Option<usize>,
+        cancel: &CancelToken,
+    ) -> Result<FileDiff, GitError> {
+        if target.kind == DiffKind::Untracked {
+            return read_untracked(&toplevel.join(&target.path), limit);
+        }
+        let mut cmd = self
+            .runner
+            .read(toplevel)
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .args(DIFF_ARGS);
+        if target.kind == DiffKind::Staged {
+            cmd = cmd.args(["--cached", "-M"]);
+        }
+        cmd = cmd.arg("--");
+        if let Some(original) = &target.original_path {
+            cmd = cmd.arg(original);
+        }
+        let mut stream = cmd.arg(&target.path).stream()?;
+        let limit = limit.unwrap_or(usize::MAX);
+        let mut output = Vec::new();
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            if cancel.is_cancelled() {
+                stream.kill();
+                return stream.finish().map(|()| FileDiff::default());
+            }
+            let n = stream.read(&mut chunk).map_err(|err| {
+                GitError::new(stream.command(), GitErrorKind::Io, err.to_string())
+            })?;
+            if n == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..n]);
+            if output.len() > limit {
+                // Dropping the stream stops git; the log records it as cancelled.
+                return Ok(FileDiff::too_large(output.len()));
+            }
+        }
+        let command = stream.command().to_owned();
+        stream.finish()?;
+        let mut diff = parse_diff(&output).map_err(|e| unexpected(&[command.as_str()], e))?;
+        if let DiffContent::Binary { .. } = diff.content {
+            diff.content = self.binary_sizes(toplevel, target, cancel);
+        }
+        Ok(diff)
+    }
+
+    fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError> {
+        let out = self.read(repo, &["log", "-1", "--format=%B", "HEAD"], cancel)?;
+        Ok(out.stdout_text())
+    }
+
+    fn stage(
+        &self,
+        toplevel: &Path,
+        paths: Option<&[PathBuf]>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let cmd = self.runner.write(toplevel).args(["add", "-A"]);
+        run_with_paths(cmd, paths, cancel)
+    }
+
+    fn unstage(
+        &self,
+        toplevel: &Path,
+        paths: Option<&[PathBuf]>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let has_head = self
+            .read(toplevel, &["rev-parse", "-q", "--verify", "HEAD"], cancel)
+            .is_ok();
+        if has_head {
+            let cmd = self.runner.write(toplevel).args(["reset", "-q"]);
+            return run_with_paths(cmd, paths, cancel);
+        }
+        // `git reset` needs a HEAD; on an unborn branch, drop index entries.
+        let cmd =
+            self.runner
+                .write(toplevel)
+                .args(["rm", "--cached", "-r", "-q", "--ignore-unmatch"]);
+        match paths {
+            Some(paths) => run_with_paths(cmd, Some(paths), cancel),
+            None => run_with_paths(cmd.args(["--", "."]), None, cancel),
+        }
+    }
+
+    fn commit(
+        &self,
+        toplevel: &Path,
+        message: &str,
+        amend: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let mut cmd = self.runner.write(toplevel).args(["commit", "-F", "-"]);
+        if amend {
+            cmd = cmd.arg("--amend");
+        }
+        cmd.stdin(message.as_bytes().to_vec())
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+}
+
+/// Runs a path-taking write. `paths` go through stdin (no length limit) and
+/// are literal (no pathspec magic); `None` means the whole worktree.
+fn run_with_paths(
+    cmd: GitCommand,
+    paths: Option<&[PathBuf]>,
+    cancel: &CancelToken,
+) -> Result<(), GitError> {
+    let cmd = cmd.env("GIT_LITERAL_PATHSPECS", "1").cancel_token(cancel);
+    let cmd = match paths {
+        Some([]) => return Ok(()),
+        Some(paths) => cmd.args(PATHSPEC_STDIN).stdin(pathspec_input(paths)),
+        None => cmd,
+    };
+    cmd.run().map(drop)
+}
+
+impl CliBackend {
+    /// Old and new sizes of a binary file, from the object database and the
+    /// working tree. A side that does not exist stays `None`.
+    fn binary_sizes(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        cancel: &CancelToken,
+    ) -> DiffContent {
+        let slashed = |p: &Path| p.to_string_lossy().replace('\\', "/");
+        let path = slashed(&target.path);
+        let old_path = target
+            .original_path
+            .as_deref()
+            .map_or_else(|| path.clone(), slashed);
+        let (old_spec, new_spec) = match target.kind {
+            DiffKind::Staged => (format!("HEAD:{old_path}"), Some(format!(":{path}"))),
+            DiffKind::Unstaged | DiffKind::Untracked => (format!(":{path}"), None),
+        };
+        let mut input = format!("{old_spec}\n");
+        if let Some(spec) = &new_spec {
+            input.push_str(spec);
+            input.push('\n');
+        }
+        let sizes: Vec<Option<u64>> = self
+            .runner
+            .read(toplevel)
+            .args(["cat-file", "--batch-check=%(objectsize)"])
+            .stdin(input)
+            .cancel_token(cancel)
+            .run()
+            .map(|out| {
+                out.stdout_text()
+                    .lines()
+                    .map(|line| line.trim().parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let old_size = sizes.first().copied().flatten();
+        let new_size = match new_spec {
+            Some(_) => sizes.get(1).copied().flatten(),
+            None => fs::metadata(toplevel.join(&target.path))
+                .ok()
+                .map(|m| m.len()),
+        };
+        DiffContent::Binary { old_size, new_size }
+    }
+}
+
+/// The diff of an untracked file, read from disk.
+fn read_untracked(path: &Path, limit: Option<usize>) -> Result<FileDiff, GitError> {
+    let io_error = |err: std::io::Error| {
+        GitError::new(
+            format!("read {}", path.display()),
+            GitErrorKind::Io,
+            err.to_string(),
+        )
+    };
+    let size = fs::metadata(path).map_err(io_error)?.len();
+    if limit.is_some_and(|limit| size > limit as u64) {
+        return Ok(FileDiff::too_large(
+            usize::try_from(size).unwrap_or(usize::MAX),
+        ));
+    }
+    Ok(untracked_diff(&fs::read(path).map_err(io_error)?))
 }

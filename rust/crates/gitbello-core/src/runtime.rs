@@ -13,7 +13,9 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use crate::backend::{CliBackend, GitBackend};
+use crate::changes::{self, ChangeGroup, ChangeLists};
 use crate::config::{Config, ConfigError};
+use crate::diff::{DiffTarget, FileDiff, LARGE_DIFF_BYTES};
 use crate::git::{CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress};
 use crate::graph::{GraphLoader, GRAPH_JOB_LABEL};
 use crate::jobs::{
@@ -25,6 +27,13 @@ use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
+
+/// Labels of the jobs the changes panel runs.
+pub const DIFF_JOB_LABEL: &str = "load diff";
+pub const HEAD_MESSAGE_JOB_LABEL: &str = "read HEAD message";
+pub const STAGE_JOB_LABEL: &str = "stage";
+pub const UNSTAGE_JOB_LABEL: &str = "unstage";
+pub const COMMIT_JOB_LABEL: &str = "commit";
 
 /// Repositories remembered for the "recent" list.
 pub const MAX_KNOWN_REPOS: usize = 20;
@@ -64,7 +73,16 @@ pub enum RuntimeEvent {
     GraphReset {
         repo: PathBuf,
     },
-    /// Progress of jobs other than refreshes (graph loads; writes later).
+    /// The selected diff loaded, failed or was cleared.
+    DiffChanged {
+        repo: PathBuf,
+    },
+    /// The HEAD commit's message, requested with [`Runtime::load_head_message`].
+    HeadMessage {
+        repo: PathBuf,
+        message: String,
+    },
+    /// Progress of jobs other than refreshes and diff loads (graph loads, writes).
     Job {
         repo: PathBuf,
         job: JobId,
@@ -86,6 +104,9 @@ pub struct RepoState {
     stashes: Option<Vec<StashEntry>>,
     operation: Option<Operation>,
     labels: HashMap<String, Vec<RefLabel>>,
+    changes: ChangeLists,
+    worktree_badges: HashMap<PathBuf, Badge>,
+    diff: Option<DiffState>,
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
     open_error: Option<GitError>,
@@ -103,6 +124,9 @@ impl RepoState {
             stashes: None,
             operation: None,
             labels: HashMap::new(),
+            changes: ChangeLists::default(),
+            worktree_badges: HashMap::new(),
+            diff: None,
             graph: None,
             graph_dirty_since: None,
             open_error: None,
@@ -172,6 +196,66 @@ impl RepoState {
     pub fn graph(&self) -> Option<&GraphLoader> {
         self.graph.as_ref()
     }
+
+    /// The changes panel's lists (indices into the status's changes).
+    pub fn changes(&self) -> &ChangeLists {
+        &self.changes
+    }
+
+    /// Badge of a worktree, by the path `git worktree list` prints.
+    pub fn worktree_badge(&self, path: &Path) -> Option<&Badge> {
+        self.worktree_badges.get(path)
+    }
+
+    pub fn diff(&self) -> Option<&DiffState> {
+        self.diff.as_ref()
+    }
+
+    /// Whether a commit can be made: no conflicts, and something staged (or
+    /// amending an existing commit).
+    pub fn can_commit(&self, amend: bool) -> bool {
+        let Some(status) = &self.status else {
+            return false;
+        };
+        if status.has_conflicts() {
+            return false;
+        }
+        if amend {
+            return status.oid.is_some();
+        }
+        !self.changes.is_empty(ChangeGroup::Staged)
+    }
+}
+
+/// The diff selected in the changes panel.
+#[derive(Debug, Clone)]
+pub struct DiffState {
+    target: DiffTarget,
+    /// Load even when larger than [`LARGE_DIFF_BYTES`].
+    full: bool,
+    generation: u64,
+    loading: bool,
+    diff: Option<FileDiff>,
+    error: Option<GitError>,
+}
+
+impl DiffState {
+    pub fn target(&self) -> &DiffTarget {
+        &self.target
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    /// The last loaded diff (kept while a reload runs).
+    pub fn diff(&self) -> Option<&FileDiff> {
+        self.diff.as_ref()
+    }
+
+    pub fn error(&self) -> Option<&GitError> {
+        self.error.as_ref()
+    }
 }
 
 /// Owns everything the UI needs from the core. See the module docs.
@@ -187,6 +271,7 @@ pub struct Runtime {
     config_path: Option<PathBuf>,
     repos: HashMap<PathBuf, RepoState>,
     log_seq: u64,
+    diff_generation: u64,
 }
 
 impl Runtime {
@@ -203,6 +288,12 @@ impl Runtime {
     /// Starts the runtime. Fails only when git is missing or too old.
     pub fn new(config: Config, config_path: Option<PathBuf>) -> Result<Self, GitError> {
         let runner = GitRunner::from_override(config.git_path.as_deref())?;
+        Ok(Self::with_runner(config, config_path, runner))
+    }
+
+    /// Starts the runtime on an existing runner (tests pass one with a fixed
+    /// identity); `config.git_path` is not consulted.
+    pub fn with_runner(config: Config, config_path: Option<PathBuf>, runner: GitRunner) -> Self {
         let backend = Arc::new(CliBackend::new(runner.clone()));
         let (scheduler, events) =
             JobScheduler::new(backend.clone(), JobScheduler::default_workers());
@@ -217,7 +308,7 @@ impl Runtime {
                 Ok(watcher) => (Some(watcher), None),
                 Err(err) => (None, Some(err.to_string())),
             };
-        Ok(Self {
+        Self {
             watcher,
             watch_error,
             scheduler,
@@ -228,7 +319,8 @@ impl Runtime {
             config_path,
             repos: HashMap::new(),
             log_seq: 0,
-        })
+            diff_generation: 0,
+        }
     }
 
     pub fn git_version(&self) -> GitVersion {
@@ -303,6 +395,102 @@ impl Runtime {
         self.refresh(key, RefreshSet::on_focus());
     }
 
+    /// Shows the diff of `target` (or nothing). A diff over the size limit
+    /// loads only with `full`. The diff reloads after every status refresh.
+    pub fn select_diff(&mut self, key: &Path, target: Option<DiffTarget>, full: bool) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        let Some(target) = target else {
+            state.diff = None;
+            return;
+        };
+        let same = state.diff.as_ref().is_some_and(|d| d.target == target);
+        if same && state.diff.as_ref().is_some_and(|d| d.full || !full) {
+            return;
+        }
+        let keep = state.diff.take().filter(|_| same);
+        state.diff = Some(DiffState {
+            target,
+            full,
+            generation: 0,
+            loading: false,
+            diff: keep.and_then(|d| d.diff),
+            error: None,
+        });
+        self.diff_generation += 1;
+        submit_diff(&self.scheduler, state, self.diff_generation);
+    }
+
+    /// Stages `paths` (worktree-root relative, as in status), or everything.
+    pub fn stage(&self, key: &Path, paths: Option<Vec<PathBuf>>) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            STAGE_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .stage(&toplevel, paths.as_deref(), ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Unstages `paths`, or everything. Staged renames take their source along.
+    pub fn unstage(&self, key: &Path, paths: Option<Vec<PathBuf>>) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let status = self.repos.get(key).and_then(RepoState::status);
+        let paths = match (paths, status) {
+            (Some(paths), Some(status)) => Some(changes::unstage_paths(status, &paths)),
+            (paths, _) => paths,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNSTAGE_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .unstage(&toplevel, paths.as_deref(), ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Commits the index (or amends HEAD) with `message`.
+    pub fn commit(&self, key: &Path, message: String, amend: bool) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let refresh = RefreshSet::EMPTY
+            .with(RefreshKind::Status)
+            .with(RefreshKind::Refs);
+        Some(
+            self.scheduler
+                .submit(JobSpec::write(key, COMMIT_JOB_LABEL, refresh, move |ctx| {
+                    ctx.backend()
+                        .commit(&toplevel, &message, amend, ctx.cancel_token())
+                        .map(|()| JobOutput::Done)
+                })),
+        )
+    }
+
+    /// Reads the HEAD commit's message; it arrives as [`RuntimeEvent::HeadMessage`].
+    pub fn load_head_message(&self, key: &Path) -> Option<JobId> {
+        self.repos.get(key).filter(|s| s.is_ready())?;
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, HEAD_MESSAGE_JOB_LABEL, |ctx| {
+                    ctx.backend()
+                        .head_message(ctx.repo(), ctx.cancel_token())
+                        .map(JobOutput::HeadMessage)
+                })),
+        )
+    }
+
+    fn toplevel_of(&self, key: &Path) -> Option<PathBuf> {
+        let state = self.repos.get(key).filter(|s| s.is_ready())?;
+        state.toplevel.clone()
+    }
+
     pub fn repo(&self, key: &Path) -> Option<&RepoState> {
         self.repos.get(key)
     }
@@ -362,10 +550,25 @@ impl Runtime {
             }
             return;
         }
+        if label == DIFF_JOB_LABEL {
+            apply_diff(state, kind, &repo, out);
+            return;
+        }
+        if label == HEAD_MESSAGE_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::HeadMessage(message))) = kind {
+                out.push(RuntimeEvent::HeadMessage { repo, message });
+                return;
+            }
+        }
         if let Some(refresh) = RefreshKind::from_label(&label) {
             match kind {
                 EventKind::Finished(Ok(output)) => {
                     apply_refresh(state, output);
+                    // Staging, edits and commits all show up as a status change.
+                    if refresh == RefreshKind::Status && state.diff.is_some() {
+                        self.diff_generation += 1;
+                        submit_diff(&self.scheduler, state, self.diff_generation);
+                    }
                     out.push(RuntimeEvent::Updated {
                         repo,
                         kind: refresh,
@@ -435,6 +638,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             if moved {
                 state.graph_dirty_since = Some(Instant::now());
             }
+            state.changes = ChangeLists::new(&status);
             state.status = Some(status);
         }
         JobOutput::Refs(refs) => {
@@ -447,8 +651,56 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
         JobOutput::Operation(operation) => state.operation = operation,
         JobOutput::Stashes(stashes) => state.stashes = Some(stashes),
-        JobOutput::Opened { .. } | JobOutput::Done => {}
+        JobOutput::WorktreeBadges(badges) => {
+            state.worktree_badges = badges.into_iter().collect();
+        }
+        JobOutput::Opened { .. }
+        | JobOutput::Done
+        | JobOutput::Diff { .. }
+        | JobOutput::HeadMessage(_) => {}
     }
+}
+
+/// Starts loading `state`'s selected diff as `generation`.
+fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, generation: u64) {
+    let (Some(diff), Some(toplevel)) = (state.diff.as_mut(), state.toplevel.clone()) else {
+        return;
+    };
+    diff.generation = generation;
+    diff.loading = true;
+    let target = diff.target.clone();
+    let limit = (!diff.full).then_some(LARGE_DIFF_BYTES);
+    scheduler.submit(JobSpec::read(&state.key, DIFF_JOB_LABEL, move |ctx| {
+        ctx.backend()
+            .diff(&toplevel, &target, limit, ctx.cancel_token())
+            .map(|diff| JobOutput::Diff { generation, diff })
+    }));
+}
+
+/// Stores a finished diff load if it is still the current one.
+fn apply_diff(state: &mut RepoState, kind: EventKind, repo: &Path, out: &mut Vec<RuntimeEvent>) {
+    let Some(current) = state.diff.as_mut() else {
+        return;
+    };
+    match kind {
+        EventKind::Finished(Ok(JobOutput::Diff { generation, diff }))
+            if generation == current.generation =>
+        {
+            current.loading = false;
+            current.diff = Some(diff);
+            current.error = None;
+        }
+        EventKind::Finished(Err(error))
+            if error.kind != GitErrorKind::Cancelled && current.loading =>
+        {
+            current.loading = false;
+            current.error = Some(error);
+        }
+        _ => return,
+    }
+    out.push(RuntimeEvent::DiffChanged {
+        repo: repo.to_path_buf(),
+    });
 }
 
 /// Absolute, symlink-resolved path without Windows' `\\?\` prefix (git and

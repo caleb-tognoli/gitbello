@@ -109,6 +109,24 @@ impl TestRepo {
         &self.runner
     }
 
+    /// A runner for code under test that writes (commits): the fixture's
+    /// empty global config and a fixed identity, but no fixed clock.
+    pub fn app_runner(&self) -> GitRunner {
+        self.runner
+            .clone()
+            .with_env("GIT_CONFIG_GLOBAL", &self.global_config)
+            .with_env("GIT_CONFIG_NOSYSTEM", "1")
+            .with_env("GIT_CONFIG_COUNT", "2")
+            .with_env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+            .with_env("GIT_CONFIG_VALUE_0", "false")
+            .with_env("GIT_CONFIG_KEY_1", "core.autocrlf")
+            .with_env("GIT_CONFIG_VALUE_1", "false")
+            .with_env("GIT_AUTHOR_NAME", "Ada Lövelace")
+            .with_env("GIT_AUTHOR_EMAIL", "ada@example.com")
+            .with_env("GIT_COMMITTER_NAME", "Ada Lövelace")
+            .with_env("GIT_COMMITTER_EMAIL", "ada@example.com")
+    }
+
     /// A temp sibling directory that is not a repository.
     pub fn non_repo_dir(&self) -> PathBuf {
         let path = self.dir.path().join("not a repo");

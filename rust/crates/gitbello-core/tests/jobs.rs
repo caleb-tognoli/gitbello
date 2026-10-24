@@ -8,6 +8,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use gitbello_core::backend::GitBackend;
+use gitbello_core::diff::{DiffTarget, FileDiff};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
@@ -50,6 +51,27 @@ impl GitBackend for FakeBackend {
     }
     fn ignored(&self, _: &Path, _: &[PathBuf], _: &CancelToken) -> Result<Vec<PathBuf>, GitError> {
         Ok(Vec::new())
+    }
+    fn diff(
+        &self,
+        _: &Path,
+        _: &DiffTarget,
+        _: Option<usize>,
+        _: &CancelToken,
+    ) -> Result<FileDiff, GitError> {
+        Ok(FileDiff::default())
+    }
+    fn head_message(&self, _: &Path, _: &CancelToken) -> Result<String, GitError> {
+        Ok(String::new())
+    }
+    fn stage(&self, _: &Path, _: Option<&[PathBuf]>, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn unstage(&self, _: &Path, _: Option<&[PathBuf]>, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn commit(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
     }
 }
 
