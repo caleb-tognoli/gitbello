@@ -21,6 +21,17 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 
+# Dependencies (godot, thiserror, ...) are optimized even in dev builds: the
+# Godot editor always loads the debug library, and unoptimized gdext type
+# conversion dominates frame times otherwise. They compile once and are cached.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Graph layout replays up to CHECKPOINT_INTERVAL rows per slice; keep it fast in
+# dev builds too. Debug assertions and overflow checks stay on.
+[profile.dev.package.gitbello-core]
+opt-level = 2
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
