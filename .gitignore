@@ -1,0 +1,14 @@
+# Rust
+/rust/target/
+
+# Godot
+/godot/.godot/
+/godot/bin/
+/godot/export_presets.cfg
+/godot/build/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
