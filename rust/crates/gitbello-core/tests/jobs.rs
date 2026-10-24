@@ -28,6 +28,9 @@ impl GitBackend for FakeBackend {
             bare: false,
         })
     }
+    fn toplevel(&self, repo: &Path, _: &CancelToken) -> Result<PathBuf, GitError> {
+        Ok(repo.to_path_buf())
+    }
     fn status(&self, _: &Path, _: &CancelToken) -> Result<RepoStatus, GitError> {
         self.status_calls.fetch_add(1, Ordering::SeqCst);
         Ok(RepoStatus::default())

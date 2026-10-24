@@ -3,6 +3,7 @@
 //! Only the fields in use are modelled; keys this version does not know are
 //! kept and written back unchanged, so older and newer versions can share a file.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -49,8 +50,39 @@ pub struct Config {
     pub worktree_template: String,
     /// 0 disables auto-fetch.
     pub auto_fetch_minutes: u32,
+    pub theme: ThemeChoice,
+    /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
+    pub keybindings: BTreeMap<String, String>,
     /// Keys this version does not model, kept as read.
     extra: Table,
+}
+
+/// Theme override; `System` follows the OS dark/light setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "system" => Some(Self::System),
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Config {
@@ -62,6 +94,8 @@ impl Default for Config {
             active_tab: None,
             worktree_template: DEFAULT_WORKTREE_TEMPLATE.to_owned(),
             auto_fetch_minutes: DEFAULT_AUTO_FETCH_MINUTES,
+            theme: ThemeChoice::System,
+            keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
     }
@@ -74,6 +108,8 @@ const KEYS: &[&str] = &[
     "active_tab",
     "worktree_template",
     "auto_fetch_minutes",
+    "theme",
+    "keybindings",
 ];
 
 impl Config {
@@ -117,6 +153,14 @@ impl Config {
                 .unwrap_or(defaults.worktree_template),
             auto_fetch_minutes: take_u32(&mut table, "auto_fetch_minutes")?
                 .unwrap_or(defaults.auto_fetch_minutes),
+            theme: match take_string(&mut table, "theme")? {
+                None => ThemeChoice::System,
+                Some(text) => ThemeChoice::parse(&text).ok_or(ConfigError::Invalid {
+                    key: "theme",
+                    expected: "\"system\", \"light\" or \"dark\"",
+                })?,
+            },
+            keybindings: take_string_map(&mut table, "keybindings")?,
             extra: table,
         };
         Ok(config)
@@ -143,6 +187,15 @@ impl Config {
                 Value::Integer(i64::try_from(active).unwrap_or(i64::MAX)),
             );
         }
+        table.insert("theme".into(), Value::String(self.theme.as_str().into()));
+        if !self.keybindings.is_empty() {
+            let bindings: Table = self
+                .keybindings
+                .iter()
+                .map(|(action, shortcut)| (action.clone(), Value::String(shortcut.clone())))
+                .collect();
+            table.insert("keybindings".into(), Value::Table(bindings));
+        }
         for (key, value) in &self.extra {
             if !KEYS.contains(&key.as_str()) {
                 table.insert(key.clone(), value.clone());
@@ -165,6 +218,27 @@ fn path_value(path: &Path) -> Value {
 
 fn paths_value(paths: &[PathBuf]) -> Value {
     Value::Array(paths.iter().map(|p| path_value(p)).collect())
+}
+
+fn take_string_map(
+    table: &mut Table,
+    key: &'static str,
+) -> Result<BTreeMap<String, String>, ConfigError> {
+    let invalid = || ConfigError::Invalid {
+        key,
+        expected: "a table of strings",
+    };
+    match table.remove(key) {
+        None => Ok(BTreeMap::new()),
+        Some(Value::Table(entries)) => entries
+            .into_iter()
+            .map(|(k, v)| match v {
+                Value::String(s) => Ok((k, s)),
+                _ => Err(invalid()),
+            })
+            .collect(),
+        Some(_) => Err(invalid()),
+    }
 }
 
 fn take_string(table: &mut Table, key: &'static str) -> Result<Option<String>, ConfigError> {
@@ -243,6 +317,8 @@ mod tests {
             active_tab: Some(0),
             worktree_template: "{repo_parent}/wt/{branch_slug}".into(),
             auto_fetch_minutes: 0,
+            theme: ThemeChoice::Dark,
+            keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };
         assert_eq!(Config::parse(&config.to_toml()).unwrap(), config);
@@ -289,6 +365,17 @@ mod tests {
         assert!(matches!(
             Config::parse("this is not toml"),
             Err(ConfigError::Syntax(_))
+        ));
+        assert!(matches!(
+            Config::parse("theme = \"purple\""),
+            Err(ConfigError::Invalid { key: "theme", .. })
+        ));
+        assert!(matches!(
+            Config::parse("[keybindings]\npalette = 3"),
+            Err(ConfigError::Invalid {
+                key: "keybindings",
+                ..
+            })
         ));
     }
 

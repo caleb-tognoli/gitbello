@@ -15,6 +15,8 @@ use crate::repo::{
 /// a bare repository). Implementations must be usable from worker threads.
 pub trait GitBackend: Send + Sync {
     fn repo_paths(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoPaths, GitError>;
+    /// Root of the worktree containing `repo` (fails in a bare repository).
+    fn toplevel(&self, repo: &Path, cancel: &CancelToken) -> Result<PathBuf, GitError>;
     fn status(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoStatus, GitError>;
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError>;
     fn worktrees(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Worktree>, GitError>;
@@ -67,6 +69,20 @@ impl GitBackend for CliBackend {
     fn repo_paths(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoPaths, GitError> {
         let out = self.read(repo, REPO_PATHS_ARGS, cancel)?;
         parse_repo_paths(&out.stdout).map_err(|e| unexpected(REPO_PATHS_ARGS, e))
+    }
+
+    fn toplevel(&self, repo: &Path, cancel: &CancelToken) -> Result<PathBuf, GitError> {
+        let out = self.read(repo, &["rev-parse", "--show-toplevel"], cancel)?;
+        let line = out.stdout.split(|&b| b == b'\n').next().unwrap_or_default();
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() {
+            return Err(GitError::new(
+                "rev-parse --show-toplevel",
+                GitErrorKind::UnexpectedOutput,
+                "empty output",
+            ));
+        }
+        Ok(crate::repo::git_path(line))
     }
 
     fn status(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoStatus, GitError> {
