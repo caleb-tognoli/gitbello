@@ -6,6 +6,8 @@ use gitbello_core::changes::split_message;
 use gitbello_core::config::ThemeChoice;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
+use gitbello_core::launch::{self, LaunchKind};
+use gitbello_core::ops::ref_name_error;
 use gitbello_core::paths;
 use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
 use godot::prelude::*;
@@ -174,7 +176,9 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
             let job = i64::try_from(job).unwrap_or(i64::MAX).to_variant();
             let label = gstr(&label).to_variant();
             match state {
-                JobState::Started => {}
+                JobState::Started => {
+                    session.emit_signal("job_started", &[job, label]);
+                }
                 JobState::Progress(p) => {
                     let percent = p.percent.map_or(-1, i64::from);
                     session.emit_signal(
@@ -196,7 +200,9 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                         );
                     }
                 }
-                JobState::Cancelled => {}
+                JobState::Cancelled => {
+                    session.emit_signal("job_cancelled", &[job, label]);
+                }
             }
         }
     }
@@ -370,6 +376,43 @@ impl AppCore {
             rt.save_config().is_ok()
         })
         .unwrap_or(false)
+    }
+
+    /// `ff-only`, `merge` or `rebase`: what a plain pull does.
+    #[func]
+    fn pull_mode(&self) -> GString {
+        runtime_cell::with(|rt| gstr(rt.config().pull_mode.as_str())).unwrap_or_default()
+    }
+
+    /// Opens `path` with the configured editor. Returns an error message,
+    /// or an empty string.
+    #[func]
+    fn open_in_editor(&self, path: GString) -> GString {
+        let template = runtime_cell::with(|rt| rt.config().editor_command.clone());
+        let Some(template) = template else {
+            return gstr(&self.start_error);
+        };
+        let dir = PathBuf::from(path.to_string());
+        launch::launch(&template, &dir, LaunchKind::Editor)
+            .err()
+            .map_or_else(GString::new, |e| gstr(&e.to_string()))
+    }
+
+    /// Opens the configured (or the platform's) terminal in `path`.
+    /// Returns an error message, or an empty string.
+    #[func]
+    fn open_terminal(&self, path: GString) -> GString {
+        let template = runtime_cell::with(|rt| rt.config().terminal_command.clone()).flatten();
+        let dir = PathBuf::from(path.to_string());
+        launch::launch_terminal(template.as_deref(), &dir)
+            .err()
+            .map_or_else(GString::new, |e| gstr(&e.to_string()))
+    }
+
+    /// Why `name` cannot be a branch or tag name, or an empty string.
+    #[func]
+    fn ref_name_error(&self, name: GString) -> GString {
+        gstr(ref_name_error(&name.to_string()).unwrap_or_default())
     }
 
     /// User shortcut overrides: action id to shortcut text.

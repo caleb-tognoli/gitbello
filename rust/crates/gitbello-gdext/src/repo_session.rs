@@ -4,6 +4,7 @@ use gitbello_core::changes::{commit_message, diff_target, ChangeGroup};
 use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
+use gitbello_core::ops::{CheckoutTarget, PullMode, RefOp};
 use gitbello_core::runtime::RepoState;
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use godot::prelude::*;
@@ -66,10 +67,16 @@ impl RepoSession {
     /// Graph loading ended; `error` is empty on success.
     #[signal]
     fn graph_loaded(row_count: i64, error: GString);
+    /// A job other than a refresh or diff load started (fetch, push, ...).
+    #[signal]
+    fn job_started(job: i64, label: GString);
     #[signal]
     fn job_progress(job: i64, label: GString, percent: i64, text: GString);
     #[signal]
     fn job_finished(job: i64, label: GString, ok: bool, error: VarDictionary);
+    /// A job was cancelled before it finished (no `job_finished` follows).
+    #[signal]
+    fn job_cancelled(job: i64, label: GString);
     /// The selected diff loaded, reloaded or failed (see `diff_info`).
     #[signal]
     fn diff_changed();
@@ -201,6 +208,199 @@ impl RepoSession {
     #[func]
     fn refresh(&self) {
         runtime_cell::with(|rt| rt.refresh(&self.key, RefreshSet::all()));
+    }
+
+    // --- Sync, branches and tags -----------------------------------------------
+
+    /// Configured remote names.
+    #[func]
+    fn remotes(&self) -> PackedStringArray {
+        self.read(|s| s.remotes().iter().map(|r| gstr(r)).collect())
+            .unwrap_or_default()
+    }
+
+    /// The checked-out branch, or empty when detached.
+    #[func]
+    fn current_branch(&self) -> GString {
+        self.read(|s| s.current_branch().map(gstr))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Where pushes go (see `RepoState::default_remote`), or empty.
+    #[func]
+    fn default_remote(&self) -> GString {
+        self.read(|s| s.default_remote().map(|r| gstr(&r)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Local then remote branches: `{name, short_name, commit, is_head,
+    /// upstream, ahead, behind, gone, worktree, kind}` (kind `branch` or `remote`).
+    #[func]
+    fn branch_refs(&self) -> Array<VarDictionary> {
+        self.read(|s| s.refs().map(convert::branch_refs))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    #[func]
+    fn can_fetch(&self) -> bool {
+        self.read(RepoState::can_fetch).unwrap_or(false)
+    }
+
+    #[func]
+    fn can_pull(&self) -> bool {
+        self.read(RepoState::can_pull).unwrap_or(false)
+    }
+
+    #[func]
+    fn can_push(&self) -> bool {
+        self.read(RepoState::can_push).unwrap_or(false)
+    }
+
+    /// Whether a fetch (manual or automatic) is running or queued.
+    #[func]
+    fn is_fetching(&self) -> bool {
+        self.read(RepoState::is_fetching).unwrap_or(false)
+    }
+
+    /// Fetches all remotes. Job label `fetch` (`auto-fetch` for automatic
+    /// ones); returns the running fetch's id if one is under way, else -1.
+    #[func]
+    fn fetch(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.fetch(&self.key)).flatten())
+    }
+
+    /// Pulls with `mode` (`ff-only`, `merge`, `rebase`, or empty for the
+    /// configured one). Label `pull`.
+    #[func]
+    fn pull(&self, mode: GString) -> i64 {
+        let mode = PullMode::parse(&mode.to_string());
+        job_id(runtime_cell::with(|rt| rt.pull(&self.key, mode)).flatten())
+    }
+
+    /// Pushes the current branch (setting its upstream if it has none).
+    /// Label `push`.
+    #[func]
+    fn push(&self, force_with_lease: bool) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.push(&self.key, force_with_lease)).flatten())
+    }
+
+    /// Pushes a tag to the default remote. Label `push tag`.
+    #[func]
+    fn push_tag(&self, name: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.push_tag(&self.key, &name.to_string())).flatten())
+    }
+
+    /// Checks out local branch `name`; with `stash`, local changes are
+    /// stashed and re-applied afterwards. Label `checkout`.
+    #[func]
+    fn checkout_branch(&self, name: GString, stash: bool) -> i64 {
+        self.checkout(Some(CheckoutTarget::Branch(name.to_string())), stash)
+    }
+
+    /// Checks out remote-tracking branch `remote_ref` (`refs/remotes/...`):
+    /// the local branch tracking it, or a new one. Label `checkout`.
+    #[func]
+    fn checkout_remote(&self, remote_ref: GString, stash: bool) -> i64 {
+        let target = self
+            .read(|s| s.remote_checkout_target(&remote_ref.to_string()))
+            .flatten();
+        self.checkout(target, stash)
+    }
+
+    /// Checks out a commit, detaching HEAD. Label `checkout`.
+    #[func]
+    fn checkout_commit(&self, oid: GString, stash: bool) -> i64 {
+        self.checkout(Some(CheckoutTarget::Detach(oid.to_string())), stash)
+    }
+
+    /// Creates branch `name` at `start` (a branch, ref or hash), optionally
+    /// switching to it. Label `create branch` (`checkout` errors as well).
+    #[func]
+    fn create_branch(&self, name: GString, start: GString, checkout: bool) -> i64 {
+        self.ref_op(RefOp::CreateBranch {
+            name: name.to_string(),
+            start: start.to_string(),
+            checkout,
+        })
+    }
+
+    /// Label `rename branch`.
+    #[func]
+    fn rename_branch(&self, old: GString, new: GString) -> i64 {
+        self.ref_op(RefOp::RenameBranch {
+            old: old.to_string(),
+            new: new.to_string(),
+        })
+    }
+
+    /// `force` deletes an unmerged branch. Label `delete branch`.
+    #[func]
+    fn delete_branch(&self, name: GString, force: bool) -> i64 {
+        self.ref_op(RefOp::DeleteBranch {
+            name: name.to_string(),
+            force,
+        })
+    }
+
+    /// Makes `branch` track `upstream` (`origin/x`); empty unsets it.
+    /// Label `set upstream`.
+    #[func]
+    fn set_upstream(&self, branch: GString, upstream: GString) -> i64 {
+        let upstream = upstream.to_string();
+        self.ref_op(RefOp::SetUpstream {
+            branch: branch.to_string(),
+            upstream: (!upstream.is_empty()).then_some(upstream),
+        })
+    }
+
+    /// Tags `target`; a non-empty `message` makes an annotated tag. Label
+    /// `create tag`.
+    #[func]
+    fn create_tag(&self, name: GString, target: GString, message: GString) -> i64 {
+        let message = message.to_string();
+        self.ref_op(RefOp::CreateTag {
+            name: name.to_string(),
+            target: target.to_string(),
+            message: (!message.trim().is_empty()).then_some(message),
+        })
+    }
+
+    /// Label `delete tag`.
+    #[func]
+    fn delete_tag(&self, name: GString) -> i64 {
+        self.ref_op(RefOp::DeleteTag {
+            name: name.to_string(),
+        })
+    }
+
+    /// Applies commit `oid` on top of HEAD. Label `cherry-pick`.
+    #[func]
+    fn cherry_pick(&self, oid: GString) -> i64 {
+        self.ref_op(RefOp::CherryPick {
+            commit: oid.to_string(),
+        })
+    }
+
+    /// Aborts the operation in progress (merge, cherry-pick, rebase, ...).
+    /// Label `abort`; -1 when there is none.
+    #[func]
+    fn abort_operation(&self) -> i64 {
+        match self.read(RepoState::operation).flatten() {
+            Some(operation) => self.ref_op(RefOp::Abort(operation)),
+            None => -1,
+        }
+    }
+
+    /// Cancels a running or queued job; returns whether it was found.
+    #[func]
+    fn cancel_job(&self, job: i64) -> bool {
+        let Ok(job) = u64::try_from(job) else {
+            return false;
+        };
+        runtime_cell::with(|rt| rt.cancel_job(job)).unwrap_or(false)
     }
 
     // --- Changes panel ------------------------------------------------------
@@ -626,6 +826,17 @@ impl RepoSession {
 
     fn read<R>(&self, f: impl FnOnce(&RepoState) -> R) -> Option<R> {
         runtime_cell::with(|rt| rt.repo(&self.key).map(f)).flatten()
+    }
+
+    fn checkout(&self, target: Option<CheckoutTarget>, stash: bool) -> i64 {
+        let Some(target) = target else {
+            return -1;
+        };
+        job_id(runtime_cell::with(|rt| rt.checkout(&self.key, target, stash)).flatten())
+    }
+
+    fn ref_op(&self, op: RefOp) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.ref_op(&self.key, op)).flatten())
     }
 
     /// A new graph load started: forget reported rows.

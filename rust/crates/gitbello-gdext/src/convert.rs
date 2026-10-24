@@ -43,21 +43,39 @@ pub fn error_kind_id(kind: GitErrorKind) -> &'static str {
         GitErrorKind::Cancelled => "cancelled",
         GitErrorKind::UnexpectedOutput => "unexpected_output",
         GitErrorKind::Stale => "stale",
+        GitErrorKind::LocalChanges => "local_changes",
+        GitErrorKind::Diverged => "diverged",
+        GitErrorKind::NoUpstream => "no_upstream",
+        GitErrorKind::NoRemote => "no_remote",
+        GitErrorKind::NotFullyMerged => "not_fully_merged",
+        GitErrorKind::CheckedOutElsewhere => "checked_out_elsewhere",
+        GitErrorKind::AlreadyExists => "already_exists",
         _ => "other",
     }
 }
 
 /// `{kind, title, message, command, stderr, exit_code}`; `message` is the
-/// first meaningful stderr line, `title` the human-readable kind.
+/// first `fatal:` or `error:` line of stderr (else its first line that is
+/// not a hint or progress), `title` the human-readable kind.
 pub fn error_dict(error: &GitError) -> VarDictionary {
-    let message = error
-        .stderr
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(|l| {
-            l.trim_start_matches("fatal: ")
-                .trim_start_matches("error: ")
+    let lines = || {
+        error
+            .stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+    };
+    let message = lines()
+        .find_map(|l| {
+            l.strip_prefix("fatal: ")
+                .or_else(|| l.strip_prefix("error: "))
+        })
+        .or_else(|| {
+            lines().find(|l| {
+                !["hint:", "remote:", "To ", "From "]
+                    .iter()
+                    .any(|p| l.starts_with(p))
+            })
         })
         .unwrap_or_default();
     vdict! {
@@ -198,6 +216,27 @@ pub fn branch_tree(nodes: &[BranchNode], refs: &[Ref]) -> Array<VarDictionary> {
             "ref" => &r,
             "children" => &branch_tree(&node.children, refs),
         });
+    }
+    out
+}
+
+/// Local and remote branches as [`ref_dict`]s plus `kind` (`branch` or
+/// `remote`), locals first; symbolic refs such as `origin/HEAD` are left out.
+pub fn branch_refs(refs: &[Ref]) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    for kind in ["branch", "remote"] {
+        for r in refs.iter().filter(|r| r.symref_target.is_none()) {
+            let matches = match r.kind {
+                RefKind::Branch => kind == "branch",
+                RefKind::RemoteBranch { .. } => kind == "remote",
+                _ => false,
+            };
+            if matches {
+                let mut dict = ref_dict(r);
+                dict.set("kind", kind);
+                out.push(&dict);
+            }
+        }
     }
     out
 }
