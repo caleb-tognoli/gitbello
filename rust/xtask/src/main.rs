@@ -248,19 +248,21 @@ fn annotate_failure(reason: &str, text: &str) {
     }
     let lines: Vec<&str> = text.lines().collect();
     let mut picked: Vec<&str> = Vec::new();
+    let mut next_unpicked = 0;
     for (i, line) in lines.iter().enumerate() {
         let interesting = SMOKE_FAIL_MARKERS.iter().any(|m| line.contains(m))
             || line.starts_with("FAIL")
             || line.starts_with("  - ");
         if interesting {
             // Keep a little context (Godot prints the location on the next lines).
-            picked.extend(lines.iter().skip(i).take(3));
+            let end = (i + 3).min(lines.len());
+            picked.extend(&lines[i.max(next_unpicked)..end]);
+            next_unpicked = next_unpicked.max(end);
         }
     }
     if picked.is_empty() {
         picked = lines.iter().rev().take(30).rev().copied().collect();
     }
-    picked.dedup();
     picked.truncate(60);
     let body = picked.join("\n");
     let escape = |s: &str| {
