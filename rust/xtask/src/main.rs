@@ -236,8 +236,8 @@ fn smoke() -> Result<()> {
         .join("debug")
         .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
     let mut fixture = Command::new(cli);
-    // repo-1..5 for the shell test, repo-6 for the commit cycle.
-    fixture.arg("fixture").arg(&fixtures).args(["--repos", "6"]);
+    // repo-1..5 for the shell test, repo-6 for the commit cycle, repo-7 for lines.
+    fixture.arg("fixture").arg(&fixtures).args(["--repos", "7"]);
     run_status(fixture)?;
 
     // Commits made by the app get a fixed identity and none of the user's

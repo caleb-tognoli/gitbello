@@ -15,7 +15,10 @@ func _ready() -> void:
 			failures.append("%s: script does not compile" % path)
 
 	for path: String in _find_files(SMOKE_DIR, "_smoke.gd"):
-		var test: SmokeTest = (load(path) as GDScript).new() as SmokeTest
+		var script: GDScript = load(path) as GDScript
+		if script == null or not script.can_instantiate():
+			continue  # already reported as not compiling
+		var test: SmokeTest = script.new() as SmokeTest
 		if test == null:
 			failures.append("%s: not a SmokeTest" % path)
 			continue
