@@ -40,6 +40,20 @@ pub enum GitErrorKind {
     UnexpectedOutput,
     #[error("the file changed since it was shown")]
     Stale,
+    #[error("local changes would be overwritten")]
+    LocalChanges,
+    #[error("branches have diverged")]
+    Diverged,
+    #[error("no upstream branch")]
+    NoUpstream,
+    #[error("no remote configured")]
+    NoRemote,
+    #[error("branch is not fully merged")]
+    NotFullyMerged,
+    #[error("branch is checked out in another worktree")]
+    CheckedOutElsewhere,
+    #[error("already exists")]
+    AlreadyExists,
     #[error("git failed")]
     Other,
 }
@@ -104,6 +118,24 @@ impl GitErrorKind {
             || has("you need to resolve your current index first")
         {
             Self::Conflict
+        } else if has("would be overwritten by")
+            || has("Please commit your changes or stash them")
+            || has("You have unstaged changes")
+            || has("Your index contains uncommitted changes")
+        {
+            Self::LocalChanges
+        } else if has("Not possible to fast-forward") || has("Diverging branches") {
+            Self::Diverged
+        } else if has("has no upstream branch") || has("There is no tracking information") {
+            Self::NoUpstream
+        } else if has("No configured push destination") {
+            Self::NoRemote
+        } else if has("is not fully merged") {
+            Self::NotFullyMerged
+        } else if has("checked out at '") || has("used by worktree at '") {
+            Self::CheckedOutElsewhere
+        } else if has("already exists") {
+            Self::AlreadyExists
         } else {
             Self::Other
         }
@@ -152,6 +184,62 @@ mod tests {
                 "",
                 GitErrorKind::Conflict,
             ),
+            (
+                "",
+                "error: Your local changes to the following files would be overwritten by checkout:\n\tapp.txt\nPlease commit your changes or stash them before you switch branches.\nAborting\n",
+                GitErrorKind::LocalChanges,
+            ),
+            (
+                "",
+                "error: The following untracked working tree files would be overwritten by checkout:\n\tnew.txt\n",
+                GitErrorKind::LocalChanges,
+            ),
+            (
+                "",
+                "hint: Diverging branches can't be fast-forwarded, you need to either:\nfatal: Not possible to fast-forward, aborting.\n",
+                GitErrorKind::Diverged,
+            ),
+            (
+                "",
+                "fatal: The current branch topic has no upstream branch.\nTo push the current branch and set the remote as upstream, use\n",
+                GitErrorKind::NoUpstream,
+            ),
+            (
+                "",
+                "There is no tracking information for the current branch.\nPlease specify which branch you want to merge with.\n",
+                GitErrorKind::NoUpstream,
+            ),
+            (
+                "",
+                "fatal: No configured push destination.\n",
+                GitErrorKind::NoRemote,
+            ),
+            (
+                "",
+                "error: the branch 'topic' is not fully merged.\nhint: If you are sure you want to delete it, run 'git branch -D topic'\n",
+                GitErrorKind::NotFullyMerged,
+            ),
+            (
+                "",
+                "fatal: 'feature/login' is already used by worktree at '/tmp/repo-1-feature'\n",
+                GitErrorKind::CheckedOutElsewhere,
+            ),
+            (
+                "",
+                "error: cannot delete branch 'feature/login' used by worktree at '/tmp/x'\n",
+                GitErrorKind::CheckedOutElsewhere,
+            ),
+            (
+                "",
+                "fatal: 'feature/login' is already checked out at '/tmp/x'\n",
+                GitErrorKind::CheckedOutElsewhere,
+            ),
+            (
+                "",
+                "fatal: a branch named 'topic' already exists\n",
+                GitErrorKind::AlreadyExists,
+            ),
+            ("", "fatal: tag 'v1.0' already exists\n", GitErrorKind::AlreadyExists),
             ("", "fatal: bad revision 'nope'\n", GitErrorKind::Other),
         ];
         for (stdout, stderr, expected) in cases {
