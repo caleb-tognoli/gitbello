@@ -57,7 +57,28 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool) -> voi
 		cursor = -1
 		set_scroll_offset(0.0)
 	refresh()
+	if keep_scroll:
+		# Line indices mean other lines now: keep only the cursor's row, so
+		# Enter can stage line after line.
+		_selected.clear()
+		if cursor >= 0:
+			_selected[cursor] = true
+		_anchor = cursor
+		selection_changed.emit()
 	_update_h_range()
+
+
+## Selected line indices, or the cursor's line when nothing is selected.
+func selected_or_cursor() -> PackedInt32Array:
+	var rows: PackedInt32Array = selected_rows()
+	if rows.is_empty() and cursor >= 0:
+		rows.append(cursor)
+	return rows
+
+
+## Horizontal scroll offset in pixels.
+func h_scroll() -> float:
+	return _h_scroll.value
 
 
 func row_height() -> float:

@@ -2,8 +2,9 @@ class_name ChangesView
 extends HSplitContainer
 ## Working-copy changes of one repository (PLAN §4): unstaged, untracked and
 ## staged file lists, the commit box and the diff of the selected file.
-## Keyboard: arrows move, Enter/Space stage or unstage, Tab moves between
-## controls; see the `changes.*` actions for the rest.
+## Keyboard: arrows move, Enter/Space stage or unstage files or the selected
+## diff lines (a hunk header takes its hunk), Delete discards, Ctrl+Z undoes
+## the last discard; see the `changes.*` actions for the rest.
 
 const THEME_TYPE: StringName = &"ChangesView"
 
@@ -12,6 +13,13 @@ var session: RepoSession = null:
 
 ## The diff currently shown, to keep its scroll position across reloads.
 var _shown_diff: String = ""
+## The list Left returns to from the diff.
+var _last_list: ChangeList = null
+var _confirm: ConfirmationDialog = ConfirmationDialog.new()
+## Runs when the user confirms the discard dialog.
+var _pending_discard: Callable = Callable()
+var _menu: PopupMenu = PopupMenu.new()
+var _menu_actions: Array[StringName] = []
 
 @onready var _files: VBoxContainer = %Files
 @onready var _unstaged_section: Control = %UnstagedSection
@@ -50,7 +58,20 @@ func _ready() -> void:
 	_load_anyway.pressed.connect(_load_full_diff)
 	_diff_view.source = func(start: int, count: int) -> Array:
 		return session.diff_lines(start, count) if session != null else []
+	_diff_view.row_activated.connect(func(_row: int) -> void: stage_diff_lines())
 	_show_diff_message("Select a file to see its changes.")
+	_confirm.confirmed.connect(func() -> void:
+		if _pending_discard.is_valid():
+			_pending_discard.call()
+		_pending_discard = Callable())
+	add_child(_confirm)
+	add_child(_menu)
+	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_menu_actions[id]))
+	for list: ChangeList in lists():
+		list.context_menu_requested.connect(_show_menu.bind(list))
+		list.gui_input.connect(_on_list_key.bind(list))
+	_diff_view.gui_input.connect(_on_diff_key)
+	_diff_view.context_menu_requested.connect(_show_menu.bind(_diff_view))
 
 
 func _notification(what: int) -> void:
@@ -136,13 +157,143 @@ func focus_message() -> void:
 	_commit_box.focus_summary()
 
 
-## Stages or unstages the selection of the focused (or selected) list.
+## Stages or unstages the selection of the focused (or selected) list, or
+## the selected lines when the diff has focus.
 func stage_selected() -> void:
+	if _diff_view.has_focus():
+		stage_diff_lines()
+		return
 	var list: ChangeList = _focused_list()
 	if list == null:
 		list = _selected_list()
 	if list != null:
 		list.activate_selection()
+
+
+## Stages (unstaged diff) or unstages (staged diff) the selected diff lines.
+## Returns whether a job started.
+func stage_diff_lines() -> bool:
+	var mode: String = _line_mode()
+	if mode.is_empty():
+		return false
+	return session.apply_lines(mode, _diff_view.selected_or_cursor()) >= 0
+
+
+func diff_view_focused() -> bool:
+	return _diff_view.has_focus()
+
+
+## Discards the focused selection after a confirmation: diff lines, or the
+## selected files (tracked files are restored from the index and can be
+## brought back with `undo_discard`; untracked files go to the trash).
+func discard_selection() -> void:
+	if _diff_view.has_focus():
+		_discard_lines()
+		return
+	var list: ChangeList = _focused_list()
+	if list == null:
+		list = _selected_list()
+	if list == null or list == _staged:
+		return
+	var rows: PackedInt32Array = list.selected_rows()
+	if rows.is_empty() and list.cursor >= 0:
+		rows.append(list.cursor)
+	var by_group: Dictionary = list.paths_by_group(rows)
+	var tracked: PackedStringArray = PackedStringArray()
+	for group: String in ["unstaged", "conflicted"]:
+		tracked.append_array(by_group.get(group, PackedStringArray()))
+	var untracked: PackedStringArray = by_group.get("untracked", PackedStringArray())
+	if tracked.is_empty() and untracked.is_empty():
+		return
+	var parts: PackedStringArray = PackedStringArray()
+	if not tracked.is_empty():
+		parts.append("Discard changes in %s? You can undo this with %s." % [
+			_describe(tracked), Actions.shortcut_label(&"changes.undo_discard")])
+	if not untracked.is_empty():
+		parts.append("Move %s to the trash?" % _describe(untracked))
+	_ask("\n".join(parts), func() -> void:
+		if not tracked.is_empty():
+			session.discard_paths(tracked)
+		if not untracked.is_empty():
+			_trash(untracked))
+
+
+func can_undo_discard() -> bool:
+	return session != null and session.can_undo_discard()
+
+
+func undo_discard() -> void:
+	if can_undo_discard():
+		session.undo_discard()
+
+
+## The discard confirmation, for tests.
+func confirm_dialog() -> ConfirmationDialog:
+	return _confirm
+
+
+func _discard_lines() -> void:
+	if not session.can_apply_lines("discard"):
+		return
+	var rows: PackedInt32Array = _diff_view.selected_or_cursor()
+	if rows.is_empty():
+		return
+	var path: String = String(session.diff_info().get("path", ""))
+	var what: String = "the selected lines" if rows.size() > 1 else "the selected line"
+	_ask("Discard %s in %s? You can undo this with %s." % [
+		what, path.get_file(), Actions.shortcut_label(&"changes.undo_discard")],
+		func() -> void: session.apply_lines("discard", rows))
+
+
+func _ask(text: String, on_confirm: Callable) -> void:
+	_confirm.title = "Discard changes"
+	_confirm.dialog_text = text
+	_confirm.ok_button_text = "Discard"
+	_pending_discard = on_confirm
+	_confirm.popup_centered()
+	_confirm.get_ok_button().grab_focus()
+
+
+func _trash(paths: PackedStringArray) -> void:
+	var root: String = session.toplevel()
+	for path: String in paths:
+		var error: Error = OS.move_to_trash(ProjectSettings.globalize_path(root.path_join(path)))
+		if error != OK:
+			push_warning("cannot move %s to the trash: %s" % [path, error_string(error)])
+	session.refresh()
+
+
+static func _describe(paths: PackedStringArray) -> String:
+	return paths[0].get_file() if paths.size() == 1 else "%d files" % paths.size()
+
+
+## `stage` or `unstage` for the shown diff, or "" when its lines cannot be used.
+func _line_mode() -> String:
+	if session == null:
+		return ""
+	if session.can_apply_lines("stage"):
+		return "stage"
+	if session.can_apply_lines("unstage"):
+		return "unstage"
+	return ""
+
+
+## Context menu for a list or the diff: the actions that apply right now.
+func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
+	_menu.clear()
+	_menu_actions.clear()
+	var ids: Array[StringName] = [&"changes.stage_selected", &"changes.discard", &"changes.undo_discard"]
+	for id: StringName in ids:
+		if not Actions.is_enabled(id):
+			continue
+		var action: ActionRegistry.Action = Actions.get_action(id)
+		_menu.add_item(action.label, _menu_actions.size())
+		_menu_actions.append(id)
+	if _menu_actions.is_empty():
+		return
+	_menu.position = Vector2i(source.get_screen_position() + at_position)
+	_menu.reset_size()
+	_menu.popup()
 
 
 func stage_all() -> void:
@@ -188,6 +339,27 @@ func _on_current_changed(group: String, path: String, list: ChangeList) -> void:
 			other.deselect()
 	session.select_diff(group, path, false)
 	_on_diff_changed()
+
+
+## Right in a file list moves into the diff.
+func _on_list_key(event: InputEvent, list: ChangeList) -> void:
+	if event.is_action_pressed("ui_right", false, true) and _diff_view.row_count() > 0:
+		_last_list = list
+		_diff_view.grab_focus()
+		if _diff_view.cursor < 0:
+			_diff_view.select_only(0)
+		list.accept_event()
+
+
+## Left in the diff (when it is not scrolled sideways) goes back to the list.
+func _on_diff_key(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_left", false, true) and _diff_view.h_scroll() <= 0.0:
+		var list: ChangeList = _last_list if _last_list != null and _last_list.row_count() > 0 else _selected_list()
+		if list == null:
+			focus_files()
+		else:
+			list.grab_focus()
+		_diff_view.accept_event()
 
 
 func _focused_list() -> ChangeList:

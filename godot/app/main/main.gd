@@ -254,7 +254,7 @@ func _register_change_actions() -> void:
 		var page: RepoTab = current_page()
 		return page != null and page.session.is_ready() and page.view == RepoTab.View.CHANGES
 	var changes: Callable = func() -> ChangesView: return current_page().changes()
-	Actions.register(&"changes.stage_selected", "Stage or unstage selected files", "Changes",
+	Actions.register(&"changes.stage_selected", "Stage or unstage the selection", "Changes",
 			func() -> void: changes.call().stage_selected(), PackedStringArray(), in_changes)
 	Actions.register(&"changes.stage_all", "Stage all changes", "Changes",
 			func() -> void: changes.call().stage_all(), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
@@ -265,6 +265,11 @@ func _register_change_actions() -> void:
 				current_page().show_view(RepoTab.View.CHANGES)
 				changes.call().focus_message(),
 			PackedStringArray(["Ctrl+Shift+M"]), repo_ready)
+	Actions.register(&"changes.discard", "Discard selected changes…", "Changes",
+			func() -> void: changes.call().discard_selection(), PackedStringArray(["Delete"]), in_changes)
+	Actions.register(&"changes.undo_discard", "Undo last discard", "Changes",
+			func() -> void: changes.call().undo_discard(), PackedStringArray(["Ctrl+Z"]),
+			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard())
 	var amend: ActionRegistry.Action = Actions.register(&"changes.toggle_amend", "Toggle amend last commit", "Changes",
 			func() -> void: changes.call().toggle_amend(), PackedStringArray(["Ctrl+Shift+A"]), in_changes)
 	amend.in_text_fields = true
