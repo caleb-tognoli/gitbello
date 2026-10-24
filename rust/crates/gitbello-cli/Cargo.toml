@@ -1,0 +1,15 @@
+[package]
+name = "gitbello-cli"
+description = "Dev-only headless harness for gitbello-core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gitbello-core.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

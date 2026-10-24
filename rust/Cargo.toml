@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+gitbello-core = { path = "crates/gitbello-core" }
+# Pinned: gdext is pre-1.0. The api feature must match the Godot version in godot/project.godot.
+godot = { version = "=0.5.5", features = ["api-4-7"] }
+anyhow = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
