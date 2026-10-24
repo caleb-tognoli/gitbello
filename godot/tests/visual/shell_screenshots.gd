@@ -91,6 +91,29 @@ func _ready() -> void:
 		await get_tree().process_frame
 	await _shot(out, "sync_toast")
 
+	# M6: a worktree row's menu, the new-task form, cleanup and settings.
+	var linked: String = String(page.session.worktrees()[1]["path"])
+	sidebar.select_ref("worktree:" + linked)
+	sidebar.grab_focus()
+	sidebar.context_menu_requested.emit(sidebar.selected_ref(), sidebar.get_screen_position() + Vector2(120.0, 180.0))
+	await _shot_window(page.context_menu(), out, "worktree_menu")
+	page.close_menu()
+	page.ops().new_task()
+	var form: FormDialog = page.ops().form()
+	(form.field("name") as LineEdit).text = "fix-login"
+	(form.field("folder") as LineEdit).text = page.session.worktree_path_for("fix-login")
+	await _shot_window(form, out, "new_task")
+	form.hide()
+	page.ops().cleanup_worktrees()
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and not form.visible:
+		await get_tree().process_frame
+	await _shot_window(form, out, "cleanup")
+	form.hide()
+	Actions.run_action(&"app.settings")
+	await _shot_window(main.settings_form(), out, "settings")
+	main.settings_form().hide()
+
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	await _shot(out, "welcome")
