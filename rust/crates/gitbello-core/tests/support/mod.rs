@@ -116,13 +116,18 @@ impl TestRepo {
         path
     }
 
-    /// A write command with the fixture environment applied.
+    /// A write command in the repository with the fixture environment applied.
     pub fn command(&self) -> GitCommand {
+        self.command_in(&self.path)
+    }
+
+    /// Like [`TestRepo::command`] but runs in `dir` (a worktree or remote).
+    pub fn command_in(&self, dir: &Path) -> GitCommand {
         let time = self.clock.get();
         self.clock.set(time + 60);
         let date = format!("{time} +0000");
         self.runner
-            .write(&self.path)
+            .write(dir)
             .env("GIT_CONFIG_GLOBAL", &self.global_config)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_AUTHOR_NAME", "Ada Lövelace")
@@ -188,4 +193,68 @@ impl TestRepo {
             .run()
             .unwrap_or_else(|err| panic!("fast-import failed: {err}"));
     }
+
+    /// Path of a new, not yet existing directory next to the repository.
+    pub fn sibling(&self, name: &str) -> PathBuf {
+        self.dir.path().join(name)
+    }
+
+    /// Writes a file in the working tree without staging it.
+    pub fn write(&self, file: &str, content: &str) {
+        let target = self.path.join(file);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        fs::write(&target, content).expect("write file");
+    }
+
+    /// Creates a bare repository next to this one, adds it as `origin` and
+    /// pushes `main` with upstream tracking. Returns the remote's path.
+    pub fn add_remote(&self) -> PathBuf {
+        let remote = self.sibling("remöte.git");
+        self.git(&["init", "--quiet", "--bare", "--initial-branch=main", &path_arg(&remote)]);
+        self.git(&["remote", "add", "origin", &path_arg(&remote)]);
+        self.git(&["push", "--quiet", "-u", "origin", "main"]);
+        remote
+    }
+
+    /// `git worktree add -b <branch> <sibling dir>`; returns the worktree path.
+    pub fn add_worktree(&self, branch: &str, dir_name: &str) -> PathBuf {
+        let path = self.sibling(dir_name);
+        self.git(&["worktree", "add", "--quiet", "-b", branch, &path_arg(&path)]);
+        path
+    }
+
+    /// Modifies `file` and stashes it with `message`.
+    pub fn stash(&self, file: &str, content: &str, message: &str) {
+        self.write(file, content);
+        self.git(&["stash", "push", "--quiet", "-m", message]);
+    }
+
+    /// Leaves the repository in a conflicted merge on `file`: `main` and a
+    /// `conflict` branch change the same line. Returns the conflicting branch name.
+    pub fn start_conflicting_merge(&self, file: &str) -> &'static str {
+        self.commit(file, "base\n", "conflict base");
+        self.branch("conflict");
+        self.commit(file, "ours\n", "ours");
+        self.checkout("conflict");
+        self.commit(file, "theirs\n", "theirs");
+        self.checkout("main");
+        let err = self
+            .try_git(&["merge", "--no-edit", "conflict"])
+            .expect_err("merge should conflict");
+        assert_eq!(err.kind, gitbello_core::git::GitErrorKind::Conflict, "{err}");
+        "conflict"
+    }
+
+    /// Detaches HEAD at the current commit.
+    pub fn detach(&self) {
+        self.git(&["checkout", "--quiet", "--detach"]);
+    }
+}
+
+/// Paths are passed to git with forward slashes so they survive any shell
+/// quoting git does internally on Windows.
+pub fn path_arg(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }

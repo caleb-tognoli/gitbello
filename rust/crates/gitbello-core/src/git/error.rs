@@ -36,6 +36,8 @@ pub enum GitErrorKind {
     LockExists,
     #[error("cancelled")]
     Cancelled,
+    #[error("unexpected git output")]
+    UnexpectedOutput,
     #[error("git failed")]
     Other,
 }
