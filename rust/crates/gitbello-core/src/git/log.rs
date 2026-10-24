@@ -116,7 +116,9 @@ mod tests {
         }
         let all = log.records_since(0);
         assert_eq!(
-            all.iter().map(|r| (r.seq, r.command.as_str())).collect::<Vec<_>>(),
+            all.iter()
+                .map(|r| (r.seq, r.command.as_str()))
+                .collect::<Vec<_>>(),
             [(2, "cmd 1"), (3, "cmd 2")]
         );
         assert_eq!(log.records_since(2).len(), 1);

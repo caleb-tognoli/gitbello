@@ -99,7 +99,10 @@ mod tests {
         assert!(wts[0].is_main && !wts[1].is_main);
         assert_eq!(wts[0].path, PathBuf::from("/home/a/my repo"));
         assert_eq!(wts[0].branch_name(), Some("main"));
-        assert_eq!(wts[1].path, PathBuf::from("/home/a/my repo.worktrees/fëature"));
+        assert_eq!(
+            wts[1].path,
+            PathBuf::from("/home/a/my repo.worktrees/fëature")
+        );
         assert_eq!(wts[1].branch_name(), Some("feature/x"));
         assert_eq!(wts[1].locked.as_deref(), Some(""));
         assert!(wts[2].detached && wts[2].branch.is_none());
@@ -109,7 +112,10 @@ mod tests {
 
     #[test]
     fn parses_bare_and_missing_terminator() {
-        let wts = parse_worktrees(b"worktree /srv/repo.git\0bare\0\0worktree /w\0HEAD abc\0branch refs/heads/x").unwrap();
+        let wts = parse_worktrees(
+            b"worktree /srv/repo.git\0bare\0\0worktree /w\0HEAD abc\0branch refs/heads/x",
+        )
+        .unwrap();
         assert!(wts[0].bare && wts[0].head.is_none());
         assert_eq!(wts[1].head.as_deref(), Some("abc"));
     }

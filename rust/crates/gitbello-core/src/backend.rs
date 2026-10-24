@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 
 use crate::git::{CancelToken, GitError, GitErrorKind, GitOutput, GitRunner};
 use crate::repo::{
-    detect_operation, parse_refs, parse_remotes, parse_repo_paths, parse_stash_list,
-    parse_status, parse_worktrees, Operation, ParseError, Ref, RepoPaths, RepoStatus,
-    StashEntry, Worktree, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS,
-    WORKTREES_ARGS,
+    detect_operation, parse_refs, parse_remotes, parse_repo_paths, parse_stash_list, parse_status,
+    parse_worktrees, Operation, ParseError, Ref, RepoPaths, RepoStatus, StashEntry, Worktree,
+    REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
 };
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
@@ -46,17 +45,22 @@ impl CliBackend {
         &self.runner
     }
 
-    fn read(&self, repo: &Path, args: &[&str], cancel: &CancelToken) -> Result<GitOutput, GitError> {
-        self.runner
-            .read(repo)
-            .args(args)
-            .cancel_token(cancel)
-            .run()
+    fn read(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        cancel: &CancelToken,
+    ) -> Result<GitOutput, GitError> {
+        self.runner.read(repo).args(args).cancel_token(cancel).run()
     }
 }
 
 fn unexpected(args: &[&str], err: ParseError) -> GitError {
-    GitError::new(args.join(" "), GitErrorKind::UnexpectedOutput, err.to_string())
+    GitError::new(
+        args.join(" "),
+        GitErrorKind::UnexpectedOutput,
+        err.to_string(),
+    )
 }
 
 impl GitBackend for CliBackend {

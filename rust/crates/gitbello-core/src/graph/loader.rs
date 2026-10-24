@@ -139,7 +139,11 @@ impl GraphLoader {
     }
 
     fn set_state(&self, state: LoadState) {
-        let mut status = self.shared.status.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut status = self
+            .shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         status.state = state;
     }
 

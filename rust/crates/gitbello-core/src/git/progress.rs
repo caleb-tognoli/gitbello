@@ -96,9 +96,13 @@ mod tests {
 
     #[test]
     fn parses_captured_fetch_progress() {
-        let p = Progress::parse("Receiving objects:  45% (450/1000), 1.20 MiB | 2.00 MiB/s").unwrap();
+        let p =
+            Progress::parse("Receiving objects:  45% (450/1000), 1.20 MiB | 2.00 MiB/s").unwrap();
         assert_eq!(p.phase, "Receiving objects");
-        assert_eq!((p.percent, p.current, p.total), (Some(45), Some(450), Some(1000)));
+        assert_eq!(
+            (p.percent, p.current, p.total),
+            (Some(45), Some(450), Some(1000))
+        );
         assert!(!p.remote);
 
         let p = Progress::parse("remote: Counting objects: 100% (5/5), done.").unwrap();
@@ -129,7 +133,8 @@ mod tests {
 
     #[test]
     fn splits_carriage_return_redraws_across_chunks() {
-        let input = b"Receiving objects:  10% (1/10)\rReceiving objects: 100% (10/10), done.\nResolv";
+        let input =
+            b"Receiving objects:  10% (1/10)\rReceiving objects: 100% (10/10), done.\nResolv";
         let mut lines = Vec::new();
         let mut splitter = LineSplitter::default();
         for chunk in input.chunks(7) {

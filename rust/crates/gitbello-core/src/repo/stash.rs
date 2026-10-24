@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn keeps_unrecognised_subjects_and_rejects_bad_records() {
         let entries = parse_stash_list(b"stash@{3}\x1fcc\x1f1\x1fautostash\0").unwrap();
-        assert_eq!((entries[0].branch.as_ref(), entries[0].message.as_str()), (None, "autostash"));
+        assert_eq!(
+            (entries[0].branch.as_ref(), entries[0].message.as_str()),
+            (None, "autostash")
+        );
         assert!(parse_stash_list(b"").unwrap().is_empty());
         assert!(parse_stash_list(b"stash@{x}\x1fa\x1f1\x1fs\0").is_err());
         assert!(parse_stash_list(b"stash@{0}\x1fa\0").is_err());

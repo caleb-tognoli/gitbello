@@ -106,9 +106,16 @@ fn reports_progress_from_a_clone() {
 
     let repo = TestRepo::init();
     for i in 0..20 {
-        repo.commit(&format!("f{i}.txt"), &"x".repeat(1000 + i), &format!("c{i}"));
+        repo.commit(
+            &format!("f{i}.txt"),
+            &"x".repeat(1000 + i),
+            &format!("c{i}"),
+        );
     }
-    let url = format!("file:///{}", support::path_arg(repo.path()).trim_start_matches('/'));
+    let url = format!(
+        "file:///{}",
+        support::path_arg(repo.path()).trim_start_matches('/')
+    );
     let target = repo.sibling("clöne");
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
@@ -120,7 +127,8 @@ fn reports_progress_from_a_clone() {
         .unwrap();
     let seen = seen.lock().unwrap();
     assert!(
-        seen.iter().any(|p| p.phase.contains("objects") && p.percent == Some(100)),
+        seen.iter()
+            .any(|p| p.phase.contains("objects") && p.percent == Some(100)),
         "{seen:#?}"
     );
 }
@@ -148,7 +156,11 @@ fn cancellation_kills_git_promptly() {
         .unwrap_err();
     handle.join().unwrap();
     assert_eq!(err.kind, GitErrorKind::Cancelled);
-    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -162,7 +174,11 @@ fn does_not_wait_for_helpers_that_keep_pipes_open() {
         .args(["-c", "alias.bg=!sleep 10 &", "bg"])
         .run()
         .unwrap();
-    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -172,7 +188,11 @@ fn logs_every_command_with_outcome() {
     let repo = TestRepo::init();
     let runner = repo.runner().clone();
     let before = runner.log().records_since(0).last().map_or(0, |r| r.seq);
-    runner.read(repo.path()).args(["rev-parse", "--git-dir"]).run().unwrap();
+    runner
+        .read(repo.path())
+        .args(["rev-parse", "--git-dir"])
+        .run()
+        .unwrap();
     let _ = runner.read(repo.path()).args(["rev-parse", "HEAD"]).run();
     let records = runner.log().records_since(before);
     assert_eq!(records.len(), 2, "{records:#?}");

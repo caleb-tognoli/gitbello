@@ -48,7 +48,9 @@ pub enum Operation {
     Merge,
     CherryPick,
     Revert,
-    Rebase { interactive: bool },
+    Rebase {
+        interactive: bool,
+    },
     /// `git am`.
     ApplyMailbox,
     Bisect,
@@ -95,7 +97,11 @@ mod tests {
         assert_eq!(paths.git_dir, PathBuf::from("/r/.git/worktrees/x"));
         assert_eq!(paths.common_dir, PathBuf::from("/r/.git"));
         assert!(!paths.bare);
-        assert!(parse_repo_paths(b"C:/r.git\r\nC:/r.git\r\ntrue\r\n").unwrap().bare);
+        assert!(
+            parse_repo_paths(b"C:/r.git\r\nC:/r.git\r\ntrue\r\n")
+                .unwrap()
+                .bare
+        );
         assert!(parse_repo_paths(b"/r/.git\n").is_err());
     }
 

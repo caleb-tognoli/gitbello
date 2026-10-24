@@ -32,12 +32,15 @@ fn status_reports_staged_unstaged_untracked_and_renames() {
         status
             .changes
             .iter()
-            .find(|c| c.path == PathBuf::from(p))
+            .find(|c| c.path == std::path::Path::new(p))
             .unwrap_or_else(|| panic!("{p} missing from {:#?}", status.changes))
     };
     assert_eq!(
         find("keep.txt").state,
-        FileState::Tracked { index: Change::Unmodified, worktree: Change::Modified }
+        FileState::Tracked {
+            index: Change::Unmodified,
+            worktree: Change::Modified
+        }
     );
     assert!(find("staged.txt").is_staged());
     let renamed = find("new näme.txt");
@@ -112,11 +115,16 @@ fn refs_cover_branches_remotes_tags_and_stash() {
     let main = get("refs/heads/main");
     assert!(main.is_head);
     assert_eq!(main.tracking.ahead, 1);
-    assert_eq!(main.worktree.as_deref().map(|p| p.ends_with("wörk tree")), Some(true));
+    assert_eq!(
+        main.worktree.as_deref().map(|p| p.ends_with("wörk tree")),
+        Some(true)
+    );
     assert_eq!(get("refs/heads/feature/wörk").short_name, "feature/wörk");
     assert_eq!(
         get("refs/remotes/origin/main").kind,
-        RefKind::RemoteBranch { remote: "origin".into() }
+        RefKind::RemoteBranch {
+            remote: "origin".into()
+        }
     );
     let tag = get("refs/tags/v1.0");
     assert!(tag.peeled.is_some() && tag.peeled.as_deref() != Some(tag.target.as_str()));
@@ -129,7 +137,13 @@ fn worktrees_list_main_and_linked_with_lock() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
     let linked = repo.add_worktree("feature/x", "lïnked wt");
-    repo.git(&["worktree", "lock", "--reason", "on usb", &support::path_arg(&linked)]);
+    repo.git(&[
+        "worktree",
+        "lock",
+        "--reason",
+        "on usb",
+        &support::path_arg(&linked),
+    ]);
 
     let backend = backend(&repo);
     let wts = backend.worktrees(repo.path(), &no_cancel()).unwrap();
@@ -175,7 +189,10 @@ fn ignored_returns_only_ignored_paths() {
     let ignored = backend.ignored(repo.path(), &paths, &no_cancel()).unwrap();
     assert_eq!(
         ignored,
-        vec![PathBuf::from("target/debug/x.o"), PathBuf::from("büild.log")]
+        vec![
+            PathBuf::from("target/debug/x.o"),
+            PathBuf::from("büild.log")
+        ]
     );
     let none = backend
         .ignored(repo.path(), &[PathBuf::from("src/main.rs")], &no_cancel())

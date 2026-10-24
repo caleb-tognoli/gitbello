@@ -212,7 +212,13 @@ impl TestRepo {
     /// pushes `main` with upstream tracking. Returns the remote's path.
     pub fn add_remote(&self) -> PathBuf {
         let remote = self.sibling("remöte.git");
-        self.git(&["init", "--quiet", "--bare", "--initial-branch=main", &path_arg(&remote)]);
+        self.git(&[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch=main",
+            &path_arg(&remote),
+        ]);
         self.git(&["remote", "add", "origin", &path_arg(&remote)]);
         self.git(&["push", "--quiet", "-u", "origin", "main"]);
         remote
@@ -243,7 +249,11 @@ impl TestRepo {
         let err = self
             .try_git(&["merge", "--no-edit", "conflict"])
             .expect_err("merge should conflict");
-        assert_eq!(err.kind, gitbello_core::git::GitErrorKind::Conflict, "{err}");
+        assert_eq!(
+            err.kind,
+            gitbello_core::git::GitErrorKind::Conflict,
+            "{err}"
+        );
         "conflict"
     }
 

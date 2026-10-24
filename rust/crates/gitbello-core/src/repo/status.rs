@@ -340,19 +340,31 @@ mod tests {
             status
                 .changes
                 .iter()
-                .find(|c| c.path == PathBuf::from(p))
+                .find(|c| c.path == std::path::Path::new(p))
                 .unwrap_or_else(|| panic!("missing {p}"))
         };
         let tracked = |index, worktree| FileState::Tracked { index, worktree };
 
-        assert_eq!(by_path("src/main.rs").state, tracked(Change::Unmodified, Change::Modified));
+        assert_eq!(
+            by_path("src/main.rs").state,
+            tracked(Change::Unmodified, Change::Modified)
+        );
         assert!(by_path("src/main.rs").is_unstaged() && !by_path("src/main.rs").is_staged());
-        assert_eq!(by_path("new file.txt").state, tracked(Change::Added, Change::Unmodified));
-        assert_eq!(by_path("gone.txt").state, tracked(Change::Modified, Change::Deleted));
+        assert_eq!(
+            by_path("new file.txt").state,
+            tracked(Change::Added, Change::Unmodified)
+        );
+        assert_eq!(
+            by_path("gone.txt").state,
+            tracked(Change::Modified, Change::Deleted)
+        );
 
         let renamed = by_path("dir/renamed name.txt");
         assert_eq!(renamed.state, tracked(Change::Renamed, Change::Unmodified));
-        assert_eq!(renamed.original_path, Some(PathBuf::from("dir/old name.txt")));
+        assert_eq!(
+            renamed.original_path,
+            Some(PathBuf::from("dir/old name.txt"))
+        );
         assert_eq!(renamed.score, Some(87));
 
         assert!(by_path("vendor/lib").submodule);
@@ -377,8 +389,7 @@ mod tests {
         assert_eq!(unborn.head, Head::Branch("main".into()));
         assert!(unborn.is_clean());
 
-        let detached =
-            parse_status(b"# branch.oid abc\0# branch.head (detached)\0").unwrap();
+        let detached = parse_status(b"# branch.oid abc\0# branch.head (detached)\0").unwrap();
         assert_eq!(detached.head, Head::Detached);
         assert_eq!(detached.upstream, None);
     }

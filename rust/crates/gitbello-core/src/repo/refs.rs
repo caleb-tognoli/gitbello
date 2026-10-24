@@ -90,7 +90,11 @@ pub fn parse_refs(output: &[u8], remotes: &[String]) -> Result<Vec<Ref>, ParseEr
         if f.len() != FIELDS {
             return Err(ParseError::new(
                 WHAT,
-                format!("expected {FIELDS} fields, got {} in `{}`", f.len(), text(line)),
+                format!(
+                    "expected {FIELDS} fields, got {} in `{}`",
+                    f.len(),
+                    text(line)
+                ),
             ));
         }
         let name = text(f[0]);
@@ -163,12 +167,72 @@ mod tests {
 
     fn captured() -> Vec<u8> {
         [
-            line(["refs/heads/main", A, "commit", "", "refs/remotes/origin/main", "ahead 2, behind 1", "*", "", "/home/a/repo"]),
-            line(["refs/heads/feature/wörk", B, "commit", "", "refs/remotes/origin/feature/wörk", "gone", " ", "", ""]),
-            line(["refs/heads/local-only", B, "commit", "", "", "", " ", "", "/home/a/repo.worktrees/local-only"]),
-            line(["refs/remotes/origin/HEAD", A, "commit", "", "", "", " ", "refs/remotes/origin/main", ""]),
-            line(["refs/remotes/origin/main", A, "commit", "", "", "", " ", "", ""]),
-            line(["refs/remotes/team/x/topic", B, "commit", "", "", "", " ", "", ""]),
+            line([
+                "refs/heads/main",
+                A,
+                "commit",
+                "",
+                "refs/remotes/origin/main",
+                "ahead 2, behind 1",
+                "*",
+                "",
+                "/home/a/repo",
+            ]),
+            line([
+                "refs/heads/feature/wörk",
+                B,
+                "commit",
+                "",
+                "refs/remotes/origin/feature/wörk",
+                "gone",
+                " ",
+                "",
+                "",
+            ]),
+            line([
+                "refs/heads/local-only",
+                B,
+                "commit",
+                "",
+                "",
+                "",
+                " ",
+                "",
+                "/home/a/repo.worktrees/local-only",
+            ]),
+            line([
+                "refs/remotes/origin/HEAD",
+                A,
+                "commit",
+                "",
+                "",
+                "",
+                " ",
+                "refs/remotes/origin/main",
+                "",
+            ]),
+            line([
+                "refs/remotes/origin/main",
+                A,
+                "commit",
+                "",
+                "",
+                "",
+                " ",
+                "",
+                "",
+            ]),
+            line([
+                "refs/remotes/team/x/topic",
+                B,
+                "commit",
+                "",
+                "",
+                "",
+                " ",
+                "",
+                "",
+            ]),
             line(["refs/stash", B, "commit", "", "", "", " ", "", ""]),
             line(["refs/tags/v1.0", B, "tag", A, "", "", " ", "", ""]),
             line(["refs/tags/light", A, "commit", "", "", "", " ", "", ""]),
@@ -183,10 +247,20 @@ mod tests {
         let refs = parse_refs(&captured(), &["origin".into(), "team/x".into()]).unwrap();
         assert_eq!(refs.len(), 10);
         let main = &refs[0];
-        assert_eq!((main.kind.clone(), main.short_name.as_str()), (RefKind::Branch, "main"));
+        assert_eq!(
+            (main.kind.clone(), main.short_name.as_str()),
+            (RefKind::Branch, "main")
+        );
         assert!(main.is_head);
         assert_eq!(main.upstream.as_deref(), Some("refs/remotes/origin/main"));
-        assert_eq!(main.tracking, Tracking { ahead: 2, behind: 1, gone: false });
+        assert_eq!(
+            main.tracking,
+            Tracking {
+                ahead: 2,
+                behind: 1,
+                gone: false
+            }
+        );
         assert_eq!(main.worktree, Some(PathBuf::from("/home/a/repo")));
 
         let gone = &refs[1];
@@ -198,11 +272,28 @@ mod tests {
 
     #[test]
     fn splits_remote_names_using_the_remote_list() {
-        let refs = parse_refs(&captured(), &["origin".into(), "team/x".into(), "team".into()]).unwrap();
-        assert_eq!(refs[3].symref_target.as_deref(), Some("refs/remotes/origin/main"));
-        assert_eq!(refs[4].kind, RefKind::RemoteBranch { remote: "origin".into() });
+        let refs = parse_refs(
+            &captured(),
+            &["origin".into(), "team/x".into(), "team".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            refs[3].symref_target.as_deref(),
+            Some("refs/remotes/origin/main")
+        );
+        assert_eq!(
+            refs[4].kind,
+            RefKind::RemoteBranch {
+                remote: "origin".into()
+            }
+        );
         assert_eq!(refs[4].remote_branch_name(), Some("main"));
-        assert_eq!(refs[5].kind, RefKind::RemoteBranch { remote: "team/x".into() });
+        assert_eq!(
+            refs[5].kind,
+            RefKind::RemoteBranch {
+                remote: "team/x".into()
+            }
+        );
         assert_eq!(refs[5].remote_branch_name(), Some("topic"));
     }
 
@@ -221,7 +312,17 @@ mod tests {
     fn parses_remote_list_and_rejects_bad_lines() {
         assert_eq!(parse_remotes(b"origin\nteam/x\n\n"), ["origin", "team/x"]);
         assert!(parse_refs(b"refs/heads/a\0only two\n", &[]).is_err());
-        let bad = line(["refs/heads/a", A, "commit", "", "", "ahead lots", " ", "", ""]);
+        let bad = line([
+            "refs/heads/a",
+            A,
+            "commit",
+            "",
+            "",
+            "ahead lots",
+            " ",
+            "",
+            "",
+        ]);
         assert!(parse_refs(bad.as_bytes(), &[]).is_err());
     }
 }
