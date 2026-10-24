@@ -180,13 +180,28 @@ fn run(args: &[String]) -> Result<()> {
 fn cargo_test(args: &[String]) -> Result<()> {
     let mut cmd = cargo();
     cmd.args(["test", "--workspace"]).args(args);
-    run_status(cmd)
+    run_cargo_checked(cmd, "cargo test failed")
+}
+
+/// Output fragments worth repeating in a CI annotation when cargo fails.
+const CARGO_FAIL_MARKERS: &[&str] = &["error", "panicked", "FAILED", "Diff in"];
+
+const CARGO_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// Runs cargo, echoing output; on failure in CI, annotates the failing lines.
+fn run_cargo_checked(cmd: Command, reason: &str) -> Result<()> {
+    let output = run_captured(cmd, CARGO_TIMEOUT)?;
+    if output.success {
+        return Ok(());
+    }
+    annotate_failure(reason, &output.text, CARGO_FAIL_MARKERS);
+    bail!("{reason}")
 }
 
 fn check() -> Result<()> {
     let mut fmt = cargo();
     fmt.args(["fmt", "--all", "--", "--check"]);
-    run_status(fmt)?;
+    run_cargo_checked(fmt, "cargo fmt --check failed")?;
 
     let mut clippy = cargo();
     clippy.args([
@@ -197,7 +212,7 @@ fn check() -> Result<()> {
         "-D",
         "warnings",
     ]);
-    run_status(clippy)?;
+    run_cargo_checked(clippy, "cargo clippy failed")?;
 
     cargo_test(&[])
 }
@@ -233,7 +248,7 @@ fn smoke() -> Result<()> {
     };
     match failure {
         Some(reason) => {
-            annotate_failure(&reason, &output.text);
+            annotate_failure(&reason, &output.text, SMOKE_FAIL_MARKERS);
             bail!("{reason}")
         }
         None => Ok(()),
@@ -242,7 +257,7 @@ fn smoke() -> Result<()> {
 
 /// On GitHub Actions, repeats the interesting output lines as an error
 /// annotation so failures are readable without opening the job log.
-fn annotate_failure(reason: &str, text: &str) {
+fn annotate_failure(reason: &str, text: &str, markers: &[&str]) {
     if env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
         return;
     }
@@ -250,12 +265,12 @@ fn annotate_failure(reason: &str, text: &str) {
     let mut picked: Vec<&str> = Vec::new();
     let mut next_unpicked = 0;
     for (i, line) in lines.iter().enumerate() {
-        let interesting = SMOKE_FAIL_MARKERS.iter().any(|m| line.contains(m))
+        let interesting = markers.iter().any(|m| line.contains(m))
             || line.starts_with("FAIL")
             || line.starts_with("  - ");
         if interesting {
             // Keep a little context (Godot prints the location on the next lines).
-            let end = (i + 3).min(lines.len());
+            let end = (i + 6).min(lines.len());
             picked.extend(&lines[i.max(next_unpicked)..end]);
             next_unpicked = next_unpicked.max(end);
         }
@@ -263,7 +278,7 @@ fn annotate_failure(reason: &str, text: &str) {
     if picked.is_empty() {
         picked = lines.iter().rev().take(30).rev().copied().collect();
     }
-    picked.truncate(60);
+    picked.truncate(80);
     let body = picked.join("\n");
     let escape = |s: &str| {
         s.replace('%', "%25")
@@ -410,7 +425,7 @@ fn import(godot: &Path) -> Result<()> {
         output = run_captured(import_cmd(), SMOKE_TIMEOUT)?;
     }
     if !output.success {
-        annotate_failure("Godot import failed", &output.text);
+        annotate_failure("Godot import failed", &output.text, SMOKE_FAIL_MARKERS);
         bail!("Godot import failed");
     }
     if let Some(marker) = ["SCRIPT ERROR", "Parse Error"]
