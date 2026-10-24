@@ -28,6 +28,7 @@ func run() -> void:
 	expect_eq(list.path_at(list.cursor), "README.md", "README.md is first")
 	var diff: DiffView = view.diff_view()
 	expect(await wait_until(func() -> bool: return diff.row_count() == 4), "README diff has 4 rows: %d" % diff.row_count())
+	expect(Array(diff.line(1).get("syntax", [])) == [0, 8, 0], "Markdown heading is colored: %s" % [diff.line(1)])
 
 	# Right moves into the diff; Down twice to `+line a`; Enter stages it.
 	press("Right")

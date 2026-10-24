@@ -52,6 +52,8 @@ func _ready() -> void:
 	_diff_panel.load_full_requested.connect(_load_full_diff)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.diff_lines(start, count) if session != null else [])
+	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
+		return session.diff_split_rows("changes", start, count) if session != null else [])
 	_diff_view.row_activated.connect(func(_row: int) -> void: stage_diff_lines())
 	_diff_panel.clear("Select a file to see its changes.")
 	_confirm.confirmed.connect(func() -> void:

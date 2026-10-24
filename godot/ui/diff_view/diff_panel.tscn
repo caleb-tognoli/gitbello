@@ -30,6 +30,13 @@ size_flags_horizontal = 3
 theme_type_variation = &"DimLabel"
 text_overrun_behavior = 3
 
+[node name="LayoutButton" type="Button" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+toggle_mode = true
+text = "Side by side"
+
 [node name="DiffStack" type="Control" parent="."]
 layout_mode = 2
 size_flags_vertical = 3

@@ -27,6 +27,18 @@ func run() -> void:
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
 
+	# Ctrl+Shift+D switches every diff to side by side (and back).
+	press("Ctrl+Shift+D")
+	expect(diff.side_by_side, "Ctrl+Shift+D shows the diff side by side")
+	expect(Core.diff_side_by_side(), "the layout is saved")
+	var row: Dictionary = diff.row_data(1)
+	expect(String(row.get("left", {}).get("text", "")) == "v1" and String(row.get("right", {}).get("text", "")) == "v2",
+			"v1 and v2 share a side-by-side row: %s" % [row])
+	# `v1` -> `v2` changes the line's only word: no word highlight on top.
+	expect(Array(row["right"]["hl"]).is_empty(), "a whole-line change has no word highlight: %s" % [row["right"]["hl"]])
+	press("Ctrl+Shift+D")
+	expect(not diff.side_by_side and not Core.diff_side_by_side(), "Ctrl+Shift+D switches back")
+
 	press("Down")
 	expect(await wait_until(func() -> bool: return details.summary_text() == "Add app"),
 			"Down shows the next commit: %s" % details.summary_text())

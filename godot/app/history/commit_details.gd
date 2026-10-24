@@ -25,6 +25,8 @@ func _ready() -> void:
 	_files.current_changed.connect(_on_file_changed)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.commit_diff_lines(start, count) if session != null else [])
+	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
+		return session.diff_split_rows("commit", start, count) if session != null else [])
 	_diff_panel.load_full_requested.connect(func() -> void:
 		session.select_commit_file(String(session.commit_diff_info().get("path", "")), true))
 	_files.gui_input.connect(_on_files_key)

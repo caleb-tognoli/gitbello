@@ -1,8 +1,12 @@
 class_name DiffPanel
 extends VBoxContainer
-## A file diff with its header (path, notes, +/− counts) and the messages
-## shown instead of lines (loading, binary, too large, no changes, errors).
-## Callers pass `RepoSession.diff_info()`-style dictionaries to `show_info`.
+## A file diff with its header (path, notes, +/− counts, layout toggle) and
+## the messages shown instead of lines (loading, binary, too large, no
+## changes, errors). Callers pass `RepoSession.diff_info()`-style
+## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
+## the layout can change everywhere at once.
+
+const GROUP: StringName = &"diff_panels"
 
 ## The user asked to load a diff past the size limit.
 signal load_full_requested()
@@ -13,6 +17,7 @@ signal load_full_requested()
 @onready var _message: Control = %DiffMessage
 @onready var _message_label: Label = %DiffMessageLabel
 @onready var _load_anyway: Button = %LoadAnywayButton
+@onready var _layout_button: Button = %LayoutButton
 
 ## `kind:path` of the diff shown, to keep the scroll position on reloads.
 var _shown: String = ""
@@ -20,7 +25,12 @@ var _placeholder: String = ""
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
+	_layout_button.toggled.connect(func(on: bool) -> void:
+		if on != _view.side_by_side:
+			Actions.run_action(&"diff.toggle_side_by_side"))
+	set_side_by_side(Core.diff_side_by_side())
 
 
 func view() -> DiffView:
@@ -30,6 +40,16 @@ func view() -> DiffView:
 ## Where lines come from: `func(start, count) -> Array` (see DiffView).
 func set_source(source: Callable) -> void:
 	_view.source = source
+
+
+## Where side-by-side rows come from (see DiffView).
+func set_split_source(source: Callable) -> void:
+	_view.split_source = source
+
+
+func set_side_by_side(value: bool) -> void:
+	_view.side_by_side = value
+	_layout_button.set_pressed_no_signal(value)
 
 
 ## Clears the diff and shows `placeholder` (also used by later `clear()` calls).
@@ -75,7 +95,8 @@ func show_info(info: Dictionary) -> void:
 	match String(info.get("content", "text")):
 		"text", "combined":
 			_message.hide()
-			_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep)
+			_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep,
+					int(info.get("split_count", info["line_count"])))
 		"binary":
 			_view.show_lines(0, 0, false)
 			show_message("Binary file: %s → %s" % [

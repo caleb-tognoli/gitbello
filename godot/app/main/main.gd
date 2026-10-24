@@ -240,6 +240,8 @@ func _register_actions() -> void:
 			func() -> void: current_page().show_view(RepoTab.View.CHANGES),
 			PackedStringArray(["Ctrl+2"]), has_tab)
 	_register_change_actions()
+	Actions.register(&"diff.toggle_side_by_side", "Toggle side-by-side diff", "View",
+			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
@@ -277,6 +279,12 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().commit(), PackedStringArray(["Ctrl+Enter"]),
 			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit())
 	commit.in_text_fields = true
+
+
+func _toggle_side_by_side() -> void:
+	var value: bool = not Core.diff_side_by_side()
+	Core.set_diff_side_by_side(value)
+	get_tree().call_group(DiffPanel.GROUP, &"set_side_by_side", value)
 
 
 func _toggle_sidebars() -> void:

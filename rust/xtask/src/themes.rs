@@ -37,6 +37,12 @@ struct Palette {
     added_bg: Rgb,
     removed_bg: Rgb,
     hunk_bg: Rgb,
+    added_hl_bg: Rgb,
+    removed_hl_bg: Rgb,
+    syntax_keyword: Rgb,
+    syntax_type: Rgb,
+    syntax_string: Rgb,
+    syntax_number: Rgb,
 }
 
 const DARK: Palette = Palette {
@@ -76,6 +82,12 @@ const DARK: Palette = Palette {
     added_bg: (0.13, 0.24, 0.16),
     removed_bg: (0.27, 0.14, 0.15),
     hunk_bg: (0.14, 0.17, 0.23),
+    added_hl_bg: (0.2, 0.42, 0.25),
+    removed_hl_bg: (0.48, 0.2, 0.22),
+    syntax_keyword: (0.78, 0.55, 0.95),
+    syntax_type: (0.4, 0.78, 0.85),
+    syntax_string: (0.6, 0.82, 0.5),
+    syntax_number: (0.95, 0.65, 0.4),
 };
 
 const LIGHT: Palette = Palette {
@@ -115,6 +127,12 @@ const LIGHT: Palette = Palette {
     added_bg: (0.88, 0.97, 0.89),
     removed_bg: (0.99, 0.9, 0.9),
     hunk_bg: (0.92, 0.94, 0.98),
+    added_hl_bg: (0.67, 0.92, 0.7),
+    removed_hl_bg: (0.98, 0.72, 0.72),
+    syntax_keyword: (0.55, 0.2, 0.7),
+    syntax_type: (0.0, 0.45, 0.55),
+    syntax_string: (0.15, 0.5, 0.1),
+    syntax_number: (0.7, 0.35, 0.0),
 };
 
 /// Monospace fonts tried in order (the first one installed wins).
@@ -591,6 +609,18 @@ fn generate(p: &Palette) -> String {
     t.item("DiffView/colors/added_mark", col(p.added));
     t.item("DiffView/colors/removed_mark", col(p.removed));
     t.item("DiffView/colors/gutter_bg", col(p.bg_alt));
+    t.item("DiffView/colors/empty_bg", col(p.bg_alt));
+    t.item("DiffView/colors/added_hl_bg", col(p.added_hl_bg));
+    t.item("DiffView/colors/removed_hl_bg", col(p.removed_hl_bg));
+    for (k, c) in [
+        ("keyword", p.syntax_keyword),
+        ("type", p.syntax_type),
+        ("string", p.syntax_string),
+        ("number", p.syntax_number),
+        ("comment", p.dim),
+    ] {
+        t.item(&format!("DiffView/colors/syntax_{k}"), col(c));
+    }
     t.item("DiffView/colors/message_color", col(p.dim));
     t.item("DiffView/constants/row_height", 20);
     t.item("DiffView/constants/padding", 8);
