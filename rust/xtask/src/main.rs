@@ -184,7 +184,7 @@ fn cargo_test(args: &[String]) -> Result<()> {
 }
 
 /// Output fragments worth repeating in a CI annotation when cargo fails.
-const CARGO_FAIL_MARKERS: &[&str] = &["error", "panicked", "FAILED", "Diff in"];
+const CARGO_FAIL_MARKERS: &[&str] = &["error:", "error[", "panicked", "FAILED", "Diff in"];
 
 const CARGO_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
