@@ -6,6 +6,10 @@ use std::path::PathBuf;
 
 use crate::repo::ParseError;
 
+mod patch;
+
+pub use patch::{build_patch, PatchMode};
+
 /// Diffs whose git output exceeds this many bytes are not loaded until the
 /// user asks for them ("load anyway").
 pub const LARGE_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -93,6 +97,10 @@ pub struct DiffHeader {
     pub similarity: Option<u8>,
     pub renamed_from: Option<String>,
     pub copied_from: Option<String>,
+    /// Blob ids from the `index <old>..<new>` line (full with `--full-index`);
+    /// all zeros for a side that does not exist.
+    pub old_oid: Option<String>,
+    pub new_oid: Option<String>,
 }
 
 impl DiffHeader {
@@ -267,6 +275,12 @@ pub fn parse_diff(output: &[u8]) -> Result<FileDiff, ParseError> {
             diff.header.old_mode = Some(mode);
         } else if let Some(mode) = after(line, "new mode ") {
             diff.header.new_mode = Some(mode);
+        } else if let Some(ids) = after(line, "index ") {
+            let ids = ids.split(' ').next().unwrap_or_default();
+            if let Some((old, new)) = ids.split_once("..") {
+                diff.header.old_oid = Some(old.to_owned());
+                diff.header.new_oid = Some(new.to_owned());
+            }
         } else if let Some(score) = after(line, "similarity index ") {
             diff.header.similarity = score.trim_end_matches('%').parse().ok();
         } else if let Some(from) = after(line, "rename from ") {

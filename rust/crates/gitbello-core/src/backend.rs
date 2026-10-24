@@ -8,7 +8,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::diff::{parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff};
+use crate::diff::{
+    parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
+};
 use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner};
 use crate::repo::{
     detect_operation, parse_refs, parse_remotes, parse_repo_paths, parse_stash_list, parse_status,
@@ -71,6 +73,51 @@ pub trait GitBackend: Send + Sync {
         amend: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    /// Applies a patch from [`crate::diff::build_patch`] as `mode` says,
+    /// after checking `guard` (the file still matches the diff) and
+    /// `git apply --check`.
+    fn apply_patch(
+        &self,
+        toplevel: &Path,
+        patch: &[u8],
+        mode: PatchMode,
+        guard: &PatchGuard,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Stores the working-tree bytes of `paths` (those that exist) as blobs,
+    /// unfiltered, so a discard can be undone. Returns `(path, blob id)`.
+    fn backup(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError>;
+    /// Restores the working tree of `paths` from the index.
+    fn discard(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Writes backed-up blobs back to their paths.
+    fn restore_backup(
+        &self,
+        toplevel: &Path,
+        files: &[(PathBuf, String)],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+}
+
+/// What a file must still look like for a patch built from its diff to apply.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PatchGuard {
+    /// Worktree-root relative path.
+    pub path: PathBuf,
+    /// Expected index blob id (full), if checked.
+    pub index_oid: Option<String>,
+    /// Expected working-tree content id (full), if checked.
+    pub worktree_oid: Option<String>,
 }
 
 /// [`GitBackend`] over the system git executable.
@@ -118,9 +165,27 @@ const DIFF_ARGS: &[&str] = &[
     "--no-textconv",
     "--no-relative",
     "--no-color",
+    "--full-index",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
+
+/// The stage-0 index blob id of `path`, from `git ls-files -s -z` output.
+fn parse_index_oid(output: &[u8]) -> Option<String> {
+    let entry = output.split(|&b| b == 0).next()?;
+    let mut fields = entry.splitn(3, |&b| b == b' ');
+    fields.next()?;
+    let oid = fields.next()?;
+    Some(String::from_utf8_lossy(oid).into_owned())
+}
+
+fn stale(path: &Path) -> GitError {
+    GitError::new(
+        format!("apply {}", path.display()),
+        GitErrorKind::Stale,
+        "the file changed since its diff was shown; refresh and try again",
+    )
+}
 
 fn unexpected(args: &[&str], err: ParseError) -> GitError {
     GitError::new(
@@ -312,6 +377,136 @@ impl GitBackend for CliBackend {
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    fn apply_patch(
+        &self,
+        toplevel: &Path,
+        patch: &[u8],
+        mode: PatchMode,
+        guard: &PatchGuard,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        if let Some(expected) = &guard.index_oid {
+            let out = self
+                .runner
+                .read(toplevel)
+                .env("GIT_LITERAL_PATHSPECS", "1")
+                .args(["ls-files", "-s", "-z", "--"])
+                .arg(&guard.path)
+                .cancel_token(cancel)
+                .run()?;
+            if parse_index_oid(&out.stdout).as_deref() != Some(expected.as_str()) {
+                return Err(stale(&guard.path));
+            }
+        }
+        if let Some(expected) = &guard.worktree_oid {
+            let out = self
+                .runner
+                .read(toplevel)
+                .args(["hash-object", "--"])
+                .arg(&guard.path)
+                .cancel_token(cancel)
+                .run()?;
+            if out.stdout_text().trim() != expected {
+                return Err(stale(&guard.path));
+            }
+        }
+        let mut args = vec!["apply", "--recount", "--whitespace=nowarn"];
+        if mode.is_cached() {
+            args.push("--cached");
+        }
+        if mode.is_reverse() {
+            args.push("-R");
+        }
+        let run = |check: bool| {
+            let mut cmd = self.runner.write(toplevel).args(&args);
+            if check {
+                cmd = cmd.arg("--check");
+            }
+            cmd.arg("-")
+                .stdin(patch.to_vec())
+                .cancel_token(cancel)
+                .run()
+                .map(drop)
+        };
+        run(true)?;
+        run(false)
+    }
+
+    fn backup(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        let existing: Vec<&PathBuf> = paths
+            .iter()
+            .filter(|p| toplevel.join(p).is_file())
+            .collect();
+        if existing.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = String::new();
+        for path in &existing {
+            input.push_str(&path.to_string_lossy());
+            input.push('\n');
+        }
+        let out = self
+            .runner
+            .write(toplevel)
+            .args(["hash-object", "-w", "--no-filters", "--stdin-paths"])
+            .stdin(input)
+            .cancel_token(cancel)
+            .run()?;
+        let oids: Vec<String> = out.stdout_text().lines().map(str::to_owned).collect();
+        if oids.len() != existing.len() {
+            return Err(GitError::new(
+                "hash-object --stdin-paths",
+                GitErrorKind::UnexpectedOutput,
+                format!("{} ids for {} files", oids.len(), existing.len()),
+            ));
+        }
+        Ok(existing.into_iter().cloned().zip(oids).collect())
+    }
+
+    fn discard(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let cmd = self.runner.write(toplevel).args(["restore", "--worktree"]);
+        run_with_paths(cmd, Some(paths), cancel)
+    }
+
+    fn restore_backup(
+        &self,
+        toplevel: &Path,
+        files: &[(PathBuf, String)],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        for (path, oid) in files {
+            let out = self
+                .runner
+                .read(toplevel)
+                .args(["cat-file", "blob", oid])
+                .cancel_token(cancel)
+                .run()?;
+            let target = toplevel.join(path);
+            let io = |err: std::io::Error| {
+                GitError::new(
+                    format!("write {}", target.display()),
+                    GitErrorKind::Io,
+                    err.to_string(),
+                )
+            };
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(io)?;
+            }
+            fs::write(&target, &out.stdout).map_err(io)?;
+        }
+        Ok(())
     }
 }
 
