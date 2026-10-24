@@ -12,6 +12,8 @@ pub mod git;
 pub mod graph;
 pub mod highlight;
 pub mod jobs;
+
+pub mod ops;
 pub mod paths;
 pub mod repo;
 pub mod runtime;

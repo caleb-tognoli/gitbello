@@ -7,12 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use gitbello_core::backend::{GitBackend, PatchGuard};
+use gitbello_core::backend::{GitBackend, PatchGuard, ProgressSink};
 use gitbello_core::diff::{DiffTarget, FileDiff, PatchMode};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
+use gitbello_core::ops::{RefOp, SyncOp};
 use gitbello_core::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 
 #[derive(Default)]
@@ -108,6 +109,21 @@ impl GitBackend for FakeBackend {
         _: &[(PathBuf, String)],
         _: &CancelToken,
     ) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn remotes(&self, _: &Path, _: &CancelToken) -> Result<Vec<String>, GitError> {
+        Ok(Vec::new())
+    }
+    fn sync(&self, _: &Path, _: &SyncOp, _: ProgressSink, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn ref_op(&self, _: &Path, _: &RefOp, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn stash_push(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Option<String>, GitError> {
+        Ok(None)
+    }
+    fn stash_pop(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
 }

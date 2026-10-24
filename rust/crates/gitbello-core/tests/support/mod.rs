@@ -286,3 +286,143 @@ impl TestRepo {
 pub fn path_arg(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
+
+impl TestRepo {
+    /// Clones `remote` into a sibling `dir_name` (another user's checkout).
+    pub fn clone_remote(&self, remote: &Path, dir_name: &str) -> PathBuf {
+        let path = self.sibling(dir_name);
+        self.git(&["clone", "--quiet", &path_arg(remote), &path_arg(&path)]);
+        path
+    }
+
+    /// Brings another checkout `dir` up to date, commits `file` there and
+    /// pushes it to its origin.
+    pub fn push_from(&self, dir: &Path, file: &str, content: &str, message: &str) {
+        let run = |args: &[&str]| {
+            self.command_in(dir)
+                .args(args)
+                .run()
+                .unwrap_or_else(|err| panic!("git {args:?} in {}: {err}", dir.display()))
+        };
+        let tracked = self
+            .command_in(dir)
+            .args(["rev-parse", "-q", "--verify", "@{upstream}"])
+            .run()
+            .is_ok();
+        if tracked {
+            run(&["pull", "--quiet", "--ff-only"]);
+        }
+        fs::write(dir.join(file), content).expect("write file");
+        run(&["add", "--", file]);
+        self.command_in(dir)
+            .args(["commit", "--quiet", "-F", "-"])
+            .stdin(message)
+            .run()
+            .unwrap_or_else(|err| panic!("commit failed: {err}"));
+        run(&["push", "--quiet", "origin", "HEAD"]);
+    }
+}
+
+/// Driving a [`Runtime`] the way the UI does: poll until something holds.
+pub mod rt {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    use gitbello_core::config::Config;
+    use gitbello_core::git::GitError;
+    use gitbello_core::runtime::{JobState, Runtime, RuntimeEvent};
+
+    use super::TestRepo;
+
+    pub const WAIT: Duration = Duration::from_secs(20);
+
+    /// A runtime on `repo` with auto-fetch off, opened and refreshed.
+    pub fn open(repo: &TestRepo) -> (Runtime, PathBuf) {
+        let mut config = Config::default();
+        config.auto_fetch_minutes = 0;
+        let mut rt = Runtime::with_runner(config, None, repo.app_runner());
+        let key = rt.open(repo.path());
+        poll_until(&mut rt, |rt, _| {
+            rt.repo(&key)
+                .is_some_and(|s| s.status().is_some() && s.refs().is_some())
+        });
+        (rt, key)
+    }
+
+    /// Polls until `done` holds; panics with the events seen after [`WAIT`].
+    pub fn poll_until(
+        rt: &mut Runtime,
+        mut done: impl FnMut(&Runtime, &[RuntimeEvent]) -> bool,
+    ) -> Vec<RuntimeEvent> {
+        let deadline = Instant::now() + WAIT;
+        let mut seen = Vec::new();
+        loop {
+            seen.extend(rt.poll());
+            if done(rt, &seen) {
+                return seen;
+            }
+            assert!(Instant::now() < deadline, "timed out; events: {seen:#?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The result of `job` once it finished (`None` = success).
+    pub fn result(events: &[RuntimeEvent], job: u64) -> Option<Option<GitError>> {
+        events.iter().find_map(|e| match e {
+            RuntimeEvent::Job {
+                job: j,
+                state: JobState::Finished(err),
+                ..
+            } if *j == job => Some(err.clone()),
+            _ => None,
+        })
+    }
+
+    /// Runs `job` to the end and returns its error, if any. Also waits for
+    /// the refreshes it queued, so the state reflects the job.
+    pub fn finish(rt: &mut Runtime, key: &Path, job: Option<u64>) -> Option<GitError> {
+        let job = job.expect("the job should start");
+        let events = poll_until(rt, |_, ev| result(ev, job).is_some());
+        let error = result(&events, job).flatten();
+        settle(rt, key);
+        error
+    }
+
+    /// Starts a job with `start` and runs it to the end; it must succeed.
+    pub fn ok(rt: &mut Runtime, key: &Path, start: impl FnOnce(&mut Runtime) -> Option<u64>) {
+        let job = start(rt);
+        succeed(rt, key, job);
+    }
+
+    /// Starts a job with `start` and returns its error, if any.
+    pub fn outcome(
+        rt: &mut Runtime,
+        key: &Path,
+        start: impl FnOnce(&mut Runtime) -> Option<u64>,
+    ) -> Option<GitError> {
+        let job = start(rt);
+        finish(rt, key, job)
+    }
+
+    /// Like [`finish`], but the job must succeed.
+    pub fn succeed(rt: &mut Runtime, key: &Path, job: Option<u64>) {
+        if let Some(err) = finish(rt, key, job) {
+            panic!("job failed: {err}");
+        }
+    }
+
+    /// Refreshes status and refs and waits until every job (that refresh
+    /// included) is done and applied, so the state is current.
+    pub fn settle(rt: &mut Runtime, key: &Path) {
+        use gitbello_core::jobs::{RefreshKind, RefreshSet};
+        rt.refresh(
+            key,
+            RefreshSet::EMPTY
+                .with(RefreshKind::Status)
+                .with(RefreshKind::Refs),
+        );
+        poll_until(rt, |rt, _| rt.pending_jobs() == 0);
+        // Final events are sent before a job leaves the queue: apply them.
+        rt.poll();
+    }
+}

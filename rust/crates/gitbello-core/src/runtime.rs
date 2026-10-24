@@ -19,12 +19,21 @@ use crate::diff::{
     build_patch, CommitSide, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
     LARGE_DIFF_BYTES,
 };
-use crate::git::{CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress};
+use crate::git::{
+    CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
+};
 use crate::graph::{GraphLoader, GRAPH_JOB_LABEL};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
-use crate::repo::{CommitDetails, Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use crate::ops::{
+    CheckoutTarget, PullMode, PushSpec, RefOp, SyncOp, AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL,
+    FETCH_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
+};
+use crate::repo::{
+    CommitDetails, FileState, Head, Operation, Ref, RefKind, RepoPaths, RepoStatus, StashEntry,
+    Worktree,
+};
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 
@@ -47,6 +56,17 @@ pub const MAX_DISCARD_UNDO: usize = 20;
 
 /// Repositories remembered for the "recent" list.
 pub const MAX_KNOWN_REPOS: usize = 20;
+
+/// Label of tag pushes (branch pushes use [`PUSH_JOB_LABEL`]).
+pub const PUSH_TAG_JOB_LABEL: &str = "push tag";
+
+/// The first auto-fetch of a repository waits this long after it opened
+/// (or the interval, if shorter), so opening many tabs does not stampede.
+const AUTO_FETCH_FIRST_DELAY: Duration = Duration::from_secs(5);
+
+/// Jobs that can leave the repository changed even when they fail (a
+/// conflicted pull, a checkout whose stashed changes did not re-apply).
+const REFRESH_ON_FAILURE: &[&str] = &[CHECKOUT_JOB_LABEL, PULL_JOB_LABEL, "cherry-pick", "abort"];
 
 /// A graph reload waits this long after the last ref or HEAD change, so a
 /// commit (which changes both) reloads once.
@@ -115,6 +135,7 @@ pub struct RepoState {
     paths: Option<RepoPaths>,
     status: Option<RepoStatus>,
     refs: Option<Vec<Ref>>,
+    remotes: Option<Vec<String>>,
     worktrees: Option<Vec<Worktree>>,
     stashes: Option<Vec<StashEntry>>,
     operation: Option<Operation>,
@@ -130,6 +151,11 @@ pub struct RepoState {
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
     open_error: Option<GitError>,
+    /// The fetch running or queued (manual or automatic), if any.
+    fetch_job: Option<JobId>,
+    next_auto_fetch: Option<Instant>,
+    /// The last auto-fetch failed; further failures are not reported again.
+    auto_fetch_failed: bool,
 }
 
 impl RepoState {
@@ -140,6 +166,7 @@ impl RepoState {
             paths: None,
             status: None,
             refs: None,
+            remotes: None,
             worktrees: None,
             stashes: None,
             operation: None,
@@ -154,6 +181,9 @@ impl RepoState {
             graph: None,
             graph_dirty_since: None,
             open_error: None,
+            fetch_job: None,
+            next_auto_fetch: None,
+            auto_fetch_failed: false,
         }
     }
 
@@ -278,6 +308,80 @@ impl RepoState {
         !self.discards.is_empty()
     }
 
+    /// Names of the configured remotes (empty until refs are read).
+    pub fn remotes(&self) -> &[String] {
+        self.remotes.as_deref().unwrap_or(&[])
+    }
+
+    /// The checked-out branch (`None` when detached or not yet known).
+    pub fn current_branch(&self) -> Option<&str> {
+        match &self.status.as_ref()?.head {
+            Head::Branch(name) => Some(name),
+            Head::Detached | Head::Unknown => None,
+        }
+    }
+
+    /// A local branch by short name.
+    pub fn branch(&self, name: &str) -> Option<&Ref> {
+        self.refs
+            .as_ref()?
+            .iter()
+            .find(|r| r.kind == RefKind::Branch && r.short_name == name)
+    }
+
+    /// `(remote, branch name on the remote)` that local branch `name` tracks.
+    pub fn upstream_of(&self, name: &str) -> Option<(String, String)> {
+        let upstream = self.branch(name)?.upstream.as_deref()?;
+        let short = upstream.strip_prefix("refs/remotes/")?;
+        // Longest matching remote wins (`team/x` over `team`).
+        let remote = self
+            .remotes()
+            .iter()
+            .filter(|r| short.starts_with(r.as_str()) && short[r.len()..].starts_with('/'))
+            .max_by_key(|r| r.len())?;
+        Some((remote.clone(), short[remote.len() + 1..].to_owned()))
+    }
+
+    /// Where pushes go: the current branch's upstream remote, else `origin`,
+    /// else the first remote.
+    pub fn default_remote(&self) -> Option<String> {
+        if let Some((remote, _)) = self.current_branch().and_then(|b| self.upstream_of(b)) {
+            return Some(remote);
+        }
+        let remotes = self.remotes();
+        remotes
+            .iter()
+            .find(|r| *r == "origin")
+            .or_else(|| remotes.first())
+            .cloned()
+    }
+
+    pub fn can_fetch(&self) -> bool {
+        self.is_ready() && !self.remotes().is_empty()
+    }
+
+    /// Whether a fetch (manual or automatic) is running or queued.
+    pub fn is_fetching(&self) -> bool {
+        self.fetch_job.is_some()
+    }
+
+    /// Pulling needs the current branch to track a remote branch that still
+    /// exists, and no operation in progress.
+    pub fn can_pull(&self) -> bool {
+        self.operation.is_none()
+            && self
+                .current_branch()
+                .and_then(|b| self.branch(b))
+                .is_some_and(|r| r.upstream.is_some() && !r.tracking.gone)
+    }
+
+    /// Pushing needs a checked-out branch with commits and a remote.
+    pub fn can_push(&self) -> bool {
+        self.operation.is_none()
+            && self.current_branch().and_then(|b| self.branch(b)).is_some()
+            && self.default_remote().is_some()
+    }
+
     /// Whether a commit can be made: no conflicts, and something staged (or
     /// amending an existing commit).
     pub fn can_commit(&self, amend: bool) -> bool {
@@ -356,6 +460,7 @@ pub struct Runtime {
     repos: HashMap<PathBuf, RepoState>,
     log_seq: u64,
     diff_generation: u64,
+    auto_fetch_override: Option<Duration>,
 }
 
 impl Runtime {
@@ -404,6 +509,7 @@ impl Runtime {
             repos: HashMap::new(),
             log_seq: 0,
             diff_generation: 0,
+            auto_fetch_override: None,
         }
     }
 
@@ -712,9 +818,200 @@ impl Runtime {
         )
     }
 
+    /// Fetches every remote (with `--prune`); refs, status and worktree
+    /// badges refresh afterwards. Returns the fetch already under way, if any.
+    pub fn fetch(&mut self, key: &Path) -> Option<JobId> {
+        self.submit_fetch(key, FETCH_JOB_LABEL)
+    }
+
+    fn submit_fetch(&mut self, key: &Path, label: &'static str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key).filter(|s| s.can_fetch())?;
+        if let Some(job) = state.fetch_job {
+            return Some(job);
+        }
+        let refresh = [
+            RefreshKind::Refs,
+            RefreshKind::Status,
+            RefreshKind::WorktreeBadges,
+        ]
+        .into_iter()
+        .collect();
+        // A read for the scheduler: it only moves remote-tracking refs, so
+        // commits and staging need not wait for the network.
+        let spec = JobSpec::read(key, label, move |ctx| {
+            let op = SyncOp::Fetch { remote: None };
+            ctx.backend()
+                .sync(
+                    &toplevel,
+                    &op,
+                    Box::new(ctx.progress_sink()),
+                    ctx.cancel_token(),
+                )
+                .map(|()| JobOutput::Done)
+        })
+        .refreshing(refresh);
+        let job = self.scheduler.submit(spec);
+        state.fetch_job = Some(job);
+        Some(job)
+    }
+
+    /// Pulls the current branch's upstream (`mode`, or the configured one).
+    pub fn pull(&self, key: &Path, mode: Option<PullMode>) -> Option<JobId> {
+        self.repos.get(key).filter(|s| s.can_pull())?;
+        let op = SyncOp::Pull {
+            mode: mode.unwrap_or(self.config.pull_mode),
+        };
+        self.submit_sync(key, PULL_JOB_LABEL, op, RefreshSet::all())
+    }
+
+    /// Pushes the current branch to its upstream, or (setting the upstream)
+    /// to the same name on the default remote.
+    pub fn push(&self, key: &Path, force_with_lease: bool) -> Option<JobId> {
+        let state = self.repos.get(key).filter(|s| s.can_push())?;
+        let branch = state.current_branch()?;
+        let spec = match state.upstream_of(branch) {
+            Some((remote, upstream)) => {
+                PushSpec::branch(&remote, branch, Some(&upstream), force_with_lease)
+            }
+            None => PushSpec::branch(&state.default_remote()?, branch, None, force_with_lease),
+        };
+        let refresh = RefreshSet::EMPTY
+            .with(RefreshKind::Refs)
+            .with(RefreshKind::Status);
+        self.submit_sync(key, PUSH_JOB_LABEL, SyncOp::Push(spec), refresh)
+    }
+
+    /// Pushes tag `name` to the default remote.
+    pub fn push_tag(&self, key: &Path, name: &str) -> Option<JobId> {
+        let remote = self.repos.get(key)?.default_remote()?;
+        let op = SyncOp::Push(PushSpec::tag(&remote, name));
+        let refresh = RefreshSet::EMPTY.with(RefreshKind::Refs);
+        self.submit_sync(key, PUSH_TAG_JOB_LABEL, op, refresh)
+    }
+
+    fn submit_sync(
+        &self,
+        key: &Path,
+        label: &str,
+        op: SyncOp,
+        refresh: RefreshSet,
+    ) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        Some(
+            self.scheduler
+                .submit(JobSpec::write(key, label, refresh, move |ctx| {
+                    ctx.backend()
+                        .sync(
+                            &toplevel,
+                            &op,
+                            Box::new(ctx.progress_sink()),
+                            ctx.cancel_token(),
+                        )
+                        .map(|()| JobOutput::Done)
+                })),
+        )
+    }
+
+    /// Checks out `target`. With `stash`, local changes are stashed first
+    /// and re-applied after switching (the dirty-tree flow of PLAN §4).
+    pub fn checkout(&self, key: &Path, target: CheckoutTarget, stash: bool) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            CHECKOUT_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                checkout_job(ctx.backend(), &toplevel, &target, stash, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Runs a branch, tag, cherry-pick or abort operation (job label
+    /// [`RefOp::label`]). Checkouts go through [`Runtime::checkout`].
+    pub fn ref_op(&self, key: &Path, op: RefOp) -> Option<JobId> {
+        let refresh = match &op {
+            RefOp::Checkout(target) => return self.checkout(key, target.clone(), false),
+            RefOp::CreateBranch {
+                checkout: false, ..
+            }
+            | RefOp::DeleteBranch { .. }
+            | RefOp::CreateTag { .. }
+            | RefOp::DeleteTag { .. } => RefreshSet::EMPTY.with(RefreshKind::Refs),
+            RefOp::SetUpstream { .. } => RefreshSet::EMPTY
+                .with(RefreshKind::Refs)
+                .with(RefreshKind::Status),
+            RefOp::CreateBranch { checkout: true, .. }
+            | RefOp::RenameBranch { .. }
+            | RefOp::CherryPick { .. }
+            | RefOp::Abort(_) => RefreshSet::all(),
+        };
+        let toplevel = self.toplevel_of(key)?;
+        let label = op.label();
+        Some(
+            self.scheduler
+                .submit(JobSpec::write(key, label, refresh, move |ctx| {
+                    ctx.backend()
+                        .ref_op(&toplevel, &op, ctx.cancel_token())
+                        .map(|()| JobOutput::Done)
+                })),
+        )
+    }
+
+    /// Cancels a queued or running job (a fetch, pull or push, say).
+    pub fn cancel_job(&self, job: JobId) -> bool {
+        self.scheduler.cancel(job)
+    }
+
+    /// Overrides the configured auto-fetch interval (tests use short ones);
+    /// `None` goes back to `auto_fetch_minutes`.
+    pub fn set_auto_fetch_interval(&mut self, interval: Option<Duration>) {
+        self.auto_fetch_override = interval;
+    }
+
+    fn auto_fetch_interval(&self) -> Option<Duration> {
+        self.auto_fetch_override.or_else(|| {
+            let minutes = self.config.auto_fetch_minutes;
+            (minutes > 0).then(|| Duration::from_secs(60 * u64::from(minutes)))
+        })
+    }
+
+    /// Starts the next due auto-fetch (PLAN §3.6): one repository at a
+    /// time, never while a write to it is queued or running.
+    fn run_auto_fetch(&mut self) {
+        let Some(interval) = self.auto_fetch_interval() else {
+            return;
+        };
+        if self.repos.values().any(RepoState::is_fetching) {
+            return;
+        }
+        let now = Instant::now();
+        let due = self.repos.values_mut().find_map(|state| {
+            if !state.can_fetch() {
+                return None;
+            }
+            let first = now + interval.min(AUTO_FETCH_FIRST_DELAY);
+            let next = *state.next_auto_fetch.get_or_insert(first);
+            (next <= now).then(|| state.key.clone())
+        });
+        let Some(key) = due else {
+            return;
+        };
+        if self.scheduler.has_write(&key) {
+            return;
+        }
+        self.submit_fetch(&key, AUTO_FETCH_JOB_LABEL);
+    }
+
     fn toplevel_of(&self, key: &Path) -> Option<PathBuf> {
         let state = self.repos.get(key).filter(|s| s.is_ready())?;
         state.toplevel.clone()
+    }
+
+    /// Jobs queued or running, for tests and diagnostics.
+    pub fn pending_jobs(&self) -> usize {
+        self.scheduler.pending()
     }
 
     pub fn repo(&self, key: &Path) -> Option<&RepoState> {
@@ -732,6 +1029,7 @@ impl Runtime {
             self.apply(event, &mut out);
         }
         self.reload_dirty_graphs(&mut out);
+        self.run_auto_fetch();
         let latest = self.runner.log().latest_seq();
         if latest != self.log_seq {
             self.log_seq = latest;
@@ -747,6 +1045,7 @@ impl Runtime {
             label,
             kind,
         } = event;
+        let auto_fetch_interval = self.auto_fetch_interval();
         let Some(state) = self.repos.get_mut(&repo) else {
             return; // closed meanwhile
         };
@@ -844,6 +1143,31 @@ impl Runtime {
             }
             return;
         }
+        if label == FETCH_JOB_LABEL || label == AUTO_FETCH_JOB_LABEL {
+            let finished = matches!(kind, EventKind::Finished(_) | EventKind::Cancelled);
+            if finished && state.fetch_job == Some(job) {
+                state.fetch_job = None;
+                state.next_auto_fetch = auto_fetch_interval.map(|i| Instant::now() + i);
+            }
+            match &kind {
+                EventKind::Finished(Ok(_)) => state.auto_fetch_failed = false,
+                // Report a failing auto-fetch once, not every interval.
+                EventKind::Finished(Err(err))
+                    if label == AUTO_FETCH_JOB_LABEL && err.kind != GitErrorKind::Cancelled =>
+                {
+                    if state.auto_fetch_failed {
+                        return;
+                    }
+                    state.auto_fetch_failed = true;
+                }
+                _ => {}
+            }
+        }
+        if matches!(kind, EventKind::Finished(Err(_)))
+            && REFRESH_ON_FAILURE.contains(&label.as_str())
+        {
+            self.scheduler.request_refresh(&repo, RefreshSet::all());
+        }
         if let EventKind::Finished(Ok(JobOutput::Discarded(backups))) = &kind {
             if !backups.is_empty() {
                 state.discards.push(backups.clone());
@@ -907,12 +1231,13 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             state.changes = ChangeLists::new(&status);
             state.status = Some(status);
         }
-        JobOutput::Refs(refs) => {
+        JobOutput::Refs(refs, remotes) => {
             if state.refs.as_ref().is_some_and(|old| *old != refs) {
                 state.graph_dirty_since = Some(Instant::now());
             }
             state.labels = labels_by_commit(&refs);
             state.refs = Some(refs);
+            state.remotes = Some(remotes);
         }
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
         JobOutput::Operation(operation) => state.operation = operation,
@@ -926,6 +1251,60 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::HeadMessage(_)
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_) => {}
+    }
+}
+
+/// Checks out `target`; with `stash`, stashes every local change first and
+/// re-applies it after switching (or after a failed switch).
+fn checkout_job(
+    backend: &dyn GitBackend,
+    toplevel: &Path,
+    target: &CheckoutTarget,
+    stash: bool,
+    cancel: &CancelToken,
+) -> Result<(), GitError> {
+    let op = RefOp::Checkout(target.clone());
+    if !stash {
+        return backend.ref_op(toplevel, &op, cancel);
+    }
+    let message = format!("gitbello: switching to {}", target.display_name());
+    let stashed = backend.stash_push(toplevel, &message, cancel)?;
+    // Putting the changes back must not be cut short by a cancel.
+    let restore = CancelToken::new();
+    if let Err(err) = backend.ref_op(toplevel, &op, cancel) {
+        if let Some(oid) = &stashed {
+            pop_stash(backend, toplevel, oid, &restore)?;
+        }
+        return Err(err);
+    }
+    match &stashed {
+        Some(oid) => pop_stash(backend, toplevel, oid, &restore),
+        None => Ok(()),
+    }
+}
+
+/// Pops stash `oid`, restoring what was staged when that applies cleanly.
+fn pop_stash(
+    backend: &dyn GitBackend,
+    toplevel: &Path,
+    oid: &str,
+    cancel: &CancelToken,
+) -> Result<(), GitError> {
+    match backend.stash_pop(toplevel, oid, true, cancel) {
+        Ok(()) => Ok(()),
+        // `--index` refuses without touching anything when the staged
+        // changes do not apply; the changes then come back unstaged.
+        Err(err) if err.kind != GitErrorKind::Stale => {
+            let clean = backend
+                .status(toplevel, cancel)
+                .is_ok_and(|status| status.changes.iter().all(|c| c.state == FileState::Ignored));
+            if clean {
+                backend.stash_pop(toplevel, oid, false, cancel)
+            } else {
+                Err(err)
+            }
+        }
+        Err(err) => Err(err),
     }
 }
 

@@ -11,9 +11,13 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use toml::{Table, Value};
 
+use crate::ops::PullMode;
+
 /// PLAN O3 suggestion; still open for confirmation.
 pub const DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
 pub const DEFAULT_AUTO_FETCH_MINUTES: u32 = 10;
+/// PLAN §3.8; `{path}` is the worktree (or file) to open.
+pub const DEFAULT_EDITOR_COMMAND: &str = "code {path}";
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -50,6 +54,13 @@ pub struct Config {
     pub worktree_template: String,
     /// 0 disables auto-fetch.
     pub auto_fetch_minutes: u32,
+    /// How `pull` integrates the upstream.
+    pub pull_mode: PullMode,
+    /// Command for "Open in editor"; `{path}` is replaced by the folder.
+    pub editor_command: String,
+    /// Command for "Open terminal here" (`{path}` as above); `None` uses the
+    /// platform's terminal.
+    pub terminal_command: Option<String>,
     pub theme: ThemeChoice,
     /// Show diffs side by side instead of unified.
     pub diff_side_by_side: bool,
@@ -96,6 +107,9 @@ impl Default for Config {
             active_tab: None,
             worktree_template: DEFAULT_WORKTREE_TEMPLATE.to_owned(),
             auto_fetch_minutes: DEFAULT_AUTO_FETCH_MINUTES,
+            pull_mode: PullMode::FastForwardOnly,
+            editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
+            terminal_command: None,
             theme: ThemeChoice::System,
             diff_side_by_side: false,
             keybindings: BTreeMap::new(),
@@ -111,6 +125,9 @@ const KEYS: &[&str] = &[
     "active_tab",
     "worktree_template",
     "auto_fetch_minutes",
+    "pull_mode",
+    "editor_command",
+    "terminal_command",
     "theme",
     "diff_side_by_side",
     "keybindings",
@@ -157,6 +174,17 @@ impl Config {
                 .unwrap_or(defaults.worktree_template),
             auto_fetch_minutes: take_u32(&mut table, "auto_fetch_minutes")?
                 .unwrap_or(defaults.auto_fetch_minutes),
+            pull_mode: match take_string(&mut table, "pull_mode")? {
+                None => defaults.pull_mode,
+                Some(text) => PullMode::parse(&text).ok_or(ConfigError::Invalid {
+                    key: "pull_mode",
+                    expected: "\"ff-only\", \"merge\" or \"rebase\"",
+                })?,
+            },
+            editor_command: take_string(&mut table, "editor_command")?
+                .unwrap_or(defaults.editor_command),
+            terminal_command: take_string(&mut table, "terminal_command")?
+                .filter(|c| !c.trim().is_empty()),
             theme: match take_string(&mut table, "theme")? {
                 None => ThemeChoice::System,
                 Some(text) => ThemeChoice::parse(&text).ok_or(ConfigError::Invalid {
@@ -184,6 +212,17 @@ impl Config {
             "auto_fetch_minutes".into(),
             Value::Integer(i64::from(self.auto_fetch_minutes)),
         );
+        table.insert(
+            "pull_mode".into(),
+            Value::String(self.pull_mode.as_str().into()),
+        );
+        table.insert(
+            "editor_command".into(),
+            Value::String(self.editor_command.clone()),
+        );
+        if let Some(terminal) = &self.terminal_command {
+            table.insert("terminal_command".into(), Value::String(terminal.clone()));
+        }
         table.insert("known_repos".into(), paths_value(&self.known_repos));
         table.insert("open_tabs".into(), paths_value(&self.open_tabs));
         if let Some(active) = self.active_tab {
@@ -337,6 +376,9 @@ mod tests {
             active_tab: Some(0),
             worktree_template: "{repo_parent}/wt/{branch_slug}".into(),
             auto_fetch_minutes: 0,
+            pull_mode: PullMode::Rebase,
+            editor_command: "subl -n {path}".into(),
+            terminal_command: Some("wt -d \"{path}\"".into()),
             theme: ThemeChoice::Dark,
             diff_side_by_side: true,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
@@ -386,6 +428,13 @@ mod tests {
         assert!(matches!(
             Config::parse("this is not toml"),
             Err(ConfigError::Syntax(_))
+        ));
+        assert!(matches!(
+            Config::parse("pull_mode = \"squash\""),
+            Err(ConfigError::Invalid {
+                key: "pull_mode",
+                ..
+            })
         ));
         assert!(matches!(
             Config::parse("theme = \"purple\""),

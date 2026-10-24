@@ -5,7 +5,9 @@
 //! - Writes to the same repository run one at a time, in submission order.
 //! - A read waits while a write to the same repository is running or queued
 //!   ahead of it, so it never races a write. Reads otherwise run concurrently.
-//! - After a successful write, the refreshes it declared are queued.
+//! - After a successful job, the refreshes it declared are queued (writes
+//!   declare them; so do reads that change only remote-tracking refs, such
+//!   as fetch, which run as reads so they never hold up commits).
 //! - Refresh requests coalesce: a refresh that is already queued (not yet
 //!   started) for the same repository and kind is reused.
 
@@ -131,7 +133,8 @@ impl fmt::Debug for RefreshSet {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobOutput {
     Status(RepoStatus),
-    Refs(Vec<Ref>),
+    /// Refs and the configured remote names.
+    Refs(Vec<Ref>, Vec<String>),
     Worktrees(Vec<Worktree>),
     Operation(Option<Operation>),
     Stashes(Vec<StashEntry>),
@@ -234,7 +237,7 @@ pub struct JobSpec {
     pub repo: PathBuf,
     pub access: JobAccess,
     pub label: String,
-    /// Refreshes to queue after a successful write.
+    /// Refreshes to queue after the job succeeds.
     pub refresh_after: RefreshSet,
     /// Use an existing token (for handles that cancel on their own, like the
     /// graph loader); a new one is made otherwise.
@@ -273,6 +276,13 @@ impl JobSpec {
 
     pub fn with_cancel(mut self, token: CancelToken) -> Self {
         self.cancel = Some(token);
+        self
+    }
+
+    /// Refreshes to queue after the job succeeds (for reads; writes take
+    /// them in [`JobSpec::write`]).
+    pub fn refreshing(mut self, refresh: RefreshSet) -> Self {
+        self.refresh_after = refresh;
         self
     }
 }
@@ -332,7 +342,12 @@ impl Inner {
             let (repo, cancel, backend) = (ctx.repo(), ctx.cancel_token(), ctx.backend());
             match kind {
                 RefreshKind::Status => backend.status(repo, cancel).map(JobOutput::Status),
-                RefreshKind::Refs => backend.refs(repo, cancel).map(JobOutput::Refs),
+                RefreshKind::Refs => {
+                    let remotes = backend.remotes(repo, cancel)?;
+                    backend
+                        .refs(repo, cancel)
+                        .map(|refs| JobOutput::Refs(refs, remotes))
+                }
                 RefreshKind::Worktrees => backend.worktrees(repo, cancel).map(JobOutput::Worktrees),
                 RefreshKind::Operation => backend.operation(repo, cancel).map(JobOutput::Operation),
                 RefreshKind::Stashes => backend.stashes(repo, cancel).map(JobOutput::Stashes),
@@ -498,6 +513,16 @@ impl JobScheduler {
         }
     }
 
+    /// Whether a write to `repo` is running or queued.
+    pub fn has_write(&self, repo: &Path) -> bool {
+        let state = self.inner.lock();
+        state.writing.contains(repo)
+            || state
+                .queue
+                .iter()
+                .any(|q| q.spec.access == JobAccess::Write && q.spec.repo == repo)
+    }
+
     /// Jobs queued or running, for tests and diagnostics.
     pub fn pending(&self) -> usize {
         let state = self.inner.lock();
@@ -602,10 +627,10 @@ fn worker(inner: &Inner) {
             state.running.remove(&id);
             if access == JobAccess::Write {
                 state.writing.remove(&repo);
-                if succeeded && !cancelled && !state.shutdown {
-                    for refresh in refresh_after.iter() {
-                        inner.queue_refresh(&mut state, &repo, refresh);
-                    }
+            }
+            if succeeded && !cancelled && !state.shutdown {
+                for refresh in refresh_after.iter() {
+                    inner.queue_refresh(&mut state, &repo, refresh);
                 }
             }
         }

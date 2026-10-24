@@ -1,6 +1,7 @@
 //! The `GitBackend` trait and its git CLI implementation (PLAN §3.3).
 //!
-//! Reads, plus the writes of the milestones so far (staging and commits).
+//! Reads, plus the writes of the milestones so far (staging, commits,
+//! discards, sync, branches, tags and cherry-picks).
 //! Commands that take paths run in the worktree root with literal pathspecs,
 //! so status paths can be passed back unchanged.
 
@@ -11,7 +12,8 @@ use std::path::{Path, PathBuf};
 use crate::diff::{
     parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
 };
-use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner};
+use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, Progress};
+use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remotes,
     parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
@@ -116,7 +118,40 @@ pub trait GitBackend: Send + Sync {
         files: &[(PathBuf, String)],
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    /// Names of the configured remotes.
+    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<String>, GitError>;
+    /// Fetch, pull or push; `--progress` lines go to `progress` as they arrive.
+    fn sync(
+        &self,
+        toplevel: &Path,
+        op: &SyncOp,
+        progress: ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Checkout, branch, tag and cherry-pick operations.
+    fn ref_op(&self, toplevel: &Path, op: &RefOp, cancel: &CancelToken) -> Result<(), GitError>;
+    /// Stashes every local change, untracked files included. Returns the new
+    /// stash's commit id, or `None` when there was nothing to stash.
+    fn stash_push(
+        &self,
+        toplevel: &Path,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError>;
+    /// Pops the newest stash after checking that it is `expected`; `index`
+    /// also restores what was staged.
+    fn stash_pop(
+        &self,
+        toplevel: &Path,
+        expected: &str,
+        index: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
 }
+
+/// Receives `--progress` updates of a running fetch, pull or push.
+pub type ProgressSink = Box<dyn FnMut(Progress) + Send>;
 
 /// What a file must still look like for a patch built from its diff to apply.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -245,7 +280,7 @@ impl GitBackend for CliBackend {
     }
 
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError> {
-        let remotes = parse_remotes(&self.read(repo, &["remote"], cancel)?.stdout);
+        let remotes = self.remotes(repo, cancel)?;
         let out = self.read(repo, REFS_ARGS, cancel)?;
         parse_refs(&out.stdout, &remotes).map_err(|e| unexpected(REFS_ARGS, e))
     }
@@ -565,6 +600,170 @@ impl GitBackend for CliBackend {
         }
         Ok(())
     }
+
+    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<String>, GitError> {
+        Ok(parse_remotes(&self.read(repo, &["remote"], cancel)?.stdout))
+    }
+
+    fn sync(
+        &self,
+        toplevel: &Path,
+        op: &SyncOp,
+        progress: ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let cmd = self.runner.write(toplevel);
+        let cmd = match op {
+            SyncOp::Fetch { remote } => {
+                let cmd = cmd.args(["fetch", "--progress", "--prune"]);
+                match remote {
+                    Some(remote) => cmd.arg(remote),
+                    None => cmd.arg("--all"),
+                }
+            }
+            SyncOp::Pull { mode } => {
+                // Explicit flags win over the user's pull.rebase / pull.ff config.
+                let flags: &[&str] = match mode {
+                    PullMode::FastForwardOnly => &["--ff-only", "--no-rebase"],
+                    PullMode::Merge => &["--no-rebase", "--ff", "--no-edit"],
+                    PullMode::Rebase => &["--rebase"],
+                };
+                cmd.args(["pull", "--progress", "--autostash"]).args(flags)
+            }
+            SyncOp::Push(spec) => {
+                let mut cmd = cmd.args(["push", "--progress"]);
+                if spec.set_upstream {
+                    cmd = cmd.arg("--set-upstream");
+                }
+                if spec.force_with_lease {
+                    cmd = cmd.arg("--force-with-lease");
+                }
+                cmd.arg(&spec.remote).args(&spec.refspecs)
+            }
+        };
+        cmd.on_progress(progress)
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn ref_op(&self, toplevel: &Path, op: &RefOp, cancel: &CancelToken) -> Result<(), GitError> {
+        let git = |args: &[&str]| {
+            self.runner
+                .write(toplevel)
+                .args(args)
+                .cancel_token(cancel)
+                .run()
+                .map(drop)
+        };
+        match op {
+            RefOp::Checkout(CheckoutTarget::Branch(name)) => git(&["switch", "--no-guess", name]),
+            RefOp::Checkout(CheckoutTarget::Track { remote_ref, local }) => {
+                git(&["switch", "--create", local, "--track", remote_ref])
+            }
+            RefOp::Checkout(CheckoutTarget::Detach(oid)) => git(&["switch", "--detach", oid]),
+            RefOp::CreateBranch {
+                name,
+                start,
+                checkout: true,
+            } => git(&["switch", "--create", name, start]),
+            RefOp::CreateBranch {
+                name,
+                start,
+                checkout: false,
+            } => git(&["branch", name, start]),
+            RefOp::RenameBranch { old, new } => git(&["branch", "--move", old, new]),
+            RefOp::DeleteBranch { name, force } => {
+                git(&["branch", if *force { "-D" } else { "-d" }, name])
+            }
+            RefOp::SetUpstream {
+                branch,
+                upstream: Some(upstream),
+            } => git(&["branch", &format!("--set-upstream-to={upstream}"), branch]),
+            RefOp::SetUpstream {
+                branch,
+                upstream: None,
+            } => git(&["branch", "--unset-upstream", branch]),
+            RefOp::CreateTag {
+                name,
+                target,
+                message: None,
+            } => git(&["tag", name, target]),
+            RefOp::CreateTag {
+                name,
+                target,
+                message: Some(message),
+            } => self
+                .runner
+                .write(toplevel)
+                .args(["tag", "--annotate", name, "-F", "-", target])
+                .stdin(message.as_bytes().to_vec())
+                .cancel_token(cancel)
+                .run()
+                .map(drop),
+            RefOp::DeleteTag { name } => git(&["tag", "--delete", name]),
+            RefOp::CherryPick { commit } => {
+                let parents = ["rev-list", "--parents", "-n", "1", commit, "--"];
+                let out = self.read(toplevel, &parents, cancel)?;
+                // The commit itself plus more than one parent: a merge.
+                if out.stdout_text().split_whitespace().count() > 2 {
+                    git(&["cherry-pick", "--mainline", "1", commit])
+                } else {
+                    git(&["cherry-pick", commit])
+                }
+            }
+            RefOp::Abort(operation) => git(abort_args(*operation)),
+        }
+    }
+
+    fn stash_push(
+        &self,
+        toplevel: &Path,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        let before = self.stash_top(toplevel, cancel)?;
+        self.runner
+            .write(toplevel)
+            .args(["stash", "push", "--include-untracked", "-m", message])
+            .cancel_token(cancel)
+            .run()?;
+        let after = self.stash_top(toplevel, cancel)?;
+        Ok(after.filter(|top| Some(top) != before.as_ref()))
+    }
+
+    fn stash_pop(
+        &self,
+        toplevel: &Path,
+        expected: &str,
+        index: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        if self.stash_top(toplevel, cancel)?.as_deref() != Some(expected) {
+            return Err(GitError::new(
+                "stash pop",
+                GitErrorKind::Stale,
+                format!("the newest stash is no longer {expected}; apply it from the stash list"),
+            ));
+        }
+        let mut cmd = self.runner.write(toplevel).args(["stash", "pop"]);
+        if index {
+            cmd = cmd.arg("--index");
+        }
+        cmd.cancel_token(cancel).run().map(drop)
+    }
+}
+
+/// `git <args>` that aborts `operation`.
+fn abort_args(operation: Operation) -> &'static [&'static str] {
+    match operation {
+        Operation::Merge => &["merge", "--abort"],
+        Operation::CherryPick => &["cherry-pick", "--abort"],
+        Operation::Revert => &["revert", "--abort"],
+        Operation::Rebase { .. } => &["rebase", "--abort"],
+        Operation::ApplyMailbox => &["am", "--abort"],
+        Operation::Bisect => &["bisect", "reset"],
+    }
 }
 
 /// Runs a path-taking write. `paths` go through stdin (no length limit) and
@@ -584,6 +783,17 @@ fn run_with_paths(
 }
 
 impl CliBackend {
+    /// Commit id of the newest stash, if any.
+    fn stash_top(&self, toplevel: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError> {
+        let verify = ["rev-parse", "-q", "--verify", "refs/stash"];
+        match self.read(toplevel, &verify, cancel) {
+            Ok(out) => Ok(Some(out.stdout_text().trim().to_owned())),
+            // Exit code 1: there is no stash.
+            Err(err) if err.exit_code == Some(1) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     /// Old and new sizes of a binary file, from the object database and the
     /// working tree. A side that does not exist stays `None`.
     fn binary_sizes(
