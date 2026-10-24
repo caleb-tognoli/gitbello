@@ -1,12 +1,17 @@
 class_name RepoOps
 extends Node
-## Sync, branch, tag and commit operations of one repository tab, with the
-## dialogs they need (PLAN §4): names for new branches and tags,
-## confirmations for deletes, force pushes and cherry-picks, and the
-## dirty-tree checkout flow that offers to stash, switch and re-apply.
+## Sync, branch, tag, commit and worktree operations of one repository tab,
+## with the dialogs they need (PLAN §4): names for new branches and tags,
+## confirmations for deletes, force pushes and cherry-picks, the dirty-tree
+## checkout flow that offers to stash, switch and re-apply, and the
+## new-task and cleanup flows for worktrees.
 
 ## Something the user should read (an editor that did not start, ...).
 signal notice(title: String, message: String)
+## A worktree should open in a tab (a new task, or the user asked).
+signal open_requested(path: String)
+## A worktree is about to be removed: close its tab, if open.
+signal close_requested(path: String)
 
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 ## Choice in the upstream dialog that removes the upstream.
@@ -25,11 +30,20 @@ var _checkouts: Dictionary[int, Dictionary] = {}
 var _deletes: Dictionary[int, String] = {}
 ## Tags to push once created: job id -> tag name.
 var _tag_pushes: Dictionary[int, String] = {}
+## New tasks started here: job id -> `{path, tab, editor}`.
+var _tasks: Dictionary[int, Dictionary] = {}
+## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
+var _form_kind: String = ""
+## The new-task folder was edited by hand: stop following the branch name.
+var _folder_edited: bool = false
+var _cleanup_requested: bool = false
+var _cleanup_list: Array[Dictionary] = []
 
 
 func _ready() -> void:
 	_form = FORM.instantiate() as FormDialog
 	add_child(_form)
+	_form.field_changed.connect(_on_form_field)
 	_confirm.dialog_autowrap = true
 	_confirm.confirmed.connect(_on_confirmed)
 	add_child(_confirm)
@@ -38,9 +52,11 @@ func _ready() -> void:
 func set_session(value: RepoSession) -> void:
 	if session != null and session.job_finished.is_connected(_on_job_finished):
 		session.job_finished.disconnect(_on_job_finished)
+		session.cleanup_loaded.disconnect(_on_cleanup_loaded)
 	session = value
 	if session != null:
 		session.job_finished.connect(_on_job_finished)
+		session.cleanup_loaded.connect(_on_cleanup_loaded)
 
 
 func form() -> FormDialog:
@@ -114,7 +130,7 @@ func _checkout(name: String, start: Callable) -> int:
 ## Asks for a name and creates a branch at `start` (a ref or hash, shown as
 ## `start_label`).
 func new_branch(start: String, start_label: String) -> void:
-	_form.begin("New branch", "Create branch", _create_branch.bind(start))
+	_begin_form("branch", "New branch", "Create branch", _create_branch.bind(start))
 	_form.add_note("Starting at %s." % start_label)
 	_form.add_line("name", "Name", "", true)
 	_form.add_check("checkout", "Check out the new branch", true)
@@ -140,7 +156,7 @@ func _create_and_switch(stash: bool, name: String, start: String) -> int:
 
 
 func rename_branch(name: String) -> void:
-	_form.begin("Rename branch", "Rename", _rename_branch.bind(name))
+	_begin_form("rename", "Rename branch", "Rename", _rename_branch.bind(name))
 	_form.add_line("name", "New name for %s" % name, name, true)
 	_form.validator = _check_branch_name.bind(name)
 	_form.open()
@@ -171,7 +187,7 @@ func set_upstream(branch: String) -> void:
 			options.append(String(ref["short_name"]))
 			if String(ref["short_name"]) == current:
 				selected = options.size() - 1
-	_form.begin("Set upstream", "Save", _save_upstream.bind(branch))
+	_begin_form("upstream", "Set upstream", "Save", _save_upstream.bind(branch))
 	_form.add_choice("upstream", "Upstream of %s" % branch, options, selected)
 	_form.open()
 
@@ -203,7 +219,7 @@ func _branch_ref(kind: String, short_name: String) -> Dictionary:
 ## Asks for a name (and an optional message, which makes it annotated) and
 ## tags `target` (shown as `target_label`).
 func new_tag(target: String, target_label: String) -> void:
-	_form.begin("New tag", "Create tag", _create_tag.bind(target))
+	_begin_form("tag", "New tag", "Create tag", _create_tag.bind(target))
 	_form.add_note("On %s." % target_label)
 	_form.add_line("name", "Name", "", true)
 	_form.add_text("message", "Message", "", "Optional; a message makes an annotated tag")
@@ -260,16 +276,173 @@ func copy_hash(oid: String) -> void:
 	DisplayServer.clipboard_set(oid)
 
 
-func open_in_editor() -> void:
-	var error: String = Core.open_in_editor(session.toplevel())
+## Opens `path` (this worktree when empty) in the configured editor.
+func open_in_editor(path: String = "") -> void:
+	var error: String = Core.open_in_editor(path if not path.is_empty() else session.toplevel())
 	if not error.is_empty():
 		notice.emit("Cannot open the editor", error)
 
 
-func open_terminal() -> void:
-	var error: String = Core.open_terminal(session.toplevel())
+## Opens a terminal in `path` (this worktree when empty).
+func open_terminal(path: String = "") -> void:
+	var error: String = Core.open_terminal(path if not path.is_empty() else session.toplevel())
 	if not error.is_empty():
 		notice.emit("Cannot open a terminal", error)
+
+
+# --- Worktrees ------------------------------------------------------------------
+
+## The new-task flow (PLAN §4): a branch from a base (the default one
+## first) in a new worktree whose folder follows the branch name, opened
+## in a tab (and optionally the editor) once created.
+func new_task() -> void:
+	var bases: PackedStringArray = PackedStringArray()
+	var base: String = session.default_base()
+	if not base.is_empty():
+		bases.append(base)
+	for ref: Dictionary in session.branch_refs():
+		var name: String = String(ref["short_name"])
+		if not name in bases:
+			bases.append(name)
+	if bases.is_empty():
+		bases.append("HEAD")
+	_folder_edited = false
+	_begin_form("task", "New task", "Create", _create_task)
+	_form.add_line("name", "Branch", "", true)
+	_form.add_choice("base", "Start from", bases, 0)
+	_form.add_line("folder", "Folder", "", false, "Follows the branch name")
+	_form.add_check("open_tab", "Open it in a new tab", true)
+	_form.add_check("open_editor", "Open it in the editor", false)
+	_form.add_note("A remote branch is fetched first.")
+	_form.validator = _check_task
+	_form.open()
+
+
+func _check_task(values: Dictionary) -> String:
+	var error: String = _check_branch_name(values, "")
+	if not error.is_empty():
+		return error
+	var folder: String = String(values.get("folder", ""))
+	return Core.new_worktree_path_error(folder)
+
+
+func _create_task(values: Dictionary) -> void:
+	var base: String = String(values["base"])
+	var remote: String = ""
+	for name: String in session.remotes():
+		if base.begins_with(name + "/") and name.length() > remote.length():
+			remote = name
+	var folder: String = String(values["folder"])
+	var job: int = session.new_task(String(values["name"]), base, folder, remote)
+	if job >= 0:
+		_tasks[job] = {"path": folder, "tab": bool(values["open_tab"]), "editor": bool(values["open_editor"])}
+
+
+func _on_form_field(key: String) -> void:
+	if _form_kind != "task":
+		return
+	if key == "folder":
+		_folder_edited = true
+	elif key == "name" and not _folder_edited:
+		var name: String = String(_form.values()["name"])
+		(_form.field("folder") as LineEdit).text = session.worktree_path_for(name) if not name.is_empty() else ""
+
+
+func open_worktree(path: String) -> void:
+	open_requested.emit(path)
+
+
+func lock_worktree(path: String) -> void:
+	_begin_form("lock", "Lock worktree", "Lock", func(values: Dictionary) -> void:
+		session.lock_worktree(path, String(values["reason"])))
+	_form.add_note("A locked worktree is kept by prune and cleanup, for example while its folder is on a removable disk.")
+	_form.add_line("reason", "Reason (optional)")
+	_form.open()
+
+
+func unlock_worktree(path: String) -> void:
+	session.unlock_worktree(path)
+
+
+## Asks, then removes the worktree described by `worktree` (a sidebar row:
+## `path`, `changed`, `locked`), closing its tab first. Its branch stays.
+func remove_worktree(worktree: Dictionary) -> void:
+	var path: String = String(worktree["path"])
+	var changed: int = int(worktree.get("changed", 0))
+	var locked: bool = bool(worktree.get("locked", false))
+	var text: String = "Remove the worktree at %s? Its branch stays." % path
+	if changed > 0:
+		text += "\n\nIts %d changed files are lost." % changed
+	if locked:
+		text += "\n\nIt is locked."
+	_ask("Remove worktree", text, "Remove", func() -> void:
+		close_requested.emit(path)
+		session.remove_worktree(path, changed > 0 or locked))
+
+
+func prune_worktrees() -> int:
+	return session.prune_worktrees()
+
+
+## The cleanup flow (PLAN §4): lists worktrees whose branch is merged or
+## whose upstream is gone, with warnings, and removes the chosen ones.
+func cleanup_worktrees() -> void:
+	if session.load_cleanup() < 0:
+		notice.emit("Nothing to compare with", "There is no main or master branch to check worktrees against.")
+		return
+	_cleanup_requested = true
+
+
+func _on_cleanup_loaded() -> void:
+	if not _cleanup_requested:
+		return
+	_cleanup_requested = false
+	_cleanup_list = session.cleanup_candidates()
+	var base: String = session.default_base()
+	if _cleanup_list.is_empty():
+		notice.emit("Nothing to clean up", "No worktree's branch is merged into %s or has lost its upstream." % base)
+		return
+	_begin_form("cleanup", "Clean up worktrees", "Remove", _run_cleanup)
+	_form.add_note("Merged into %s, or their upstream is gone:" % base)
+	for i: int in _cleanup_list.size():
+		var item: Dictionary = _cleanup_list[i]
+		var warnings: PackedStringArray = PackedStringArray()
+		if int(item["changed"]) > 0:
+			warnings.append("%d changed files will be lost" % int(item["changed"]))
+		if int(item["ahead"]) > 0:
+			warnings.append("%d commits not pushed" % int(item["ahead"]))
+		if bool(item["locked"]):
+			warnings.append("locked")
+		var label: String = "%s  (%s)" % [String(item["branch"]),
+				"merged" if String(item["reason"]) == "merged" else "upstream gone, probably merged"]
+		if not warnings.is_empty():
+			label += " · " + ", ".join(warnings)
+		_form.add_check("wt%d" % i, label, warnings.is_empty())
+	_form.add_check("delete_branches", "Also delete their branches", true)
+	_form.validator = _check_cleanup
+	_form.open()
+
+
+func _check_cleanup(values: Dictionary) -> String:
+	for i: int in _cleanup_list.size():
+		if bool(values.get("wt%d" % i, false)):
+			return ""
+	return "Select a worktree."
+
+
+func _run_cleanup(values: Dictionary) -> void:
+	var items: Array[Dictionary] = []
+	for i: int in _cleanup_list.size():
+		if not bool(values["wt%d" % i]):
+			continue
+		var item: Dictionary = _cleanup_list[i]
+		close_requested.emit(String(item["path"]))
+		items.append({
+			"path": String(item["path"]),
+			"branch": String(item["branch"]),
+			"force": int(item["changed"]) > 0 or bool(item["locked"]),
+		})
+	session.cleanup(items, bool(values["delete_branches"]))
 
 
 # --- Follow-ups ---------------------------------------------------------------
@@ -296,6 +469,18 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		_tag_pushes.erase(job)
 		if ok:
 			session.push_tag(tag)
+	elif _tasks.has(job):
+		var task: Dictionary = _tasks[job]
+		_tasks.erase(job)
+		if ok and bool(task["tab"]):
+			open_requested.emit(String(task["path"]))
+		if ok and bool(task["editor"]):
+			open_in_editor(String(task["path"]))
+
+
+func _begin_form(kind: String, title_text: String, ok_text: String, on_submit: Callable) -> void:
+	_form_kind = kind
+	_form.begin(title_text, ok_text, on_submit)
 
 
 func _ask(title_text: String, text: String, ok_text: String, run: Callable) -> void:

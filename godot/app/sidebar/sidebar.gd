@@ -102,8 +102,10 @@ func section_item(section: Section) -> TreeItem:
 
 
 ## The selected row's ref: `{type, name, short, commit, is_head, upstream}`
-## with type `branch`, `remote` or `tag` (`name` is the full ref name), or
-## an empty dictionary.
+## with type `branch`, `remote` or `tag` (`name` is the full ref name;
+## branches add `worktree`, the folder where they are checked out), or type
+## `worktree` (`name` is `worktree:<path>`; adds `path`, `is_main`,
+## `locked`, `prunable`, `changed`), or an empty dictionary.
 func selected_ref() -> Dictionary:
 	var item: TreeItem = get_selected()
 	if item == null:
@@ -214,9 +216,23 @@ func _rebuild_worktrees() -> void:
 			flags.append(String(wt["badge"]))
 		var item: TreeItem = _add(section, "%s  ·  %s" % [String(wt["name"]), branch], " ".join(flags))
 		item.set_tooltip_text(0, String(wt["path"]))
+		item.set_metadata(0, {
+			"type": "worktree",
+			"name": "worktree:" + String(wt["path"]),
+			"short": String(wt["name"]),
+			"path": String(wt["path"]),
+			"commit": String(wt["head"]),
+			"is_head": bool(wt["is_current"]),
+			"is_main": bool(wt["is_main"]),
+			"locked": bool(wt["locked"]),
+			"prunable": bool(wt["prunable"]),
+			"changed": maxi(0, int(wt["changed"])),
+			"upstream": "",
+		})
 		if bool(wt["is_current"]):
 			item.set_custom_color(0, get_theme_color(&"head_color", THEME_TYPE))
 			item.set_text(0, "● " + item.get_text(0))
+	_restore_selection()
 
 
 func _rebuild_branches() -> void:
@@ -250,6 +266,7 @@ func _add_branch_nodes(parent: TreeItem, nodes: Array, prefix: String, type: Str
 			"commit": String(ref["commit"]),
 			"is_head": bool(ref["is_head"]),
 			"upstream": String(ref["upstream"]),
+			"worktree": String(ref["worktree"]),
 		})
 		var tooltip: String = String(ref["short_name"])
 		if not String(ref["upstream"]).is_empty():

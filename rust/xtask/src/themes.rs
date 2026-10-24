@@ -585,6 +585,7 @@ fn generate(p: &Palette) -> String {
     t.item("ErrorLabel/colors/font_color", col(p.error));
     t.item("FormDialog/constants/width", 440);
     t.item("FormDialog/constants/text_height", 90);
+    t.item("FormDialog/constants/note_width", 400);
     t.item("FormDialog/constants/separation", 6);
     t.styled(
         "ProgressBar/styles/background",

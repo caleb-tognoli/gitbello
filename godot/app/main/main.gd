@@ -7,6 +7,7 @@ extends PanelContainer
 const MIN_WINDOW_SIZE: Vector2i = Vector2i(960, 600)
 const REPO_ARG: String = "--repo="
 const REPO_TAB: PackedScene = preload("res://app/repo_tab/repo_tab.tscn")
+const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 
 var _pages: Array[RepoTab] = []
 var _current: int = -1
@@ -21,6 +22,8 @@ var _current: int = -1
 @onready var _version_label: Label = %VersionLabel
 @onready var _toasts: Toasts = %Toasts
 @onready var _jobs_bar: JobsBar = %JobsBar
+
+var _settings_form: FormDialog = null
 @onready var _palette: CommandPalette = %Palette
 @onready var _shortcuts_dialog: ShortcutsDialog = %ShortcutsDialog
 
@@ -39,6 +42,8 @@ func _ready() -> void:
 	_toasts.custom_minimum_size.x = float(get_theme_constant(&"width", &"Toasts"))
 	_tabs.max_tab_width = get_theme_constant(&"max_tab_width", &"Shell")
 	_palette.dynamic_entries = _palette_entries
+	_settings_form = FORM.instantiate() as FormDialog
+	add_child(_settings_form)
 	_toasts.fix_provider = _error_fixes
 	_toasts.error_filter = _error_handled_elsewhere
 
@@ -94,6 +99,8 @@ func open_repo(path: String) -> RepoTab:
 	page.setup(session)
 	page.title_changed.connect(_on_page_title_changed.bind(page))
 	page.notice.connect(func(title: String, message: String) -> void: _toasts.show_toast(title, message))
+	page.worktree_open_requested.connect(func(worktree: String) -> void: open_repo(worktree))
+	page.worktree_close_requested.connect(close_tab_of)
 	_jobs_bar.watch(session)
 	_pages.append(page)
 	_tabs.add_tab(page.title())
@@ -150,6 +157,21 @@ func palette() -> CommandPalette:
 
 func jobs_bar() -> JobsBar:
 	return _jobs_bar
+
+
+## Closes the tab showing worktree `path` (as git or the user wrote it), if any.
+func close_tab_of(path: String) -> void:
+	for i: int in _pages.size():
+		if _same_path(_pages[i].session.toplevel(), path) or _same_path(_pages[i].repo_path(), path):
+			close_tab(i)
+			return
+
+
+static func _same_path(a: String, b: String) -> bool:
+	var norm: Callable = func(p: String) -> String:
+		var slashed: String = p.replace("\\", "/").trim_suffix("/")
+		return slashed.to_lower() if OS.has_feature("windows") else slashed
+	return norm.call(a) == norm.call(b)
 
 
 ## The tab of repository `repo_path` (a session key), or null.
@@ -259,6 +281,8 @@ func _register_actions() -> void:
 	_register_change_actions()
 	_register_sync_actions()
 	_register_branch_actions()
+	_register_worktree_actions()
+	Actions.register(&"app.settings", "Settings…", "App", _open_settings)
 	Actions.register(&"diff.toggle_side_by_side", "Toggle side-by-side diff", "View",
 			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
 	for choice: String in ["system", "light", "dark"]:
@@ -373,9 +397,13 @@ func _register_branch_actions() -> void:
 	Actions.register(&"branch.rename", "Rename branch…", "Branches",
 			func() -> void: ops.call().rename_branch(branch.call()), PackedStringArray(["F2"]),
 			func() -> bool: return not String(branch.call()).is_empty())
+	# A branch checked out in another worktree cannot be deleted; remove the
+	# worktree first.
 	Actions.register(&"branch.delete", "Delete branch…", "Branches",
 			func() -> void: ops.call().delete_branch(String(ref.call()["short"])), PackedStringArray(),
-			func() -> bool: return ref_is.call("branch") and not bool(ref.call()["is_head"]))
+			func() -> bool:
+				return ref_is.call("branch") and not bool(ref.call()["is_head"]) \
+						and String(ref.call().get("worktree", "")).is_empty())
 	Actions.register(&"branch.set_upstream", "Set upstream…", "Branches",
 			func() -> void: ops.call().set_upstream(branch.call()), PackedStringArray(),
 			func() -> bool:
@@ -414,6 +442,90 @@ func _register_branch_actions() -> void:
 			func() -> void: ops.call().copy_hash(String(target_commit.call()["hash"])),
 			PackedStringArray(),
 			func() -> bool: return not target_commit.call().is_empty())
+
+
+## Worktree actions: the new-task and cleanup flows, and the sidebar
+## worktree row's open, lock, remove and prune.
+func _register_worktree_actions() -> void:
+	var is_ready: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session.is_ready()
+	var ops: Callable = func() -> RepoOps: return current_page().ops()
+	var worktree: Callable = func() -> Dictionary:
+		var target: Dictionary = current_page().ref_target() if is_ready.call() else {}
+		return target if String(target.get("type", "")) == "worktree" else {}
+	var openable: Callable = func() -> bool:
+		var wt: Dictionary = worktree.call()
+		return not wt.is_empty() and not bool(wt["prunable"])
+	var has_missing: Callable = func() -> bool:
+		if not is_ready.call():
+			return false
+		for wt: Dictionary in current_page().session.worktrees():
+			if bool(wt["prunable"]):
+				return true
+		return false
+	Actions.register(&"task.new", "New task…", "Worktrees",
+			func() -> void: ops.call().new_task(), PackedStringArray(["Ctrl+T"]),
+			func() -> bool: return is_ready.call() and not current_page().session.main_worktree().is_empty())
+	Actions.register(&"worktree.cleanup", "Clean up merged worktrees…", "Worktrees",
+			func() -> void: ops.call().cleanup_worktrees(), PackedStringArray(),
+			func() -> bool: return is_ready.call() and current_page().session.worktrees().size() > 1)
+	Actions.register(&"worktree.prune", "Prune missing worktrees", "Worktrees",
+			func() -> void: ops.call().prune_worktrees(), PackedStringArray(), has_missing)
+	Actions.register(&"worktree.open", "Open worktree in a tab", "Worktrees",
+			func() -> void: ops.call().open_worktree(String(worktree.call()["path"])), PackedStringArray(),
+			func() -> bool: return openable.call() and not bool(worktree.call()["is_head"]))
+	Actions.register(&"worktree.open_in_editor", "Open worktree in editor", "Worktrees",
+			func() -> void: ops.call().open_in_editor(String(worktree.call()["path"])), PackedStringArray(),
+			openable)
+	Actions.register(&"worktree.open_terminal", "Open terminal in worktree", "Worktrees",
+			func() -> void: ops.call().open_terminal(String(worktree.call()["path"])), PackedStringArray(),
+			openable)
+	Actions.register(&"worktree.lock", "Lock worktree…", "Worktrees",
+			func() -> void: ops.call().lock_worktree(String(worktree.call()["path"])), PackedStringArray(),
+			func() -> bool:
+				var wt: Dictionary = worktree.call()
+				return not wt.is_empty() and not bool(wt["is_main"]) and not bool(wt["locked"]))
+	Actions.register(&"worktree.unlock", "Unlock worktree", "Worktrees",
+			func() -> void: ops.call().unlock_worktree(String(worktree.call()["path"])), PackedStringArray(),
+			func() -> bool: return bool(worktree.call().get("locked", false)))
+	Actions.register(&"worktree.remove", "Remove worktree…", "Worktrees",
+			func() -> void: ops.call().remove_worktree(worktree.call()), PackedStringArray(),
+			func() -> bool:
+				var wt: Dictionary = worktree.call()
+				return openable.call() and not bool(wt["is_main"]) and not bool(wt["is_head"]))
+
+
+## The Settings dialog: pull mode, auto-fetch, editor, terminal and the
+## worktree folder template.
+func _open_settings() -> void:
+	var settings: Dictionary = Core.settings()
+	var modes: PackedStringArray = PackedStringArray(["ff-only", "merge", "rebase"])
+	_settings_form.begin("Settings", "Save", _save_settings)
+	_settings_form.add_choice("pull_mode", "Pull", modes, modes.find(String(settings["pull_mode"])))
+	_settings_form.add_line("auto_fetch_minutes", "Fetch automatically every … minutes (0: never)",
+			str(int(settings["auto_fetch_minutes"])))
+	_settings_form.add_line("editor_command", "Editor command ({path} is the folder)", String(settings["editor_command"]))
+	_settings_form.add_line("terminal_command", "Terminal command", String(settings["terminal_command"]), false,
+			"The platform's terminal")
+	_settings_form.add_line("worktree_template", "New task folders", String(settings["worktree_template"]))
+	_settings_form.add_note("{repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
+	_settings_form.validator = func(values: Dictionary) -> String:
+		var minutes: String = String(values["auto_fetch_minutes"])
+		return "" if minutes.is_valid_int() and int(minutes) >= 0 else "Enter a whole number of minutes."
+	_settings_form.open()
+
+
+func settings_form() -> FormDialog:
+	return _settings_form
+
+
+func _save_settings(values: Dictionary) -> void:
+	var settings: Dictionary = values.duplicate()
+	settings["auto_fetch_minutes"] = int(String(values["auto_fetch_minutes"]))
+	var error: String = Core.set_settings(settings)
+	if not error.is_empty():
+		_toasts.show_toast("Settings not saved", error)
 
 
 ## Where a new branch or tag starts: `[commit-ish, label]` from the sidebar's

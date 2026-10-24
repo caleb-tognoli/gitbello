@@ -4,6 +4,9 @@ extends ConfirmationDialog
 ## check boxes, choices and a multi-line text, checked by `validator` as the
 ## user types. Enter in a line submits when the form is valid.
 
+## The user changed field `key` (code setting a value does not count).
+signal field_changed(key: String)
+
 const THEME_TYPE: StringName = &"FormDialog"
 
 ## `func(values: Dictionary) -> String`: an error to show, or "" when valid.
@@ -46,10 +49,12 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 
 
 ## A one-line text field. `ref_name` turns typed spaces into dashes.
-func add_line(key: String, label: String, value: String = "", ref_name: bool = false) -> LineEdit:
+func add_line(key: String, label: String, value: String = "", ref_name: bool = false,
+		placeholder: String = "") -> LineEdit:
 	_add_label(label)
 	var line: LineEdit = LineEdit.new()
 	line.text = value
+	line.placeholder_text = placeholder
 	line.text_changed.connect(_on_line_changed.bind(line))
 	line.text_submitted.connect(func(_text: String) -> void: submit())
 	_box.add_child(line)
@@ -63,7 +68,7 @@ func add_check(key: String, label: String, value: bool = false) -> CheckBox:
 	var check: CheckBox = CheckBox.new()
 	check.text = label
 	check.button_pressed = value
-	check.toggled.connect(func(_on: bool) -> void: _touch())
+	check.toggled.connect(func(_on: bool) -> void: _touch(key))
 	_box.add_child(check)
 	_fields[key] = check
 	return check
@@ -76,7 +81,7 @@ func add_choice(key: String, label: String, options: PackedStringArray, selected
 	for option: String in options:
 		choice.add_item(option)
 	choice.selected = clampi(selected, -1, options.size() - 1)
-	choice.item_selected.connect(func(_index: int) -> void: _touch())
+	choice.item_selected.connect(func(_index: int) -> void: _touch(key))
 	_box.add_child(choice)
 	_fields[key] = choice
 	return choice
@@ -88,7 +93,7 @@ func add_text(key: String, label: String, value: String = "", placeholder: Strin
 	text.text = value
 	text.placeholder_text = placeholder
 	text.custom_minimum_size.y = float(get_theme_constant(&"text_height", THEME_TYPE))
-	text.text_changed.connect(_touch)
+	text.text_changed.connect(_touch.bind(key))
 	_box.add_child(text)
 	_fields[key] = text
 	return text
@@ -99,7 +104,9 @@ func add_note(text: String) -> Label:
 	var note: Label = Label.new()
 	note.text = text
 	note.theme_type_variation = &"DimLabel"
-	note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	# Wrapping needs a width up front, or the label measures itself tall.
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.custom_minimum_size.x = float(get_theme_constant(&"note_width", THEME_TYPE))
 	_box.add_child(note)
 	return note
 
@@ -167,8 +174,10 @@ func _validate() -> bool:
 	return error.is_empty()
 
 
-func _touch() -> void:
+func _touch(key: String = "") -> void:
 	_touched = true
+	if not key.is_empty():
+		field_changed.emit(key)
 	_validate()
 
 
@@ -178,7 +187,7 @@ func _on_line_changed(text: String, line: LineEdit) -> void:
 		var caret: int = line.caret_column
 		line.text = text.replace(" ", "-")
 		line.caret_column = caret
-	_touch()
+	_touch(key)
 
 
 func _add_label(text: String) -> void:

@@ -9,6 +9,10 @@ extends Control
 signal title_changed()
 ## Something the user should read (from the tab's operations).
 signal notice(title: String, message: String)
+## A worktree should open in a tab.
+signal worktree_open_requested(path: String)
+## A worktree is about to be removed: its tab should close.
+signal worktree_close_requested(path: String)
 
 enum View { HISTORY, CHANGES }
 
@@ -18,6 +22,8 @@ const REF_MENUS: Dictionary[String, Array] = {
 		&"branch.rename", &"branch.set_upstream", &"branch.delete"],
 	"remote": [&"branch.checkout", &"branch.new", &"tag.new"],
 	"tag": [&"commit.checkout", &"branch.new", &"", &"tag.push", &"tag.delete"],
+	"worktree": [&"worktree.open", &"worktree.open_in_editor", &"worktree.open_terminal", &"",
+		&"worktree.lock", &"worktree.unlock", &"", &"worktree.remove", &"worktree.prune"],
 }
 const COMMIT_MENU: Array[StringName] = [&"commit.checkout", &"branch.new", &"tag.new", &"",
 	&"commit.cherry_pick", &"", &"commit.copy_hash"]
@@ -59,6 +65,8 @@ func _ready() -> void:
 		button.tooltip_text = Actions.shortcut_label(action)
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
+	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
+	_ops.close_requested.connect(func(path: String) -> void: worktree_close_requested.emit(path))
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
 	_sidebar.ref_activated.connect(_on_ref_activated)
@@ -81,6 +89,7 @@ func setup(value: RepoSession) -> void:
 		sig.connect(func() -> void: title_changed.emit())
 	session.status_changed.connect(_update_changes_button)
 	session.open_failed.connect(_on_open_failed)
+	session.missing.connect(_on_missing)
 	_ops.session = session
 	for sig: Signal in [session.opened, session.refs_changed, session.status_changed, session.badge_changed]:
 		sig.connect(_update_sync_buttons)
@@ -215,9 +224,12 @@ func _on_commit_menu(at_position: Vector2) -> void:
 
 
 ## Enter on a branch checks it out; on a remote branch, checks out (or
-## creates) the local branch tracking it.
+## creates) the local branch tracking it; on a worktree, opens its tab.
 func _on_ref_activated(ref: Dictionary) -> void:
 	match String(ref["type"]):
+		"worktree":
+			if not bool(ref["is_head"]) and not bool(ref["prunable"]):
+				_ops.open_worktree(String(ref["path"]))
 		"branch":
 			if not bool(ref["is_head"]):
 				_ops.checkout_branch(String(ref["short"]))
@@ -277,6 +289,14 @@ func focus_view() -> void:
 func _update_changes_button() -> void:
 	var changed: int = int(session.badge().get("changed", 0))
 	_changes_button.text = "Changes" if changed == 0 else "Changes · %d" % changed
+
+
+func _on_missing() -> void:
+	_split.hide()
+	_error_panel.show()
+	_error_label.text = "%s\n\nThis worktree's folder no longer exists.\nClose the tab with %s." % [
+		session.toplevel(), Actions.shortcut_label(&"tab.close")]
+	title_changed.emit()
 
 
 func _on_open_failed(error: Dictionary) -> void:
