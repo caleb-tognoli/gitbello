@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
+use notify::event::{AccessKind, AccessMode};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 use thiserror::Error;
 
 use crate::backend::GitBackend;
@@ -260,6 +261,7 @@ fn debounce_loop(
     loop {
         match rx.recv_timeout(debounce / 4) {
             Ok(Message::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+            Ok(Message::Fs(Ok(event))) if !changes_content(&event.kind) => {}
             Ok(Message::Fs(Ok(event))) => {
                 let targets = targets.lock().unwrap_or_else(PoisonError::into_inner);
                 for path in &event.paths {
@@ -290,6 +292,17 @@ fn debounce_loop(
                 on_change(&repo, refresh);
             }
         }
+    }
+}
+
+/// Whether an event can mean changed content. inotify also reports reads
+/// (open, close without writing); counting those would make our own git reads
+/// trigger more refreshes, forever.
+fn changes_content(kind: &EventKind) -> bool {
+    match kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+        EventKind::Access(_) => false,
+        _ => true,
     }
 }
 
@@ -412,6 +425,22 @@ mod tests {
         assert_eq!(c("/wt/a.txt"), Change::WorktreeFile(PathBuf::from("a.txt")));
         // The main worktree's files are not this target's business.
         assert_eq!(c("/r/a.txt"), Change::Ignore);
+    }
+
+    #[test]
+    fn reads_are_not_changes() {
+        use notify::event::{CreateKind, ModifyKind};
+        assert!(!changes_content(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!changes_content(&EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+        assert!(changes_content(&EventKind::Access(AccessKind::Close(
+            AccessMode::Write
+        ))));
+        assert!(changes_content(&EventKind::Modify(ModifyKind::Any)));
+        assert!(changes_content(&EventKind::Create(CreateKind::File)));
     }
 
     #[test]
