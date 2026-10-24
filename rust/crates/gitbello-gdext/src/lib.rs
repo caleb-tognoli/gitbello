@@ -2,6 +2,7 @@
 //! belongs in `gitbello-core`.
 
 mod app_core;
+mod repo_session;
 
 // gdext requires an `unsafe impl` for the extension entry point. It lives in its
 // own module so the `unsafe_code` allowance stays this narrow.
