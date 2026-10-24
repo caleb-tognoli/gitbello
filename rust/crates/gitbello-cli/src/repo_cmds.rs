@@ -1,5 +1,5 @@
-//! Repository read commands: status, refs, worktrees, stashes, op-state,
-//! watch and config.
+//! Repository read commands: status, refs, worktrees, stashes, diff,
+//! op-state, watch and config.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,6 +7,9 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use gitbello_core::backend::{CliBackend, GitBackend};
 use gitbello_core::config::Config;
+use gitbello_core::diff::{
+    display_text, DiffContent, DiffKind, DiffTarget, LineKind, LARGE_DIFF_BYTES,
+};
 use gitbello_core::git::{CancelToken, CommandOutcome, GitRunner};
 use gitbello_core::paths;
 use gitbello_core::repo::{Change, FileChange, FileState, Head, RefKind};
@@ -230,6 +233,68 @@ pub fn worktrees(args: &[String]) -> Result<()> {
         };
         println!("{}  {what}{flags}", wt.path.display());
     }
+    print_command_log(&backend);
+    Ok(())
+}
+
+pub fn diff(args: &[String]) -> Result<()> {
+    let mut positional = Vec::new();
+    let mut kind = DiffKind::Unstaged;
+    let mut full = false;
+    for arg in args {
+        match arg.as_str() {
+            "--staged" => kind = DiffKind::Staged,
+            "--untracked" => kind = DiffKind::Untracked,
+            "--full" => full = true,
+            other => positional.push(other),
+        }
+    }
+    let [root, file] = positional[..] else {
+        bail!("diff needs a worktree root and a file path");
+    };
+    let backend = backend()?;
+    let target = DiffTarget {
+        kind,
+        path: PathBuf::from(file),
+        original_path: None,
+    };
+    let limit = (!full).then_some(LARGE_DIFF_BYTES);
+    let started = std::time::Instant::now();
+    let diff = backend.diff(Path::new(root), &target, limit, &CancelToken::new())?;
+    let elapsed = started.elapsed();
+    for note in diff.header.notes() {
+        println!("# {note}");
+    }
+    match diff.content {
+        DiffContent::Binary { old_size, new_size } => {
+            println!("# binary: {old_size:?} -> {new_size:?} bytes");
+        }
+        DiffContent::TooLarge { bytes } => println!("# too large: over {bytes} bytes (--full)"),
+        DiffContent::Text | DiffContent::Combined => {}
+    }
+    let number = |n: Option<u32>| n.map_or_else(String::new, |n| n.to_string());
+    for line in diff.lines(0, usize::MAX) {
+        let mark = match line.kind {
+            LineKind::Hunk => "",
+            LineKind::Context => " ",
+            LineKind::Added => "+",
+            LineKind::Removed => "-",
+        };
+        println!(
+            "{:>6} {:>6} {mark}{}{}",
+            number(line.old_line),
+            number(line.new_line),
+            display_text(line.text),
+            if line.no_newline { "  (no newline)" } else { "" }
+        );
+    }
+    eprintln!(
+        "{} lines, +{} -{}, loaded and parsed in {:.1} ms",
+        diff.line_count(),
+        diff.additions,
+        diff.deletions,
+        elapsed.as_secs_f64() * 1e3
+    );
     print_command_log(&backend);
     Ok(())
 }

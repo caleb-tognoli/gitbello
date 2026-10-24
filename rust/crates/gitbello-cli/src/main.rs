@@ -20,6 +20,8 @@ commands:
   refs <path>                      branches, remote branches, tags
   worktrees <path>                 worktrees of the repository
   stashes <path>                   stash list
+  diff <root> <file> [--staged|--untracked] [--full]
+                                   one file's diff (root = worktree root)
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
@@ -41,6 +43,7 @@ fn main() -> Result<()> {
         Some("refs") => repo_cmds::refs(rest),
         Some("worktrees") => repo_cmds::worktrees(rest),
         Some("stashes") => repo_cmds::stashes(rest),
+        Some("diff") => repo_cmds::diff(rest),
         Some("op-state") => repo_cmds::op_state(rest),
         Some("watch") => repo_cmds::watch(rest),
         Some("config") => repo_cmds::config(rest),
