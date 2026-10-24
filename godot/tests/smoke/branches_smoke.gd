@@ -84,6 +84,10 @@ func run() -> void:
 	sidebar.grab_focus()
 	press("Enter")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "back on main")
+	# Another commit first, so the picked commit gets a new parent: picked
+	# within the same second onto the same parent, git would produce the
+	# very same commit and `renamed` would count as merged.
+	expect(await _commit(session, "untracked", "notes.txt", "Add notes"), "committed notes.txt on main")
 	press("Ctrl+1")
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
