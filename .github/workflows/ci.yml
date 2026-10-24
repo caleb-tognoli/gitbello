@@ -60,8 +60,10 @@ jobs:
           mkdir -p "$dir"
           curl -fsSL -o "$dir/$zip" "$base/$zip"
           curl -fsSL -o "$dir/SHA512-SUMS.txt" "$base/SHA512-SUMS.txt"
-          (cd "$dir" && grep " $zip\$" SHA512-SUMS.txt | shasum -a 512 -c -)
-          unzip -q "$dir/$zip" -d "$dir"
+          # Tool availability differs per runner: macOS lacks sha512sum, Windows Git Bash may lack shasum/unzip.
+          if command -v sha512sum >/dev/null; then sum="sha512sum"; else sum="shasum -a 512"; fi
+          (cd "$dir" && grep " $zip\$" SHA512-SUMS.txt | $sum -c -)
+          if command -v unzip >/dev/null; then unzip -q "$dir/$zip" -d "$dir"; else 7z x -y -o"$dir" "$dir/$zip" >/dev/null; fi
           chmod +x "$dir/${{ matrix.godot_bin }}"
           echo "GODOT=$dir/${{ matrix.godot_bin }}" >> "$GITHUB_ENV"
 
