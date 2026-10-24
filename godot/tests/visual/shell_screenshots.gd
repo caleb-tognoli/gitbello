@@ -32,6 +32,7 @@ func _ready() -> void:
 		if list.row_count() > 0 and not main.page_at(0).session.badge().get("head", "").is_empty():
 			break
 		await get_tree().process_frame
+	main.page_at(0).history().commit_list().select_only(0)
 	await _settle()
 
 	Actions.run_action(&"view.theme_dark")
