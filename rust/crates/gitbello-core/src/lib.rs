@@ -6,6 +6,7 @@
 pub mod backend;
 pub mod git;
 pub mod graph;
+pub mod jobs;
 pub mod repo;
 
 /// Version of the core crate, as reported to the UI and CLI.
