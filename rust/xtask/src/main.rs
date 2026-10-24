@@ -21,7 +21,8 @@ commands:
                           build, then launch the Godot project
   test [<cargo args>]     cargo test for the whole workspace
   check                   fmt --check + clippy -D warnings + test
-  smoke                   build, import, then run headless Godot smoke tests
+  smoke [--only <text>]   build, import, then run headless Godot smoke tests
+                          (only those whose file name contains <text>)
   bench-graph <path> [--ui] [--record]
                           time a graph load of <path> (read-only); --ui adds the
                           windowed scroll benchmark; --record appends to docs/perf.md
@@ -52,7 +53,7 @@ fn main() -> Result<()> {
         "run" => run(rest),
         "test" => cargo_test(rest),
         "check" => check(),
-        "smoke" => smoke(),
+        "smoke" => smoke(rest),
         "bench-graph" => bench_graph(rest),
         "themes" => themes::run(&godot_project_dir().join("themes")),
         "help" | "--help" | "-h" => {
@@ -221,7 +222,12 @@ fn check() -> Result<()> {
     cargo_test(&[])
 }
 
-fn smoke() -> Result<()> {
+fn smoke(args: &[String]) -> Result<()> {
+    let only = match args {
+        [] => None,
+        [flag, text] if flag == "--only" => Some(text.clone()),
+        _ => bail!("usage: cargo xtask smoke [--only <text>]"),
+    };
     build(Profile::Debug)?;
     let godot = find_godot()?;
     import(&godot)?;
@@ -258,6 +264,7 @@ fn smoke() -> Result<()> {
         .arg("res://tests/smoke/smoke_runner.tscn")
         .arg("--")
         .arg(format!("--fixtures={}", fixtures.display()))
+        .args(only.map(|text| format!("--only={text}")))
         .env("GITBELLO_CONFIG", fixtures.join("config.toml"))
         .env("GIT_CONFIG_GLOBAL", fixtures.join("global.gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
