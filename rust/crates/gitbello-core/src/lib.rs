@@ -4,7 +4,9 @@
 //! live here. This crate must never depend on Godot.
 
 pub mod backend;
+pub mod changes;
 pub mod config;
+pub mod diff;
 pub mod fuzzy;
 pub mod git;
 pub mod graph;
