@@ -1,11 +1,12 @@
 //! Dev-only headless harness for `gitbello-core`.
 
+mod repo_cmds;
+
 use std::ops::Range;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use gitbello_core::git::GitRunner;
 use gitbello_core::graph::{GraphIndex, GraphLoader, LoadState, RowLayout, SegmentKind};
 
 const USAGE: &str = "usage: gitbello-cli <command>
@@ -13,7 +14,16 @@ const USAGE: &str = "usage: gitbello-cli <command>
 commands:
   version                          print the core version
   graph <path> [--rows a..b]       print graph rows (default 0..50)
-  graph-bench <path>               time a full graph load and print metrics";
+  graph-bench <path>               time a full graph load and print metrics
+  status <path>                    working tree status
+  refs <path>                      branches, remote branches, tags
+  worktrees <path>                 worktrees of the repository
+  stashes <path>                   stash list
+  op-state <path>                  git dirs and in-progress operation
+  watch <path>                     print refreshes file changes would trigger
+  config                           print the config file path and contents
+
+Set GITBELLO_LOG=1 to print the git commands a command ran.";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -25,6 +35,13 @@ fn main() -> Result<()> {
         }
         Some("graph") => graph(rest),
         Some("graph-bench") => graph_bench(rest),
+        Some("status") => repo_cmds::status(rest),
+        Some("refs") => repo_cmds::refs(rest),
+        Some("worktrees") => repo_cmds::worktrees(rest),
+        Some("stashes") => repo_cmds::stashes(rest),
+        Some("op-state") => repo_cmds::op_state(rest),
+        Some("watch") => repo_cmds::watch(rest),
+        Some("config") => repo_cmds::config(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
             Ok(())
@@ -34,7 +51,7 @@ fn main() -> Result<()> {
 }
 
 fn load(path: PathBuf) -> Result<(GraphLoader, Duration)> {
-    let runner = GitRunner::discover()?;
+    let runner = repo_cmds::runner()?;
     let started = Instant::now();
     let loader = GraphLoader::start(runner, path);
     loop {
@@ -132,7 +149,7 @@ fn graph_bench(args: &[String]) -> Result<()> {
         bail!("graph-bench needs exactly one repository path");
     };
     let path = PathBuf::from(path);
-    let git = GitRunner::discover()?.version();
+    let git = repo_cmds::runner()?.version();
     let (loader, wall) = load(path.clone())?;
     let progress = loader.progress();
     let index = loader.index();
