@@ -74,5 +74,6 @@ func _click(list: VirtualList, at: Vector2, ctrl: bool) -> void:
 	event.button_index = MOUSE_BUTTON_LEFT
 	event.pressed = true
 	event.position = at
-	event.ctrl_pressed = ctrl
+	# Sets Ctrl, or Cmd on macOS, matching is_command_or_control_pressed().
+	event.command_or_control_autoremap = ctrl
 	list._gui_input(event)
