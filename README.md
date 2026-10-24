@@ -8,7 +8,7 @@ A fast, open-source, cross-platform Git GUI for people who work across many repo
 
 Requirements:
 
-- Rust (stable, 1.94 or newer)
+- Rust via rustup (the pinned version in `rust-toolchain.toml` is installed automatically)
 - Godot **4.7.x** (standard build, not .NET)
 - git **2.40** or newer
 

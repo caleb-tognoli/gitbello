@@ -1,0 +1,6 @@
+# Pinned so local builds and CI use the same rustc, rustfmt and clippy.
+# Bump deliberately; keep the version in .github/workflows/ci.yml in sync.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
