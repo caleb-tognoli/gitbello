@@ -1,11 +1,17 @@
 class_name CommitList
 extends VirtualList
-## History rows (graph, subject, hash, author, date) driven by
+## History rows (graph, ref labels, subject, hash, author, date) driven by
 ## `RepoSession.graph_rows()`. Only a window around the visible rows is fetched.
 
 const LIST_THEME_TYPE: StringName = &"CommitList"
 ## Rows fetched beyond each edge of the visible range.
 const FETCH_MARGIN: int = 64
+const LABEL_STYLES: Dictionary[String, StringName] = {
+	"head": &"label_head",
+	"branch": &"label_branch",
+	"remote": &"label_remote",
+	"tag": &"label_tag",
+}
 
 var session: RepoSession = null:
 	set = set_session
@@ -17,11 +23,24 @@ var last_fetch_usec: int = 0
 ## Number of rows drawn since creation, for smoke tests.
 var rows_drawn: int = 0
 
+
+## Shaped text of one row, rebuilt when the subject width changes.
+class RowText:
+	extends RefCounted
+	var subject: TextLine
+	var hash: TextLine
+	var author: TextLine
+	var date: TextLine
+	var labels: Array[TextLine] = []
+	var label_styles: Array[StringName] = []
+	## Width the labels take before the subject, including gaps.
+	var labels_width: float = 0.0
+
+
 var _graph: GraphView = GraphView.new()
 var _rows: Dictionary[int, Dictionary] = {}
 var _geometry: Dictionary[int, GraphView.RowGeometry] = {}
-## Shaped text per row: subject, hash, author, date. Rebuilt when widths change.
-var _text: Dictionary[int, Array] = {}
+var _text: Dictionary[int, RowText] = {}
 var _text_layout_width: float = -1.0
 var _utc_offset_seconds: int = 0
 var _utc_offset_known: bool = false
@@ -32,7 +51,9 @@ var _graph_lanes: int = 1
 # Theme values, cached because `_draw_row` runs for every visible row each frame.
 var _font: Font = null
 var _font_size: int = 0
+var _label_font_size: int = 0
 var _padding: float = 0.0
+var _label_gap: float = 0.0
 var _author_width: float = 0.0
 var _date_width: float = 0.0
 var _hash_width: float = 0.0
@@ -40,6 +61,8 @@ var _subject_color: Color = Color.WHITE
 var _hash_color: Color = Color.WHITE
 var _author_color: Color = Color.WHITE
 var _date_color: Color = Color.WHITE
+var _label_color: Color = Color.WHITE
+var _label_boxes: Dictionary[StringName, StyleBox] = {}
 
 
 func _ready() -> void:
@@ -59,7 +82,9 @@ func _update_theme() -> void:
 	_graph.update_theme(self)
 	_font = get_theme_font(&"font", &"Label")
 	_font_size = get_theme_font_size(&"font_size", &"Label")
+	_label_font_size = get_theme_font_size(&"label_font_size", LIST_THEME_TYPE)
 	_padding = float(get_theme_constant(&"padding", LIST_THEME_TYPE))
+	_label_gap = float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
 	_author_width = float(get_theme_constant(&"author_width", LIST_THEME_TYPE))
 	_date_width = float(get_theme_constant(&"date_width", LIST_THEME_TYPE))
 	_hash_width = float(get_theme_constant(&"hash_width", LIST_THEME_TYPE))
@@ -67,14 +92,21 @@ func _update_theme() -> void:
 	_hash_color = get_theme_color(&"hash_color", LIST_THEME_TYPE)
 	_author_color = get_theme_color(&"author_color", LIST_THEME_TYPE)
 	_date_color = get_theme_color(&"date_color", LIST_THEME_TYPE)
+	_label_color = get_theme_color(&"label_color", LIST_THEME_TYPE)
+	for style: StringName in LABEL_STYLES.values():
+		_label_boxes[style] = get_theme_stylebox(style, LIST_THEME_TYPE)
 
 
 func set_session(value: RepoSession) -> void:
-	if session != null and session.graph_changed.is_connected(_on_graph_changed):
-		session.graph_changed.disconnect(_on_graph_changed)
+	if session != null:
+		if session.graph_changed.is_connected(_on_graph_changed):
+			session.graph_changed.disconnect(_on_graph_changed)
+		if session.graph_reset.is_connected(_on_graph_reset):
+			session.graph_reset.disconnect(_on_graph_reset)
 	session = value
 	if session != null:
 		session.graph_changed.connect(_on_graph_changed)
+		session.graph_reset.connect(_on_graph_reset)
 	_clear_window()
 	_graph_lanes = 1
 	select_only(-1)
@@ -101,6 +133,9 @@ func _prepare_rows(first: int, count: int) -> void:
 		return
 	var started: int = Time.get_ticks_usec()
 	_clear_window()
+	# The graph area fits the fetched window, so a wide stretch of history
+	# does not leave a gap everywhere else.
+	_graph_lanes = 1
 	_window_start = maxi(0, first - FETCH_MARGIN)
 	var fetched: Array[Dictionary] = session.graph_rows(_window_start, count + 2 * FETCH_MARGIN)
 	for data: Dictionary in fetched:
@@ -131,27 +166,57 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	if subject_width != _text_layout_width:
 		_text.clear()
 		_text_layout_width = subject_width
-	var lines: Array = _text.get(row, [])
-	if lines.is_empty():
-		lines = [
-			_shape(data["subject"], subject_width, HORIZONTAL_ALIGNMENT_LEFT),
-			_shape(String(data["hash"]).left(7), _hash_width, HORIZONTAL_ALIGNMENT_LEFT),
-			_shape(data["author"], _author_width, HORIZONTAL_ALIGNMENT_LEFT),
-			_shape(_date(int(data["time"])), _date_width, HORIZONTAL_ALIGNMENT_RIGHT),
-		]
-		_text[row] = lines
+	var text: RowText = _text.get(row)
+	if text == null:
+		text = _shape_row(data, subject_width)
+		_text[row] = text
+
 	var canvas: RID = get_canvas_item()
-	var top: float = rect.position.y + (rect.size.y - (lines[0] as TextLine).get_size().y) * 0.5
-	if subject_width > 0.0:
-		(lines[0] as TextLine).draw(canvas, Vector2(subject_x, top), _subject_color)
-	(lines[1] as TextLine).draw(canvas, Vector2(hash_x, top), _hash_color)
-	(lines[2] as TextLine).draw(canvas, Vector2(author_x, top), _author_color)
-	(lines[3] as TextLine).draw(canvas, Vector2(date_x, top), _date_color)
+	var top: float = rect.position.y + (rect.size.y - text.subject.get_size().y) * 0.5
+	var x: float = subject_x
+	for i: int in text.labels.size():
+		x += _draw_label(canvas, text.labels[i], text.label_styles[i], x, rect) + _label_gap
+	if subject_width - text.labels_width > 0.0:
+		text.subject.draw(canvas, Vector2(subject_x + text.labels_width, top), _subject_color)
+	text.hash.draw(canvas, Vector2(hash_x, top), _hash_color)
+	text.author.draw(canvas, Vector2(author_x, top), _author_color)
+	text.date.draw(canvas, Vector2(date_x, top), _date_color)
 
 
-func _shape(text: String, width: float, alignment: HorizontalAlignment) -> TextLine:
+## Draws one ref label pill at `x`; returns its width.
+func _draw_label(canvas: RID, line: TextLine, style: StringName, x: float, rect: Rect2) -> float:
+	var box: StyleBox = _label_boxes[style]
+	var size: Vector2 = line.get_size()
+	var pill: Rect2 = Rect2(
+			x,
+			rect.position.y + (rect.size.y - size.y - box.get_minimum_size().y) * 0.5,
+			size.x + box.get_minimum_size().x,
+			size.y + box.get_minimum_size().y)
+	draw_style_box(box, pill)
+	line.draw(canvas, pill.position + Vector2(box.get_margin(SIDE_LEFT), box.get_margin(SIDE_TOP)), _label_color)
+	return pill.size.x
+
+
+func _shape_row(data: Dictionary, subject_width: float) -> RowText:
+	var text: RowText = RowText.new()
+	for label: Dictionary in data.get("refs", []):
+		var line: TextLine = TextLine.new()
+		line.add_string(String(label["name"]), _font, _label_font_size)
+		var style: StringName = LABEL_STYLES["head"] if bool(label["is_head"]) \
+				else LABEL_STYLES.get(String(label["kind"]), &"label_branch")
+		text.labels.append(line)
+		text.label_styles.append(style)
+		text.labels_width += line.get_size().x + _label_boxes[style].get_minimum_size().x + _label_gap
+	text.subject = _shape(data["subject"], subject_width - text.labels_width, HORIZONTAL_ALIGNMENT_LEFT)
+	text.hash = _shape(String(data["hash"]).left(7), _hash_width, HORIZONTAL_ALIGNMENT_LEFT)
+	text.author = _shape(data["author"], _author_width, HORIZONTAL_ALIGNMENT_LEFT)
+	text.date = _shape(_date(int(data["time"])), _date_width, HORIZONTAL_ALIGNMENT_RIGHT)
+	return text
+
+
+func _shape(value: String, width: float, alignment: HorizontalAlignment) -> TextLine:
 	var line: TextLine = TextLine.new()
-	line.add_string(text, _font, _font_size)
+	line.add_string(value, _font, _font_size)
 	line.width = maxf(0.0, width)
 	line.alignment = alignment
 	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -174,4 +239,11 @@ func _clear_window() -> void:
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
+	refresh()
+
+
+## A new load replaced the graph: drop cached rows, keep the scroll position.
+func _on_graph_reset() -> void:
+	_clear_window()
+	_graph_lanes = 1
 	refresh()

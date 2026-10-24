@@ -11,26 +11,11 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_history")
 
-[node name="Session" type="RepoSession" parent="."]
-unique_name_in_owner = true
-
-[node name="Toolbar" type="HBoxContainer" parent="."]
-layout_mode = 2
-
-[node name="OpenButton" type="Button" parent="Toolbar"]
+[node name="StatusLabel" type="Label" parent="."]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Open…"
-
-[node name="PathLabel" type="Label" parent="Toolbar"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
+theme_type_variation = &"DimLabel"
 text_overrun_behavior = 3
-
-[node name="StatusLabel" type="Label" parent="Toolbar"]
-unique_name_in_owner = true
-layout_mode = 2
 
 [node name="CommitList" type="Control" parent="."]
 unique_name_in_owner = true
