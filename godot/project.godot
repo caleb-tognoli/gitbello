@@ -20,6 +20,7 @@ run/low_processor_mode=true
 [autoload]
 
 Core="*res://app/core/core.tscn"
+Actions="*res://app/actions/action_registry.gd"
 
 [debug]
 

@@ -1,0 +1,29 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/palette/command_palette.gd" id="1_palette"]
+
+[node name="CommandPalette" type="PanelContainer"]
+theme_type_variation = &"PalettePanel"
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+grow_horizontal = 2
+script = ExtResource("1_palette")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Query" type="LineEdit" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Type a command, repository or tab…"
+clear_button_enabled = true
+
+[node name="Results" type="Tree" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 0
+columns = 2
+hide_root = true
+select_mode = 1
