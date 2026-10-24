@@ -249,13 +249,15 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 **Accept when** `cargo xtask run` opens an empty window on all three OSes (verified in CI where possible), CI is green, and idle CPU is near 0% with low processor mode on.
 
 ### M1 — Graph performance spike (≈1.5 weeks)
-- [ ] `GitRunner` (minimal version: spawn, stream, env, Windows flag)
-- [ ] Streaming log parser and `GraphIndex` with incremental lane assignment
-- [ ] `gitbello-cli graph <path> --rows a..b` for inspection, plus parser and lane unit tests
-- [ ] `VirtualList` and `GraphView` in Godot, driven by `graph_rows(start, count)`
-- [ ] Benchmark on a local clone of `git/git` (read-only); record timings and memory
+- [x] `GitRunner` (minimal version: spawn, stream, env, Windows flag), with the classified `GitError` that M2 keeps
+- [x] Streaming log parser and `GraphIndex` with incremental lane assignment (lane state checkpointed every 256 rows; slices replayed)
+- [x] `gitbello-cli graph <path> --rows a..b` for inspection, plus parser and lane unit tests
+- [x] `VirtualList` and `GraphView` in Godot, driven by `graph_rows(start, count)`
+- [x] Benchmark on a local clone of `git/git` (read-only); record timings and memory (`cargo xtask bench-graph`, results in `docs/perf.md`)
 
 **Accept when** the targets in §3.9 are met, or a written report explains the gap and the fix. **This is the go/no-go checkpoint for the Godot UI.**
+
+*Result:* all §3.9 targets met except the first screen on repos without a commit-graph file (git itself takes ~640 ms to emit the first commit on git/git) and 1–2 frames over 16.7 ms when flinging a page per frame. See `docs/perf.md`.
 
 ### M2 — Core foundation (≈2 weeks)
 - [ ] Full `GitRunner`: progress mode, cancellation, error classification, command log

@@ -41,6 +41,7 @@ cargo xtask run              # build + launch Godot project
 cargo xtask test             # cargo test for the whole workspace
 cargo xtask check            # fmt --check + clippy -D warnings + test
 cargo xtask smoke            # headless Godot smoke scripts
+cargo xtask bench-graph <repo> [--ui] [--record]   # graph load + scroll benchmark (read-only)
 ```
 
 Run `cargo xtask check` before declaring any task done.
