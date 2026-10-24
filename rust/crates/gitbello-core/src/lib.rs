@@ -3,6 +3,8 @@
 //! All git logic, parsing, models, graph layout, watching and job scheduling
 //! live here. This crate must never depend on Godot.
 
+pub mod git;
+
 /// Version of the core crate, as reported to the UI and CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

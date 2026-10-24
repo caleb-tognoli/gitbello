@@ -1,0 +1,191 @@
+//! Fixture helpers: real temporary repositories (AGENTS rule 7).
+//!
+//! Paths contain spaces and non-ASCII characters on purpose. Every git call goes
+//! through `GitRunner` and is isolated from the user's global and system config.
+
+#![allow(dead_code)]
+
+use std::cell::Cell;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use gitbello_core::git::{GitCommand, GitError, GitOutput, GitRunner};
+
+static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+/// Fixed base time so fixture hashes are reproducible.
+const EPOCH: i64 = 1_700_000_000;
+
+/// A temporary directory removed on drop.
+pub struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    pub fn new(label: &str) -> Self {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("gitbello tést {label} {}-{n}", std::process::id()));
+        if path.exists() {
+            remove_tree(&path);
+        }
+        fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        remove_tree(&self.path);
+    }
+}
+
+/// `remove_dir_all` that also handles git's read-only object files on Windows.
+fn remove_tree(path: &Path) {
+    if fs::remove_dir_all(path).is_ok() {
+        return;
+    }
+    fn make_writable(path: &Path) {
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            let mut perms = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+            if meta.is_dir() {
+                if let Ok(entries) = fs::read_dir(path) {
+                    for entry in entries.flatten() {
+                        make_writable(&entry.path());
+                    }
+                }
+            }
+        }
+    }
+    make_writable(path);
+    let _ = fs::remove_dir_all(path);
+}
+
+pub fn runner() -> GitRunner {
+    GitRunner::discover().expect("git 2.40+ must be installed to run tests")
+}
+
+/// A repository in a temp dir, with a deterministic clock and identity.
+pub struct TestRepo {
+    dir: TempDir,
+    path: PathBuf,
+    global_config: PathBuf,
+    runner: GitRunner,
+    clock: Cell<i64>,
+}
+
+impl TestRepo {
+    /// `git init` on branch `main`.
+    pub fn init() -> Self {
+        let dir = TempDir::new("repo");
+        let path = dir.path().join("wörk tree");
+        fs::create_dir_all(&path).expect("create repo dir");
+        let global_config = dir.path().join("global.gitconfig");
+        fs::write(&global_config, "").expect("write empty global config");
+        let repo = Self {
+            dir,
+            path,
+            global_config,
+            runner: runner(),
+            clock: Cell::new(EPOCH),
+        };
+        repo.git(&["init", "--quiet", "--initial-branch=main"]);
+        repo
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn runner(&self) -> &GitRunner {
+        &self.runner
+    }
+
+    /// A temp sibling directory that is not a repository.
+    pub fn non_repo_dir(&self) -> PathBuf {
+        let path = self.dir.path().join("not a repo");
+        fs::create_dir_all(&path).expect("create dir");
+        path
+    }
+
+    /// A write command with the fixture environment applied.
+    pub fn command(&self) -> GitCommand {
+        let time = self.clock.get();
+        self.clock.set(time + 60);
+        let date = format!("{time} +0000");
+        self.runner
+            .write(&self.path)
+            .env("GIT_CONFIG_GLOBAL", &self.global_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Ada Lövelace")
+            .env("GIT_AUTHOR_EMAIL", "ada@example.com")
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_NAME", "Ada Lövelace")
+            .env("GIT_COMMITTER_EMAIL", "ada@example.com")
+            .env("GIT_COMMITTER_DATE", &date)
+            .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+    }
+
+    pub fn try_git(&self, args: &[&str]) -> Result<GitOutput, GitError> {
+        self.command().args(args).run()
+    }
+
+    /// Runs git and returns trimmed stdout; panics on failure.
+    pub fn git(&self, args: &[&str]) -> String {
+        match self.try_git(args) {
+            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+            Err(err) => panic!("git {args:?} failed: {err}"),
+        }
+    }
+
+    /// Writes `file`, stages it and commits. Returns the new commit hash.
+    pub fn commit(&self, file: &str, content: &str, message: &str) -> String {
+        let target = self.path.join(file);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        fs::write(&target, content).expect("write file");
+        self.git(&["add", "--", file]);
+        self.command()
+            .args(["commit", "--quiet", "-F", "-"])
+            .stdin(message)
+            .run()
+            .unwrap_or_else(|err| panic!("commit failed: {err}"));
+        self.head()
+    }
+
+    pub fn head(&self) -> String {
+        self.git(&["rev-parse", "HEAD"])
+    }
+
+    pub fn branch(&self, name: &str) {
+        self.git(&["branch", name]);
+    }
+
+    pub fn checkout(&self, name: &str) {
+        self.git(&["checkout", "--quiet", name]);
+    }
+
+    /// `git merge --no-ff`; returns the merge commit hash.
+    pub fn merge(&self, branch: &str, message: &str) -> String {
+        self.git(&["merge", "--no-ff", "--quiet", "-m", message, branch]);
+        self.head()
+    }
+
+    /// Feeds a `git fast-import` stream (fast way to build large histories).
+    pub fn fast_import(&self, stream: &str) {
+        self.command()
+            .args(["fast-import", "--quiet"])
+            .stdin(stream)
+            .run()
+            .unwrap_or_else(|err| panic!("fast-import failed: {err}"));
+    }
+}
