@@ -6,8 +6,8 @@ use gitbello_core::changes::{change_code, ChangeGroup};
 use gitbello_core::diff::{display_text, DiffContent, DiffKind, FileDiff, LineKind};
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::repo::{
-    Change, Conflict, FileChange, FileState, Head, Operation, Ref, RefKind, RepoStatus, StashEntry,
-    Worktree,
+    Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
+    RefKind, RepoStatus, StashEntry, Worktree,
 };
 use gitbello_core::runtime::DiffState;
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
@@ -256,6 +256,43 @@ pub fn worktrees(
     out
 }
 
+/// `{oid, parents, author, email, time, committer, committer_email,
+/// commit_time, summary, body, file_count}`.
+pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
+    let parents: PackedStringArray = commit.parents.iter().map(|p| gstr(p)).collect();
+    vdict! {
+        "oid" => &gstr(&commit.oid),
+        "parents" => &parents,
+        "author" => &gstr(&commit.author_name),
+        "email" => &gstr(&commit.author_email),
+        "time" => commit.author_time,
+        "committer" => &gstr(&commit.committer_name),
+        "committer_email" => &gstr(&commit.committer_email),
+        "commit_time" => commit.committer_time,
+        "summary" => &gstr(commit.summary()),
+        "body" => &gstr(commit.body()),
+        "file_count" => to_i64(commit.files.len()),
+    }
+}
+
+/// A commit file row: `{path, original_path, code}`.
+pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
+    let code = match file.change {
+        Change::Modified => "M",
+        Change::Added => "A",
+        Change::Deleted => "D",
+        Change::Renamed => "R",
+        Change::Copied => "C",
+        Change::TypeChanged => "T",
+        Change::Unmodified => "",
+    };
+    vdict! {
+        "path" => &path_str(&file.path),
+        "original_path" => &file.original_path.as_deref().map_or_else(GString::new, path_str),
+        "code" => code,
+    }
+}
+
 /// A changes-panel row: `{path, original_path, code, group}`.
 pub fn change_row(change: &FileChange, group: ChangeGroup) -> VarDictionary {
     vdict! {
@@ -287,6 +324,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
         DiffKind::Unstaged => "unstaged",
         DiffKind::Staged => "staged",
         DiffKind::Untracked => "untracked",
+        DiffKind::Commit => "commit",
     };
     let mut info = vdict! {
         "path" => &path_str(&target.path),

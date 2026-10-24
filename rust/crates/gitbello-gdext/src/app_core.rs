@@ -7,7 +7,7 @@ use gitbello_core::config::ThemeChoice;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::paths;
-use gitbello_core::runtime::{JobState, Runtime, RuntimeEvent};
+use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
 use godot::prelude::*;
 
 use crate::convert::{self, gstr, path_str, to_i64};
@@ -139,9 +139,18 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.bind_mut().reset_graph();
             }
         }
-        RuntimeEvent::DiffChanged { repo } => {
+        RuntimeEvent::DiffChanged { repo, slot } => {
             if let Some(mut session) = find(sessions, &repo) {
-                session.emit_signal("diff_changed", &[]);
+                let signal = match slot {
+                    DiffSlot::Changes => "diff_changed",
+                    DiffSlot::Commit => "commit_diff_changed",
+                };
+                session.emit_signal(signal, &[]);
+            }
+        }
+        RuntimeEvent::CommitLoaded { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("commit_loaded", &[]);
             }
         }
         RuntimeEvent::HeadMessage { repo, message } => {

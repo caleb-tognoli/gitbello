@@ -76,6 +76,12 @@ impl RepoSession {
     /// HEAD's message, split into summary and body (`load_head_message`).
     #[signal]
     fn head_message_loaded(summary: GString, body: GString);
+    /// The commit requested with `load_commit` arrived (`commit_info`).
+    #[signal]
+    fn commit_loaded();
+    /// The commit file diff loaded or failed (`commit_diff_info`).
+    #[signal]
+    fn commit_diff_changed();
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -345,6 +351,73 @@ impl RepoSession {
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
             s.diff()
+                .and_then(|d| d.diff())
+                .map(|diff| convert::diff_lines(diff, start, count))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    // --- Commit details -----------------------------------------------------
+
+    /// Loads a commit's details (full or unique hash); `commit_loaded` follows.
+    #[func]
+    fn load_commit(&self, oid: GString) {
+        runtime_cell::with(|rt| rt.load_commit(&self.key, &oid.to_string()));
+    }
+
+    /// See `convert::commit_info`; empty until a commit loaded.
+    #[func]
+    fn commit_info(&self) -> VarDictionary {
+        self.read(|s| s.commit().map(convert::commit_info))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Files of the loaded commit, rows `start..start + count`:
+    /// `{path, original_path, code}`.
+    #[func]
+    fn commit_files(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let mut rows = Array::new();
+            if let Some(commit) = s.commit() {
+                for file in commit.files.iter().skip(start).take(count) {
+                    rows.push(&convert::commit_file_row(file));
+                }
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// Shows the diff of `path` in the loaded commit; `commit_diff_changed` follows.
+    #[func]
+    fn select_commit_file(&self, path: GString, full: bool) {
+        let path = PathBuf::from(path.to_string());
+        runtime_cell::with(|rt| rt.select_commit_file(&self.key, Some(&path), full));
+    }
+
+    #[func]
+    fn clear_commit_diff(&self) {
+        runtime_cell::with(|rt| rt.select_commit_file(&self.key, None, false));
+    }
+
+    /// Like `diff_info`, for the commit file diff.
+    #[func]
+    fn commit_diff_info(&self) -> VarDictionary {
+        self.read(|s| convert::diff_info(s.commit_diff()))
+            .unwrap_or_default()
+    }
+
+    /// Like `diff_lines`, for the commit file diff.
+    #[func]
+    fn commit_diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            s.commit_diff()
                 .and_then(|d| d.diff())
                 .map(|diff| convert::diff_lines(diff, start, count))
         })
