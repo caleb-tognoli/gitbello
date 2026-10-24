@@ -20,6 +20,9 @@ commands:
   test [<cargo args>]     cargo test for the whole workspace
   check                   fmt --check + clippy -D warnings + test
   smoke                   build, import, then run headless Godot smoke tests
+  bench-graph <path> [--ui] [--record]
+                          time a graph load of <path> (read-only); --ui adds the
+                          windowed scroll benchmark; --record appends to docs/perf.md
 
 environment:
   GODOT                   path to the Godot executable (default: `godot` on PATH)";
@@ -47,6 +50,7 @@ fn main() -> Result<()> {
         "test" => cargo_test(rest),
         "check" => check(),
         "smoke" => smoke(),
+        "bench-graph" => bench_graph(rest),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())
@@ -223,6 +227,121 @@ fn smoke() -> Result<()> {
         bail!("smoke runner did not print `{SMOKE_PASS_MARKER}`");
     }
     Ok(())
+}
+
+fn bench_graph(args: &[String]) -> Result<()> {
+    let mut path = None;
+    let (mut ui, mut record) = (false, false);
+    for arg in args {
+        match arg.as_str() {
+            "--ui" => ui = true,
+            "--record" => record = true,
+            other if path.is_none() => path = Some(other.to_owned()),
+            other => bail!("unexpected argument `{other}`"),
+        }
+    }
+    let path = path.context("bench-graph needs a repository path")?;
+
+    let mut cli_build = cargo();
+    cli_build.args(["build", "--release", "--package", "gitbello-cli"]);
+    run_status(cli_build)?;
+    let cli = target_dir()
+        .join("release")
+        .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
+    let mut cmd = Command::new(cli);
+    cmd.args(["graph-bench", &path]);
+    let core = run_captured(cmd, SMOKE_TIMEOUT)?;
+    if !core.success {
+        bail!("graph-bench failed");
+    }
+    let mut report = core.text.trim_end().to_owned();
+
+    if ui {
+        build(Profile::Debug)?;
+        let godot = find_godot()?;
+        if !godot_project_dir().join(".godot").exists() {
+            import(&godot)?;
+        }
+        let mut cmd = Command::new(&godot);
+        cmd.arg("--path")
+            .arg(godot_project_dir())
+            .arg("res://tests/perf/scroll_bench.tscn")
+            .arg("--")
+            .arg(format!("--repo={path}"));
+        let output = run_captured(cmd, SMOKE_TIMEOUT)?;
+        let lines: Vec<&str> = output
+            .text
+            .lines()
+            .filter_map(|line| line.strip_prefix("BENCH "))
+            .collect();
+        if !output.success || lines.is_empty() {
+            bail!("scroll benchmark failed");
+        }
+        report.push_str(
+            "
+
+scroll benchmark (Godot ",
+        );
+        report.push_str(&godot_version(&godot));
+        report.push_str(
+            ", debug library)
+",
+        );
+        report.push_str(&lines.join(
+            "
+",
+        ));
+    }
+
+    if record {
+        let perf = repo_dir().join("docs").join("perf.md");
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&perf)
+            .with_context(|| format!("failed to open {}", perf.display()))?;
+        let threads = thread::available_parallelism().map_or(0, usize::from);
+        let cpu = env::var("PROCESSOR_IDENTIFIER").unwrap_or_default();
+        writeln!(
+            file,
+            "
+### {} · {} {} · {threads} threads {cpu}
+
+```text
+{report}
+```",
+            today(),
+            env::consts::OS,
+            env::consts::ARCH,
+        )?;
+        eprintln!("appended to {}", perf.display());
+    }
+    Ok(())
+}
+
+fn godot_version(godot: &Path) -> String {
+    Command::new(godot)
+        .arg("--version")
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// Today's UTC date as `YYYY-MM-DD` (civil-from-days, H. Hinnant).
+fn today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let days = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 /// Runs a headless editor import so the class cache and extension list exist.
