@@ -290,6 +290,7 @@ pub fn worktrees(
             "detached" => wt.detached,
             "bare" => wt.bare,
             "locked" => wt.locked.is_some(),
+            "lock_reason" => &gstr(wt.locked.as_deref().unwrap_or_default()),
             "prunable" => wt.prunable.is_some(),
             "is_main" => wt.is_main,
             "is_current" => is_current,

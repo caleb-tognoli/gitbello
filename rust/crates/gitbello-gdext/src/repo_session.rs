@@ -4,9 +4,10 @@ use gitbello_core::changes::{commit_message, diff_target, ChangeGroup};
 use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
-use gitbello_core::ops::{CheckoutTarget, PullMode, RefOp};
+use gitbello_core::ops::{CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
 use gitbello_core::runtime::RepoState;
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
+use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
 
 use crate::convert::{self, gstr, path_str, to_i64};
@@ -89,6 +90,12 @@ impl RepoSession {
     /// The commit file diff loaded or failed (`commit_diff_info`).
     #[signal]
     fn commit_diff_changed();
+    /// The worktree folder is gone; the session no longer refreshes.
+    #[signal]
+    fn missing();
+    /// `load_cleanup` finished (`cleanup_candidates`).
+    #[signal]
+    fn cleanup_loaded();
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -401,6 +408,158 @@ impl RepoSession {
             return false;
         };
         runtime_cell::with(|rt| rt.cancel_job(job)).unwrap_or(false)
+    }
+
+    // --- Worktrees ----------------------------------------------------------
+
+    /// Whether the worktree folder disappeared (see `missing`).
+    #[func]
+    fn is_missing(&self) -> bool {
+        self.read(RepoState::is_missing).unwrap_or(false)
+    }
+
+    /// The main worktree (or bare repository) folder, or empty until known.
+    #[func]
+    fn main_worktree(&self) -> GString {
+        self.read(|s| s.main_worktree().map(path_str))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Where new tasks start (`origin/main`, ...), or empty.
+    #[func]
+    fn default_base(&self) -> GString {
+        self.read(|s| s.default_base().map(|b| gstr(&b)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Folder for a new task on `branch`, from the `worktree_template` setting.
+    #[func]
+    fn worktree_path_for(&self, branch: GString) -> GString {
+        runtime_cell::with(|rt| {
+            let main = rt.repo(&self.key)?.main_worktree()?.to_path_buf();
+            let template = rt.config().worktree_template.clone();
+            Some(path_str(&worktree_path(
+                &template,
+                &main,
+                &branch.to_string(),
+            )))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// The new-task flow: creates `branch` from `base` in a new worktree at
+    /// `path`, fetching `fetch_remote` first (empty: no fetch). Label `new task`.
+    #[func]
+    fn new_task(
+        &self,
+        branch: GString,
+        base: GString,
+        path: GString,
+        fetch_remote: GString,
+    ) -> i64 {
+        let remote = fetch_remote.to_string();
+        let task = NewTask {
+            branch: branch.to_string(),
+            base: base.to_string(),
+            path: PathBuf::from(path.to_string()),
+            fetch_remote: (!remote.is_empty()).then_some(remote),
+        };
+        job_id(runtime_cell::with(|rt| rt.new_task(&self.key, task)).flatten())
+    }
+
+    /// Checks out `branch` in a new worktree at `path`; a non-empty `start`
+    /// creates the branch there first. Label `add worktree`.
+    #[func]
+    fn add_worktree(&self, path: GString, branch: GString, start: GString) -> i64 {
+        let start = start.to_string();
+        self.worktree_op(WorktreeOp::Add {
+            path: PathBuf::from(path.to_string()),
+            branch: branch.to_string(),
+            start: (!start.is_empty()).then_some(start),
+        })
+    }
+
+    /// `force` also removes one with local changes or a lock. Label `remove worktree`.
+    #[func]
+    fn remove_worktree(&self, path: GString, force: bool) -> i64 {
+        self.worktree_op(WorktreeOp::Remove {
+            path: PathBuf::from(path.to_string()),
+            force,
+        })
+    }
+
+    /// Label `lock worktree`.
+    #[func]
+    fn lock_worktree(&self, path: GString, reason: GString) -> i64 {
+        self.worktree_op(WorktreeOp::Lock {
+            path: PathBuf::from(path.to_string()),
+            reason: reason.to_string(),
+        })
+    }
+
+    /// Label `unlock worktree`.
+    #[func]
+    fn unlock_worktree(&self, path: GString) -> i64 {
+        self.worktree_op(WorktreeOp::Unlock {
+            path: PathBuf::from(path.to_string()),
+        })
+    }
+
+    /// Forgets worktrees whose folders are gone. Label `prune worktrees`.
+    #[func]
+    fn prune_worktrees(&self) -> i64 {
+        self.worktree_op(WorktreeOp::Prune)
+    }
+
+    /// Looks for worktrees to clean up; `cleanup_loaded` follows.
+    #[func]
+    fn load_cleanup(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.load_cleanup(&self.key)).flatten())
+    }
+
+    /// `{path, branch, reason, changed, ahead, locked}`; reason is `merged`
+    /// or `upstream_gone`, changed is -1 when unknown.
+    #[func]
+    fn cleanup_candidates(&self) -> Array<VarDictionary> {
+        self.read(|s| {
+            let mut out = Array::new();
+            for c in s.cleanup().unwrap_or_default() {
+                out.push(&vdict! {
+                    "path" => &path_str(&c.path),
+                    "branch" => &gstr(&c.branch),
+                    "reason" => match c.reason {
+                        CleanupReason::Merged => "merged",
+                        CleanupReason::UpstreamGone => "upstream_gone",
+                    },
+                    "changed" => c.changed.map_or(-1, to_i64),
+                    "ahead" => i64::from(c.ahead),
+                    "locked" => c.locked,
+                });
+            }
+            out
+        })
+        .unwrap_or_default()
+    }
+
+    /// Removes worktrees (`{path, branch, force}` each) and, with
+    /// `delete_branches`, their branches. Label `clean up worktrees`.
+    #[func]
+    fn cleanup(&self, items: Array<VarDictionary>, delete_branches: bool) -> i64 {
+        let items: Vec<(PathBuf, String, bool)> = items
+            .iter_shared()
+            .map(|item| {
+                let text = |key: &str| item.get(key).map(|v| v.to_string()).unwrap_or_default();
+                let force = item
+                    .get("force")
+                    .and_then(|v| v.try_to::<bool>().ok())
+                    .unwrap_or(false);
+                (PathBuf::from(text("path")), text("branch"), force)
+            })
+            .collect();
+        job_id(runtime_cell::with(|rt| rt.cleanup(&self.key, items, delete_branches)).flatten())
     }
 
     // --- Changes panel ------------------------------------------------------
@@ -837,6 +996,10 @@ impl RepoSession {
 
     fn ref_op(&self, op: RefOp) -> i64 {
         job_id(runtime_cell::with(|rt| rt.ref_op(&self.key, op)).flatten())
+    }
+
+    fn worktree_op(&self, op: WorktreeOp) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.worktree_op(&self.key, op)).flatten())
     }
 
     /// A new graph load started: forget reported rows.

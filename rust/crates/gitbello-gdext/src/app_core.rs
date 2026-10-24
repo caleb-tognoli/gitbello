@@ -7,9 +7,10 @@ use gitbello_core::config::ThemeChoice;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
-use gitbello_core::ops::ref_name_error;
+use gitbello_core::ops::{ref_name_error, PullMode};
 use gitbello_core::paths;
 use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
+use gitbello_core::worktrees::new_worktree_path_error;
 use godot::prelude::*;
 
 use crate::convert::{self, gstr, path_str, to_i64};
@@ -150,7 +151,16 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal(signal, &[]);
             }
         }
-        RuntimeEvent::Missing { .. } | RuntimeEvent::CleanupLoaded { .. } => {}
+        RuntimeEvent::Missing { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("missing", &[]);
+            }
+        }
+        RuntimeEvent::CleanupLoaded { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("cleanup_loaded", &[]);
+            }
+        }
         RuntimeEvent::CommitLoaded { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("commit_loaded", &[]);
@@ -414,6 +424,87 @@ impl AppCore {
     #[func]
     fn ref_name_error(&self, name: GString) -> GString {
         gstr(ref_name_error(&name.to_string()).unwrap_or_default())
+    }
+
+    /// Why a new worktree cannot go at `path` (it must be missing or an empty
+    /// folder), or an empty string.
+    #[func]
+    fn new_worktree_path_error(&self, path: GString) -> GString {
+        gstr(new_worktree_path_error(Path::new(&path.to_string())).unwrap_or_default())
+    }
+
+    /// The settings the Settings dialog edits: `{pull_mode,
+    /// auto_fetch_minutes, editor_command, terminal_command,
+    /// worktree_template}`; an empty terminal command means the platform's.
+    #[func]
+    fn settings(&self) -> VarDictionary {
+        runtime_cell::with(|rt| {
+            let c = rt.config();
+            vdict! {
+                "pull_mode" => c.pull_mode.as_str(),
+                "auto_fetch_minutes" => i64::from(c.auto_fetch_minutes),
+                "editor_command" => &gstr(&c.editor_command),
+                "terminal_command" => &gstr(c.terminal_command.as_deref().unwrap_or_default()),
+                "worktree_template" => &gstr(&c.worktree_template),
+            }
+        })
+        .unwrap_or_default()
+    }
+
+    /// Validates and saves `settings` (keys as in `settings`; missing keys
+    /// stay). Returns an error message, or an empty string.
+    #[func]
+    fn set_settings(&mut self, settings: VarDictionary) -> GString {
+        let text = |key: &str| settings.get(key).map(|v| v.to_string());
+        let pull_mode = match text("pull_mode") {
+            None => None,
+            Some(mode) => match PullMode::parse(&mode) {
+                Some(mode) => Some(mode),
+                None => return gstr("Pull mode must be ff-only, merge or rebase."),
+            },
+        };
+        let minutes = match settings.get("auto_fetch_minutes") {
+            None => None,
+            Some(value) => match value
+                .try_to::<i64>()
+                .ok()
+                .and_then(|m| u32::try_from(m).ok())
+            {
+                Some(minutes) => Some(minutes),
+                None => return gstr("The auto-fetch interval must be a whole number of minutes."),
+            },
+        };
+        let editor = text("editor_command");
+        if editor.as_deref().is_some_and(|e| e.trim().is_empty()) {
+            return gstr("Enter an editor command.");
+        }
+        let template = text("worktree_template");
+        if template.as_deref().is_some_and(|t| t.trim().is_empty()) {
+            return gstr("Enter a worktree folder template.");
+        }
+        runtime_cell::with(|rt| {
+            let config = rt.config_mut();
+            if let Some(mode) = pull_mode {
+                config.pull_mode = mode;
+            }
+            if let Some(minutes) = minutes {
+                config.auto_fetch_minutes = minutes;
+            }
+            if let Some(editor) = editor {
+                config.editor_command = editor.trim().to_owned();
+            }
+            if let Some(terminal) = text("terminal_command") {
+                let terminal = terminal.trim();
+                config.terminal_command = (!terminal.is_empty()).then(|| terminal.to_owned());
+            }
+            if let Some(template) = template {
+                config.worktree_template = template.trim().to_owned();
+            }
+            rt.save_config()
+                .err()
+                .map_or_else(GString::new, |e| gstr(&e.to_string()))
+        })
+        .unwrap_or_else(|| gstr(&self.start_error))
     }
 
     /// User shortcut overrides: action id to shortcut text.
