@@ -1,5 +1,6 @@
 //! Dev-only headless harness for `gitbello-core`.
 
+mod fixture;
 mod repo_cmds;
 
 use std::ops::Range;
@@ -22,6 +23,7 @@ commands:
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
+  fixture <dir> [--repos N]        create throwaway repos for UI smoke tests
 
 Set GITBELLO_LOG=1 to print the git commands a command ran.";
 
@@ -42,6 +44,7 @@ fn main() -> Result<()> {
         Some("op-state") => repo_cmds::op_state(rest),
         Some("watch") => repo_cmds::watch(rest),
         Some("config") => repo_cmds::config(rest),
+        Some("fixture") => fixture::run(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
             Ok(())
