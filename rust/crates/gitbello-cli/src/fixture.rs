@@ -3,7 +3,9 @@
 //!
 //! Each `repo-<n>` has: two commits on `main`, a `feature/login` branch, a
 //! `v1.0` tag, a bare `origin` remote with `main` pushed and one commit ahead,
-//! a stash, a linked worktree and one modified plus one untracked file.
+//! a stash, a linked worktree and one modified plus one untracked file. The
+//! remote also has a commit (`remote.txt`) that `repo-<n>` has not fetched,
+//! so a fetch leaves `main` one ahead and one behind.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -87,6 +89,42 @@ fn slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Someone else's commit on the remote, pushed from a throwaway clone.
+fn push_remote_change(git: &Git<'_>, repo: &Path, remote: &Path, n: usize) -> Result<()> {
+    let clone = repo.with_file_name(format!("repo-{n}-other"));
+    git.run(
+        repo,
+        &["clone", "--quiet", &slash(remote), &slash(&clone)],
+        None,
+    )?;
+    git.commit(&clone, "remote.txt", "from elsewhere\n", "Remote change")?;
+    git.run(&clone, &["push", "--quiet", "origin", "main"], None)?;
+    remove_tree(&clone).with_context(|| format!("removing {}", clone.display()))
+}
+
+/// `remove_dir_all` that first clears the read-only flag git puts on object
+/// files (Windows refuses to delete those).
+fn remove_tree(dir: &Path) -> std::io::Result<()> {
+    fn walk(path: &Path) {
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            let mut perms = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+            if meta.is_dir() {
+                for entry in fs::read_dir(path).into_iter().flatten().flatten() {
+                    walk(&entry.path());
+                }
+            }
+        }
+    }
+    if fs::remove_dir_all(dir).is_ok() {
+        return Ok(());
+    }
+    walk(dir);
+    fs::remove_dir_all(dir)
+}
+
 fn build_repo(runner: &GitRunner, repo: &Path, global_config: &Path, n: usize) -> Result<()> {
     fs::create_dir_all(repo)?;
     let git = Git {
@@ -119,6 +157,7 @@ fn build_repo(runner: &GitRunner, repo: &Path, global_config: &Path, n: usize) -
     )?;
     git.run(repo, &["remote", "add", "origin", &slash(&remote)], None)?;
     git.run(repo, &["push", "--quiet", "-u", "origin", "main"], None)?;
+    push_remote_change(&git, repo, &remote, n)?;
     git.commit(repo, "app.txt", "v2\n", "Improve app")?;
 
     fs::write(repo.join("app.txt"), "stashed change\n")?;
