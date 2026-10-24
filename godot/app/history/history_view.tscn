@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://app/history/history_view.gd" id="1_history"]
 [ext_resource type="Script" path="res://app/history/commit_list.gd" id="2_list"]
+[ext_resource type="PackedScene" path="res://app/history/commit_details.tscn" id="3_details"]
 
 [node name="HistoryView" type="VBoxContainer"]
 anchors_preset = 15
@@ -17,8 +18,17 @@ layout_mode = 2
 theme_type_variation = &"DimLabel"
 text_overrun_behavior = 3
 
-[node name="CommitList" type="Control" parent="."]
+[node name="Split" type="VSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CommitList" type="Control" parent="Split"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("2_list")
+
+[node name="Details" parent="Split" instance=ExtResource("3_details")]
+unique_name_in_owner = true
+layout_mode = 2

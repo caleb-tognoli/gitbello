@@ -11,8 +11,6 @@ const THEME_TYPE: StringName = &"ChangesView"
 var session: RepoSession = null:
 	set = set_session
 
-## The diff currently shown, to keep its scroll position across reloads.
-var _shown_diff: String = ""
 ## The list Left returns to from the diff.
 var _last_list: ChangeList = null
 var _confirm: ConfirmationDialog = ConfirmationDialog.new()
@@ -36,12 +34,8 @@ var _menu_actions: Array[StringName] = []
 @onready var _unstage_section_button: Button = %UnstageSectionButton
 @onready var _clean_label: Label = %CleanLabel
 @onready var _commit_box: CommitBox = %CommitBox
-@onready var _diff_path: Label = %DiffPath
-@onready var _diff_stats: Label = %DiffStats
-@onready var _diff_view: DiffView = %DiffView
-@onready var _diff_message: Control = %DiffMessage
-@onready var _diff_message_label: Label = %DiffMessageLabel
-@onready var _load_anyway: Button = %LoadAnywayButton
+@onready var _diff_panel: DiffPanel = %DiffPanel
+@onready var _diff_view: DiffView = _diff_panel.view()
 
 
 func _ready() -> void:
@@ -55,11 +49,11 @@ func _ready() -> void:
 	_stage_section_button.pressed.connect(func() -> void: _stage_list(_unstaged))
 	_add_untracked_button.pressed.connect(func() -> void: _stage_list(_untracked))
 	_unstage_section_button.pressed.connect(unstage_all)
-	_load_anyway.pressed.connect(_load_full_diff)
-	_diff_view.source = func(start: int, count: int) -> Array:
-		return session.diff_lines(start, count) if session != null else []
+	_diff_panel.load_full_requested.connect(_load_full_diff)
+	_diff_panel.set_source(func(start: int, count: int) -> Array:
+		return session.diff_lines(start, count) if session != null else [])
 	_diff_view.row_activated.connect(func(_row: int) -> void: stage_diff_lines())
-	_show_diff_message("Select a file to see its changes.")
+	_diff_panel.clear("Select a file to see its changes.")
 	_confirm.confirmed.connect(func() -> void:
 		if _pending_discard.is_valid():
 			_pending_discard.call()
@@ -379,11 +373,7 @@ func _selected_list() -> ChangeList:
 func _clear_diff() -> void:
 	if session != null:
 		session.clear_diff()
-	_shown_diff = ""
-	_diff_view.show_lines(0, 0, false)
-	_diff_path.text = ""
-	_diff_stats.text = ""
-	_show_diff_message("Select a file to see its changes.")
+	_diff_panel.clear()
 
 
 func _load_full_diff() -> void:
@@ -393,58 +383,12 @@ func _load_full_diff() -> void:
 
 
 func _on_diff_changed() -> void:
-	var info: Dictionary = session.diff_info() if session != null else {}
-	var state: String = String(info.get("state", "none"))
-	if state == "none":
-		return
-	var path: String = String(info["path"])
-	var key: String = String(info["kind"]) + ":" + path
-	_diff_path.text = path
-	var notes: PackedStringArray = info.get("notes", PackedStringArray())
-	var stats: PackedStringArray = PackedStringArray(notes)
-	if int(info.get("additions", 0)) > 0 or int(info.get("deletions", 0)) > 0:
-		stats.append("+%d −%d" % [int(info["additions"]), int(info["deletions"])])
-	_diff_stats.text = "  ·  ".join(stats)
-	match state:
-		"loading":
-			if key != _shown_diff:
-				_diff_view.show_lines(0, 0, false)
-				_show_diff_message("Loading…")
-			return
-		"error":
-			var error: Dictionary = info.get("error", {})
-			_diff_view.show_lines(0, 0, false)
-			_show_diff_message("Cannot show this diff.\n%s" % String(error.get("message", error.get("title", ""))))
-			_shown_diff = ""
-			return
-	var keep: bool = key == _shown_diff
-	_shown_diff = key
-	match String(info.get("content", "text")):
-		"text", "combined":
-			_diff_message.hide()
-			_diff_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep)
-		"binary":
-			_diff_view.show_lines(0, 0, false)
-			_show_diff_message("Binary file: %s → %s" % [
-				_size_text(int(info["old_size"])), _size_text(int(info["new_size"]))])
-		"too_large":
-			_diff_view.show_lines(0, 0, false)
-			_show_diff_message("This diff is large (more than %s)." % _size_text(int(info["bytes"])), true)
-		"empty":
-			_diff_view.show_lines(0, 0, false)
-			_show_diff_message("No changes to show." if notes.is_empty() else "\n".join(notes))
+	if session != null:
+		_diff_panel.show_info(session.diff_info())
 
 
-func _show_diff_message(text: String, offer_full: bool = false) -> void:
-	_diff_message_label.text = text
-	_load_anyway.visible = offer_full
-	_diff_message.show()
-
-
-static func _size_text(bytes: int) -> String:
-	if bytes < 0:
-		return "none"
-	return String.humanize_size(bytes)
+func diff_panel() -> DiffPanel:
+	return _diff_panel
 
 
 func _apply_theme() -> void:

@@ -1,0 +1,56 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://app/history/commit_details.gd" id="1_details"]
+[ext_resource type="Script" path="res://app/history/commit_file_list.gd" id="2_files"]
+[ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="3_panel"]
+
+[node name="CommitDetails" type="HSplitContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_details")
+
+[node name="Info" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Summary" type="Label" parent="Info"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"CommitSummary"
+autowrap_mode = 3
+
+[node name="Meta" type="Label" parent="Info"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+autowrap_mode = 3
+
+[node name="BodyScroll" type="ScrollContainer" parent="Info"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Body" type="Label" parent="Info/BodyScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+autowrap_mode = 3
+
+[node name="FilesLabel" type="Label" parent="Info"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SectionHeader"
+
+[node name="Files" type="Control" parent="Info"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_files")
+
+[node name="CommitDiffPanel" parent="." instance=ExtResource("3_panel")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3

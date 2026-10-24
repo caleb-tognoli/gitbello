@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
 [ext_resource type="Script" path="res://app/changes/commit_box.gd" id="3_commit"]
-[ext_resource type="Script" path="res://ui/diff_view/diff_view.gd" id="4_diff"]
+[ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="5_panel"]
 
 [node name="ChangesView" type="HSplitContainer"]
 anchors_preset = 15
@@ -145,64 +145,7 @@ layout_mode = 2
 theme_type_variation = &"ErrorOutput"
 editable = false
 
-[node name="DiffPanel" type="VBoxContainer" parent="."]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="DiffHeaderPanel" type="PanelContainer" parent="DiffPanel"]
-layout_mode = 2
-theme_type_variation = &"DiffHeader"
-
-[node name="DiffHeader" type="HBoxContainer" parent="DiffPanel/DiffHeaderPanel"]
-layout_mode = 2
-
-[node name="DiffPath" type="Label" parent="DiffPanel/DiffHeaderPanel/DiffHeader"]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="DiffStats" type="Label" parent="DiffPanel/DiffHeaderPanel/DiffHeader"]
+[node name="DiffPanel" parent="." instance=ExtResource("5_panel")]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_type_variation = &"DimLabel"
-text_overrun_behavior = 3
-
-[node name="DiffStack" type="Control" parent="DiffPanel"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="DiffView" type="Control" parent="DiffPanel/DiffStack"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("4_diff")
-
-[node name="DiffMessage" type="CenterContainer" parent="DiffPanel/DiffStack"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="Box" type="VBoxContainer" parent="DiffPanel/DiffStack/DiffMessage"]
-layout_mode = 2
-
-[node name="DiffMessageLabel" type="Label" parent="DiffPanel/DiffStack/DiffMessage/Box"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DimLabel"
-horizontal_alignment = 1
-
-[node name="LoadAnywayButton" type="Button" parent="DiffPanel/DiffStack/DiffMessage/Box"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-size_flags_horizontal = 4
-text = "Load anyway"

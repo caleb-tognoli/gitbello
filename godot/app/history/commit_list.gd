@@ -118,6 +118,21 @@ func row_data(row: int) -> Dictionary:
 	return _rows.get(row, {})
 
 
+## Full hash of a row (fetched when it is outside the cached window), or "".
+func hash_at(row: int) -> String:
+	if row < 0 or session == null:
+		return ""
+	if _rows.has(row):
+		return String(_rows[row]["hash"])
+	var rows: Array[Dictionary] = session.graph_rows(row, 1)
+	return String(rows[0]["hash"]) if not rows.is_empty() else ""
+
+
+## Local date and time (`YYYY-MM-DD HH:MM`) of a unix time.
+func date_text(unix_time: int) -> String:
+	return _date(unix_time)
+
+
 func _get_row_count() -> int:
 	return session.graph_row_count() if session != null else 0
 

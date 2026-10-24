@@ -557,6 +557,11 @@ fn generate(p: &Palette) -> String {
     t.item("ErrorOutput/colors/font_readonly_color", col(p.error));
     t.item("ErrorOutput/fonts/font", &mono);
     t.item("ErrorOutput/font_sizes/font_size", 12);
+    t.base("CommitSummary", "Label");
+    t.item("CommitSummary/font_sizes/font_size", 16);
+    t.item("CommitDetails/constants/details_height", 300);
+    t.item("CommitDetails/constants/files_width", 340);
+    t.item("CommitDetails/constants/body_height", 80);
     t.item("ChangesView/constants/files_width", 360);
     t.item("ChangesView/constants/separation", 6);
     t.item("CommitBox/constants/body_height", 96);
