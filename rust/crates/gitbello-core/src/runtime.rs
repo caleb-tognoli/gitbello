@@ -27,8 +27,9 @@ use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
 use crate::ops::{
-    CheckoutTarget, PullMode, PushSpec, RefOp, SyncOp, AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL,
-    FETCH_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
+    CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp, AUTO_FETCH_JOB_LABEL,
+    CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL, NEW_TASK_JOB_LABEL, PULL_JOB_LABEL,
+    PUSH_JOB_LABEL,
 };
 use crate::repo::{
     CommitDetails, FileState, Head, Operation, Ref, RefKind, RepoPaths, RepoStatus, StashEntry,
@@ -36,6 +37,7 @@ use crate::repo::{
 };
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
+use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
@@ -56,6 +58,9 @@ pub const MAX_DISCARD_UNDO: usize = 20;
 
 /// Repositories remembered for the "recent" list.
 pub const MAX_KNOWN_REPOS: usize = 20;
+
+/// Label of the read that finds worktrees to clean up.
+pub const CLEANUP_SCAN_JOB_LABEL: &str = "find merged worktrees";
 
 /// Label of tag pushes (branch pushes use [`PUSH_JOB_LABEL`]).
 pub const PUSH_TAG_JOB_LABEL: &str = "push tag";
@@ -112,6 +117,14 @@ pub enum RuntimeEvent {
     CommitLoaded {
         repo: PathBuf,
     },
+    /// The worktree folder of this repository is gone; refreshes stop.
+    Missing {
+        repo: PathBuf,
+    },
+    /// The candidates requested with [`Runtime::load_cleanup`] arrived.
+    CleanupLoaded {
+        repo: PathBuf,
+    },
     /// The HEAD commit's message, requested with [`Runtime::load_head_message`].
     HeadMessage {
         repo: PathBuf,
@@ -156,6 +169,9 @@ pub struct RepoState {
     next_auto_fetch: Option<Instant>,
     /// The last auto-fetch failed; further failures are not reported again.
     auto_fetch_failed: bool,
+    /// The worktree folder disappeared.
+    missing: bool,
+    cleanup: Option<Vec<CleanupCandidate>>,
 }
 
 impl RepoState {
@@ -184,6 +200,8 @@ impl RepoState {
             fetch_job: None,
             next_auto_fetch: None,
             auto_fetch_failed: false,
+            missing: false,
+            cleanup: None,
         }
     }
 
@@ -201,13 +219,55 @@ impl RepoState {
         self.paths.as_ref()
     }
 
-    /// Folder name of the worktree root (or of the key until resolved).
+    /// Folder name of the worktree root (or of the key until resolved); a
+    /// linked worktree's is prefixed with its repository's (`repo/task`).
     pub fn display_name(&self) -> String {
-        let path = self.toplevel.as_deref().unwrap_or(&self.key);
-        path.file_name().map_or_else(
-            || path.display().to_string(),
-            |n| n.to_string_lossy().into_owned(),
-        )
+        let name = |path: &Path| {
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        };
+        let own = name(self.toplevel.as_deref().unwrap_or(&self.key));
+        let Some(paths) = self.paths.as_ref().filter(|p| p.git_dir != p.common_dir) else {
+            return own;
+        };
+        // The common dir is `<repo>/.git`, or the bare repository itself.
+        let common = &paths.common_dir;
+        let repo = if common.file_name().is_some_and(|n| n == ".git") {
+            common.parent().map(name)
+        } else {
+            Some(name(common))
+        };
+        match repo {
+            Some(repo) => format!("{}/{own}", repo.strip_suffix(".git").unwrap_or(&repo)),
+            None => own,
+        }
+    }
+
+    /// Whether the worktree folder disappeared (see [`RuntimeEvent::Missing`]).
+    pub fn is_missing(&self) -> bool {
+        self.missing
+    }
+
+    /// The main worktree (or bare repository) folder, once worktrees are read.
+    pub fn main_worktree(&self) -> Option<&Path> {
+        self.worktrees
+            .as_ref()?
+            .iter()
+            .find(|wt| wt.is_main)
+            .map(|wt| wt.path.as_path())
+    }
+
+    /// Where new tasks start and what cleanup compares against (short ref
+    /// name, such as `origin/main`).
+    pub fn default_base(&self) -> Option<String> {
+        default_base(self.refs.as_deref()?, self.default_remote().as_deref())
+    }
+
+    /// Worktrees the cleanup flow offers, once [`Runtime::load_cleanup`] answered.
+    pub fn cleanup(&self) -> Option<&[CleanupCandidate]> {
+        self.cleanup.as_deref()
     }
 
     pub fn is_ready(&self) -> bool {
@@ -593,7 +653,11 @@ impl Runtime {
     }
 
     pub fn refresh(&self, key: &Path, kinds: RefreshSet) {
-        if self.repos.get(key).is_some_and(RepoState::is_ready) {
+        if self
+            .repos
+            .get(key)
+            .is_some_and(|s| s.is_ready() && !s.missing)
+        {
             self.scheduler.request_refresh(key, kinds);
         }
     }
@@ -977,6 +1041,103 @@ impl Runtime {
         )
     }
 
+    /// Adds, removes, locks, unlocks or prunes worktrees (job label
+    /// [`WorktreeOp::label`]).
+    pub fn worktree_op(&self, key: &Path, op: WorktreeOp) -> Option<JobId> {
+        self.repos.get(key).filter(|s| s.is_ready())?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            op.label(),
+            worktree_refresh(),
+            move |ctx| {
+                ctx.backend()
+                    .worktree_op(ctx.repo(), &op, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// The new-task flow (PLAN §4) as one job: fetch the base's remote, then
+    /// create the branch in a new worktree. A failure rolls back what was
+    /// created. The caller opens the worktree afterwards.
+    pub fn new_task(&self, key: &Path, task: NewTask) -> Option<JobId> {
+        self.repos.get(key).filter(|s| s.is_ready())?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            NEW_TASK_JOB_LABEL,
+            worktree_refresh(),
+            move |ctx| {
+                let progress = Box::new(ctx.progress_sink());
+                new_task_job(
+                    ctx.backend(),
+                    ctx.repo(),
+                    &task,
+                    progress,
+                    ctx.cancel_token(),
+                )
+                .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Finds the worktrees whose branch is merged into the default base or
+    /// whose upstream is gone; they arrive as [`RuntimeEvent::CleanupLoaded`].
+    pub fn load_cleanup(&mut self, key: &Path) -> Option<JobId> {
+        let state = self.repos.get_mut(key).filter(|s| s.is_ready())?;
+        let base = state.default_base()?;
+        let current = state.toplevel.clone()?;
+        let badges = state.worktree_badges.clone();
+        state.cleanup = None;
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, CLEANUP_SCAN_JOB_LABEL, move |ctx| {
+                    let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
+                    let worktrees = backend.worktrees(repo, cancel)?;
+                    let refs = backend.refs(repo, cancel)?;
+                    let merged = backend.merged_branches(repo, &base, cancel)?;
+                    Ok(JobOutput::Cleanup(cleanup_candidates(
+                        &worktrees, &refs, &merged, &base, &badges, &current,
+                    )))
+                })),
+        )
+    }
+
+    /// Removes worktrees (`(path, branch, force)`; force discards local
+    /// changes) and, with `delete_branches`, their branches. Goes on past a
+    /// failure and reports the first one.
+    pub fn cleanup(
+        &self,
+        key: &Path,
+        items: Vec<(PathBuf, String, bool)>,
+        delete_branches: bool,
+    ) -> Option<JobId> {
+        self.repos.get(key).filter(|s| s.is_ready())?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            CLEANUP_JOB_LABEL,
+            worktree_refresh(),
+            move |ctx| {
+                let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
+                let mut first_error = None;
+                for (path, branch, force) in items {
+                    let remove = WorktreeOp::Remove { path, force };
+                    let mut result = backend.worktree_op(repo, &remove, cancel);
+                    if result.is_ok() && delete_branches {
+                        let delete = RefOp::DeleteBranch {
+                            name: branch,
+                            force: true,
+                        };
+                        result = backend.ref_op(repo, &delete, cancel);
+                    }
+                    if let Err(err) = result {
+                        first_error.get_or_insert(err);
+                    }
+                }
+                first_error.map_or(Ok(JobOutput::Done), Err)
+            },
+        )))
+    }
+
     /// Cancels a queued or running job (a fetch, pull or push, say).
     pub fn cancel_job(&self, job: JobId) -> bool {
         self.scheduler.cancel(job)
@@ -1125,6 +1286,13 @@ impl Runtime {
             }
             return;
         }
+        if label == CLEANUP_SCAN_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::Cleanup(list))) = kind {
+                state.cleanup = Some(list);
+                out.push(RuntimeEvent::CleanupLoaded { repo });
+                return;
+            }
+        }
         if label == HEAD_MESSAGE_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::HeadMessage(message))) = kind {
                 out.push(RuntimeEvent::HeadMessage { repo, message });
@@ -1145,12 +1313,36 @@ impl Runtime {
                             self.diff_generation,
                         );
                     }
+                    let common = state.paths.as_ref().map(|p| p.common_dir.clone());
+                    // Other open worktrees of this repository show this one's badge.
+                    if refresh == RefreshKind::Status {
+                        for (key, other) in &self.repos {
+                            let sibling = *key != repo
+                                && other.paths.as_ref().map(|p| &p.common_dir) == common.as_ref()
+                                && other.worktrees.as_ref().is_some_and(|w| w.len() > 1);
+                            if sibling {
+                                let badges = RefreshSet::EMPTY.with(RefreshKind::WorktreeBadges);
+                                self.scheduler.request_refresh(key, badges);
+                            }
+                        }
+                    }
                     out.push(RuntimeEvent::Updated {
                         repo,
                         kind: refresh,
                     });
                 }
                 EventKind::Finished(Err(error)) if error.kind != GitErrorKind::Cancelled => {
+                    // The worktree folder was deleted: say so once and stop.
+                    if state.toplevel.as_ref().is_some_and(|t| !t.is_dir()) {
+                        if !state.missing {
+                            state.missing = true;
+                            if let Some(watcher) = &self.watcher {
+                                watcher.unwatch(&repo);
+                            }
+                            out.push(RuntimeEvent::Missing { repo });
+                        }
+                        return;
+                    }
                     out.push(RuntimeEvent::RefreshFailed {
                         repo,
                         kind: refresh,
@@ -1264,12 +1456,83 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             state.worktree_badges = badges.into_iter().collect();
         }
         JobOutput::Opened { .. }
+        | JobOutput::Cleanup(_)
         | JobOutput::Done
         | JobOutput::Diff { .. }
         | JobOutput::HeadMessage(_)
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_) => {}
     }
+}
+
+/// What worktree jobs refresh: the list, its badges, and refs (branches
+/// show which worktree has them).
+fn worktree_refresh() -> RefreshSet {
+    [
+        RefreshKind::Worktrees,
+        RefreshKind::WorktreeBadges,
+        RefreshKind::Refs,
+    ]
+    .into_iter()
+    .collect()
+}
+
+/// Fetches `task`'s remote, then adds the worktree with its new branch. On
+/// failure, removes what `git worktree add` left behind (it may have
+/// created the branch before refusing the folder).
+fn new_task_job(
+    backend: &dyn GitBackend,
+    repo: &Path,
+    task: &NewTask,
+    progress: crate::backend::ProgressSink,
+    cancel: &CancelToken,
+) -> Result<(), GitError> {
+    if let Some(remote) = &task.fetch_remote {
+        let fetch = SyncOp::Fetch {
+            remote: Some(remote.clone()),
+        };
+        backend.sync(repo, &fetch, progress, cancel)?;
+    }
+    let branch_ref = format!("refs/heads/{}", task.branch);
+    if backend.resolve(repo, &branch_ref, cancel)?.is_some() {
+        return Err(GitError::new(
+            "worktree add",
+            GitErrorKind::AlreadyExists,
+            format!("a branch named '{}' already exists", task.branch),
+        ));
+    }
+    let add = WorktreeOp::Add {
+        path: task.path.clone(),
+        branch: task.branch.clone(),
+        start: Some(task.base.clone()),
+    };
+    let Err(err) = backend.worktree_op(repo, &add, cancel) else {
+        return Ok(());
+    };
+    // Rolling back must not be cut short by a cancel.
+    let restore = CancelToken::new();
+    let registered = backend.worktrees(repo, &restore).is_ok_and(|list| {
+        list.iter()
+            .any(|wt| wt.path.components().eq(task.path.components()))
+    });
+    if registered {
+        let remove = WorktreeOp::Remove {
+            path: task.path.clone(),
+            force: true,
+        };
+        let _ = backend.worktree_op(repo, &remove, &restore);
+    }
+    if backend
+        .resolve(repo, &branch_ref, &restore)
+        .is_ok_and(|b| b.is_some())
+    {
+        let delete = RefOp::DeleteBranch {
+            name: task.branch.clone(),
+            force: true,
+        };
+        let _ = backend.ref_op(repo, &delete, &restore);
+    }
+    Err(err)
 }
 
 /// Checks out `target`; with `stash`, stashes every local change first and

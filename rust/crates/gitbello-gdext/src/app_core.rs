@@ -150,6 +150,7 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal(signal, &[]);
             }
         }
+        RuntimeEvent::Missing { .. } | RuntimeEvent::CleanupLoaded { .. } => {}
         RuntimeEvent::CommitLoaded { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("commit_loaded", &[]);

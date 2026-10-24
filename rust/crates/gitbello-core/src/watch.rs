@@ -134,7 +134,7 @@ pub fn classify(target: &WatchTarget, path: &Path) -> Change {
             }
             // Linked worktrees are registered here. A linked target's own git
             // dir lives below it too, but matched in the first iteration.
-            "worktrees" => set(&[Worktrees]),
+            "worktrees" => set(&[Worktrees, WorktreeBadges]),
             _ => Change::Ignore,
         };
     }
@@ -392,7 +392,10 @@ mod tests {
         assert_eq!(kinds(c("/r/.git/logs/refs/stash")), [Stashes]);
         assert_eq!(kinds(c("/r/.git/MERGE_HEAD")), [Status, Operation]);
         assert_eq!(kinds(c("/r/.git/rebase-merge/done")), [Status, Operation]);
-        assert_eq!(kinds(c("/r/.git/worktrees/wt/HEAD")), [Worktrees]);
+        assert_eq!(
+            kinds(c("/r/.git/worktrees/wt/HEAD")),
+            [Worktrees, WorktreeBadges]
+        );
         for ignored in [
             "/r/.git/objects/ab/cdef",
             "/r/.git/index.lock",
@@ -421,7 +424,10 @@ mod tests {
         // Shared refs still matter.
         assert_eq!(kinds(c("/r/.git/refs/heads/main")), [Status, Refs]);
         // Other worktrees' registrations are worktree-list changes.
-        assert_eq!(kinds(c("/r/.git/worktrees/other/HEAD")), [Worktrees]);
+        assert_eq!(
+            kinds(c("/r/.git/worktrees/other/HEAD")),
+            [Worktrees, WorktreeBadges]
+        );
         assert_eq!(c("/wt/a.txt"), Change::WorktreeFile(PathBuf::from("a.txt")));
         // The main worktree's files are not this target's business.
         assert_eq!(c("/r/a.txt"), Change::Ignore);

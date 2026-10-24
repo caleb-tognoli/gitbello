@@ -24,6 +24,7 @@ use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::repo::{CommitDetails, Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 use crate::sidebar::Badge;
+use crate::worktrees::CleanupCandidate;
 
 pub type JobId = u64;
 
@@ -149,6 +150,8 @@ pub enum JobOutput {
     HeadMessage(String),
     /// One commit's details.
     Commit(Box<CommitDetails>),
+    /// Worktrees the cleanup flow can offer.
+    Cleanup(Vec<CleanupCandidate>),
     /// A discard finished; these `(path, blob id)` backups can undo it.
     Discarded(Vec<(PathBuf, String)>),
     /// A repository was opened: its worktree root and git directories.

@@ -20,6 +20,7 @@ pub mod repo;
 pub mod runtime;
 pub mod sidebar;
 pub mod watch;
+pub mod worktrees;
 
 /// Version of the core crate, as reported to the UI and CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -1,6 +1,9 @@
-//! Write operations of M5 (PLAN §5): syncing with remotes, branches, tags,
-//! checkout and cherry-pick. Plain data for the [`crate::backend::GitBackend`]
-//! methods; the runtime decides what to run and in which order.
+//! Write operations (PLAN §5, M5 and M6): syncing with remotes, branches,
+//! tags, checkout, cherry-pick and worktrees. Plain data for the
+//! [`crate::backend::GitBackend`] methods; the runtime decides what to run
+//! and in which order.
+
+use std::path::PathBuf;
 
 use crate::repo::Operation;
 
@@ -171,6 +174,57 @@ impl RefOp {
     }
 }
 
+/// Worktree changes (`git worktree ...`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeOp {
+    /// Checks out `branch` in a new worktree at `path`; with `start`, creates
+    /// `branch` there first (without tracking `start`).
+    Add {
+        path: PathBuf,
+        branch: String,
+        start: Option<String>,
+    },
+    /// `force` also removes a worktree with local changes or a lock.
+    Remove {
+        path: PathBuf,
+        force: bool,
+    },
+    Lock {
+        path: PathBuf,
+        reason: String,
+    },
+    Unlock {
+        path: PathBuf,
+    },
+    /// Forgets worktrees whose folders are gone.
+    Prune,
+}
+
+impl WorktreeOp {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Add { .. } => "add worktree",
+            Self::Remove { .. } => "remove worktree",
+            Self::Lock { .. } => "lock worktree",
+            Self::Unlock { .. } => "unlock worktree",
+            Self::Prune => "prune worktrees",
+        }
+    }
+}
+
+/// The new-task flow (PLAN §4): a branch from `base` in a new worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTask {
+    pub branch: String,
+    /// Commit-ish to start from, such as `origin/main`.
+    pub base: String,
+    pub path: PathBuf,
+    /// Fetched first so the base is current.
+    pub fetch_remote: Option<String>,
+}
+
+pub const NEW_TASK_JOB_LABEL: &str = "new task";
+pub const CLEANUP_JOB_LABEL: &str = "clean up worktrees";
 pub const FETCH_JOB_LABEL: &str = "fetch";
 pub const AUTO_FETCH_JOB_LABEL: &str = "auto-fetch";
 pub const PULL_JOB_LABEL: &str = "pull";

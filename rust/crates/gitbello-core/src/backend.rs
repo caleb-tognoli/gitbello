@@ -13,7 +13,7 @@ use crate::diff::{
     parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
 };
 use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, Progress};
-use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp};
+use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remotes,
     parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
@@ -148,6 +148,27 @@ pub trait GitBackend: Send + Sync {
         index: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    fn worktree_op(
+        &self,
+        repo: &Path,
+        op: &WorktreeOp,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Full names of the local branches merged into `base`.
+    fn merged_branches(
+        &self,
+        repo: &Path,
+        base: &str,
+        cancel: &CancelToken,
+    ) -> Result<Vec<String>, GitError>;
+    /// The commit `rev` names, or `None` when it names nothing.
+    fn resolve(
+        &self,
+        repo: &Path,
+        rev: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError>;
 }
 
 /// Receives `--progress` updates of a running fetch, pull or push.
@@ -752,6 +773,89 @@ impl GitBackend for CliBackend {
         }
         cmd.cancel_token(cancel).run().map(drop)
     }
+
+    fn worktree_op(
+        &self,
+        repo: &Path,
+        op: &WorktreeOp,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let mut cmd = self.runner.write(repo).arg("worktree");
+        cmd = match op {
+            WorktreeOp::Add {
+                path,
+                branch,
+                start: Some(start),
+            } => cmd
+                .args(["add", "--no-track", "-b", branch])
+                .arg(worktree_arg(path))
+                .arg(start),
+            WorktreeOp::Add {
+                path,
+                branch,
+                start: None,
+            } => cmd.arg("add").arg(worktree_arg(path)).arg(branch),
+            // A locked worktree needs the force flag twice.
+            WorktreeOp::Remove { path, force } => {
+                let cmd = cmd.arg("remove");
+                let cmd = if *force { cmd.args(["-f", "-f"]) } else { cmd };
+                cmd.arg(worktree_arg(path))
+            }
+            WorktreeOp::Lock { path, reason } => {
+                let cmd = cmd.arg("lock");
+                let cmd = if reason.is_empty() {
+                    cmd
+                } else {
+                    cmd.args(["--reason", reason])
+                };
+                cmd.arg(worktree_arg(path))
+            }
+            WorktreeOp::Unlock { path } => cmd.arg("unlock").arg(worktree_arg(path)),
+            WorktreeOp::Prune => cmd.arg("prune"),
+        };
+        cmd.cancel_token(cancel).run().map(drop)
+    }
+
+    fn merged_branches(
+        &self,
+        repo: &Path,
+        base: &str,
+        cancel: &CancelToken,
+    ) -> Result<Vec<String>, GitError> {
+        let merged = format!("--merged={base}");
+        let args = [
+            "for-each-ref",
+            "--format=%(refname)",
+            &merged,
+            "refs/heads/",
+        ];
+        let out = self.read(repo, &args, cancel)?;
+        Ok(out
+            .stdout_text()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+
+    fn resolve(
+        &self,
+        repo: &Path,
+        rev: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        let rev = format!("{rev}^{{commit}}");
+        match self.read(repo, &["rev-parse", "-q", "--verify", &rev], cancel) {
+            Ok(out) => Ok(Some(out.stdout_text().trim().to_owned())),
+            Err(err) if err.exit_code == Some(1) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+/// Paths for `git worktree` arguments, with forward slashes.
+fn worktree_arg(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// `git <args>` that aborts `operation`.

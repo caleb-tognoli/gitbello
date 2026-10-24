@@ -13,7 +13,7 @@ use toml::{Table, Value};
 
 use crate::ops::PullMode;
 
-/// PLAN O3 suggestion; still open for confirmation.
+/// PLAN O3: worktrees go next to the repository, grouped per repository.
 pub const DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
 pub const DEFAULT_AUTO_FETCH_MINUTES: u32 = 10;
 /// PLAN §3.8; `{path}` is the worktree (or file) to open.

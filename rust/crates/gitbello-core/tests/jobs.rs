@@ -13,7 +13,7 @@ use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
-use gitbello_core::ops::{RefOp, SyncOp};
+use gitbello_core::ops::{RefOp, SyncOp, WorktreeOp};
 use gitbello_core::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 
 #[derive(Default)]
@@ -125,6 +125,15 @@ impl GitBackend for FakeBackend {
     }
     fn stash_pop(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
+    }
+    fn worktree_op(&self, _: &Path, _: &WorktreeOp, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn merged_branches(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Vec<String>, GitError> {
+        Ok(Vec::new())
+    }
+    fn resolve(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Option<String>, GitError> {
+        Ok(None)
     }
 }
 
