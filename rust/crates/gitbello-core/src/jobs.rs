@@ -68,6 +68,18 @@ impl RefreshSet {
         RefreshKind::ALL.iter().copied().collect()
     }
 
+    /// The cheap refresh to run for the active tab when the window regains
+    /// focus, as a fallback for missed file events (PLAN §3.6).
+    pub fn on_focus() -> Self {
+        [
+            RefreshKind::Status,
+            RefreshKind::Refs,
+            RefreshKind::Operation,
+        ]
+        .into_iter()
+        .collect()
+    }
+
     pub fn with(self, kind: RefreshKind) -> Self {
         Self(self.0 | kind.bit())
     }
@@ -85,7 +97,9 @@ impl RefreshSet {
     }
 
     pub fn iter(self) -> impl Iterator<Item = RefreshKind> {
-        RefreshKind::ALL.into_iter().filter(move |k| self.contains(*k))
+        RefreshKind::ALL
+            .into_iter()
+            .filter(move |k| self.contains(*k))
     }
 }
 
@@ -390,8 +404,12 @@ impl JobScheduler {
             if let Some(job) = state.queue.remove(pos) {
                 drop(state);
                 job.cancel.cancel();
-                self.inner
-                    .send(job.id, &job.spec.repo, &job.spec.label, EventKind::Cancelled);
+                self.inner.send(
+                    job.id,
+                    &job.spec.repo,
+                    &job.spec.label,
+                    EventKind::Cancelled,
+                );
                 self.inner.wake.notify_all();
             }
             return true;
