@@ -74,3 +74,18 @@ index memory    4.78 MiB (58.5 bytes/commit, target < 150)
 string memory   4.12 MiB
 50-row slice    avg 44.2 us, max 209.7 us (400 samples)
 ```
+
+## M4a — diffs and change lists
+
+Debug build of `gitbello-cli` (core at opt-level 2), Windows, git 2.53.0, temp repo.
+`gitbello-cli diff <root> <file> [--full]` and `GITBELLO_LOG=1 gitbello-cli status <root>`.
+
+```text
+diff, 20k-line file, 1 in 3 lines changed   26,668 lines   36 ms (git + parse)
+diff, 50k-line file, every line changed     100,001 lines  63 ms with --full
+same file without --full                    stops at the 2 MiB limit after 49 ms
+status, 10,000 untracked files              42 ms
+```
+
+The change lists and the diff view fetch only a window around the visible rows
+(`change_rows`, `diff_lines`), so list length does not change frame cost.

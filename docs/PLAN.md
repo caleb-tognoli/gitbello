@@ -287,12 +287,14 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work), each with its own review.
 
 #### M4a — Changes panel, unified diff, commit (≈1.5 weeks)
-- [ ] Changes panel: unstaged, staged and untracked lists, multi-select, stage or unstage files
-- [ ] `DiffView` (unified): diffs parsed in core and read in slices; large/binary handling
-- [ ] Commit box: summary and body, amend toggle, hook output shown on failure
-- [ ] Per-worktree dirty badges in the sidebar (pulled forward from M6)
+- [x] Changes panel: unstaged, staged and untracked lists, multi-select, stage or unstage files
+- [x] `DiffView` (unified): diffs parsed in core and read in slices; large/binary handling
+- [x] Commit box: summary and body, amend toggle, hook output shown on failure
+- [x] Per-worktree dirty badges in the sidebar (pulled forward from M6)
 
 **Accept when** a full stage-commit-amend cycle works using only the keyboard.
+
+*Result:* covered by `changes_smoke.gd` (Ctrl+2, Enter/Space to stage, Ctrl+Shift+M, Ctrl+Enter, Ctrl+Shift+A, a rejecting hook) and core tests in `tests/changes.rs`. Conflicted files are listed with the unstaged ones. Worktree badges refresh on open, F5 and focus (linked worktrees are not watched until M6). Numbers in `docs/perf.md`.
 
 #### M4b — Hunks, lines, details (≈1.5 weeks)
 - [ ] `DiffView`: side-by-side, syntax highlighting (hand-written lexers, no new crate), intra-line highlights
