@@ -16,14 +16,15 @@ use crate::backend::{CliBackend, GitBackend, PatchGuard};
 use crate::changes::{self, ChangeGroup, ChangeLists};
 use crate::config::{Config, ConfigError};
 use crate::diff::{
-    build_patch, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode, LARGE_DIFF_BYTES,
+    build_patch, CommitSide, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
+    LARGE_DIFF_BYTES,
 };
 use crate::git::{CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress};
 use crate::graph::{GraphLoader, GRAPH_JOB_LABEL};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
-use crate::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use crate::repo::{CommitDetails, Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 
@@ -32,6 +33,8 @@ pub const OPEN_JOB_LABEL: &str = "open repository";
 
 /// Labels of the jobs the changes panel runs.
 pub const DIFF_JOB_LABEL: &str = "load diff";
+pub const COMMIT_DIFF_JOB_LABEL: &str = "load commit diff";
+pub const COMMIT_DETAILS_JOB_LABEL: &str = "read commit";
 pub const HEAD_MESSAGE_JOB_LABEL: &str = "read HEAD message";
 pub const STAGE_JOB_LABEL: &str = "stage";
 pub const UNSTAGE_JOB_LABEL: &str = "unstage";
@@ -80,8 +83,13 @@ pub enum RuntimeEvent {
     GraphReset {
         repo: PathBuf,
     },
-    /// The selected diff loaded, failed or was cleared.
+    /// A selected diff loaded or failed.
     DiffChanged {
+        repo: PathBuf,
+        slot: DiffSlot,
+    },
+    /// The commit requested with [`Runtime::load_commit`] loaded.
+    CommitLoaded {
         repo: PathBuf,
     },
     /// The HEAD commit's message, requested with [`Runtime::load_head_message`].
@@ -114,6 +122,9 @@ pub struct RepoState {
     changes: ChangeLists,
     worktree_badges: HashMap<PathBuf, Badge>,
     diff: Option<DiffState>,
+    commit: Option<CommitDetails>,
+    commit_requested: Option<String>,
+    commit_diff: Option<DiffState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
     graph: Option<GraphLoader>,
@@ -136,6 +147,9 @@ impl RepoState {
             changes: ChangeLists::default(),
             worktree_badges: HashMap::new(),
             diff: None,
+            commit: None,
+            commit_requested: None,
+            commit_diff: None,
             discards: Vec::new(),
             graph: None,
             graph_dirty_since: None,
@@ -221,6 +235,23 @@ impl RepoState {
         self.diff.as_ref()
     }
 
+    /// The commit last loaded with [`Runtime::load_commit`] (once it arrived).
+    pub fn commit(&self) -> Option<&CommitDetails> {
+        self.commit.as_ref()
+    }
+
+    /// The diff of a file of the loaded commit.
+    pub fn commit_diff(&self) -> Option<&DiffState> {
+        self.commit_diff.as_ref()
+    }
+
+    fn slot_mut(&mut self, slot: DiffSlot) -> &mut Option<DiffState> {
+        match slot {
+            DiffSlot::Changes => &mut self.diff,
+            DiffSlot::Commit => &mut self.commit_diff,
+        }
+    }
+
     /// Whether the selected diff's lines can be used with `mode`: a loaded
     /// text diff of the matching kind (unstaged for stage and discard,
     /// staged for unstage), not a rename or copy.
@@ -263,7 +294,24 @@ impl RepoState {
     }
 }
 
-/// The diff selected in the changes panel.
+/// Which of a repository's two diffs: the changes panel's or the commit
+/// details panel's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiffSlot {
+    Changes,
+    Commit,
+}
+
+impl DiffSlot {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Changes => DIFF_JOB_LABEL,
+            Self::Commit => COMMIT_DIFF_JOB_LABEL,
+        }
+    }
+}
+
+/// A selected diff and its loading state.
 #[derive(Debug, Clone)]
 pub struct DiffState {
     target: DiffTarget,
@@ -434,19 +482,62 @@ impl Runtime {
     /// Shows the diff of `target` (or nothing). A diff over the size limit
     /// loads only with `full`. The diff reloads after every status refresh.
     pub fn select_diff(&mut self, key: &Path, target: Option<DiffTarget>, full: bool) {
+        self.select_slot(key, DiffSlot::Changes, target, full);
+    }
+
+    /// Loads the details of commit `oid` (a full or unique hash); they arrive
+    /// as [`RuntimeEvent::CommitLoaded`]. Clears the commit file diff.
+    pub fn load_commit(&mut self, key: &Path, oid: &str) {
+        let Some(state) = self.repos.get_mut(key).filter(|s| s.is_ready()) else {
+            return;
+        };
+        if state.commit_requested.as_deref() == Some(oid) {
+            return;
+        }
+        state.commit_requested = Some(oid.to_owned());
+        state.commit_diff = None;
+        let oid = oid.to_owned();
+        self.scheduler
+            .submit(JobSpec::read(key, COMMIT_DETAILS_JOB_LABEL, move |ctx| {
+                ctx.backend()
+                    .commit_details(ctx.repo(), &oid, ctx.cancel_token())
+                    .map(|details| JobOutput::Commit(Box::new(details)))
+            }));
+    }
+
+    /// Shows the diff of `path` in the loaded commit (or nothing).
+    pub fn select_commit_file(&mut self, key: &Path, path: Option<&Path>, full: bool) {
+        let target = path.and_then(|path| {
+            let commit = self.repos.get(key)?.commit.as_ref()?;
+            let file = commit.files.iter().find(|f| f.path == path)?;
+            Some(DiffTarget {
+                kind: DiffKind::Commit,
+                path: file.path.clone(),
+                original_path: file.original_path.clone(),
+                commit: Some(CommitSide {
+                    oid: commit.oid.clone(),
+                    parent: commit.parents.first().cloned(),
+                }),
+            })
+        });
+        self.select_slot(key, DiffSlot::Commit, target, full);
+    }
+
+    fn select_slot(&mut self, key: &Path, slot: DiffSlot, target: Option<DiffTarget>, full: bool) {
         let Some(state) = self.repos.get_mut(key) else {
             return;
         };
         let Some(target) = target else {
-            state.diff = None;
+            *state.slot_mut(slot) = None;
             return;
         };
-        let same = state.diff.as_ref().is_some_and(|d| d.target == target);
-        if same && state.diff.as_ref().is_some_and(|d| d.full || !full) {
+        let current = state.slot_mut(slot);
+        let same = current.as_ref().is_some_and(|d| d.target == target);
+        if same && current.as_ref().is_some_and(|d| d.full || !full) {
             return;
         }
-        let keep = state.diff.take().filter(|_| same);
-        state.diff = Some(DiffState {
+        let keep = current.take().filter(|_| same);
+        *current = Some(DiffState {
             target,
             full,
             generation: 0,
@@ -455,7 +546,7 @@ impl Runtime {
             error: None,
         });
         self.diff_generation += 1;
-        submit_diff(&self.scheduler, state, self.diff_generation);
+        submit_diff(&self.scheduler, state, slot, self.diff_generation);
     }
 
     /// Stages `paths` (worktree-root relative, as in status), or everything.
@@ -686,7 +777,35 @@ impl Runtime {
             return;
         }
         if label == DIFF_JOB_LABEL {
-            apply_diff(state, kind, &repo, out);
+            apply_diff(state, DiffSlot::Changes, kind, &repo, out);
+            return;
+        }
+        if label == COMMIT_DIFF_JOB_LABEL {
+            apply_diff(state, DiffSlot::Commit, kind, &repo, out);
+            return;
+        }
+        if label == COMMIT_DETAILS_JOB_LABEL {
+            match kind {
+                EventKind::Finished(Ok(JobOutput::Commit(details)))
+                    if state.commit_requested.as_deref() == Some(details.oid.as_str())
+                        || state
+                            .commit_requested
+                            .as_deref()
+                            .is_some_and(|r| details.oid.starts_with(r)) =>
+                {
+                    state.commit = Some(*details);
+                    out.push(RuntimeEvent::CommitLoaded { repo });
+                }
+                EventKind::Finished(Err(error)) if error.kind != GitErrorKind::Cancelled => {
+                    out.push(RuntimeEvent::Job {
+                        repo,
+                        job,
+                        label,
+                        state: JobState::Finished(Some(error)),
+                    });
+                }
+                _ => {}
+            }
             return;
         }
         if label == HEAD_MESSAGE_JOB_LABEL {
@@ -702,7 +821,12 @@ impl Runtime {
                     // Staging, edits and commits all show up as a status change.
                     if refresh == RefreshKind::Status && state.diff.is_some() {
                         self.diff_generation += 1;
-                        submit_diff(&self.scheduler, state, self.diff_generation);
+                        submit_diff(
+                            &self.scheduler,
+                            state,
+                            DiffSlot::Changes,
+                            self.diff_generation,
+                        );
                     }
                     out.push(RuntimeEvent::Updated {
                         repo,
@@ -800,20 +924,23 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Done
         | JobOutput::Diff { .. }
         | JobOutput::HeadMessage(_)
+        | JobOutput::Commit(_)
         | JobOutput::Discarded(_) => {}
     }
 }
 
-/// Starts loading `state`'s selected diff as `generation`.
-fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, generation: u64) {
-    let (Some(diff), Some(toplevel)) = (state.diff.as_mut(), state.toplevel.clone()) else {
+/// Starts loading `state`'s selected diff in `slot` as `generation`.
+fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, generation: u64) {
+    let key = state.key.clone();
+    let toplevel = state.toplevel.clone();
+    let (Some(diff), Some(toplevel)) = (state.slot_mut(slot).as_mut(), toplevel) else {
         return;
     };
     diff.generation = generation;
     diff.loading = true;
     let target = diff.target.clone();
     let limit = (!diff.full).then_some(LARGE_DIFF_BYTES);
-    scheduler.submit(JobSpec::read(&state.key, DIFF_JOB_LABEL, move |ctx| {
+    scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
         ctx.backend()
             .diff(&toplevel, &target, limit, ctx.cancel_token())
             .map(|diff| JobOutput::Diff { generation, diff })
@@ -821,8 +948,14 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, generation: u64)
 }
 
 /// Stores a finished diff load if it is still the current one.
-fn apply_diff(state: &mut RepoState, kind: EventKind, repo: &Path, out: &mut Vec<RuntimeEvent>) {
-    let Some(current) = state.diff.as_mut() else {
+fn apply_diff(
+    state: &mut RepoState,
+    slot: DiffSlot,
+    kind: EventKind,
+    repo: &Path,
+    out: &mut Vec<RuntimeEvent>,
+) {
+    let Some(current) = state.slot_mut(slot).as_mut() else {
         return;
     };
     match kind {
@@ -843,6 +976,7 @@ fn apply_diff(state: &mut RepoState, kind: EventKind, repo: &Path, out: &mut Vec
     }
     out.push(RuntimeEvent::DiffChanged {
         repo: repo.to_path_buf(),
+        slot,
     });
 }
 

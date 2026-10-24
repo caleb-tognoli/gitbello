@@ -73,6 +73,14 @@ impl GitBackend for FakeBackend {
     fn commit(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
+    fn commit_details(
+        &self,
+        _: &Path,
+        _: &str,
+        _: &CancelToken,
+    ) -> Result<gitbello_core::repo::CommitDetails, GitError> {
+        Ok(Default::default())
+    }
     fn apply_patch(
         &self,
         _: &Path,

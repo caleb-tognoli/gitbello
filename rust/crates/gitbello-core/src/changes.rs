@@ -136,6 +136,7 @@ pub fn diff_target(status: &RepoStatus, group: ChangeGroup, path: &Path) -> Diff
         kind: group.diff_kind(),
         path: path.to_path_buf(),
         original_path,
+        commit: None,
     }
 }
 

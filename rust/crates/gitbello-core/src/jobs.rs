@@ -20,7 +20,7 @@ use std::thread::{self, JoinHandle};
 use crate::backend::GitBackend;
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
-use crate::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use crate::repo::{CommitDetails, Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
 use crate::sidebar::Badge;
 
 pub type JobId = u64;
@@ -144,6 +144,8 @@ pub enum JobOutput {
     },
     /// The HEAD commit's message.
     HeadMessage(String),
+    /// One commit's details.
+    Commit(Box<CommitDetails>),
     /// A discard finished; these `(path, blob id)` backups can undo it.
     Discarded(Vec<(PathBuf, String)>),
     /// A repository was opened: its worktree root and git directories.

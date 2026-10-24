@@ -13,9 +13,10 @@ use crate::diff::{
 };
 use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner};
 use crate::repo::{
-    detect_operation, parse_refs, parse_remotes, parse_repo_paths, parse_stash_list, parse_status,
-    parse_worktrees, Operation, ParseError, Ref, RepoPaths, RepoStatus, StashEntry, Worktree,
-    REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
+    detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remotes,
+    parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
+    ParseError, Ref, RepoPaths, RepoStatus, StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS,
+    REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
 };
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
@@ -73,6 +74,14 @@ pub trait GitBackend: Send + Sync {
         amend: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    /// A commit's header and changed files (against its first parent).
+    fn commit_details(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<CommitDetails, GitError>;
 
     /// Applies a patch from [`crate::diff::build_patch`] as `mode` says,
     /// after checking `guard` (the file still matches the diff) and
@@ -187,6 +196,21 @@ fn stale(path: &Path) -> GitError {
     )
 }
 
+/// `git diff-tree` arguments for one commit's file, with the same stable
+/// output as [`DIFF_ARGS`].
+const DIFF_TREE_ARGS: &[&str] = &[
+    "diff-tree",
+    "-p",
+    "-M",
+    "--no-commit-id",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--full-index",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
 fn unexpected(args: &[&str], err: ParseError) -> GitError {
     GitError::new(
         args.join(" "),
@@ -281,11 +305,16 @@ impl GitBackend for CliBackend {
         if target.kind == DiffKind::Untracked {
             return read_untracked(&toplevel.join(&target.path), limit);
         }
-        let mut cmd = self
-            .runner
-            .read(toplevel)
-            .env("GIT_LITERAL_PATHSPECS", "1")
-            .args(DIFF_ARGS);
+        let mut cmd = self.runner.read(toplevel).env("GIT_LITERAL_PATHSPECS", "1");
+        if let (DiffKind::Commit, Some(commit)) = (target.kind, &target.commit) {
+            cmd = cmd.args(DIFF_TREE_ARGS);
+            cmd = match &commit.parent {
+                Some(parent) => cmd.args([parent, &commit.oid]),
+                None => cmd.args(["--root", &commit.oid]),
+            };
+        } else {
+            cmd = cmd.args(DIFF_ARGS);
+        }
         if target.kind == DiffKind::Staged {
             cmd = cmd.args(["--cached", "-M"]);
         }
@@ -377,6 +406,34 @@ impl GitBackend for CliBackend {
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    fn commit_details(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<CommitDetails, GitError> {
+        let show = ["show", "-s", COMMIT_SHOW_FORMAT, oid, "--"];
+        let out = self.read(repo, &show, cancel)?;
+        let mut details = parse_commit_header(&out.stdout).map_err(|e| unexpected(&show, e))?;
+        let mut args = vec![
+            "diff-tree",
+            "-r",
+            "-z",
+            "-M",
+            "--name-status",
+            "--no-commit-id",
+        ];
+        match details.parents.first() {
+            Some(parent) => args.push(parent),
+            None => args.push("--root"),
+        }
+        args.push(&details.oid);
+        let out = self.read(repo, &args, cancel)?;
+        let files = parse_name_status(&out.stdout).map_err(|e| unexpected(&args, e))?;
+        details.files = files;
+        Ok(details)
     }
 
     fn apply_patch(
@@ -544,6 +601,11 @@ impl CliBackend {
         let (old_spec, new_spec) = match target.kind {
             DiffKind::Staged => (format!("HEAD:{old_path}"), Some(format!(":{path}"))),
             DiffKind::Unstaged | DiffKind::Untracked => (format!(":{path}"), None),
+            DiffKind::Commit => {
+                let oid = target.commit.as_ref().map_or("HEAD", |c| c.oid.as_str());
+                // `<oid>^` is missing for a root commit, which reads as "no old side".
+                (format!("{oid}^:{old_path}"), Some(format!("{oid}:{path}")))
+            }
         };
         let mut input = format!("{old_spec}\n");
         if let Some(spec) = &new_spec {

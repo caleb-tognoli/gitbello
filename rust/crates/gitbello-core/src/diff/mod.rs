@@ -32,6 +32,16 @@ pub enum DiffKind {
     Staged,
     /// A file git does not track yet: everything is added.
     Untracked,
+    /// A file in a commit, against the commit's first parent.
+    Commit,
+}
+
+/// The commit a [`DiffKind::Commit`] diff shows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CommitSide {
+    pub oid: String,
+    /// First parent; `None` for a root commit.
+    pub parent: Option<String>,
 }
 
 /// The diff to show: one file in one change list.
@@ -42,6 +52,8 @@ pub struct DiffTarget {
     pub path: PathBuf,
     /// Source of a staged rename or copy.
     pub original_path: Option<PathBuf>,
+    /// Set for [`DiffKind::Commit`].
+    pub commit: Option<CommitSide>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

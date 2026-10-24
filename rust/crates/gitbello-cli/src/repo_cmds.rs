@@ -257,6 +257,7 @@ pub fn diff(args: &[String]) -> Result<()> {
         kind,
         path: PathBuf::from(file),
         original_path: None,
+        commit: None,
     };
     let limit = (!full).then_some(LARGE_DIFF_BYTES);
     let started = std::time::Instant::now();

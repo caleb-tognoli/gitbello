@@ -31,6 +31,7 @@ fn target(kind: DiffKind, path: &str) -> DiffTarget {
         kind,
         path: PathBuf::from(path),
         original_path: None,
+        commit: None,
     }
 }
 
@@ -128,6 +129,7 @@ fn diff_handles_renames_binary_and_large_files() {
                 kind: DiffKind::Staged,
                 path: PathBuf::from("new.txt"),
                 original_path: Some(PathBuf::from("old.txt")),
+                commit: None,
             },
             None,
             &no_cancel(),

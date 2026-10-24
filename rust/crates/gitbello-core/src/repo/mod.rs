@@ -1,6 +1,7 @@
 //! Repository read models and the parsers that build them from git output
 //! (PLAN §3.3). Parsers are pure functions over captured bytes.
 
+mod commit;
 mod operation;
 mod refs;
 mod stash;
@@ -11,6 +12,9 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+pub use commit::{
+    parse_commit_header, parse_name_status, CommitDetails, CommitFile, COMMIT_SHOW_FORMAT,
+};
 pub use operation::{detect_operation, parse_repo_paths, Operation, RepoPaths, REPO_PATHS_ARGS};
 pub use refs::{parse_refs, parse_remotes, Ref, RefKind, Tracking, REFS_ARGS};
 pub use stash::{parse_stash_list, StashEntry, STASH_LIST_ARGS};

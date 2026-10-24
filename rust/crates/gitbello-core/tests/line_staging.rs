@@ -25,6 +25,7 @@ fn diff_of(repo: &TestRepo, kind: DiffKind, path: &str) -> FileDiff {
         kind,
         path: PathBuf::from(path),
         original_path: None,
+        commit: None,
     };
     backend(repo)
         .diff(repo.path(), &target, None, &CancelToken::new())
@@ -431,6 +432,7 @@ fn runtime_line_staging_discard_and_undo() {
         kind,
         path: PathBuf::from("f.txt"),
         original_path: None,
+        commit: None,
     };
     rt.select_diff(&key, Some(target(DiffKind::Unstaged)), false);
     poll_until(&mut rt, |rt, _| loaded_diff(rt, &key).is_some());
