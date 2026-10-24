@@ -40,7 +40,7 @@ cargo xtask build --release
 cargo xtask run              # build + launch Godot project
 cargo xtask test             # cargo test for the whole workspace
 cargo xtask check            # fmt --check + clippy -D warnings + test
-cargo xtask smoke            # headless Godot smoke scripts
+cargo xtask smoke [--only <name>]   # headless Godot smoke scripts (or those matching <name>)
 cargo xtask bench-graph <repo> [--ui] [--record]   # graph load + scroll benchmark (read-only)
 cargo xtask themes           # regenerate godot/themes/*.tres from rust/xtask/src/themes.rs
 ```

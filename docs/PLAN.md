@@ -155,7 +155,8 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - open tabs and their layout
   - worktree path template
   - editor command (default `code {path}`)
-  - terminal command
+  - terminal command (default: the platform's terminal)
+  - pull mode (`ff-only` by default, `merge` or `rebase`)
   - auto-fetch interval
   - keybindings
   - theme override
@@ -306,12 +307,14 @@ Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work
 *Result:* `tests/line_staging.rs` covers first/last lines, missing final newlines, CRLF, a second hunk alone, odd paths, a stale index (refused) and 30 random selections checked against an independent model; `lines_smoke.gd` and `history_smoke.gd` drive the UI. Discards back the file up as a blob first and Ctrl+Z restores it (the last 20 per repository, in memory); untracked files go to the trash. Line staging works on tracked files only (not untracked files or renames). Highlighting is per line, so multi-line comments and strings are only colored on their first line.
 
 ### M5 — Sync, branches, tags (≈2 weeks)
-- [ ] Fetch, pull (ff-only by default, with a merge/rebase setting) and push with progress, cancel, and classified error fixes (for example, a non-fast-forward error offers pull)
-- [ ] Auto-fetch scheduler and live ahead/behind
-- [ ] Branch create, checkout (dirty-tree flow §4), rename, delete; set upstream
-- [ ] Tags: create (light and annotated), delete, push
-- [ ] Cherry-pick from the graph context menu
-- [ ] "Open in editor" and "Open terminal here" actions
+- [x] Fetch, pull (ff-only by default, with a merge/rebase setting) and push with progress, cancel, and classified error fixes (for example, a non-fast-forward error offers pull)
+- [x] Auto-fetch scheduler and live ahead/behind
+- [x] Branch create, checkout (dirty-tree flow §4), rename, delete; set upstream
+- [x] Tags: create (light and annotated), delete, push
+- [x] Cherry-pick from the graph context menu
+- [x] "Open in editor" and "Open terminal here" actions
+
+*Result:* `tests/sync.rs` covers fetch, fast-forward/merge/rebase pulls over local changes, pushes with and without an upstream, a rejected push, and auto-fetch (interval, one failure report per streak); `tests/branches.rs` covers branch create/rename/delete (unmerged needs force), remote and detached checkouts, upstreams, the stash-switch-re-apply flow (including a conflicting re-apply and a failed switch), tags and cherry-picks (merges against the first parent, aborting a conflict). `sync_smoke.gd` and `branches_smoke.gd` drive the UI. Fetch runs as a scheduler read, so commits never wait for the network; auto-fetch goes one repository at a time and skips repositories with a write queued. The minimal stash and re-apply of the checkout flow was pulled forward from M7; branches joined the palette.
 
 ### M6 — Worktrees (≈1.5 weeks) → daily-driver point
 - [ ] Worktrees nested in the sidebar with badges; open a worktree as a tab
