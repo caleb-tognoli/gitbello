@@ -79,7 +79,8 @@ Run `cargo xtask check` before declaring any task done.
 - **GDScript:** `snake_case` files and functions, `PascalCase` classes (`class_name`). One scene per feature component. Signals for upward communication, method calls for downward.
 - **Theming:** no hardcoded colors or sizes in scenes. Use the theme and its type variations.
 - **Godot project settings** that must stay on: low processor mode, HiDPI, native file dialogs. See PLAN §3.7.
-- **Cross-platform:** use the `directories` crate for config paths, keep paths as `PathBuf` in core, and test path handling with spaces and non-ASCII characters.
+- **Cross-platform:** use `gitbello_core::paths` for config and data dirs, keep paths as `PathBuf` in core, and test path handling with spaces and non-ASCII characters.
+- **Dependencies:** keep them few. Avoid crates that pull `windows-sys` 0.61+ (or other `raw-dylib` imports): the local windows-gnu toolchain cannot build them. `winapi-util` is pinned to 0.1.9 in `Cargo.lock` for this reason; don't `cargo update` it.
 
 ## Verifying work without seeing the UI
 

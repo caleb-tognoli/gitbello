@@ -109,7 +109,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 
 ### 3.4 Jobs and events
 
-- `JobScheduler` runs a small pool of worker threads (std threads plus `crossbeam-channel`; no async runtime needed).
+- `JobScheduler` runs a small pool of worker threads (std threads, `Mutex` + `Condvar` queue and an `mpsc` event channel; no async runtime or extra crates).
 - Each repo has a **write queue** (FIFO, one at a time). Reads run on the shared pool. A read that would race with a queued write waits until the write is done.
 - Jobs report `Started`, `Progress`, `Finished(Result)` and `Cancelled` through one `Event` channel per `AppCore`.
 - After any write, the scheduler automatically queues a targeted refresh. For example, a commit refreshes status, refs and the graph head; staging refreshes only status and the affected diff.
@@ -127,7 +127,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 
 ### 3.6 Watching and refresh
 
-- Use `notify` with `notify-debouncer-full` (about 250 ms) on each open worktree directory and its git dir. Watch the common dir for refs.
+- Use `notify` with gitbello's own per-repository debouncer (250 ms quiet, 1 s at most) on each open worktree directory and its git dir. Watch the common dir for refs.
 - Ignore `objects/` churn and any path git would ignore. Status does the real work, and the watcher only decides whether a status refresh is needed.
 - **Window focus in** (`NOTIFICATION_APPLICATION_FOCUS_IN`) triggers a cheap refresh of the active tab as a reliable fallback.
 - **Auto-fetch:** a configurable interval (default 10 min, off for metered connections later). It runs with `--prune`, staggered across repos, and never runs while a write is in progress.
@@ -150,7 +150,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 
 ### 3.8 Config and persistence
 
-- User config lives in the OS config dir (`directories` crate) as TOML:
+- User config lives in the OS config dir (`gitbello_core::paths`, written by hand; the `directories` crate's Windows dependency does not build on the GNU toolchain) as TOML:
   - known repos
   - open tabs and their layout
   - worktree path template
@@ -260,14 +260,16 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 *Result:* all §3.9 targets met except the first screen on repos without a commit-graph file (git itself takes ~640 ms to emit the first commit on git/git) and 1–2 frames over 16.7 ms when flinging a page per frame. See `docs/perf.md`.
 
 ### M2 — Core foundation (≈2 weeks)
-- [ ] Full `GitRunner`: progress mode, cancellation, error classification, command log
-- [ ] `GitBackend` trait and `CliBackend` reads: status, refs, worktrees, operation state, stash list
-- [ ] `JobScheduler` with per-repo write queues, refresh coalescing and the event channel
-- [ ] Watcher (§3.6) and the focus-in refresh hook
-- [ ] Config load and save (§3.8); git version check
-- [ ] Test fixtures: builders for repos with commits, branches, remotes (a local bare repo), worktrees, stashes, conflicts, detached HEAD, and paths with spaces or unicode
+- [x] Full `GitRunner`: progress mode, cancellation, error classification, command log
+- [x] `GitBackend` trait and `CliBackend` reads: status, refs, worktrees, operation state, stash list
+- [x] `JobScheduler` with per-repo write queues, refresh coalescing and the event channel (graph loads run as jobs)
+- [x] Watcher (§3.6) and the focus-in refresh hook (core side; the Godot focus notification is wired with `RepoSession` in M3)
+- [x] Config load and save (§3.8); git version check
+- [x] Test fixtures: builders for repos with commits, branches, remotes (a local bare repo), worktrees, stashes, conflicts, detached HEAD, and paths with spaces or unicode
 
 **Accept when** core tests cover every parser and the scheduler's ordering guarantees, and `gitbello-cli status|refs|worktrees <path>` works.
+
+*Result:* 104 Rust tests (parsers on captured output and on real temp repos, scheduler ordering/coalescing/cancellation with a fake backend, watcher on real repos). The CLI also has `stashes`, `op-state`, `watch` and `config`.
 
 ### M3 — App shell (≈2 weeks)
 - [ ] `RepoSession` binding with signals; open repo (folder dialog, recent list, drag and drop)
