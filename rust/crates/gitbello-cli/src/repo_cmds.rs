@@ -285,7 +285,11 @@ pub fn diff(args: &[String]) -> Result<()> {
             number(line.old_line),
             number(line.new_line),
             display_text(line.text),
-            if line.no_newline { "  (no newline)" } else { "" }
+            if line.no_newline {
+                "  (no newline)"
+            } else {
+                ""
+            }
         );
     }
     eprintln!(
