@@ -283,13 +283,23 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 *Result:* covered by `shell_smoke.gd` (five fixture repos, badge update after an outside change) and core runtime tests (commits from the CLI). Branch/tag labels on graph rows and the focus-in refresh were added here too.
 
 ### M4 — Changes and commit (≈2.5 weeks)
+
+Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work), each with its own review.
+
+#### M4a — Changes panel, unified diff, commit (≈1.5 weeks)
 - [ ] Changes panel: unstaged, staged and untracked lists, multi-select, stage or unstage files
-- [ ] `DiffView`: unified and side-by-side, syntax highlighting, intra-line highlights, large/binary handling
-- [ ] Hunk and line staging and unstaging; discard selection (with confirmation, undoable where possible)
+- [ ] `DiffView` (unified): diffs parsed in core and read in slices; large/binary handling
 - [ ] Commit box: summary and body, amend toggle, hook output shown on failure
+- [ ] Per-worktree dirty badges in the sidebar (pulled forward from M6)
+
+**Accept when** a full stage-commit-amend cycle works using only the keyboard.
+
+#### M4b — Hunks, lines, details (≈1.5 weeks)
+- [ ] `DiffView`: side-by-side, syntax highlighting (hand-written lexers, no new crate), intra-line highlights
+- [ ] Hunk and line staging and unstaging (patch built in core, `git apply --cached --recount`, checked first); discard selection (with confirmation, undoable where possible)
 - [ ] Commit details panel when a graph row is selected
 
-**Accept when** a full stage-commit-amend cycle works using only the keyboard, and the line-staging tests pass, including edge cases (no trailing newline, CRLF files, first and last line of a file).
+**Accept when** the line-staging tests pass, including edge cases (no trailing newline, CRLF files, first and last line of a file).
 
 ### M5 — Sync, branches, tags (≈2 weeks)
 - [ ] Fetch, pull (ff-only by default, with a merge/rebase setting) and push with progress, cancel, and classified error fixes (for example, a non-fast-forward error offers pull)
