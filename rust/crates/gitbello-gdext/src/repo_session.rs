@@ -229,6 +229,48 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// Paths of rows `start..start + count` of a change list.
+    #[func]
+    fn change_paths(&self, group: GString, start: i64, count: i64) -> PackedStringArray {
+        let Some(group) = parse_group(&group) else {
+            return PackedStringArray::new();
+        };
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let Some(status) = s.status() else {
+                return PackedStringArray::new();
+            };
+            s.changes()
+                .indices(group)
+                .iter()
+                .skip(start)
+                .take(count)
+                .map(|&i| path_str(&status.changes[i].path))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Row of `path` in a change list, or -1.
+    #[func]
+    fn change_index(&self, group: GString, path: GString) -> i64 {
+        let Some(group) = parse_group(&group) else {
+            return -1;
+        };
+        let path = PathBuf::from(path.to_string());
+        self.read(|s| {
+            let status = s.status()?;
+            let indices = s.changes().indices(group);
+            indices
+                .binary_search_by(|&i| status.changes[i].path.cmp(&path))
+                .ok()
+                .map(to_i64)
+        })
+        .flatten()
+        .unwrap_or(-1)
+    }
+
     /// Stages (or, for the `staged` list, unstages) `paths` from `group`.
     /// Returns the job id, or -1 when the repository is not ready.
     #[func]
