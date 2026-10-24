@@ -4,6 +4,7 @@
 //! live here. This crate must never depend on Godot.
 
 pub mod git;
+pub mod graph;
 
 /// Version of the core crate, as reported to the UI and CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
