@@ -2,10 +2,17 @@ class_name RepoSidebar
 extends Tree
 ## Repository overview (PLAN §4): Changes, Worktrees, Branches, Remotes,
 ## Tags, Stashes. Each section rebuilds from its session signal and keeps the
-## user's collapsed folders. Choosing a Changes row opens the changes view.
+## user's collapsed folders and selection. Choosing a Changes row opens the
+## changes view; branch, remote and tag rows carry a ref (see `selected_ref`)
+## that Enter activates and right-click or the menu key offers actions for.
 
 ## The user chose a row of the Changes section.
 signal changes_requested()
+## Enter or double-click on a branch, remote branch or tag row.
+signal ref_activated(ref: Dictionary)
+## Right-click or the menu key on a ref row; `at_position` is in screen
+## coordinates.
+signal context_menu_requested(ref: Dictionary, at_position: Vector2)
 
 const THEME_TYPE: StringName = &"RepoSidebar"
 const CHANGE_GROUPS: Dictionary[String, String] = {
@@ -35,6 +42,8 @@ var session: RepoSession = null:
 	set = set_session
 
 var _sections: Dictionary[Section, TreeItem] = {}
+## Ref row to select again after a rebuild.
+var _reselect: String = ""
 ## Paths ("Branches/feature") the user collapsed or expanded.
 var _folded: Dictionary[String, bool] = {}
 
@@ -45,9 +54,10 @@ func _ready() -> void:
 	columns = 2
 	set_column_expand(1, false)
 	set_column_custom_minimum_width(1, get_theme_constant(&"badge_width", THEME_TYPE))
+	allow_rmb_select = true
 	item_collapsed.connect(_on_item_collapsed)
-	item_activated.connect(_on_item_chosen)
-	item_mouse_selected.connect(func(_p: Vector2, _b: int) -> void: _on_item_chosen())
+	item_activated.connect(_on_item_activated)
+	item_mouse_selected.connect(_on_item_mouse_selected)
 	_build_sections()
 
 
@@ -91,6 +101,42 @@ func section_item(section: Section) -> TreeItem:
 	return _sections[section]
 
 
+## The selected row's ref: `{type, name, short, commit, is_head, upstream}`
+## with type `branch`, `remote` or `tag` (`name` is the full ref name), or
+## an empty dictionary.
+func selected_ref() -> Dictionary:
+	var item: TreeItem = get_selected()
+	if item == null:
+		return {}
+	var meta: Variant = item.get_metadata(0)
+	return meta if meta is Dictionary else {}
+
+
+## Selects the row of ref `name` (full name). Returns whether it was found.
+func select_ref(name: String) -> bool:
+	var item: TreeItem = _find_ref(get_root(), name)
+	if item == null:
+		return false
+	var parent: TreeItem = item.get_parent()
+	while parent != null:
+		parent.collapsed = false
+		parent = parent.get_parent()
+	item.select(0)
+	scroll_to_item(item)
+	return true
+
+
+func _find_ref(item: TreeItem, name: String) -> TreeItem:
+	for child: TreeItem in item.get_children():
+		var meta: Variant = child.get_metadata(0)
+		if meta is Dictionary and String(meta["name"]) == name:
+			return child
+		var found: TreeItem = _find_ref(child, name)
+		if found != null:
+			return found
+	return null
+
+
 func _signal_pairs(s: RepoSession) -> Array:
 	return [
 		[s.status_changed, _rebuild_changes],
@@ -117,6 +163,9 @@ func _build_sections() -> void:
 
 func _reset(section: Section, count_text: String) -> TreeItem:
 	var item: TreeItem = _sections[section]
+	var selected: Dictionary = selected_ref()
+	if not selected.is_empty():
+		_reselect = String(selected["name"])
 	for child: TreeItem in item.get_children():
 		child.free()
 	item.set_text(1, count_text)
@@ -173,17 +222,18 @@ func _rebuild_worktrees() -> void:
 func _rebuild_branches() -> void:
 	var local: Array[Dictionary] = session.local_branches() if session != null else []
 	var remote: Array[Dictionary] = session.remote_branches() if session != null else []
-	_add_branch_nodes(_reset(Section.BRANCHES, ""), local, "Branches")
-	_add_branch_nodes(_reset(Section.REMOTES, ""), remote, "Remotes")
+	_add_branch_nodes(_reset(Section.BRANCHES, ""), local, "Branches", "branch")
+	_add_branch_nodes(_reset(Section.REMOTES, ""), remote, "Remotes", "remote")
+	_restore_selection()
 
 
-func _add_branch_nodes(parent: TreeItem, nodes: Array, prefix: String) -> void:
+func _add_branch_nodes(parent: TreeItem, nodes: Array, prefix: String, type: String) -> void:
 	for node: Dictionary in nodes:
 		var path: String = prefix + "/" + String(node["name"])
 		var ref: Dictionary = node["ref"]
 		if ref.is_empty():
 			var folder: TreeItem = _add(parent, String(node["name"]), "", path)
-			_add_branch_nodes(folder, node["children"], path)
+			_add_branch_nodes(folder, node["children"], path, type)
 			continue
 		var badge: PackedStringArray = PackedStringArray()
 		if bool(ref["gone"]):
@@ -193,7 +243,18 @@ func _add_branch_nodes(parent: TreeItem, nodes: Array, prefix: String) -> void:
 		if int(ref["behind"]) > 0:
 			badge.append("↓%d" % int(ref["behind"]))
 		var item: TreeItem = _add(parent, String(node["name"]), " ".join(badge))
-		item.set_tooltip_text(0, String(ref["short_name"]))
+		item.set_metadata(0, {
+			"type": type,
+			"name": String(ref["name"]),
+			"short": String(ref["short_name"]),
+			"commit": String(ref["commit"]),
+			"is_head": bool(ref["is_head"]),
+			"upstream": String(ref["upstream"]),
+		})
+		var tooltip: String = String(ref["short_name"])
+		if not String(ref["upstream"]).is_empty():
+			tooltip += "\ntracks " + String(ref["upstream"])
+		item.set_tooltip_text(0, tooltip)
 		if bool(ref["is_head"]):
 			item.set_custom_color(0, get_theme_color(&"head_color", THEME_TYPE))
 			item.set_text(0, "● " + String(node["name"]))
@@ -203,7 +264,16 @@ func _rebuild_tags() -> void:
 	var tags: Array[Dictionary] = session.tags() if session != null else []
 	var section: TreeItem = _reset(Section.TAGS, str(tags.size()) if not tags.is_empty() else "")
 	for tag: Dictionary in tags:
-		_add(section, String(tag["name"]), String(tag["commit"]).left(7))
+		var item: TreeItem = _add(section, String(tag["name"]), String(tag["commit"]).left(7))
+		item.set_metadata(0, {
+			"type": "tag",
+			"name": "refs/tags/" + String(tag["name"]),
+			"short": String(tag["name"]),
+			"commit": String(tag["commit"]),
+			"is_head": false,
+			"upstream": "",
+		})
+	_restore_selection()
 
 
 func _rebuild_stashes() -> void:
@@ -214,10 +284,52 @@ func _rebuild_stashes() -> void:
 		_add(section, String(stash["message"]), branch)
 
 
-func _on_item_chosen() -> void:
+func _on_item_activated() -> void:
+	var ref: Dictionary = selected_ref()
+	if not ref.is_empty():
+		ref_activated.emit(ref)
+		return
+	_open_changes_if_chosen()
+
+
+func _on_item_mouse_selected(at_position: Vector2, button: int) -> void:
+	if button == MOUSE_BUTTON_RIGHT:
+		grab_focus()
+		_request_menu(get_screen_position() + at_position)
+	elif button == MOUSE_BUTTON_LEFT:
+		_open_changes_if_chosen()
+
+
+func _gui_input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed:
+		return
+	if key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed):
+		var item: TreeItem = get_selected()
+		if item != null:
+			var rect: Rect2 = get_item_area_rect(item)
+			_request_menu(get_screen_position() + rect.position + Vector2(0.0, rect.size.y))
+			accept_event()
+
+
+func _request_menu(at_position: Vector2) -> void:
+	var ref: Dictionary = selected_ref()
+	if not ref.is_empty():
+		context_menu_requested.emit(ref, at_position)
+
+
+func _open_changes_if_chosen() -> void:
 	var item: TreeItem = get_selected()
-	if item != null and item.get_metadata(0) == CHANGES_ROW:
+	if item != null and item.get_metadata(0) is String and item.get_metadata(0) == CHANGES_ROW:
 		changes_requested.emit()
+
+
+func _restore_selection() -> void:
+	if not _reselect.is_empty():
+		var item: TreeItem = _find_ref(get_root(), _reselect)
+		if item != null:
+			item.select(0)
+		_reselect = ""
 
 
 func _is_folded(path: String, default: bool) -> bool:

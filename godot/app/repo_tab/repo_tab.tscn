@@ -39,11 +39,15 @@ theme_type_variation = &"ShellLayout"
 layout_mode = 2
 theme_type_variation = &"ViewBar"
 
-[node name="ViewSwitch" type="HBoxContainer" parent="Split/Main/ViewBar"]
+[node name="ViewRow" type="HBoxContainer" parent="Split/Main/ViewBar"]
 layout_mode = 2
+
+[node name="ViewSwitch" type="HBoxContainer" parent="Split/Main/ViewBar/ViewRow"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"ViewSwitch"
 
-[node name="HistoryButton" type="Button" parent="Split/Main/ViewBar/ViewSwitch"]
+[node name="HistoryButton" type="Button" parent="Split/Main/ViewBar/ViewRow/ViewSwitch"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
@@ -51,12 +55,34 @@ toggle_mode = true
 button_pressed = true
 text = "History"
 
-[node name="ChangesButton" type="Button" parent="Split/Main/ViewBar/ViewSwitch"]
+[node name="ChangesButton" type="Button" parent="Split/Main/ViewBar/ViewRow/ViewSwitch"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 toggle_mode = true
 text = "Changes"
+
+[node name="SyncButtons" type="HBoxContainer" parent="Split/Main/ViewBar/ViewRow"]
+layout_mode = 2
+theme_type_variation = &"ViewSwitch"
+
+[node name="FetchButton" type="Button" parent="Split/Main/ViewBar/ViewRow/SyncButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Fetch"
+
+[node name="PullButton" type="Button" parent="Split/Main/ViewBar/ViewRow/SyncButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Pull"
+
+[node name="PushButton" type="Button" parent="Split/Main/ViewBar/ViewRow/SyncButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Push"
 
 [node name="Views" type="Control" parent="Split/Main"]
 layout_mode = 2

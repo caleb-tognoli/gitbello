@@ -20,6 +20,7 @@ var _current: int = -1
 @onready var _status_label: Label = %StatusLabel
 @onready var _version_label: Label = %VersionLabel
 @onready var _toasts: Toasts = %Toasts
+@onready var _jobs_bar: JobsBar = %JobsBar
 @onready var _palette: CommandPalette = %Palette
 @onready var _shortcuts_dialog: ShortcutsDialog = %ShortcutsDialog
 
@@ -38,6 +39,8 @@ func _ready() -> void:
 	_toasts.custom_minimum_size.x = float(get_theme_constant(&"width", &"Toasts"))
 	_tabs.max_tab_width = get_theme_constant(&"max_tab_width", &"Shell")
 	_palette.dynamic_entries = _palette_entries
+	_toasts.fix_provider = _error_fixes
+	_toasts.error_filter = _error_handled_elsewhere
 
 	_tabs.tab_changed.connect(_on_tab_changed)
 	_tabs.tab_close_pressed.connect(close_tab)
@@ -90,6 +93,8 @@ func open_repo(path: String) -> RepoTab:
 	_content.add_child(page)
 	page.setup(session)
 	page.title_changed.connect(_on_page_title_changed.bind(page))
+	page.notice.connect(func(title: String, message: String) -> void: _toasts.show_toast(title, message))
+	_jobs_bar.watch(session)
 	_pages.append(page)
 	_tabs.add_tab(page.title())
 	_tabs.set_tab_metadata(_tabs.tab_count - 1, page)
@@ -141,6 +146,18 @@ func toasts() -> Toasts:
 
 func palette() -> CommandPalette:
 	return _palette
+
+
+func jobs_bar() -> JobsBar:
+	return _jobs_bar
+
+
+## The tab of repository `repo_path` (a session key), or null.
+func page_for(repo_path: String) -> RepoTab:
+	for p: RepoTab in _pages:
+		if p.repo_path() == repo_path:
+			return p
+	return null
 
 
 func _restore_tabs() -> void:
@@ -240,6 +257,8 @@ func _register_actions() -> void:
 			func() -> void: current_page().show_view(RepoTab.View.CHANGES),
 			PackedStringArray(["Ctrl+2"]), has_tab)
 	_register_change_actions()
+	_register_sync_actions()
+	_register_branch_actions()
 	Actions.register(&"diff.toggle_side_by_side", "Toggle side-by-side diff", "View",
 			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
 	for choice: String in ["system", "light", "dark"]:
@@ -281,6 +300,166 @@ func _register_change_actions() -> void:
 	commit.in_text_fields = true
 
 
+## Fetch, pull, push and friends; they run on the current tab.
+func _register_sync_actions() -> void:
+	var is_ready: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session.is_ready()
+	var session: Callable = func() -> RepoSession: return current_page().session
+	var ops: Callable = func() -> RepoOps: return current_page().ops()
+	var can_pull: Callable = func() -> bool: return is_ready.call() and session.call().can_pull()
+	var can_push: Callable = func() -> bool: return is_ready.call() and session.call().can_push()
+	Actions.register(&"sync.fetch", "Fetch", "Sync",
+			func() -> void: ops.call().fetch(), PackedStringArray(["Ctrl+Shift+F"]),
+			func() -> bool: return is_ready.call() and session.call().can_fetch())
+	Actions.register(&"sync.pull", "Pull", "Sync",
+			func() -> void: ops.call().pull(), PackedStringArray(["Ctrl+L"]), can_pull)
+	for mode: String in ["ff-only", "merge", "rebase"]:
+		var label: String = {"ff-only": "Pull (fast-forward only)", "merge": "Pull (merge)", "rebase": "Pull (rebase)"}[mode]
+		Actions.register(StringName("sync.pull_" + mode.replace("-", "_")), label, "Sync",
+				func() -> void: ops.call().pull(mode), PackedStringArray(), can_pull)
+	Actions.register(&"sync.push", "Push", "Sync",
+			func() -> void: ops.call().push(), PackedStringArray(["Ctrl+P"]), can_push)
+	Actions.register(&"sync.force_push", "Force push (with lease)…", "Sync",
+			func() -> void: ops.call().force_push(), PackedStringArray(), can_push)
+	Actions.register(&"sync.cancel", "Cancel the running git operation", "Sync",
+			func() -> void: _jobs_bar.cancel_current(), PackedStringArray(),
+			func() -> bool: return _jobs_bar.job_count() > 0)
+	Actions.register(&"operation.abort", "Abort the operation in progress…", "Repository",
+			func() -> void: ops.call().abort_operation(), PackedStringArray(),
+			func() -> bool: return is_ready.call() and not session.call().operation().is_empty())
+	Actions.register(&"repo.open_in_editor", "Open in editor", "Repository",
+			func() -> void: ops.call().open_in_editor(), PackedStringArray(["Ctrl+Shift+E"]), is_ready)
+	Actions.register(&"repo.open_terminal", "Open terminal here", "Repository",
+			func() -> void: ops.call().open_terminal(), PackedStringArray(["Ctrl+Shift+T"]), is_ready)
+
+
+## Branch, tag and commit actions. They act on the sidebar's ref or the
+## history's commit (`RepoTab.ref_target` / `commit_target`), else on HEAD.
+func _register_branch_actions() -> void:
+	var is_ready: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session.is_ready()
+	var ops: Callable = func() -> RepoOps: return current_page().ops()
+	var ref: Callable = func() -> Dictionary:
+		return current_page().ref_target() if is_ready.call() else {}
+	var commit: Callable = func() -> Dictionary:
+		return current_page().commit_target() if is_ready.call() else {}
+	var ref_is: Callable = func(type: String) -> bool: return String(ref.call().get("type", "")) == type
+	# A local branch: the sidebar's, else the checked-out one.
+	var branch: Callable = func() -> String:
+		var target: Dictionary = ref.call()
+		if not target.is_empty():
+			return String(target["short"]) if String(target["type"]) == "branch" else ""
+		return current_page().session.current_branch() if is_ready.call() else ""
+	var has_head: Callable = func() -> bool:
+		return is_ready.call() and not String(current_page().session.status().get("oid", "")).is_empty()
+
+	Actions.register(&"branch.new", "New branch…", "Branches",
+			func() -> void:
+				var start: Array = _start_point(ref.call(), commit.call())
+				ops.call().new_branch(start[0], start[1]),
+			PackedStringArray(["Ctrl+Shift+N"]), has_head)
+	Actions.register(&"branch.checkout", "Check out", "Branches",
+			func() -> void:
+				var target: Dictionary = ref.call()
+				if String(target["type"]) == "remote":
+					ops.call().checkout_remote(String(target["name"]))
+				else:
+					ops.call().checkout_branch(String(target["short"])),
+			PackedStringArray(),
+			func() -> bool:
+				return ref_is.call("remote") or (ref_is.call("branch") and not bool(ref.call()["is_head"])))
+	Actions.register(&"branch.rename", "Rename branch…", "Branches",
+			func() -> void: ops.call().rename_branch(branch.call()), PackedStringArray(["F2"]),
+			func() -> bool: return not String(branch.call()).is_empty())
+	Actions.register(&"branch.delete", "Delete branch…", "Branches",
+			func() -> void: ops.call().delete_branch(String(ref.call()["short"])), PackedStringArray(),
+			func() -> bool: return ref_is.call("branch") and not bool(ref.call()["is_head"]))
+	Actions.register(&"branch.set_upstream", "Set upstream…", "Branches",
+			func() -> void: ops.call().set_upstream(branch.call()), PackedStringArray(),
+			func() -> bool:
+				return not String(branch.call()).is_empty() and not current_page().session.remotes().is_empty())
+	Actions.register(&"tag.new", "New tag…", "Tags",
+			func() -> void:
+				var start: Array = _start_point(ref.call(), commit.call())
+				ops.call().new_tag(start[0], start[1]),
+			PackedStringArray(), has_head)
+	Actions.register(&"tag.push", "Push tag", "Tags",
+			func() -> void: ops.call().push_tag(String(ref.call()["short"])), PackedStringArray(),
+			func() -> bool: return ref_is.call("tag") and not current_page().session.default_remote().is_empty())
+	Actions.register(&"tag.delete", "Delete tag…", "Tags",
+			func() -> void: ops.call().delete_tag(String(ref.call()["short"])), PackedStringArray(),
+			func() -> bool: return ref_is.call("tag"))
+	# Commit actions take the history's commit, or a sidebar tag's.
+	var target_commit: Callable = func() -> Dictionary:
+		var target: Dictionary = ref.call()
+		if String(target.get("type", "")) == "tag":
+			return {"hash": String(target["commit"]), "subject": String(target["short"])}
+		return commit.call() if target.is_empty() else {}
+	var not_head: Callable = func() -> bool:
+		var target: Dictionary = target_commit.call()
+		return not target.is_empty() \
+				and String(target["hash"]) != String(current_page().session.status().get("oid", ""))
+	Actions.register(&"commit.checkout", "Check out commit (detached)…", "History",
+			func() -> void: ops.call().checkout_commit(String(target_commit.call()["hash"])),
+			PackedStringArray(), not_head)
+	Actions.register(&"commit.cherry_pick", "Cherry-pick commit…", "History",
+			func() -> void:
+				var target: Dictionary = target_commit.call()
+				ops.call().cherry_pick(String(target["hash"]), String(target["subject"])),
+			PackedStringArray(),
+			func() -> bool: return not_head.call() and current_page().session.operation().is_empty())
+	Actions.register(&"commit.copy_hash", "Copy commit hash", "History",
+			func() -> void: ops.call().copy_hash(String(target_commit.call()["hash"])),
+			PackedStringArray(),
+			func() -> bool: return not target_commit.call().is_empty())
+
+
+## Where a new branch or tag starts: `[commit-ish, label]` from the sidebar's
+## ref, the history's commit, or HEAD.
+func _start_point(ref: Dictionary, commit: Dictionary) -> Array:
+	if not ref.is_empty():
+		return [String(ref["name"]), String(ref["short"])]
+	if not commit.is_empty():
+		var hash: String = String(commit["hash"])
+		return [hash, "%s “%s”" % [hash.left(7), String(commit["subject"])]]
+	var head: String = current_page().session.current_branch()
+	return ["HEAD", head if not head.is_empty() else "HEAD"]
+
+
+## Buttons for a toast about `error` in `repo_path` (`Toasts.fix_provider`).
+func _error_fixes(repo_path: String, error: Dictionary) -> Array[Dictionary]:
+	var fixes: Array[Dictionary] = []
+	var page: RepoTab = page_for(repo_path)
+	if page == null:
+		return fixes
+	var ops: RepoOps = page.ops()
+	var command: String = String(error.get("command", ""))
+	match String(error.get("kind", "")):
+		"non_fast_forward":
+			fixes.append({"label": "Pull", "run": func() -> void: ops.pull()})
+		"diverged":
+			fixes.append({"label": "Pull (merge)", "run": func() -> void: ops.pull("merge")})
+			fixes.append({"label": "Pull (rebase)", "run": func() -> void: ops.pull("rebase")})
+		"conflict":
+			if command.begins_with("cherry-pick") or command.begins_with("pull"):
+				fixes.append({"label": "Abort", "run": func() -> void: page.session.abort_operation()})
+		"checked_out_elsewhere":
+			var stderr: String = String(error.get("stderr", ""))
+			var at: int = stderr.find(" at '")
+			if at >= 0:
+				var path: String = stderr.substr(at + 5).get_slice("'", 0)
+				fixes.append({"label": "Open that worktree", "run": func() -> void: open_repo(path)})
+	return fixes
+
+
+## Errors the tab follows up with a dialog need no toast (`Toasts.error_filter`).
+func _error_handled_elsewhere(repo_path: String, error: Dictionary) -> bool:
+	var page: RepoTab = page_for(repo_path)
+	return page != null and page.ops().handles_error(error)
+
+
 func _toggle_side_by_side() -> void:
 	var value: bool = not Core.diff_side_by_side()
 	Core.set_diff_side_by_side(value)
@@ -316,9 +495,25 @@ func _show_open_dialog() -> void:
 	dialog.popup_centered_ratio(0.6)
 
 
-## Palette entries besides actions: switch to a tab, open a recent repository.
+## Palette entries besides actions: check out a branch of the current tab,
+## switch to a tab, open a recent repository.
 func _palette_entries() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = []
+	var page: RepoTab = current_page()
+	if page != null and page.session.is_ready():
+		for ref: Dictionary in page.session.branch_refs():
+			if bool(ref["is_head"]):
+				continue
+			var local: bool = String(ref["kind"]) == "branch"
+			var name: String = String(ref["short_name"])
+			var full: String = String(ref["name"])
+			var ops: RepoOps = page.ops()
+			entries.append({
+				"label": "Check out: " + name,
+				"detail": "branch" if local else "remote branch",
+				"run": (func() -> void: ops.checkout_branch(name)) if local
+						else (func() -> void: ops.checkout_remote(full)),
+			})
 	for i: int in _pages.size():
 		var index: int = i
 		entries.append({

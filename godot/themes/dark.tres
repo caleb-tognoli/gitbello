@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=66 format=3]
+[gd_resource type="Theme" load_steps=68 format=3]
 
 [ext_resource type="Texture2D" path="res://themes/icons/close_on_dark.svg" id="icon_close"]
 
@@ -542,6 +542,22 @@ content_margin_top = 4
 content_margin_right = 8
 content_margin_bottom = 4
 
+[sub_resource type="StyleBoxFlat" id="sb_64"]
+bg_color = Color(0.24, 0.255, 0.29, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_top = 3
+content_margin_bottom = 3
+
+[sub_resource type="StyleBoxFlat" id="sb_65"]
+bg_color = Color(0.33, 0.58, 0.98, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [resource]
 TabBar/icons/close = ExtResource("icon_close")
 default_font_size = 14
@@ -729,6 +745,16 @@ CommitSummary/font_sizes/font_size = 16
 CommitDetails/constants/details_height = 300
 CommitDetails/constants/files_width = 340
 CommitDetails/constants/body_height = 80
+ErrorLabel/base_type = &"Label"
+ErrorLabel/colors/font_color = Color(0.95, 0.45, 0.45, 1)
+FormDialog/constants/width = 440
+FormDialog/constants/text_height = 90
+FormDialog/constants/separation = 6
+ProgressBar/styles/background = SubResource("sb_64")
+ProgressBar/styles/fill = SubResource("sb_65")
+JobsBar/constants/progress_width = 140
+JobsBar/constants/label_width = 380
+JobsBar/constants/separation = 8
 ChangesView/constants/files_width = 360
 ChangesView/constants/separation = 6
 CommitBox/constants/body_height = 96

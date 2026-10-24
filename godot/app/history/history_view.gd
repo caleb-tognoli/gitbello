@@ -5,6 +5,8 @@ extends VBoxContainer
 ## files, and from there into the diff; Left goes back.
 
 signal repo_loaded(row_count: int, error: String)
+## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
+signal commit_menu_requested(at_position: Vector2)
 
 var session: RepoSession = null:
 	set = set_session
@@ -19,6 +21,8 @@ func _ready() -> void:
 	_details.date_format = _commit_list.date_text
 	_commit_list.selection_changed.connect(_on_commit_selected)
 	_commit_list.gui_input.connect(_on_list_key)
+	_commit_list.context_menu_requested.connect(func(_row: int, at: Vector2) -> void:
+		commit_menu_requested.emit(_commit_list.get_screen_position() + at))
 	_details.file_list().gui_input.connect(_on_files_key)
 	_apply_theme()
 
@@ -51,6 +55,15 @@ func details() -> CommitDetails:
 	return _details
 
 
+## The commit under the cursor: `{hash, subject}`, or empty.
+func selected_commit() -> Dictionary:
+	var row: int = _commit_list.cursor
+	var hash: String = _commit_list.hash_at(row)
+	if hash.is_empty():
+		return {}
+	return {"hash": hash, "subject": String(_commit_list.row_data(row).get("subject", ""))}
+
+
 func _on_commit_selected() -> void:
 	_details.show_commit(_commit_list.hash_at(_commit_list.cursor))
 
@@ -58,6 +71,14 @@ func _on_commit_selected() -> void:
 func _on_list_key(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_right", false, true) and _details.file_list().row_count() > 0:
 		_details.focus_files()
+		_commit_list.accept_event()
+		return
+	var key: InputEventKey = event as InputEventKey
+	var menu_key: bool = key != null and key.pressed 			and (key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed))
+	if menu_key and _commit_list.cursor >= 0:
+		var height: float = _commit_list.row_height()
+		var y: float = (_commit_list.cursor + 1) * height - _commit_list.scroll_offset()
+		commit_menu_requested.emit(_commit_list.get_screen_position() + Vector2(0.0, y))
 		_commit_list.accept_event()
 
 

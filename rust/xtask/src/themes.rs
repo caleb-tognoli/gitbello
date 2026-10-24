@@ -580,6 +580,20 @@ fn generate(p: &Palette) -> String {
     t.item("CommitDetails/constants/details_height", 300);
     t.item("CommitDetails/constants/files_width", 340);
     t.item("CommitDetails/constants/body_height", 80);
+    // Sync, branches and tags (M5).
+    t.base("ErrorLabel", "Label");
+    t.item("ErrorLabel/colors/font_color", col(p.error));
+    t.item("FormDialog/constants/width", 440);
+    t.item("FormDialog/constants/text_height", 90);
+    t.item("FormDialog/constants/separation", 6);
+    t.styled(
+        "ProgressBar/styles/background",
+        flat(p.border).radius(3).margins([0.0, 3.0, 0.0, 3.0]),
+    );
+    t.styled("ProgressBar/styles/fill", flat(p.accent).radius(3));
+    t.item("JobsBar/constants/progress_width", 140);
+    t.item("JobsBar/constants/label_width", 380);
+    t.item("JobsBar/constants/separation", 8);
     t.item("ChangesView/constants/files_width", 360);
     t.item("ChangesView/constants/separation", 6);
     t.item("CommitBox/constants/body_height", 96);

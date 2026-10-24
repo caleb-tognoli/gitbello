@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/form_dialog/form_dialog.gd" id="1_form"]
+
+[node name="FormDialog" type="ConfirmationDialog"]
+script = ExtResource("1_form")
+
+[node name="Box" type="VBoxContainer" parent="."]
+
+[node name="Fields" type="VBoxContainer" parent="Box"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Error" type="Label" parent="Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"ErrorLabel"
+autowrap_mode = 3
