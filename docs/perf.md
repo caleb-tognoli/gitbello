@@ -89,3 +89,22 @@ status, 10,000 untracked files              42 ms
 
 The change lists and the diff view fetch only a window around the visible rows
 (`change_rows`, `diff_lines`), so list length does not change frame cost.
+
+## M4b — diff view rendering
+
+`godot --path godot res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path>`
+(windowed, debug gdext, RTX 4070, 144 Hz display). Temp repo with a
+24,000-line Rust file, 4,000 changed line pairs; syntax and changed-word
+highlights on.
+
+```text
+diff load (git + parse + pairing)      69 ms
+unified fetch, 300 rows                p50 1.3 ms, max 1.5 ms
+side-by-side fetch, 300 rows           p50 2.7 ms, max 3.0 ms
+paging through the diff, frame time    p50 6.98 ms, p99 8.29 ms, max 8.41 ms
+```
+
+Line staging round trip (core test `random_selections_stage_exactly_what_was_picked`,
+30 rounds of diff + patch + `git apply --check` + apply + unstage): 11 s in total,
+about 0.35 s per round including fixture commits.
+

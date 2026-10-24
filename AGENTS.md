@@ -90,4 +90,5 @@ Run `cargo xtask check` before declaring any task done.
 - For UI, write headless smoke scripts under `godot/tests/smoke/`, run with `cargo xtask smoke`. They instantiate scenes, drive them with a fixture repo, and assert on node state.
 - `cargo xtask smoke` creates throwaway fixture repos (`gitbello-cli fixture`) and a scratch config (`GITBELLO_CONFIG`); smoke tests get them as `--fixtures=<dir>`. Never point tests at the real config.
 - To look at the UI, run `res://tests/visual/shell_screenshots.tscn -- --repos=<a>;<b> --out=<dir>` (windowed, with `GITBELLO_CONFIG` set to a scratch file) and read the PNGs.
+- `res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path>` times diff loads, slice fetches and paging (read-only).
 - Performance claims need numbers. Log timings and memory, and include them in the milestone summary.

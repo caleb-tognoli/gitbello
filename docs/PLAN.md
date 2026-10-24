@@ -297,11 +297,13 @@ Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work
 *Result:* covered by `changes_smoke.gd` (Ctrl+2, Enter/Space to stage, Ctrl+Shift+M, Ctrl+Enter, Ctrl+Shift+A, a rejecting hook) and core tests in `tests/changes.rs`. Conflicted files are listed with the unstaged ones. Worktree badges refresh on open, F5 and focus (linked worktrees are not watched until M6). Numbers in `docs/perf.md`.
 
 #### M4b — Hunks, lines, details (≈1.5 weeks)
-- [ ] `DiffView`: side-by-side, syntax highlighting (hand-written lexers, no new crate), intra-line highlights
-- [ ] Hunk and line staging and unstaging (patch built in core, `git apply --cached --recount`, checked first); discard selection (with confirmation, undoable where possible)
-- [ ] Commit details panel when a graph row is selected
+- [x] `DiffView`: side-by-side, syntax highlighting (hand-written lexers, no new crate), intra-line highlights
+- [x] Hunk and line staging and unstaging (patch built in core, `git apply --cached --recount`, checked first); discard selection (with confirmation, undoable where possible)
+- [x] Commit details panel when a graph row is selected
 
 **Accept when** the line-staging tests pass, including edge cases (no trailing newline, CRLF files, first and last line of a file).
+
+*Result:* `tests/line_staging.rs` covers first/last lines, missing final newlines, CRLF, a second hunk alone, odd paths, a stale index (refused) and 30 random selections checked against an independent model; `lines_smoke.gd` and `history_smoke.gd` drive the UI. Discards back the file up as a blob first and Ctrl+Z restores it (the last 20 per repository, in memory); untracked files go to the trash. Line staging works on tracked files only (not untracked files or renames). Highlighting is per line, so multi-line comments and strings are only colored on their first line.
 
 ### M5 — Sync, branches, tags (≈2 weeks)
 - [ ] Fetch, pull (ff-only by default, with a merge/rebase setting) and push with progress, cancel, and classified error fixes (for example, a non-fast-forward error offers pull)
