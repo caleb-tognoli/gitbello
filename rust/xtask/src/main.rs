@@ -214,19 +214,61 @@ fn smoke() -> Result<()> {
         .arg("res://tests/smoke/smoke_runner.tscn");
     let output = run_captured(cmd, SMOKE_TIMEOUT)?;
 
-    if let Some(marker) = SMOKE_FAIL_MARKERS
+    let failure = if output.timed_out {
+        Some(format!(
+            "smoke runner timed out after {}s",
+            SMOKE_TIMEOUT.as_secs()
+        ))
+    } else if let Some(marker) = SMOKE_FAIL_MARKERS
         .iter()
         .find(|marker| output.text.contains(**marker))
     {
-        bail!("smoke tests reported `{marker}`");
+        Some(format!("smoke tests reported `{marker}`"))
+    } else if !output.success {
+        Some("smoke runner exited with failure".to_owned())
+    } else if !output.text.contains(SMOKE_PASS_MARKER) {
+        Some(format!("smoke runner did not print `{SMOKE_PASS_MARKER}`"))
+    } else {
+        None
+    };
+    match failure {
+        Some(reason) => {
+            annotate_failure(&reason, &output.text);
+            bail!("{reason}")
+        }
+        None => Ok(()),
     }
-    if !output.success {
-        bail!("smoke runner exited with failure");
+}
+
+/// On GitHub Actions, repeats the interesting output lines as an error
+/// annotation so failures are readable without opening the job log.
+fn annotate_failure(reason: &str, text: &str) {
+    if env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
+        return;
     }
-    if !output.text.contains(SMOKE_PASS_MARKER) {
-        bail!("smoke runner did not print `{SMOKE_PASS_MARKER}`");
+    let lines: Vec<&str> = text.lines().collect();
+    let mut picked: Vec<&str> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let interesting = SMOKE_FAIL_MARKERS.iter().any(|m| line.contains(m))
+            || line.starts_with("FAIL")
+            || line.starts_with("  - ");
+        if interesting {
+            // Keep a little context (Godot prints the location on the next lines).
+            picked.extend(lines.iter().skip(i).take(3));
+        }
     }
-    Ok(())
+    if picked.is_empty() {
+        picked = lines.iter().rev().take(30).rev().copied().collect();
+    }
+    picked.dedup();
+    picked.truncate(60);
+    let body = picked.join("\n");
+    let escape = |s: &str| {
+        s.replace('%', "%25")
+            .replace('\r', "%0D")
+            .replace('\n', "%0A")
+    };
+    println!("::error title={}::{}", escape(reason), escape(&body));
 }
 
 fn bench_graph(args: &[String]) -> Result<()> {
@@ -366,6 +408,7 @@ fn import(godot: &Path) -> Result<()> {
         output = run_captured(import_cmd(), SMOKE_TIMEOUT)?;
     }
     if !output.success {
+        annotate_failure("Godot import failed", &output.text);
         bail!("Godot import failed");
     }
     if let Some(marker) = ["SCRIPT ERROR", "Parse Error"]
@@ -409,6 +452,7 @@ fn find_on_path(names: &[&str]) -> Option<PathBuf> {
 
 struct Captured {
     success: bool,
+    timed_out: bool,
     /// stdout followed by stderr.
     text: String,
 }
@@ -434,18 +478,20 @@ fn run_captured(mut cmd: Command, timeout: Duration) -> Result<Captured> {
         }
         if started.elapsed() > timeout {
             child.kill().ok();
-            child.wait().ok();
-            bail!("timed out after {}s: {display}", timeout.as_secs());
+            eprintln!("timed out after {}s: {display}", timeout.as_secs());
+            break child.wait()?;
         }
         thread::sleep(Duration::from_millis(50));
     };
+    let timed_out = started.elapsed() > timeout;
 
     let mut text = String::new();
     for handle in [stdout, stderr].into_iter().flatten() {
         text.push_str(&handle.join().unwrap_or_default());
     }
     Ok(Captured {
-        success: status.success(),
+        success: status.success() && !timed_out,
+        timed_out,
         text,
     })
 }
