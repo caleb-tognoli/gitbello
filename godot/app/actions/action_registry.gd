@@ -23,6 +23,9 @@ class Action:
 	var default_shortcuts: PackedStringArray
 	## Hidden actions run from shortcuts but are not listed in the palette.
 	var hidden: bool = false
+	## Whether the shortcut also works while a text field has focus (text
+	## fields otherwise keep keys like Ctrl+Enter for themselves).
+	var in_text_fields: bool = false
 
 	func is_enabled() -> bool:
 		return not enabled.is_valid() or bool(enabled.call())
@@ -126,6 +129,42 @@ func action_for_event(event: InputEventKey) -> StringName:
 			if Shortcuts.matches(event, shortcut):
 				return id
 	return &""
+
+
+## Text fields swallow most keys. Before the focused one sees a key, run the
+## action it presses when that is a Ctrl/Alt/F-key shortcut the field does not
+## use for editing, or an action marked `in_text_fields`.
+func _input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	if not (focus is LineEdit or focus is TextEdit):
+		return
+	var id: StringName = action_for_event(key)
+	var action: Action = _actions.get(id)
+	if action == null:
+		return
+	if not action.in_text_fields and (not _is_command_key(key) or _is_text_editing_key(key)):
+		return
+	if run_action(id):
+		get_viewport().set_input_as_handled()
+
+
+static func _is_command_key(key: InputEventKey) -> bool:
+	return key.is_command_or_control_pressed() or key.alt_pressed \
+			or (key.keycode >= KEY_F1 and key.keycode <= KEY_F12)
+
+
+## Whether text fields use `key` themselves (copy, undo, word jumps, ...).
+static func _is_text_editing_key(key: InputEventKey) -> bool:
+	for action: StringName in InputMap.get_actions():
+		var action_name: String = String(action)
+		var editing: bool = action_name.begins_with("ui_text_") \
+				or action_name in ["ui_cut", "ui_copy", "ui_paste", "ui_undo", "ui_redo"]
+		if editing and key.is_action(action, true):
+			return true
+	return false
 
 
 func _shortcut_input(event: InputEvent) -> void:
