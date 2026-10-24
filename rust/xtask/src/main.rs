@@ -222,12 +222,30 @@ fn smoke() -> Result<()> {
     let godot = find_godot()?;
     import(&godot)?;
 
+    // Throwaway repositories and config; the tests never touch real ones.
+    let fixtures = env::temp_dir().join(format!("gitbello-smoke-{}", std::process::id()));
+    remove_tree(&fixtures);
+    let mut cli_build = cargo();
+    cli_build.args(["build", "--package", "gitbello-cli"]);
+    run_status(cli_build)?;
+    let cli = target_dir()
+        .join("debug")
+        .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
+    let mut fixture = Command::new(cli);
+    fixture.arg("fixture").arg(&fixtures).args(["--repos", "5"]);
+    run_status(fixture)?;
+
     let mut cmd = Command::new(&godot);
     cmd.arg("--headless")
         .arg("--path")
         .arg(godot_project_dir())
-        .arg("res://tests/smoke/smoke_runner.tscn");
-    let output = run_captured(cmd, SMOKE_TIMEOUT)?;
+        .arg("res://tests/smoke/smoke_runner.tscn")
+        .arg("--")
+        .arg(format!("--fixtures={}", fixtures.display()))
+        .env("GITBELLO_CONFIG", fixtures.join("config.toml"));
+    let output = run_captured(cmd, SMOKE_TIMEOUT);
+    remove_tree(&fixtures);
+    let output = output?;
 
     let failure = if output.timed_out {
         Some(format!(
@@ -378,6 +396,28 @@ scroll benchmark (Godot ",
     Ok(())
 }
 
+/// Deletes a directory tree, including git's read-only object files on Windows.
+fn remove_tree(path: &Path) {
+    if !path.exists() || fs::remove_dir_all(path).is_ok() {
+        return;
+    }
+    fn make_writable(path: &Path) {
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            let mut perms = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+            if meta.is_dir() {
+                for entry in fs::read_dir(path).into_iter().flatten().flatten() {
+                    make_writable(&entry.path());
+                }
+            }
+        }
+    }
+    make_writable(path);
+    let _ = fs::remove_dir_all(path);
+}
+
 fn godot_version(godot: &Path) -> String {
     Command::new(godot)
         .arg("--version")
@@ -418,10 +458,12 @@ fn import(godot: &Path) -> Result<()> {
         .join("extension_list.cfg")
         .exists();
     let mut output = run_captured(import_cmd(), SMOKE_TIMEOUT)?;
-    if !output.success && first_import {
-        // Godot 4.7.1 crashes on exit from the import that first discovers the
-        // extension (also with a minimal project). The next import is clean.
-        eprintln!("note: first-time import crashed on exit; retrying once");
+    if first_import {
+        // A first import is noisy for reasons outside the project: Godot 4.7.1
+        // crashes on exit after first discovering the extension, and resources
+        // that reference not-yet-imported files (the theme's icons) report
+        // errors while loading. The second import is the one that counts.
+        eprintln!("note: first-time import; running a second import to check the project");
         output = run_captured(import_cmd(), SMOKE_TIMEOUT)?;
     }
     if !output.success {
