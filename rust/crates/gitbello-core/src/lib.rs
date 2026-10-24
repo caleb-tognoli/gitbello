@@ -10,6 +10,7 @@ pub mod diff;
 pub mod fuzzy;
 pub mod git;
 pub mod graph;
+pub mod highlight;
 pub mod jobs;
 pub mod paths;
 pub mod repo;

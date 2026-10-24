@@ -350,9 +350,30 @@ impl RepoSession {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
-            s.diff()
-                .and_then(|d| d.diff())
-                .map(|diff| convert::diff_lines(diff, start, count))
+            let state = s.diff()?;
+            let language = convert::diff_language(&state.target().path);
+            state
+                .diff()
+                .map(|diff| convert::diff_lines(diff, start, count, language))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Side-by-side rows of a diff (`slot` is `changes` or `commit`):
+    /// `{left, right}` with `diff_lines`-style lines or empty dictionaries.
+    /// `diff_info().split_count` gives the number of rows.
+    #[func]
+    fn diff_split_rows(&self, slot: GString, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        let commit = slot == "commit";
+        self.read(|s| {
+            let state = if commit { s.commit_diff() } else { s.diff() }?;
+            let language = convert::diff_language(&state.target().path);
+            state
+                .diff()
+                .map(|diff| convert::split_rows(diff, start, count, language))
         })
         .flatten()
         .unwrap_or_default()
@@ -417,9 +438,11 @@ impl RepoSession {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
-            s.commit_diff()
-                .and_then(|d| d.diff())
-                .map(|diff| convert::diff_lines(diff, start, count))
+            let state = s.commit_diff()?;
+            let language = convert::diff_language(&state.target().path);
+            state
+                .diff()
+                .map(|diff| convert::diff_lines(diff, start, count, language))
         })
         .flatten()
         .unwrap_or_default()

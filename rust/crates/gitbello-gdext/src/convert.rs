@@ -3,8 +3,11 @@
 use std::path::Path;
 
 use gitbello_core::changes::{change_code, ChangeGroup};
-use gitbello_core::diff::{display_text, DiffContent, DiffKind, FileDiff, LineKind};
+use gitbello_core::diff::{
+    changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LineKind,
+};
 use gitbello_core::git::{GitError, GitErrorKind};
+use gitbello_core::highlight::{highlight, language_for, Language};
 use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
     RefKind, RepoStatus, StashEntry, Worktree,
@@ -362,6 +365,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             info.set("additions", i64::from(diff.additions));
             info.set("deletions", i64::from(diff.deletions));
             info.set("line_count", to_i64(diff.line_count()));
+            info.set("split_count", to_i64(diff.split_row_count()));
             info.set("max_line", i64::from(diff.max_line_number()));
             info.set("old_size", old_size);
             info.set("new_size", new_size);
@@ -371,23 +375,98 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
     info
 }
 
-/// Diff lines as `{kind, old, new, text, no_newline}`; kind 0 = hunk header,
-/// 1 = context, 2 = added, 3 = removed; line numbers are 0 when absent.
-pub fn diff_lines(diff: &FileDiff, start: usize, count: usize) -> Array<VarDictionary> {
+/// The language used to color a diff of `path`.
+pub fn diff_language(path: &Path) -> Option<Language> {
+    language_for(path)
+}
+
+/// One diff line: `{index, kind, old, new, text, no_newline, hl, syntax}`.
+/// `kind` 0 = hunk header, 1 = context, 2 = added, 3 = removed; line numbers
+/// are 0 when absent; `hl` is the changed `[start, end)` character range
+/// against the paired line (empty when none); `syntax` holds
+/// `start, end, token kind` triples (see `highlight::TokenKind::id`).
+pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> VarDictionary {
+    let Some(line) = diff.line(index) else {
+        return VarDictionary::new();
+    };
+    let text = display_text(line.text);
+    let kind: i64 = match line.kind {
+        LineKind::Hunk => 0,
+        LineKind::Context => 1,
+        LineKind::Added => 2,
+        LineKind::Removed => 3,
+    };
+    let mut hl = PackedInt32Array::new();
+    if let Some(other) = diff.partner(index).and_then(|p| diff.line(p)) {
+        let other = display_text(other.text);
+        let removed = line.kind == LineKind::Removed;
+        let (old, new) = if removed {
+            (&text, &other)
+        } else {
+            (&other, &text)
+        };
+        if let Some((old_range, new_range)) = changed_ranges(old, new) {
+            let (start, end) = if removed { old_range } else { new_range };
+            hl.push(i32::try_from(start).unwrap_or(i32::MAX));
+            hl.push(i32::try_from(end).unwrap_or(i32::MAX));
+        }
+    }
+    let mut syntax = PackedInt32Array::new();
+    if let (Some(language), false) = (language, line.kind == LineKind::Hunk) {
+        for token in highlight(language, &text) {
+            syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
+            syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
+            syntax.push(token.kind.id());
+        }
+    }
+    vdict! {
+        "index" => to_i64(index),
+        "kind" => kind,
+        "old" => i64::from(line.old_line.unwrap_or(0)),
+        "new" => i64::from(line.new_line.unwrap_or(0)),
+        "text" => &gstr(&text),
+        "no_newline" => line.no_newline,
+        "hl" => &hl,
+        "syntax" => &syntax,
+    }
+}
+
+/// Diff lines `start..start + count` (see [`diff_line`]).
+pub fn diff_lines(
+    diff: &FileDiff,
+    start: usize,
+    count: usize,
+    language: Option<Language>,
+) -> Array<VarDictionary> {
+    let end = start.saturating_add(count).min(diff.line_count());
     let mut out = Array::new();
-    for line in diff.lines(start, count) {
-        let kind: i64 = match line.kind {
-            LineKind::Hunk => 0,
-            LineKind::Context => 1,
-            LineKind::Added => 2,
-            LineKind::Removed => 3,
+    for index in start.min(end)..end {
+        out.push(&diff_line(diff, index, language));
+    }
+    out
+}
+
+/// Side-by-side rows `start..start + count` as `{left, right}`, each a line
+/// (see [`diff_line`]) or empty; a hunk header is the same line on both sides.
+pub fn split_rows(
+    diff: &FileDiff,
+    start: usize,
+    count: usize,
+    language: Option<Language>,
+) -> Array<VarDictionary> {
+    let end = start.saturating_add(count).min(diff.split_row_count());
+    let mut out = Array::new();
+    for row in start.min(end)..end {
+        let Some((left, right)) = diff.split_row(row) else {
+            break;
+        };
+        let side = |line: Option<usize>| {
+            line.map(|l| diff_line(diff, l, language))
+                .unwrap_or_default()
         };
         out.push(&vdict! {
-            "kind" => kind,
-            "old" => i64::from(line.old_line.unwrap_or(0)),
-            "new" => i64::from(line.new_line.unwrap_or(0)),
-            "text" => &gstr(&display_text(line.text)),
-            "no_newline" => line.no_newline,
+            "left" => &side(left),
+            "right" => &side(right),
         });
     }
     out

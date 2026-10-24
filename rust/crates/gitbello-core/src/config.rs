@@ -51,6 +51,8 @@ pub struct Config {
     /// 0 disables auto-fetch.
     pub auto_fetch_minutes: u32,
     pub theme: ThemeChoice,
+    /// Show diffs side by side instead of unified.
+    pub diff_side_by_side: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
     pub keybindings: BTreeMap<String, String>,
     /// Keys this version does not model, kept as read.
@@ -95,6 +97,7 @@ impl Default for Config {
             worktree_template: DEFAULT_WORKTREE_TEMPLATE.to_owned(),
             auto_fetch_minutes: DEFAULT_AUTO_FETCH_MINUTES,
             theme: ThemeChoice::System,
+            diff_side_by_side: false,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
@@ -109,6 +112,7 @@ const KEYS: &[&str] = &[
     "worktree_template",
     "auto_fetch_minutes",
     "theme",
+    "diff_side_by_side",
     "keybindings",
 ];
 
@@ -160,6 +164,7 @@ impl Config {
                     expected: "\"system\", \"light\" or \"dark\"",
                 })?,
             },
+            diff_side_by_side: take_bool(&mut table, "diff_side_by_side")?.unwrap_or(false),
             keybindings: take_string_map(&mut table, "keybindings")?,
             extra: table,
         };
@@ -188,6 +193,10 @@ impl Config {
             );
         }
         table.insert("theme".into(), Value::String(self.theme.as_str().into()));
+        table.insert(
+            "diff_side_by_side".into(),
+            Value::Boolean(self.diff_side_by_side),
+        );
         if !self.keybindings.is_empty() {
             let bindings: Table = self
                 .keybindings
@@ -273,6 +282,17 @@ fn take_paths(table: &mut Table, key: &'static str) -> Result<Vec<PathBuf>, Conf
     }
 }
 
+fn take_bool(table: &mut Table, key: &'static str) -> Result<Option<bool>, ConfigError> {
+    match table.remove(key) {
+        None => Ok(None),
+        Some(Value::Boolean(b)) => Ok(Some(b)),
+        Some(_) => Err(ConfigError::Invalid {
+            key,
+            expected: "true or false",
+        }),
+    }
+}
+
 fn take_u32(table: &mut Table, key: &'static str) -> Result<Option<u32>, ConfigError> {
     match table.remove(key) {
         None => Ok(None),
@@ -318,6 +338,7 @@ mod tests {
             worktree_template: "{repo_parent}/wt/{branch_slug}".into(),
             auto_fetch_minutes: 0,
             theme: ThemeChoice::Dark,
+            diff_side_by_side: true,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };

@@ -357,6 +357,21 @@ impl AppCore {
         .unwrap_or(false)
     }
 
+    /// Whether diffs show side by side (saved in the config).
+    #[func]
+    fn diff_side_by_side(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().diff_side_by_side).unwrap_or(false)
+    }
+
+    #[func]
+    fn set_diff_side_by_side(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().diff_side_by_side = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
     /// User shortcut overrides: action id to shortcut text.
     #[func]
     fn keybindings(&self) -> VarDictionary {

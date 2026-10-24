@@ -943,7 +943,10 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
     scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
         ctx.backend()
             .diff(&toplevel, &target, limit, ctx.cancel_token())
-            .map(|diff| JobOutput::Diff { generation, diff })
+            .map(|diff| JobOutput::Diff {
+                generation,
+                diff: Box::new(diff),
+            })
     }));
 }
 
@@ -963,7 +966,7 @@ fn apply_diff(
             if generation == current.generation =>
         {
             current.loading = false;
-            current.diff = Some(diff);
+            current.diff = Some(*diff);
             current.error = None;
         }
         EventKind::Finished(Err(error))

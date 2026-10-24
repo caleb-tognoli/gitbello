@@ -170,7 +170,15 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
     lines: Vec<LineEntry>,
     text: Vec<u8>,
+    /// Per line: the removed/added line it pairs with, or [`NONE`].
+    partners: Vec<u32>,
+    /// Side-by-side rows as (left, right) line indices; a hunk header fills
+    /// both sides.
+    split: Vec<[u32; 2]>,
 }
+
+/// No line (in [`FileDiff`]'s pairing tables).
+const NONE: u32 = u32::MAX;
 
 impl FileDiff {
     /// A diff that was not loaded because it is larger than the limit.
@@ -185,6 +193,67 @@ impl FileDiff {
 
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+
+    /// The line a removed or added line is paired with: the n-th removed
+    /// line of a change block pairs with its n-th added line.
+    pub fn partner(&self, line: usize) -> Option<usize> {
+        self.partners
+            .get(line)
+            .filter(|&&p| p != NONE)
+            .map(|&p| p as usize)
+    }
+
+    /// Rows of the side-by-side layout.
+    pub fn split_row_count(&self) -> usize {
+        self.split.len()
+    }
+
+    /// `(left, right)` line indices of a side-by-side row; context lines and
+    /// hunk headers have the same line on both sides.
+    pub fn split_row(&self, row: usize) -> Option<(Option<usize>, Option<usize>)> {
+        let [left, right] = *self.split.get(row)?;
+        let side = |l: u32| (l != NONE).then_some(l as usize);
+        Some((side(left), side(right)))
+    }
+
+    /// Fills the pairing tables once the lines are final.
+    fn pair_lines(&mut self) {
+        let n = self.lines.len();
+        self.partners = vec![NONE; n];
+        self.split = Vec::with_capacity(n);
+        let to = |i: usize| u32::try_from(i).unwrap_or(NONE);
+        let mut i = 0;
+        while i < n {
+            match self.lines[i].kind {
+                LineKind::Hunk | LineKind::Context => {
+                    self.split.push([to(i), to(i)]);
+                    i += 1;
+                }
+                LineKind::Removed | LineKind::Added => {
+                    let removed_start = i;
+                    while i < n && self.lines[i].kind == LineKind::Removed {
+                        i += 1;
+                    }
+                    let added_start = i;
+                    while i < n && self.lines[i].kind == LineKind::Added {
+                        i += 1;
+                    }
+                    let removed = added_start - removed_start;
+                    let added = i - added_start;
+                    for k in 0..removed.max(added) {
+                        let left = (k < removed).then(|| removed_start + k);
+                        let right = (k < added).then(|| added_start + k);
+                        if let (Some(l), Some(r)) = (left, right) {
+                            self.partners[l] = to(r);
+                            self.partners[r] = to(l);
+                        }
+                        self.split
+                            .push([left.map_or(NONE, to), right.map_or(NONE, to)]);
+                    }
+                }
+            }
+        }
     }
 
     /// No lines and nothing else to report (the file matches its base).
@@ -260,6 +329,12 @@ fn after(line: &[u8], prefix: &str) -> Option<String> {
 /// Parses `git diff` output for one file. Only the first file is read when
 /// the output has several.
 pub fn parse_diff(output: &[u8]) -> Result<FileDiff, ParseError> {
+    let mut diff = parse_lines(output)?;
+    diff.pair_lines();
+    Ok(diff)
+}
+
+fn parse_lines(output: &[u8]) -> Result<FileDiff, ParseError> {
     let mut diff = FileDiff::default();
     let mut lines = split_lines(output).peekable();
     let mut seen_file = false;
@@ -416,6 +491,12 @@ pub fn looks_binary(content: &[u8]) -> bool {
 
 /// The diff of an untracked file: every line added.
 pub fn untracked_diff(content: &[u8]) -> FileDiff {
+    let mut diff = untracked_lines(content);
+    diff.pair_lines();
+    diff
+}
+
+fn untracked_lines(content: &[u8]) -> FileDiff {
     let mut diff = FileDiff {
         header: DiffHeader {
             new_file: true,
@@ -450,6 +531,46 @@ pub fn untracked_diff(content: &[u8]) -> FileDiff {
         diff.mark_no_newline();
     }
     diff
+}
+
+/// The changed parts of a removed line and the added line it pairs with,
+/// as character ranges `(start, end)` in each: the text between their common
+/// prefix and suffix, widened to whole words. `None` when the lines share
+/// too little for a highlight to help.
+pub fn changed_ranges(old: &str, new: &str) -> Option<((usize, usize), (usize, usize))> {
+    let a: Vec<char> = old.chars().collect();
+    let b: Vec<char> = new.chars().collect();
+    let max_common = a.len().min(b.len());
+    let mut prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut suffix = a
+        .iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take(max_common - prefix)
+        .take_while(|(x, y)| x == y)
+        .count();
+    if prefix + suffix == a.len() && prefix + suffix == b.len() {
+        return None; // identical
+    }
+    let word = |s: &[char], i: usize| s.get(i).is_some_and(|&c| c.is_alphanumeric() || c == '_');
+    // Do not split a word: move the cut to the word's start (prefix) and
+    // end (suffix) when the change starts or ends inside it.
+    while prefix > 0 && word(&a, prefix - 1) && (word(&a, prefix) || word(&b, prefix)) {
+        prefix -= 1;
+    }
+    while suffix > 0 && {
+        let (ia, ib) = (a.len() - suffix, b.len() - suffix);
+        word(&a, ia) && ((ia > 0 && word(&a, ia - 1)) || (ib > 0 && word(&b, ib - 1)))
+    } {
+        suffix -= 1;
+    }
+    let common = prefix + suffix;
+    let longest = a.len().max(b.len());
+    // Mostly rewritten lines read better without a highlight.
+    if common * 10 < longest * 3 {
+        return None;
+    }
+    Some(((prefix, a.len() - suffix), (prefix, b.len() - suffix)))
 }
 
 /// Line text prepared for display: lossy UTF-8, one trailing `\r` dropped,
@@ -664,6 +785,54 @@ index 1111111..2222222 100644
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn pairs_changes_for_side_by_side() {
+        let diff = parse_diff(MODIFIED).unwrap();
+        // 0 hunk, 1 one, 2 -two, 3 +two!, 4 +two and a half, 5 three, 6 hunk, 7 -ten, 8 +TEN
+        assert_eq!(diff.partner(2), Some(3));
+        assert_eq!(diff.partner(3), Some(2));
+        assert_eq!(diff.partner(4), None);
+        assert_eq!(diff.partner(1), None);
+        let rows: Vec<_> = (0..diff.split_row_count())
+            .map(|r| diff.split_row(r).unwrap())
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (Some(0), Some(0)),
+                (Some(1), Some(1)),
+                (Some(2), Some(3)),
+                (None, Some(4)),
+                (Some(5), Some(5)),
+                (Some(6), Some(6)),
+                (Some(7), Some(8)),
+            ]
+        );
+        let new_file = untracked_diff(
+            b"a
+b
+",
+        );
+        assert_eq!(new_file.split_row(1), Some((None, Some(1))));
+    }
+
+    #[test]
+    fn changed_ranges_cover_whole_words() {
+        assert_eq!(
+            changed_ranges("let x = old_name(1);", "let x = new_name(1);"),
+            Some(((8, 16), (8, 16)))
+        );
+        assert_eq!(
+            changed_ranges("value: 10,", "value: 12,"),
+            Some(((7, 9), (7, 9)))
+        );
+        assert_eq!(changed_ranges("abc", "abc"), None);
+        assert_eq!(changed_ranges("completely", "different words"), None);
+        // A short word that changed is the whole line: no highlight.
+        assert_eq!(changed_ranges("a", "ab"), None);
+        assert_eq!(changed_ranges("x = 1", "x = 1;"), Some(((5, 5), (5, 6))));
     }
 
     #[test]

@@ -140,7 +140,7 @@ pub enum JobOutput {
     /// A diff load; `generation` tells a stale result from the current one.
     Diff {
         generation: u64,
-        diff: FileDiff,
+        diff: Box<FileDiff>,
     },
     /// The HEAD commit's message.
     HeadMessage(String),
