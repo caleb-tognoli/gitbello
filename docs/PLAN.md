@@ -243,7 +243,7 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 - [x] Godot project with the pinned version, `gitbello.gdextension` (all three platforms, debug and release), and the project settings from §3.7
 - [x] `cargo xtask build | run | test | check | smoke`
 - [x] gdext hello world: Rust `AppCore` autoload visible from GDScript, which emits a signal
-- [ ] CI (GitHub Actions, matrix win/linux/mac): fmt, clippy, test, build the gdext lib, Godot headless import, and one smoke test *(workflow written; not yet run on GitHub)*
+- [x] CI (GitHub Actions, matrix win/linux/mac): fmt, clippy, test, build the gdext lib, Godot headless import, and one smoke test
 - [x] LICENSE (per O1), README stub, `.gitignore`
 
 **Accept when** `cargo xtask run` opens an empty window on all three OSes (verified in CI where possible), CI is green, and idle CPU is near 0% with low processor mode on.
