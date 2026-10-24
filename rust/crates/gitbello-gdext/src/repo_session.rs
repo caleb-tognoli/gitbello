@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use gitbello_core::changes::{commit_message, diff_target, ChangeGroup};
+use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::runtime::RepoState;
@@ -351,6 +352,54 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// Whether the selected diff's lines can be used with `mode` (`stage`,
+    /// `unstage` or `discard`).
+    #[func]
+    fn can_apply_lines(&self, mode: GString) -> bool {
+        let Some(mode) = parse_mode(&mode) else {
+            return false;
+        };
+        self.read(|s| s.can_apply_lines(mode)).unwrap_or(false)
+    }
+
+    /// Stages, unstages or discards the selected diff lines (`diff_lines`
+    /// indices; a hunk header row takes its whole hunk). Returns the job id
+    /// (label `stage`, `unstage` or `discard`), or -1 when nothing applies.
+    #[func]
+    fn apply_lines(&self, mode: GString, lines: PackedInt32Array) -> i64 {
+        let Some(mode) = parse_mode(&mode) else {
+            return -1;
+        };
+        let lines: Vec<usize> = lines
+            .as_slice()
+            .iter()
+            .filter_map(|&l| usize::try_from(l).ok())
+            .collect();
+        job_id(runtime_cell::with(|rt| rt.apply_lines(&self.key, &lines, mode)).flatten())
+    }
+
+    /// Restores `paths` from the index in the working tree (backed up first).
+    #[func]
+    fn discard_paths(&self, paths: PackedStringArray) -> i64 {
+        let paths: Vec<PathBuf> = paths
+            .as_slice()
+            .iter()
+            .map(|p| PathBuf::from(p.to_string()))
+            .collect();
+        job_id(runtime_cell::with(|rt| rt.discard_files(&self.key, paths)).flatten())
+    }
+
+    #[func]
+    fn can_undo_discard(&self) -> bool {
+        self.read(RepoState::can_undo_discard).unwrap_or(false)
+    }
+
+    /// Writes back the most recent discard. Label `undo discard`.
+    #[func]
+    fn undo_discard(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_discard(&self.key)).flatten())
+    }
+
     /// Whether `commit(…, amend)` can run now.
     #[func]
     fn can_commit(&self, amend: bool) -> bool {
@@ -455,6 +504,15 @@ impl RepoSession {
 
 fn parse_group(id: &GString) -> Option<ChangeGroup> {
     ChangeGroup::from_id(&id.to_string())
+}
+
+fn parse_mode(id: &GString) -> Option<PatchMode> {
+    match id.to_string().as_str() {
+        "stage" => Some(PatchMode::Stage),
+        "unstage" => Some(PatchMode::Unstage),
+        "discard" => Some(PatchMode::Discard),
+        _ => None,
+    }
 }
 
 fn job_id(job: Option<JobId>) -> i64 {
