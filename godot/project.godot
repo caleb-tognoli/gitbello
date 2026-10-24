@@ -32,6 +32,10 @@ window/size/viewport_height=800
 window/dpi/allow_hidpi=true
 window/subwindows/embed_subwindows=false
 
+[gui]
+
+theme/custom="res://themes/dark.tres"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

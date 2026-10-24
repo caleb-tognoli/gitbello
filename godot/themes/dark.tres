@@ -1,0 +1,31 @@
+[gd_resource type="Theme" load_steps=2 format=3]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_background"]
+bg_color = Color(0.118, 0.125, 0.141, 1)
+
+[resource]
+CommitList/colors/author_color = Color(0.62, 0.65, 0.7, 1)
+CommitList/colors/date_color = Color(0.5, 0.53, 0.58, 1)
+CommitList/colors/hash_color = Color(0.5, 0.53, 0.58, 1)
+CommitList/colors/subject_color = Color(0.88, 0.9, 0.93, 1)
+CommitList/constants/author_width = 170
+CommitList/constants/date_width = 150
+CommitList/constants/hash_width = 70
+CommitList/constants/padding = 8
+GraphView/colors/lane_0 = Color(0.3, 0.6, 1, 1)
+GraphView/colors/lane_1 = Color(0.36, 0.8, 0.45, 1)
+GraphView/colors/lane_2 = Color(1, 0.62, 0.25, 1)
+GraphView/colors/lane_3 = Color(0.7, 0.5, 1, 1)
+GraphView/colors/lane_4 = Color(0.95, 0.38, 0.42, 1)
+GraphView/colors/lane_5 = Color(0.25, 0.8, 0.8, 1)
+GraphView/colors/lane_6 = Color(0.92, 0.8, 0.3, 1)
+GraphView/colors/lane_7 = Color(0.95, 0.5, 0.75, 1)
+GraphView/colors/node_outline = Color(0.118, 0.125, 0.141, 1)
+GraphView/constants/lane_width = 14
+GraphView/constants/line_width = 2
+GraphView/constants/max_lanes = 24
+GraphView/constants/node_radius = 4
+PanelContainer/styles/panel = SubResource("StyleBoxFlat_background")
+VirtualList/colors/cursor_color = Color(0.45, 0.62, 0.9, 0.9)
+VirtualList/colors/selection_color = Color(0.2, 0.32, 0.52, 1)
+VirtualList/constants/row_height = 24
