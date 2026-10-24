@@ -8,6 +8,7 @@ pub mod git;
 pub mod graph;
 pub mod jobs;
 pub mod repo;
+pub mod watch;
 
 /// Version of the core crate, as reported to the UI and CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
