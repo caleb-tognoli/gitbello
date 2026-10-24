@@ -46,6 +46,23 @@ func _ready() -> void:
 	Actions.run_action(&"view.toggle_git_log")
 	await _shot(out, "git_log")
 	Actions.run_action(&"view.toggle_git_log")
+
+	var page: RepoTab = main.page_at(0)
+	page.show_view(RepoTab.View.CHANGES)
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and page.changes().diff_view().row_count() == 0:
+		await get_tree().process_frame
+	await _shot(out, "changes_dark")
+	Actions.run_action(&"view.theme_light")
+	await _shot(out, "changes_light")
+	Actions.run_action(&"view.theme_dark")
+	page.changes().untracked_list().grab_focus()
+	page.changes().untracked_list().select_only(0)
+	await _shot(out, "changes_untracked")
+	Actions.run_action(&"changes.focus_message")
+	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
+	await _shot(out, "changes_message")
+	page.show_view(RepoTab.View.HISTORY)
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	await _shot(out, "welcome")

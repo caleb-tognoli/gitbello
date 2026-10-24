@@ -236,9 +236,12 @@ fn smoke() -> Result<()> {
         .join("debug")
         .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
     let mut fixture = Command::new(cli);
-    fixture.arg("fixture").arg(&fixtures).args(["--repos", "5"]);
+    // repo-1..5 for the shell test, repo-6 for the commit cycle.
+    fixture.arg("fixture").arg(&fixtures).args(["--repos", "6"]);
     run_status(fixture)?;
 
+    // Commits made by the app get a fixed identity and none of the user's
+    // (or CI's) git config.
     let mut cmd = Command::new(&godot);
     cmd.arg("--headless")
         .arg("--path")
@@ -246,7 +249,16 @@ fn smoke() -> Result<()> {
         .arg("res://tests/smoke/smoke_runner.tscn")
         .arg("--")
         .arg(format!("--fixtures={}", fixtures.display()))
-        .env("GITBELLO_CONFIG", fixtures.join("config.toml"));
+        .env("GITBELLO_CONFIG", fixtures.join("config.toml"))
+        .env("GIT_CONFIG_GLOBAL", fixtures.join("global.gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+        .env("GIT_CONFIG_VALUE_0", "false")
+        .env("GIT_AUTHOR_NAME", "Smoke Test")
+        .env("GIT_AUTHOR_EMAIL", "smoke@example.com")
+        .env("GIT_COMMITTER_NAME", "Smoke Test")
+        .env("GIT_COMMITTER_EMAIL", "smoke@example.com");
     let output = run_captured(cmd, SMOKE_TIMEOUT);
     remove_tree(&fixtures);
     let output = output?;
