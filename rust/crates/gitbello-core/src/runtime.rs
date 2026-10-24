@@ -342,6 +342,24 @@ impl RepoState {
         Some((remote.clone(), short[remote.len() + 1..].to_owned()))
     }
 
+    /// How to check out remote-tracking branch `remote_ref`
+    /// (`refs/remotes/origin/x`): the local branch that already tracks it,
+    /// else a new local branch of the same name tracking it.
+    pub fn remote_checkout_target(&self, remote_ref: &str) -> Option<CheckoutTarget> {
+        let refs = self.refs.as_ref()?;
+        let remote = refs.iter().find(|r| r.name == remote_ref)?;
+        let tracking = refs
+            .iter()
+            .find(|r| r.kind == RefKind::Branch && r.upstream.as_deref() == Some(remote_ref));
+        if let Some(local) = tracking {
+            return Some(CheckoutTarget::Branch(local.short_name.clone()));
+        }
+        Some(CheckoutTarget::Track {
+            remote_ref: remote_ref.to_owned(),
+            local: remote.remote_branch_name()?.to_owned(),
+        })
+    }
+
     /// Where pushes go: the current branch's upstream remote, else `origin`,
     /// else the first remote.
     pub fn default_remote(&self) -> Option<String> {

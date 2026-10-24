@@ -113,7 +113,15 @@ fn checkout_remote_branches_detached_commits_and_upstreams() {
         remote_ref: "refs/remotes/origin/shared".into(),
         local: "shared".into(),
     };
+    let target = |rt: &Runtime| {
+        rt.repo(&key)
+            .unwrap()
+            .remote_checkout_target("refs/remotes/origin/shared")
+    };
+    assert_eq!(target(&rt), Some(track.clone()));
     ok(&mut rt, &key, |rt| rt.checkout(&key, track, false));
+    // Now a local branch tracks it: checking out the remote reuses it.
+    assert_eq!(target(&rt), Some(branch("shared")));
     assert_eq!(head_branch(&rt, &key).as_deref(), Some("shared"));
     let state = rt.repo(&key).unwrap();
     assert_eq!(
