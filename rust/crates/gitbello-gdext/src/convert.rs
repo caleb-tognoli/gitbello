@@ -2,11 +2,14 @@
 
 use std::path::Path;
 
+use gitbello_core::changes::{change_code, ChangeGroup};
+use gitbello_core::diff::{display_text, DiffContent, DiffKind, FileDiff, LineKind};
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::repo::{
     Change, Conflict, FileChange, FileState, Head, Operation, Ref, RefKind, RepoStatus, StashEntry,
     Worktree,
 };
+use gitbello_core::runtime::DiffState;
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
 use godot::prelude::*;
 
@@ -223,10 +226,20 @@ pub fn stashes(entries: &[StashEntry]) -> Array<VarDictionary> {
     out
 }
 
-pub fn worktrees(list: &[Worktree], current: Option<&Path>) -> Array<VarDictionary> {
+/// Worktree rows. `badge` gives the live badge of a worktree path (the
+/// current one from its own status, linked ones from their badge refresh).
+pub fn worktrees(
+    list: &[Worktree],
+    current: Option<&Path>,
+    badge: impl Fn(&Worktree, bool) -> Option<Badge>,
+) -> Array<VarDictionary> {
     let mut out = Array::new();
     for wt in list {
+        let is_current = current.is_some_and(|c| same_path(c, &wt.path));
+        let badge = badge(wt, is_current);
         out.push(&vdict! {
+            "badge" => &gstr(&badge.as_ref().map(Badge::summary).unwrap_or_default()),
+            "changed" => badge.as_ref().map_or(-1, |b| to_i64(b.changed)),
             "path" => &path_str(&wt.path),
             "name" => &gstr(&wt.path.file_name().map_or_else(|| wt.path.to_string_lossy(), |n| n.to_string_lossy())),
             "branch" => &gstr(wt.branch_name().unwrap_or_default()),
@@ -236,7 +249,106 @@ pub fn worktrees(list: &[Worktree], current: Option<&Path>) -> Array<VarDictiona
             "locked" => wt.locked.is_some(),
             "prunable" => wt.prunable.is_some(),
             "is_main" => wt.is_main,
-            "is_current" => current.is_some_and(|c| same_path(c, &wt.path)),
+            "is_current" => is_current,
+        });
+    }
+    out
+}
+
+/// A changes-panel row: `{path, original_path, code, group}`.
+pub fn change_row(change: &FileChange, group: ChangeGroup) -> VarDictionary {
+    vdict! {
+        "path" => &path_str(&change.path),
+        "original_path" => &change.original_path.as_deref().map_or_else(GString::new, path_str),
+        "code" => change_code(change, group),
+        "group" => group.id(),
+    }
+}
+
+fn diff_content_id(content: DiffContent) -> &'static str {
+    match content {
+        DiffContent::Text => "text",
+        DiffContent::Binary { .. } => "binary",
+        DiffContent::TooLarge { .. } => "too_large",
+        DiffContent::Combined => "combined",
+    }
+}
+
+/// `{state, path, kind, content, notes, additions, deletions, line_count,
+/// max_line, old_size, new_size, bytes, error}`; `state` is `none`,
+/// `loading`, `error` or `ready`. Sizes are -1 when unknown.
+pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
+    let Some(state) = state else {
+        return vdict! { "state" => "none" };
+    };
+    let target = state.target();
+    let kind = match target.kind {
+        DiffKind::Unstaged => "unstaged",
+        DiffKind::Staged => "staged",
+        DiffKind::Untracked => "untracked",
+    };
+    let mut info = vdict! {
+        "path" => &path_str(&target.path),
+        "kind" => kind,
+    };
+    let size = |s: Option<u64>| s.map_or(-1, |s| i64::try_from(s).unwrap_or(i64::MAX));
+    match (state.diff(), state.error()) {
+        (_, Some(error)) if !state.is_loading() => {
+            info.set("state", "error");
+            info.set("error", &error_dict(error));
+        }
+        (None, _) => info.set("state", "loading"),
+        (Some(diff), _) => {
+            info.set(
+                "state",
+                if state.is_loading() {
+                    "loading"
+                } else {
+                    "ready"
+                },
+            );
+            let (old_size, new_size, bytes) = match diff.content {
+                DiffContent::Binary { old_size, new_size } => (size(old_size), size(new_size), -1),
+                DiffContent::TooLarge { bytes } => (-1, -1, size(Some(bytes))),
+                DiffContent::Text | DiffContent::Combined => (-1, -1, -1),
+            };
+            let content = if diff.is_empty() {
+                "empty"
+            } else {
+                diff_content_id(diff.content)
+            };
+            let notes: PackedStringArray = diff.header.notes().iter().map(|n| gstr(n)).collect();
+            info.set("content", content);
+            info.set("notes", &notes);
+            info.set("additions", i64::from(diff.additions));
+            info.set("deletions", i64::from(diff.deletions));
+            info.set("line_count", to_i64(diff.line_count()));
+            info.set("max_line", i64::from(diff.max_line_number()));
+            info.set("old_size", old_size);
+            info.set("new_size", new_size);
+            info.set("bytes", bytes);
+        }
+    }
+    info
+}
+
+/// Diff lines as `{kind, old, new, text, no_newline}`; kind 0 = hunk header,
+/// 1 = context, 2 = added, 3 = removed; line numbers are 0 when absent.
+pub fn diff_lines(diff: &FileDiff, start: usize, count: usize) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    for line in diff.lines(start, count) {
+        let kind: i64 = match line.kind {
+            LineKind::Hunk => 0,
+            LineKind::Context => 1,
+            LineKind::Added => 2,
+            LineKind::Removed => 3,
+        };
+        out.push(&vdict! {
+            "kind" => kind,
+            "old" => i64::from(line.old_line.unwrap_or(0)),
+            "new" => i64::from(line.new_line.unwrap_or(0)),
+            "text" => &gstr(&display_text(line.text)),
+            "no_newline" => line.no_newline,
         });
     }
     out

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use gitbello_core::changes::split_message;
 use gitbello_core::config::ThemeChoice;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
@@ -117,6 +118,7 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 RefreshKind::Worktrees => "worktrees_changed",
                 RefreshKind::Operation => "operation_changed",
                 RefreshKind::Stashes => "stashes_changed",
+                RefreshKind::WorktreeBadges => "worktrees_changed",
             };
             session.emit_signal(signal, &[]);
             if matches!(kind, RefreshKind::Status | RefreshKind::Operation) {
@@ -135,6 +137,20 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
         RuntimeEvent::GraphReset { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.bind_mut().reset_graph();
+            }
+        }
+        RuntimeEvent::DiffChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("diff_changed", &[]);
+            }
+        }
+        RuntimeEvent::HeadMessage { repo, message } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let (summary, body) = split_message(&message);
+                session.emit_signal(
+                    "head_message_loaded",
+                    &[gstr(&summary).to_variant(), gstr(&body).to_variant()],
+                );
             }
         }
         RuntimeEvent::Job {

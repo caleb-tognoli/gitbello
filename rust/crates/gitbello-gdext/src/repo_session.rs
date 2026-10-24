@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use gitbello_core::changes::{commit_message, diff_target, ChangeGroup};
 use gitbello_core::graph::{to_hex, LoadState};
-use gitbello_core::jobs::RefreshSet;
+use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::runtime::RepoState;
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use godot::prelude::*;
@@ -68,6 +69,12 @@ impl RepoSession {
     fn job_progress(job: i64, label: GString, percent: i64, text: GString);
     #[signal]
     fn job_finished(job: i64, label: GString, ok: bool, error: VarDictionary);
+    /// The selected diff loaded, reloaded or failed (see `diff_info`).
+    #[signal]
+    fn diff_changed();
+    /// HEAD's message, split into summary and body (`load_head_message`).
+    #[signal]
+    fn head_message_loaded(summary: GString, body: GString);
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -156,12 +163,21 @@ impl RepoSession {
             .unwrap_or_default()
     }
 
-    /// `{path, name, branch, head, detached, bare, locked, prunable, is_main, is_current}`.
+    /// `{path, name, branch, head, detached, bare, locked, prunable, is_main,
+    /// is_current, badge, changed}`; `badge` is the summary text (`3 ↑1`) and
+    /// `changed` is -1 until the worktree's status is known.
     #[func]
     fn worktrees(&self) -> Array<VarDictionary> {
         self.read(|s| {
-            s.worktrees()
-                .map(|list| convert::worktrees(list, s.toplevel()))
+            s.worktrees().map(|list| {
+                convert::worktrees(list, s.toplevel(), |wt, current| {
+                    if current {
+                        s.status().map(|_| s.badge())
+                    } else {
+                        s.worktree_badge(&wt.path).cloned()
+                    }
+                })
+            })
         })
         .flatten()
         .unwrap_or_default()
@@ -178,6 +194,142 @@ impl RepoSession {
     #[func]
     fn refresh(&self) {
         runtime_cell::with(|rt| rt.refresh(&self.key, RefreshSet::all()));
+    }
+
+    // --- Changes panel ------------------------------------------------------
+
+    /// Files in a change list: `conflicted`, `unstaged`, `staged` or `untracked`.
+    #[func]
+    fn change_count(&self, group: GString) -> i64 {
+        let Some(group) = parse_group(&group) else {
+            return 0;
+        };
+        self.read(|s| to_i64(s.changes().len(group))).unwrap_or(0)
+    }
+
+    /// Rows `start..start + count` of a change list, sorted by path:
+    /// `{path, original_path, code, group}` (code is `M`, `A`, `D`, `R`, `?`, ...).
+    #[func]
+    fn change_rows(&self, group: GString, start: i64, count: i64) -> Array<VarDictionary> {
+        let Some(group) = parse_group(&group) else {
+            return Array::new();
+        };
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let mut rows = Array::new();
+            let Some(status) = s.status() else {
+                return rows;
+            };
+            for &i in s.changes().indices(group).iter().skip(start).take(count) {
+                rows.push(&convert::change_row(&status.changes[i], group));
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// Stages (or, for the `staged` list, unstages) `paths` from `group`.
+    /// Returns the job id, or -1 when the repository is not ready.
+    #[func]
+    fn stage_paths(&self, group: GString, paths: PackedStringArray) -> i64 {
+        let Some(group) = parse_group(&group) else {
+            return -1;
+        };
+        let paths: Vec<PathBuf> = paths
+            .as_slice()
+            .iter()
+            .map(|p| PathBuf::from(p.to_string()))
+            .collect();
+        let job = runtime_cell::with(|rt| {
+            if group.stages() {
+                rt.stage(&self.key, Some(paths))
+            } else {
+                rt.unstage(&self.key, Some(paths))
+            }
+        });
+        job_id(job.flatten())
+    }
+
+    /// `git add -A` of the whole worktree.
+    #[func]
+    fn stage_all(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.stage(&self.key, None)).flatten())
+    }
+
+    /// Unstages everything.
+    #[func]
+    fn unstage_all(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.unstage(&self.key, None)).flatten())
+    }
+
+    /// Shows the diff of `path` from `group`; `full` loads it past the size
+    /// limit. `diff_changed` fires when it is loaded and after every reload.
+    #[func]
+    fn select_diff(&self, group: GString, path: GString, full: bool) {
+        let Some(group) = parse_group(&group) else {
+            return;
+        };
+        let path = PathBuf::from(path.to_string());
+        runtime_cell::with(|rt| {
+            let target = rt
+                .repo(&self.key)
+                .and_then(RepoState::status)
+                .map(|status| diff_target(status, group, &path));
+            if let Some(target) = target {
+                rt.select_diff(&self.key, Some(target), full);
+            }
+        });
+    }
+
+    #[func]
+    fn clear_diff(&self) {
+        runtime_cell::with(|rt| rt.select_diff(&self.key, None, false));
+    }
+
+    /// See `convert::diff_info`: `{state, path, kind, content, notes, ...}`.
+    #[func]
+    fn diff_info(&self) -> VarDictionary {
+        self.read(|s| convert::diff_info(s.diff()))
+            .unwrap_or_default()
+    }
+
+    /// Visible slice of the selected diff: `{kind, old, new, text, no_newline}`
+    /// (kind 0 = hunk header, 1 = context, 2 = added, 3 = removed).
+    #[func]
+    fn diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            s.diff()
+                .and_then(|d| d.diff())
+                .map(|diff| convert::diff_lines(diff, start, count))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Whether `commit(…, amend)` can run now.
+    #[func]
+    fn can_commit(&self, amend: bool) -> bool {
+        self.read(|s| s.can_commit(amend)).unwrap_or(false)
+    }
+
+    /// Commits the index (or amends HEAD). Returns the job id, or -1 when the
+    /// summary is empty or the repository is not ready. The result arrives as
+    /// `job_finished` with label `commit`; hook output is in the error's stderr.
+    #[func]
+    fn commit(&self, summary: GString, body: GString, amend: bool) -> i64 {
+        let Some(message) = commit_message(&summary.to_string(), &body.to_string()) else {
+            return -1;
+        };
+        job_id(runtime_cell::with(|rt| rt.commit(&self.key, message, amend)).flatten())
+    }
+
+    /// Reads HEAD's message for amending; arrives as `head_message_loaded`.
+    #[func]
+    fn load_head_message(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.load_head_message(&self.key)).flatten())
     }
 
     /// Rows reported through `graph_changed` so far.
@@ -257,6 +409,14 @@ impl RepoSession {
         })
         .unwrap_or_default()
     }
+}
+
+fn parse_group(id: &GString) -> Option<ChangeGroup> {
+    ChangeGroup::from_id(&id.to_string())
+}
+
+fn job_id(job: Option<JobId>) -> i64 {
+    job.map_or(-1, |id| i64::try_from(id).unwrap_or(i64::MAX))
 }
 
 impl RepoSession {
