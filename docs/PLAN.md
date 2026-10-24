@@ -28,7 +28,7 @@ GitHub, GitLab or any hosting integration (gitbello is pure git) · interactive 
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | UI framework | Godot 4, latest stable 4.x, pinned in `project.godot` and CI |
+| D1 | UI framework | Godot 4, latest stable 4.x, pinned in `project.godot` and CI (currently **4.7**; CI uses 4.7.2; gdext `godot = "=0.5.5"` with `api-4-7`) |
 | D2 | UI language | Typed GDScript, thin view only |
 | D3 | Native layer | Rust through gdext (`godot` crate, pinned version) |
 | D4 | Git access | System `git` CLI behind a `GitBackend` trait; `gix` for hot reads later |
@@ -40,7 +40,7 @@ GitHub, GitLab or any hosting integration (gitbello is pure git) · interactive 
 
 ### Open decisions (Caleb to confirm)
 
-- **O1 License.** Suggested: MIT OR Apache-2.0 (the Rust norm, compatible with Godot's MIT and gdext's MPL-2.0). The alternative is GPL-3.0 if forks must stay open.
+- ~~**O1 License.**~~ **Decided: MIT OR Apache-2.0** (2026-10-24).
 - **O2 Terminal approach** (M10). A full embedded terminal or "open system terminal here". See §3.13.
 - **O3 Default worktree path template.** Suggested: `{repo_parent}/{repo_name}.worktrees/{branch_slug}`.
 
@@ -239,12 +239,12 @@ This runs as a single job with rollback if any step fails.
 Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that stage gitbello can replace GitHub Desktop for normal work.
 
 ### M0 — Skeleton and toolchain (≈1 week)
-- [ ] Cargo workspace with `gitbello-core`, `gitbello-gdext`, `gitbello-cli` and `xtask`
-- [ ] Godot project with the pinned version, `gitbello.gdextension` (all three platforms, debug and release), and the project settings from §3.7
-- [ ] `cargo xtask build | run | test | check | smoke`
-- [ ] gdext hello world: Rust `AppCore` autoload visible from GDScript, which emits a signal
-- [ ] CI (GitHub Actions, matrix win/linux/mac): fmt, clippy, test, build the gdext lib, Godot headless import, and one smoke test
-- [ ] LICENSE (per O1), README stub, `.gitignore`
+- [x] Cargo workspace with `gitbello-core`, `gitbello-gdext`, `gitbello-cli` and `xtask`
+- [x] Godot project with the pinned version, `gitbello.gdextension` (all three platforms, debug and release), and the project settings from §3.7
+- [x] `cargo xtask build | run | test | check | smoke`
+- [x] gdext hello world: Rust `AppCore` autoload visible from GDScript, which emits a signal
+- [ ] CI (GitHub Actions, matrix win/linux/mac): fmt, clippy, test, build the gdext lib, Godot headless import, and one smoke test *(workflow written; not yet run on GitHub)*
+- [x] LICENSE (per O1), README stub, `.gitignore`
 
 **Accept when** `cargo xtask run` opens an empty window on all three OSes (verified in CI where possible), CI is green, and idle CPU is near 0% with low processor mode on.
 
