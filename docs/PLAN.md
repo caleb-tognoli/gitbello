@@ -272,13 +272,15 @@ Estimates assume ~20 h/week. The **daily-driver point** comes after M6: at that 
 *Result:* 104 Rust tests (parsers on captured output and on real temp repos, scheduler ordering/coalescing/cancellation with a fake backend, watcher on real repos). The CLI also has `stashes`, `op-state`, `watch` and `config`.
 
 ### M3 — App shell (≈2 weeks)
-- [ ] `RepoSession` binding with signals; open repo (folder dialog, recent list, drag and drop)
-- [ ] Tabs (open, close, reorder, restore on launch) and a sidebar with all sections and badges (data only, read-only)
-- [ ] `ActionRegistry`, command palette, rebindable shortcuts
-- [ ] Light and dark themes that follow the OS; a balanced density pass
-- [ ] Git command log panel; error toast and dialog using classified errors
+- [x] `RepoSession` binding with signals; open repo (folder dialog, recent list, drag and drop). The core `Runtime` (config, git, jobs, watcher, repo state) is owned by the `Core` autoload
+- [x] Tabs (open, close, reorder, restore on launch) and a sidebar with all sections and badges (data only, read-only). Worktree rows show branch and state; per-worktree dirty badges come with M6
+- [x] `ActionRegistry`, command palette, rebindable shortcuts (palette lists actions, tabs and recent repos; branches and files arrive with M4/M5)
+- [x] Light and dark themes that follow the OS; a balanced density pass
+- [x] Git command log panel; error toast and dialog using classified errors
 
 **Accept when** five repos can be open in tabs with correct live badges that update after CLI changes outside the app.
+
+*Result:* covered by `shell_smoke.gd` (five fixture repos, badge update after an outside change) and core runtime tests (commits from the CLI). Branch/tag labels on graph rows and the focus-in refresh were added here too.
 
 ### M4 — Changes and commit (≈2.5 weeks)
 - [ ] Changes panel: unstaged, staged and untracked lists, multi-select, stage or unstage files
