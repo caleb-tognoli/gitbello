@@ -1,12 +1,21 @@
 class_name RepoSidebar
 extends Tree
-## Read-only repository overview (PLAN §4): Changes, Worktrees, Branches,
-## Remotes, Tags, Stashes. Each section rebuilds from its session signal and
-## keeps the user's collapsed folders.
+## Repository overview (PLAN §4): Changes, Worktrees, Branches, Remotes,
+## Tags, Stashes. Each section rebuilds from its session signal and keeps the
+## user's collapsed folders. Choosing a Changes row opens the changes view.
+
+## The user chose a row of the Changes section.
+signal changes_requested()
 
 const THEME_TYPE: StringName = &"RepoSidebar"
-## Changed files listed under Changes; the rest are summarised.
-const MAX_LISTED_CHANGES: int = 200
+const CHANGE_GROUPS: Dictionary[String, String] = {
+	"conflicted": "Conflicted",
+	"unstaged": "Unstaged",
+	"untracked": "Untracked",
+	"staged": "Staged",
+}
+## Metadata of Changes rows.
+const CHANGES_ROW: String = "changes"
 
 enum Section { CHANGES, WORKTREES, BRANCHES, REMOTES, TAGS, STASHES }
 
@@ -35,13 +44,17 @@ func _ready() -> void:
 	hide_root = true
 	columns = 2
 	set_column_expand(1, false)
+	set_column_custom_minimum_width(1, get_theme_constant(&"badge_width", THEME_TYPE))
 	item_collapsed.connect(_on_item_collapsed)
+	item_activated.connect(_on_item_chosen)
+	item_mouse_selected.connect(func(_p: Vector2, _b: int) -> void: _on_item_chosen())
 	_build_sections()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
 		custom_minimum_size.x = float(get_theme_constant(&"width", THEME_TYPE))
+		set_column_custom_minimum_width(1, get_theme_constant(&"badge_width", THEME_TYPE))
 		_build_sections()
 		refresh_all()
 
@@ -81,6 +94,7 @@ func section_item(section: Section) -> TreeItem:
 func _signal_pairs(s: RepoSession) -> Array:
 	return [
 		[s.status_changed, _rebuild_changes],
+		[s.status_changed, _rebuild_worktrees],
 		[s.worktrees_changed, _rebuild_worktrees],
 		[s.refs_changed, _rebuild_branches],
 		[s.refs_changed, _rebuild_tags],
@@ -122,17 +136,17 @@ func _add(parent: TreeItem, text: String, badge: String = "", path: String = "")
 
 
 func _rebuild_changes() -> void:
-	var status: Dictionary = session.status() if session != null else {}
-	var changes: Array = status.get("changes", [])
-	var section: TreeItem = _reset(Section.CHANGES, str(changes.size()) if not changes.is_empty() else "")
-	for i: int in mini(changes.size(), MAX_LISTED_CHANGES):
-		var change: Dictionary = changes[i]
-		var what: String = String(change["conflict"])
-		if what.is_empty():
-			what = String(change["index"]) if bool(change["staged"]) else String(change["worktree"])
-		_add(section, String(change["path"]), what)
-	if changes.size() > MAX_LISTED_CHANGES:
-		_add(section, "… %d more" % (changes.size() - MAX_LISTED_CHANGES))
+	var changed: int = int(session.badge().get("changed", 0)) if session != null else 0
+	var section: TreeItem = _reset(Section.CHANGES, str(changed) if changed > 0 else "")
+	if session == null:
+		return
+	for group: String in CHANGE_GROUPS:
+		var count: int = session.change_count(group)
+		if count > 0:
+			var item: TreeItem = _add(section, CHANGE_GROUPS[group], str(count))
+			item.set_metadata(0, CHANGES_ROW)
+	if section.get_child_count() == 0:
+		_add(section, "No local changes").set_metadata(0, CHANGES_ROW)
 
 
 func _rebuild_worktrees() -> void:
@@ -143,14 +157,17 @@ func _rebuild_worktrees() -> void:
 		if bool(wt["detached"]):
 			branch = "detached " + String(wt["head"]).left(7)
 		var flags: PackedStringArray = PackedStringArray()
-		if bool(wt["is_current"]):
-			flags.append("current")
 		if bool(wt["locked"]):
 			flags.append("locked")
 		if bool(wt["prunable"]):
 			flags.append("missing")
+		if not String(wt["badge"]).is_empty():
+			flags.append(String(wt["badge"]))
 		var item: TreeItem = _add(section, "%s  ·  %s" % [String(wt["name"]), branch], " ".join(flags))
 		item.set_tooltip_text(0, String(wt["path"]))
+		if bool(wt["is_current"]):
+			item.set_custom_color(0, get_theme_color(&"head_color", THEME_TYPE))
+			item.set_text(0, "● " + item.get_text(0))
 
 
 func _rebuild_branches() -> void:
@@ -195,6 +212,12 @@ func _rebuild_stashes() -> void:
 	for stash: Dictionary in stashes:
 		var branch: String = String(stash["branch"])
 		_add(section, String(stash["message"]), branch)
+
+
+func _on_item_chosen() -> void:
+	var item: TreeItem = get_selected()
+	if item != null and item.get_metadata(0) == CHANGES_ROW:
+		changes_requested.emit()
 
 
 func _is_folded(path: String, default: bool) -> bool:

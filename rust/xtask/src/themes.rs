@@ -329,10 +329,22 @@ fn generate(p: &Palette) -> String {
     );
 
     let button = [10.0, 4.0, 10.0, 4.0];
-    t.styled("Button/styles/normal", boxed(p.surface, p.border, 1, 4, button));
-    t.styled("Button/styles/hover", boxed(p.hover, p.border, 1, 4, button));
-    t.styled("Button/styles/pressed", boxed(p.pressed, p.border, 1, 4, button));
-    t.styled("Button/styles/disabled", boxed(p.bg_alt, p.border, 1, 4, button));
+    t.styled(
+        "Button/styles/normal",
+        boxed(p.surface, p.border, 1, 4, button),
+    );
+    t.styled(
+        "Button/styles/hover",
+        boxed(p.hover, p.border, 1, 4, button),
+    );
+    t.styled(
+        "Button/styles/pressed",
+        boxed(p.pressed, p.border, 1, 4, button),
+    );
+    t.styled(
+        "Button/styles/disabled",
+        boxed(p.bg_alt, p.border, 1, 4, button),
+    );
     t.styled("Button/styles/focus", outline(p.accent, 1, 4));
     for k in [
         "font_hover_color",
@@ -371,6 +383,10 @@ fn generate(p: &Palette) -> String {
         t.item(&format!("CheckBox/colors/{k}"), col(p.text));
     }
     t.item("CheckBox/colors/font_disabled_color", col(p.dim));
+    for state in ["normal", "pressed", "hover", "hover_pressed", "disabled"] {
+        t.emptied(&format!("CheckBox/styles/{state}"));
+    }
+    t.styled("CheckBox/styles/focus", outline(p.accent, 1, 4));
 
     t.styled("Tree/styles/panel", flat(p.bg_alt));
     t.emptied("Tree/styles/focus");
@@ -400,7 +416,10 @@ fn generate(p: &Palette) -> String {
     t.styled("ItemList/styles/panel", flat(p.bg_alt).margins([4.0; 4]));
     t.emptied("ItemList/styles/focus");
     t.styled("ItemList/styles/selected", flat(p.selection_soft).radius(3));
-    t.styled("ItemList/styles/selected_focus", flat(p.selection).radius(3));
+    t.styled(
+        "ItemList/styles/selected_focus",
+        flat(p.selection).radius(3),
+    );
     t.styled("ItemList/styles/hovered", flat(p.hover).radius(3));
     t.emptied("ItemList/styles/cursor");
     t.emptied("ItemList/styles/cursor_unfocused");
@@ -424,7 +443,10 @@ fn generate(p: &Palette) -> String {
     t.styled("TabStrip/styles/panel", flat(p.bg_alt));
 
     for o in ["VScrollBar", "HScrollBar"] {
-        t.styled(&format!("{o}/styles/scroll"), flat(p.bg_alt).margins([3.0; 4]));
+        t.styled(
+            &format!("{o}/styles/scroll"),
+            flat(p.bg_alt).margins([3.0; 4]),
+        );
         let grabber = |c: Rgb| flat(c).radius(4).margins([4.0; 4]);
         t.styled(&format!("{o}/styles/grabber"), grabber(p.border));
         t.styled(&format!("{o}/styles/grabber_highlight"), grabber(p.dim));
@@ -473,6 +495,7 @@ fn generate(p: &Palette) -> String {
     t.item("RepoSidebar/colors/badge_color", col(p.dim));
     t.item("RepoSidebar/colors/head_color", col(p.head));
     t.item("RepoSidebar/constants/width", 260);
+    t.item("RepoSidebar/constants/badge_width", 72);
     t.item("GitLogPanel/colors/error_color", col(p.error));
     t.item("GitLogPanel/constants/time_width", 80);
     t.item("GitLogPanel/constants/repo_width", 140);
@@ -521,6 +544,11 @@ fn generate(p: &Palette) -> String {
         flat(p.bg)
             .border(p.border, 1, BOTTOM)
             .margins([8.0, 4.0, 8.0, 4.0]),
+    );
+    t.base("DiffHeader", "PanelContainer");
+    t.styled(
+        "DiffHeader/styles/panel",
+        flat(p.bg).margins([8.0, 4.0, 8.0, 4.0]),
     );
     t.base("SectionHeader", "Label");
     t.item("SectionHeader/colors/font_color", col(p.dim));

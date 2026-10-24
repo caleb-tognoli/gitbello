@@ -1,0 +1,208 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
+[ext_resource type="Script" path="res://app/changes/commit_box.gd" id="3_commit"]
+[ext_resource type="Script" path="res://ui/diff_view/diff_view.gd" id="4_diff"]
+
+[node name="ChangesView" type="HSplitContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_view")
+
+[node name="Files" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="UnstagedSection" type="VBoxContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Header" type="HBoxContainer" parent="Files/UnstagedSection"]
+layout_mode = 2
+
+[node name="UnstagedLabel" type="Label" parent="Files/UnstagedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionHeader"
+text = "Unstaged"
+
+[node name="StageSectionButton" type="Button" parent="Files/UnstagedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Stage all"
+
+[node name="UnstagedList" type="Control" parent="Files/UnstagedSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_list")
+
+[node name="UntrackedSection" type="VBoxContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Header" type="HBoxContainer" parent="Files/UntrackedSection"]
+layout_mode = 2
+
+[node name="UntrackedLabel" type="Label" parent="Files/UntrackedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionHeader"
+text = "Untracked"
+
+[node name="AddUntrackedButton" type="Button" parent="Files/UntrackedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Stage all"
+
+[node name="UntrackedList" type="Control" parent="Files/UntrackedSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_list")
+
+[node name="StagedSection" type="VBoxContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Header" type="HBoxContainer" parent="Files/StagedSection"]
+layout_mode = 2
+
+[node name="StagedLabel" type="Label" parent="Files/StagedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionHeader"
+text = "Staged"
+
+[node name="UnstageSectionButton" type="Button" parent="Files/StagedSection/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Unstage all"
+
+[node name="StagedList" type="Control" parent="Files/StagedSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_list")
+
+[node name="CleanLabel" type="Label" parent="Files"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"DimLabel"
+text = "No local changes."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CommitBox" type="VBoxContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+script = ExtResource("3_commit")
+
+[node name="Summary" type="LineEdit" parent="Files/CommitBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Summary (required)"
+
+[node name="Body" type="TextEdit" parent="Files/CommitBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Description"
+wrap_mode = 1
+
+[node name="Row" type="HBoxContainer" parent="Files/CommitBox"]
+layout_mode = 2
+
+[node name="Amend" type="CheckBox" parent="Files/CommitBox/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Amend last commit"
+
+[node name="CommitButton" type="Button" parent="Files/CommitBox/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Commit"
+
+[node name="Output" type="TextEdit" parent="Files/CommitBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"ErrorOutput"
+editable = false
+
+[node name="DiffPanel" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DiffHeaderPanel" type="PanelContainer" parent="DiffPanel"]
+layout_mode = 2
+theme_type_variation = &"DiffHeader"
+
+[node name="DiffHeader" type="HBoxContainer" parent="DiffPanel/DiffHeaderPanel"]
+layout_mode = 2
+
+[node name="DiffPath" type="Label" parent="DiffPanel/DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="DiffStats" type="Label" parent="DiffPanel/DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DimLabel"
+text_overrun_behavior = 3
+
+[node name="DiffStack" type="Control" parent="DiffPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DiffView" type="Control" parent="DiffPanel/DiffStack"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_diff")
+
+[node name="DiffMessage" type="CenterContainer" parent="DiffPanel/DiffStack"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Box" type="VBoxContainer" parent="DiffPanel/DiffStack/DiffMessage"]
+layout_mode = 2
+
+[node name="DiffMessageLabel" type="Label" parent="DiffPanel/DiffStack/DiffMessage/Box"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+horizontal_alignment = 1
+
+[node name="LoadAnywayButton" type="Button" parent="DiffPanel/DiffStack/DiffMessage/Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Load anyway"

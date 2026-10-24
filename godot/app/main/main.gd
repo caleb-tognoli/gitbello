@@ -178,7 +178,7 @@ func _on_tab_changed(index: int) -> void:
 	_save_tabs()
 	var active: RepoTab = current_page()
 	if active != null:
-		active.history().commit_list().grab_focus()
+		active.focus_view()
 
 
 ## TabBar reordered its tabs; rebuild the page list from the tab metadata.
@@ -233,9 +233,45 @@ func _register_actions() -> void:
 	Actions.register(&"view.toggle_git_log", "Toggle git command log", "View",
 			func() -> void: _git_log.visible = not _git_log.visible,
 			PackedStringArray(["Ctrl+Shift+L"]))
+	Actions.register(&"view.history", "Show history", "View",
+			func() -> void: current_page().show_view(RepoTab.View.HISTORY),
+			PackedStringArray(["Ctrl+1"]), has_tab)
+	Actions.register(&"view.changes", "Show changes", "View",
+			func() -> void: current_page().show_view(RepoTab.View.CHANGES),
+			PackedStringArray(["Ctrl+2"]), has_tab)
+	_register_change_actions()
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
+
+
+## Changes-panel actions; they run on the current tab's changes view.
+func _register_change_actions() -> void:
+	var repo_ready: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session.is_ready()
+	var in_changes: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session.is_ready() and page.view == RepoTab.View.CHANGES
+	var changes: Callable = func() -> ChangesView: return current_page().changes()
+	Actions.register(&"changes.stage_selected", "Stage or unstage selected files", "Changes",
+			func() -> void: changes.call().stage_selected(), PackedStringArray(), in_changes)
+	Actions.register(&"changes.stage_all", "Stage all changes", "Changes",
+			func() -> void: changes.call().stage_all(), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
+	Actions.register(&"changes.unstage_all", "Unstage all changes", "Changes",
+			func() -> void: changes.call().unstage_all(), PackedStringArray(["Ctrl+Shift+U"]), repo_ready)
+	Actions.register(&"changes.focus_message", "Write commit message", "Changes",
+			func() -> void:
+				current_page().show_view(RepoTab.View.CHANGES)
+				changes.call().focus_message(),
+			PackedStringArray(["Ctrl+Shift+M"]), repo_ready)
+	var amend: ActionRegistry.Action = Actions.register(&"changes.toggle_amend", "Toggle amend last commit", "Changes",
+			func() -> void: changes.call().toggle_amend(), PackedStringArray(["Ctrl+Shift+A"]), in_changes)
+	amend.in_text_fields = true
+	var commit: ActionRegistry.Action = Actions.register(&"changes.commit", "Commit", "Changes",
+			func() -> void: changes.call().commit(), PackedStringArray(["Ctrl+Enter"]),
+			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit())
+	commit.in_text_fields = true
 
 
 func _toggle_sidebars() -> void:
