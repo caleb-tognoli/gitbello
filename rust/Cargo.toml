@@ -14,6 +14,9 @@ gitbello-core = { path = "crates/gitbello-core" }
 godot = { version = "=0.5.5", features = ["api-4-7"] }
 anyhow = "1"
 thiserror = "2"
+notify = "8.2"
+# Config fields are mapped by hand from toml::Table (no serde derive), so unknown keys survive a save.
+toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse", "display"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
