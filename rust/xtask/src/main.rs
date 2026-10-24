@@ -236,9 +236,18 @@ fn smoke() -> Result<()> {
         .join("debug")
         .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
     let mut fixture = Command::new(cli);
-    // repo-1..5 for the shell test, repo-6 for the commit cycle, repo-7 for lines.
-    fixture.arg("fixture").arg(&fixtures).args(["--repos", "7"]);
+    // repo-1..5 for the shell test, repo-6 for the commit cycle, repo-7 for
+    // lines, repo-8 for sync, repo-9 for branches and tags.
+    fixture.arg("fixture").arg(&fixtures).args(["--repos", "9"]);
     run_status(fixture)?;
+    // No auto-fetch moving badges mid-test, and launch commands that cannot
+    // start anything.
+    fs::write(
+        fixtures.join("config.toml"),
+        "auto_fetch_minutes = 0\n\
+         editor_command = \"gitbello-smoke-missing-editor {path}\"\n\
+         terminal_command = \"gitbello-smoke-missing-terminal\"\n",
+    )?;
 
     // Commits made by the app get a fixed identity and none of the user's
     // (or CI's) git config.

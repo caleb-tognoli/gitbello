@@ -64,6 +64,33 @@ func _ready() -> void:
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
 	page.show_view(RepoTab.View.HISTORY)
+
+	# M5: a branch's context menu, the new-branch form, the jobs bar and a
+	# toast with fixes (fetching and pulling change only the fixture repo).
+	var sidebar: RepoSidebar = page.sidebar()
+	sidebar.select_ref("refs/heads/main")
+	sidebar.grab_focus()
+	sidebar.context_menu_requested.emit(sidebar.selected_ref(), sidebar.get_screen_position() + Vector2(120.0, 290.0))
+	await _shot_window(page.context_menu(), out, "branch_menu")
+	page.close_menu()
+	Actions.run_action(&"branch.new")
+	await _shot_window(page.ops().form(), out, "new_branch")
+	page.ops().form().hide()
+	var bar: JobsBar = main.jobs_bar()
+	bar._on_started(-2, "push", page.session)
+	bar._on_progress(-2, "push", 45, "Writing objects:  45% (9/20)", page.session)
+	await _shot(out, "jobs_bar")
+	bar._on_cancelled(-2, "push", page.session)
+	Actions.run_action(&"sync.fetch")
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and int(page.session.badge().get("behind", 0)) == 0:
+		await get_tree().process_frame
+	Actions.run_action(&"sync.pull")
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and main.toasts().fix_labels().is_empty():
+		await get_tree().process_frame
+	await _shot(out, "sync_toast")
+
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	await _shot(out, "welcome")
@@ -73,6 +100,14 @@ func _ready() -> void:
 func _settle() -> void:
 	for i: int in 30:
 		await get_tree().process_frame
+
+
+## Popups may be windows of their own; this saves one's content.
+func _shot_window(window: Window, dir: String, name: String) -> void:
+	await _settle()
+	var path: String = dir.path_join(name + ".png")
+	window.get_texture().get_image().save_png(path)
+	print("SHOT ", path)
 
 
 func _shot(dir: String, name: String) -> void:

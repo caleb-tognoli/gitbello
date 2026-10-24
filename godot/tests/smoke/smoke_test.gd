@@ -12,12 +12,18 @@ func run() -> void:
 
 func expect(condition: bool, message: String) -> void:
 	if not condition:
-		failures.append(message)
+		_fail(message)
 
 
 func expect_eq(actual: Variant, expected: Variant, message: String) -> void:
 	if typeof(actual) != typeof(expected) or actual != expected:
-		failures.append("%s: expected %s, got %s" % [message, expected, actual])
+		_fail("%s: expected %s, got %s" % [message, expected, actual])
+
+
+## Records a failure and prints it right away (a later hang still shows it).
+func _fail(message: String) -> void:
+	failures.append(message)
+	printerr("  ! %s: %s" % [get_script().resource_path.get_file(), message])
 
 
 ## Waits up to `timeout_ms` (frames keep running) for `condition`; returns
@@ -54,6 +60,16 @@ func type_text(text: String) -> void:
 		event.unicode = ch.unicode_at(0)
 		event.keycode = OS.find_keycode_from_string(ch.to_upper()) if ch != " " else KEY_SPACE
 		get_viewport().push_input(event)
+
+
+static func write_file(path: String, text: String) -> void:
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
+
+
+static func read_file(path: String) -> String:
+	return FileAccess.get_file_as_string(path)
 
 
 ## The `--fixtures=<dir>` argument from `cargo xtask smoke`, or "".
