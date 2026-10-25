@@ -8,6 +8,7 @@ extends SmokeTest
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 
+var _ops: RepoOps = null
 
 func run() -> void:
 	var fixtures: String = fixtures_dir()
@@ -27,6 +28,7 @@ func run() -> void:
 	var page: RepoTab = main.open_repo(repo)
 	var session: RepoSession = page.session
 	var ops: RepoOps = page.ops()
+	_ops = ops
 	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "?"), "lines.txt is untracked")
 	expect(await _commit(session, "lines.txt", "Add lines"), "committed lines.txt on main")
 
@@ -52,15 +54,17 @@ func run() -> void:
 	expect(await _choose_branch(popover, "main"), "the branch list finds main")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "Enter checked out main")
 
-	# A local edit that topic-one's version would overwrite: the checkout is
-	# refused, a dialog offers to stash, switch and re-apply.
+	# A local edit that topic-one's version would overwrite: the switch asks
+	# first; bringing the changes stashes, switches and re-applies them.
 	write_file(lines_path, lines.replace("line 10\n", "local 10\n"))
 	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "M"), "lines.txt is modified")
-	expect(await _choose_branch(popover, "topic-one"), "the branch list finds topic-one")
+	expect(await _choose_branch(popover, "topic-one", ""), "the branch list finds topic-one")
+	var switch: ConfirmationDialog = ops.switch_dialog()
+	expect(await wait_until(func() -> bool: return switch.visible), "a switch with changes asks first")
+	expect(switch.get_ok_button().text == "Bring them to topic-one", "it offers to bring them: %s" % switch.get_ok_button().text)
+	expect(ops.leave_button().text == "Leave them on main", "or to leave them: %s" % ops.leave_button().text)
+	switch.get_ok_button().pressed.emit()
 	var confirm: ConfirmationDialog = ops.confirm_dialog()
-	expect(await wait_until(func() -> bool: return confirm.visible), "the refused checkout offers to stash")
-	expect(confirm.dialog_text.contains("Stash"), "the dialog explains: %s" % confirm.dialog_text)
-	press("Enter")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "topic-one"),
 			"stashed and switched: %s" % session.current_branch())
 	expect(await wait_until(func() -> bool: return read_file(lines_path) == lines.replace("line 1\n", "topic 1\n").replace("line 10\n", "local 10\n")),
@@ -142,13 +146,19 @@ func run() -> void:
 
 ## Opens the branch list with Ctrl+B, filters it by `name` and presses
 ## Enter; returns whether the list opened and the first row is `name`.
-func _choose_branch(popover: BranchPopover, name: String) -> bool:
+## When the switch asks about local changes, it gets `answer` (`bring`; ""
+## leaves the dialog open).
+func _choose_branch(popover: BranchPopover, name: String, answer: String = "bring") -> bool:
 	press("Ctrl+B")
 	if not await wait_until(func() -> bool: return popover.visible):
 		return false
 	popover.set_filter(name)
 	var found: bool = not popover.row_names().is_empty() and popover.row_names()[0] == name
 	press("Enter", popover)
+	var dialog: ConfirmationDialog = _ops.switch_dialog()
+	var asked: bool = _ops.session.change_count() > 0 and await wait_until(func() -> bool: return dialog.visible, 3000)
+	if answer == "bring" and asked:
+		dialog.get_ok_button().pressed.emit()
 	return found
 
 

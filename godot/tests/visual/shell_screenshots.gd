@@ -155,6 +155,27 @@ func _ready() -> void:
 	await _shot_window(main.settings_form(), out, "settings")
 	main.settings_form().hide()
 
+	# M6.5 P4: the switch with changes, then changes left on main and the
+	# Shelved section (only the fixture repo changes).
+	page.show_view(WorktreeView.View.CHANGES)
+	page.session.create_branch("topic", "HEAD", false)
+	await _settle()
+	page.ops().checkout_branch("topic")
+	await _shot_window(page.ops().switch_dialog(), out, "switch_dialog")
+	page.ops().leave_button().pressed.emit()
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and page.session.current_branch() != "topic":
+		await get_tree().process_frame
+	page.ops().checkout_branch("main")
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and not page.changes().offer_bar().visible:
+		await get_tree().process_frame
+	var shelf_list: ShelfList = page.changes().shelf_list()
+	for shelf: Dictionary in page.session.shelves():
+		shelf_list.expand(String(shelf["oid"]))
+	await _settle()
+	await _shot(out, "shelves")
+
 	# M6.5 P3: no local changes (discarding touches only the fixture repo).
 	page.session.discard_paths(page.session.change_paths(0, page.session.change_count()))
 	deadline = Time.get_ticks_msec() + WAIT_MS
