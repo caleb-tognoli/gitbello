@@ -72,6 +72,13 @@ fn gaps_open_from_the_old_file_and_survive_reloads() {
     let closed = rows(&rt, &key);
     // git names the line before a hunk as its section.
     assert_eq!(closed[0], "@@ -7,7 +7,7 @@ l6");
+    // The old file is read at once, to know what follows the last hunk.
+    poll_until(&mut rt, |rt, _| {
+        rt.repo(&key)
+            .and_then(|s| s.diff())
+            .is_some_and(|d| d.old_file().is_some())
+    });
+    let closed = rows(&rt, &key);
     assert_eq!(closed.last().expect("rows"), "end");
     let layout = rt
         .repo(&key)
@@ -81,14 +88,8 @@ fn gaps_open_from_the_old_file_and_survive_reloads() {
         .clone();
     assert_eq!(layout.expanders(0), Expanders::Up);
     assert_eq!(layout.expanders(1), Expanders::Both);
-    assert!(rt
-        .repo(&key)
-        .and_then(|s| s.diff())
-        .expect("diff")
-        .old_file()
-        .is_none());
 
-    // Up from the second hunk: the old file is read, then 20 lines show.
+    // Up from the second hunk: 20 lines show.
     rt.expand_diff(&key, DiffSlot::Changes, 1, Expand::Up);
     wait_for_diff(&mut rt);
     let open_rows = rows(&rt, &key);
@@ -96,7 +97,7 @@ fn gaps_open_from_the_old_file_and_survive_reloads() {
         .iter()
         .position(|r| r.starts_with("@@ -37"))
         .expect("second header");
-    assert_eq!(open_rows[header], "@@ -37,27 +37,27 @@ l56");
+    assert_eq!(open_rows[header], "@@ -37,27 +37,27 @@");
     assert_eq!(open_rows[header + 1], "~37 l37");
     assert_eq!(open_rows[header + 20], "~56 l56");
 

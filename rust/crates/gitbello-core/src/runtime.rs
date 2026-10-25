@@ -617,9 +617,12 @@ pub struct DiffState {
     error: Option<GitError>,
     /// Which gaps between hunks the user opened.
     expansion: Expansion,
-    /// The old side, read once a gap is opened.
+    /// The old side, read once a gap is opened or to learn what follows
+    /// the last hunk.
     old: Option<Arc<OldFile>>,
     old_loading: bool,
+    /// Blob whose read failed (or was too large): not read again.
+    old_failed: Option<String>,
     /// Rows to show: the diff and the open gaps.
     layout: DiffLayout,
 }
@@ -636,6 +639,7 @@ impl DiffState {
             expansion: Expansion::default(),
             old: None,
             old_loading: false,
+            old_failed: None,
             layout: DiffLayout::default(),
         }
     }
@@ -670,12 +674,16 @@ impl DiffState {
             .filter(|oid| !oid.chars().all(|c| c == '0'))
     }
 
-    /// Gaps are open but the old file still has to be read.
+    /// The old file has to be read: gaps are open, or the end of the file
+    /// is unknown.
     fn needs_old_file(&self) -> bool {
-        !self.expansion.is_empty()
+        let Some(oid) = self.old_oid() else {
+            return false;
+        };
+        (!self.expansion.is_empty() || !self.layout.end_known())
             && self.old.is_none()
             && !self.old_loading
-            && self.old_oid().is_some()
+            && self.old_failed.as_deref() != Some(oid)
     }
 
     /// Drops an old file of another blob, then rebuilds the layout.
@@ -916,6 +924,7 @@ impl Runtime {
             next.diff = keep.diff;
             next.expansion = keep.expansion;
             next.old = keep.old;
+            next.old_failed = keep.old_failed;
             next.layout = keep.layout;
         }
         *current = Some(next);
@@ -2209,12 +2218,13 @@ fn apply_old_file(
     repo: &Path,
     out: &mut Vec<RuntimeEvent>,
 ) {
-    let old = match result {
+    let (old, failed) = match result {
         Some(JobOutput::OldFile {
             oid,
             text: Some(text),
-        }) => Some(Arc::new(OldFile::new(oid, text))),
-        _ => None,
+        }) => (Some(Arc::new(OldFile::new(oid, text))), None),
+        Some(JobOutput::OldFile { oid, text: None }) => (None, Some(oid)),
+        _ => (None, None),
     };
     for slot in [DiffSlot::Changes, DiffSlot::Commit] {
         let Some(diff) = state.slot_mut(slot).as_mut().filter(|d| d.old_loading) else {
@@ -2223,7 +2233,10 @@ fn apply_old_file(
         diff.old_loading = false;
         match &old {
             Some(old) if diff.old_oid() == Some(old.oid()) => diff.old = Some(Arc::clone(old)),
-            _ => diff.expansion = Expansion::default(),
+            _ => {
+                diff.expansion = Expansion::default();
+                diff.old_failed = failed.clone().or_else(|| diff.old_oid().map(str::to_owned));
+            }
         }
         diff.relayout();
         out.push(RuntimeEvent::DiffChanged {

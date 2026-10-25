@@ -170,17 +170,21 @@ pub struct HeaderRow {
 }
 
 impl HeaderRow {
-    /// `@@ -a,b +c,d @@` with the original header's section text after it.
+    /// `@@ -a,b +c,d @@` with the original header's section text after it,
+    /// while the header still starts where git put it (the section names
+    /// the line before that start).
     pub fn text(&self, diff: &FileDiff) -> String {
-        let original = diff
-            .hunks
-            .get(self.hunk)
+        let hunk = diff.hunks.get(self.hunk);
+        let original = hunk
             .and_then(|h| diff.line(h.line))
             .map(|l| String::from_utf8_lossy(l.text).into_owned())
             .unwrap_or_default();
+        let moved =
+            hunk.is_some_and(|h| h.old_start != self.old_start || h.new_start != self.new_start);
         let section = original
             .strip_prefix("@@")
             .and_then(|rest| rest.split_once("@@"))
+            .filter(|_| !moved)
             .map_or("", |(_, section)| section);
         let range = |start: u32, count: u32| match count {
             1 => start.to_string(),
@@ -203,8 +207,8 @@ pub enum LayoutRow {
     Header(HeaderRow),
     /// An unchanged line outside the hunks, by its old and new numbers.
     Hidden { old: u32, new: u32 },
-    /// After the last hunk, where more of the file follows (or may follow,
-    /// until the old file is read).
+    /// After the last hunk, where more of the file follows (shown once the
+    /// old file says so).
     End,
 }
 
@@ -396,7 +400,7 @@ impl DiffLayout {
         layout.hidden(last.0, i64::from(last.1) - i64::from(last.0), down, open);
         let hidden = size.map(|size| size - down);
         layout.gaps.push(Gap { hidden });
-        if hidden != Some(0) {
+        if hidden.is_some_and(|hidden| hidden > 0) {
             layout.unified.push(Run::End);
             layout.split.push(Run::End);
         }
@@ -474,6 +478,17 @@ impl DiffLayout {
             Some(hidden) if hidden <= EXPAND_STEP => Expanders::All,
             _ => Expanders::Both,
         }
+    }
+
+    /// Lines gap `gap` still hides; `None` after the last hunk while the old
+    /// file is unread.
+    pub fn hidden_lines(&self, gap: usize) -> Option<u32> {
+        self.gaps.get(gap).and_then(|g| g.hidden)
+    }
+
+    /// Whether it is known how much of the file follows the last hunk.
+    pub fn end_known(&self) -> bool {
+        self.gaps.last().is_none_or(|g| g.hidden.is_some())
     }
 
     /// Some lines of the file are not shown (or may not be).
@@ -558,19 +573,28 @@ index 1111111..2222222 100644
     }
 
     #[test]
-    fn closed_layout_is_the_diff_plus_an_end_row() {
+    fn closed_layout_is_the_diff_then_an_end_row_once_the_end_is_known() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
         let rows = describe(&diff, &layout, false);
-        assert_eq!(rows.len(), diff.line_count() + 1);
+        // Three context lines end the last hunk: more may follow.
+        assert_eq!(rows.len(), diff.line_count());
+        assert!(!layout.end_known());
+        assert!(layout.has_hidden());
         assert_eq!(rows[0], "@@ -2,7 +2,7 @@ fn top");
         assert_eq!(rows[9], "@@ -27,7 +27,7 @@");
-        assert_eq!(rows.last().unwrap(), "end");
         assert_eq!(layout.expanders(0), Expanders::Up);
+        assert_eq!(layout.hidden_lines(0), Some(1));
         // l9..l26: one click opens it all.
         assert_eq!(layout.expanders(1), Expanders::All);
-        assert_eq!(layout.expanders(2), Expanders::Down);
+        assert_eq!(layout.hidden_lines(1), Some(18));
         assert_eq!(layout.max_line_number(), diff.max_line_number());
+        let old = old();
+        let layout = DiffLayout::build(&diff, &Expansion::default(), Some(&old));
+        let rows = describe(&diff, &layout, false);
+        assert_eq!(rows.last().unwrap(), "end");
+        assert_eq!(layout.expanders(2), Expanders::Down);
+        assert_eq!(layout.hidden_lines(2), Some(7));
     }
 
     #[test]
@@ -623,8 +647,9 @@ index 1111111..2222222 100644
         let layout = DiffLayout::build(&diff, &expansion, Some(&old));
         let rows = describe(&diff, &layout, false);
         // l5..l59 is 55 lines: 20 above the second hunk open.
-        let header = rows.iter().position(|r| r.contains("section")).unwrap();
-        assert_eq!(rows[header], "@@ -40,23 +40,24 @@ section");
+        let header = rows.iter().position(|r| r.starts_with("@@ -40")).unwrap();
+        // It no longer starts where git put it, so git's section is dropped.
+        assert_eq!(rows[header], "@@ -40,23 +40,24 @@");
         assert_eq!(rows[header + 1], "~40/40");
         assert_eq!(rows[header + 20], "~59/59");
         assert_eq!(rows[header + 21], "l60");
