@@ -26,6 +26,7 @@ var _placeholder: String = ""
 
 func _ready() -> void:
 	add_to_group(GROUP)
+	_layout_button.icon = AppTheme.icon(&"Panels2")
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
 	_layout_button.toggled.connect(func(on: bool) -> void:
 		if on != _view.side_by_side:

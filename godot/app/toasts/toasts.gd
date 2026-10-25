@@ -43,12 +43,14 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 	if not details.is_empty():
 		var more: Button = Button.new()
 		more.text = "Details"
-		more.flat = true
+		more.theme_type_variation = &"ToolbarButton"
 		more.pressed.connect(func() -> void: _show_details(title, details))
 		row.add_child(more)
 	var close: Button = Button.new()
-	close.text = "✕"
-	close.flat = true
+	close.icon = AppTheme.CLOSE
+	close.tooltip_text = "Dismiss"
+	close.theme_type_variation = &"ToolbarButton"
+	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	close.pressed.connect(panel.queue_free)
 	row.add_child(close)
 	if not fixes.is_empty():

@@ -12,6 +12,8 @@ signal recent_chosen(path: String)
 
 
 func _ready() -> void:
+	_open_button.icon = AppTheme.icon(&"Folder")
+	_open_button.theme_type_variation = &"PrimaryButton"
 	_open_button.pressed.connect(func() -> void: open_requested.emit())
 	_recent.item_activated.connect(_on_recent_activated)
 	refresh()

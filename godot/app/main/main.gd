@@ -50,6 +50,7 @@ func _ready() -> void:
 	_tabs.tab_changed.connect(_on_tab_changed)
 	_tabs.tab_close_pressed.connect(close_tab)
 	_tabs.active_tab_rearranged.connect(_on_tab_rearranged)
+	_add_button.icon = AppTheme.icon(&"Add")
 	_add_button.pressed.connect(func() -> void: Actions.run_action(&"repo.open"))
 	_welcome.open_requested.connect(func() -> void: Actions.run_action(&"repo.open"))
 	_welcome.recent_chosen.connect(open_repo)
@@ -496,20 +497,22 @@ func _register_worktree_actions() -> void:
 				return openable.call() and not bool(wt["is_main"]) and not bool(wt["is_head"]))
 
 
-## The Settings dialog: pull mode, auto-fetch, editor, terminal and the
-## worktree folder template.
+## The Settings dialog: pull mode, auto-fetch, editor, terminal, the
+## worktree folder template and the accent colour.
 func _open_settings() -> void:
 	var settings: Dictionary = Core.settings()
 	var modes: PackedStringArray = PackedStringArray(["ff-only", "merge", "rebase"])
 	_settings_form.begin("Settings", "Save", _save_settings)
 	_settings_form.add_choice("pull_mode", "Pull", modes, modes.find(String(settings["pull_mode"])))
-	_settings_form.add_line("auto_fetch_minutes", "Fetch automatically every … minutes (0: never)",
-			str(int(settings["auto_fetch_minutes"])))
-	_settings_form.add_line("editor_command", "Editor command ({path} is the folder)", String(settings["editor_command"]))
-	_settings_form.add_line("terminal_command", "Terminal command", String(settings["terminal_command"]), false,
+	_settings_form.add_line("auto_fetch_minutes", "Auto-fetch", str(int(settings["auto_fetch_minutes"])))
+	_settings_form.add_note("Minutes between fetches; 0 turns it off.")
+	_settings_form.add_line("editor_command", "Editor", String(settings["editor_command"]))
+	_settings_form.add_note("{path} is replaced by the folder.")
+	_settings_form.add_line("terminal_command", "Terminal", String(settings["terminal_command"]), false,
 			"The platform's terminal")
 	_settings_form.add_line("worktree_template", "New task folders", String(settings["worktree_template"]))
 	_settings_form.add_note("{repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
+	_settings_form.add_color("accent", "Accent colour", ThemeManager.configured_accent(), AppTheme.ACCENT_PRESETS)
 	_settings_form.validator = func(values: Dictionary) -> String:
 		var minutes: String = String(values["auto_fetch_minutes"])
 		return "" if minutes.is_valid_int() and int(minutes) >= 0 else "Enter a whole number of minutes."
@@ -523,9 +526,14 @@ func settings_form() -> FormDialog:
 func _save_settings(values: Dictionary) -> void:
 	var settings: Dictionary = values.duplicate()
 	settings["auto_fetch_minutes"] = int(String(values["auto_fetch_minutes"]))
+	if Color(String(values["accent"])).is_equal_approx(AppTheme.DEFAULT_ACCENT):
+		settings["accent"] = ""
 	var error: String = Core.set_settings(settings)
 	if not error.is_empty():
 		_toasts.show_toast("Settings not saved", error)
+		return
+	if not ThemeManager.configured_accent().is_equal_approx(ThemeManager.accent):
+		ThemeManager.apply(self)
 
 
 ## Where a new branch or tag starts: `[commit-ish, label]` from the sidebar's
