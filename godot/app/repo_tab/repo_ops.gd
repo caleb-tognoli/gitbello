@@ -157,7 +157,8 @@ func _create_and_switch(stash: bool, name: String, start: String) -> int:
 
 func rename_branch(name: String) -> void:
 	_begin_form("rename", "Rename branch", "Rename", _rename_branch.bind(name))
-	_form.add_line("name", "New name for %s" % name, name, true)
+	_form.add_note("Renaming %s." % name)
+	_form.add_line("name", "New name", name, true)
 	_form.validator = _check_branch_name.bind(name)
 	_form.open()
 
@@ -188,7 +189,8 @@ func set_upstream(branch: String) -> void:
 			if String(ref["short_name"]) == current:
 				selected = options.size() - 1
 	_begin_form("upstream", "Set upstream", "Save", _save_upstream.bind(branch))
-	_form.add_choice("upstream", "Upstream of %s" % branch, options, selected)
+	_form.add_note("The branch %s follows." % branch)
+	_form.add_choice("upstream", "Upstream", options, selected)
 	_form.open()
 
 
@@ -356,7 +358,7 @@ func lock_worktree(path: String) -> void:
 	_begin_form("lock", "Lock worktree", "Lock", func(values: Dictionary) -> void:
 		session.lock_worktree(path, String(values["reason"])))
 	_form.add_note("A locked worktree is kept by prune and cleanup, for example while its folder is on a removable disk.")
-	_form.add_line("reason", "Reason (optional)")
+	_form.add_line("reason", "Reason", "", false, "Optional")
 	_form.open()
 
 
