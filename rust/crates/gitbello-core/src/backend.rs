@@ -15,10 +15,10 @@ use crate::diff::{
 use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, Progress};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
-    detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remotes,
+    detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
     parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
-    ParseError, Ref, RepoPaths, RepoStatus, StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS,
-    REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
+    ParseError, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree, COMMIT_SHOW_FORMAT,
+    REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
 };
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
@@ -119,8 +119,8 @@ pub trait GitBackend: Send + Sync {
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
 
-    /// Names of the configured remotes.
-    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<String>, GitError>;
+    /// The configured remotes with their URLs.
+    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Remote>, GitError>;
     /// Fetch, pull or push; `--progress` lines go to `progress` as they arrive.
     fn sync(
         &self,
@@ -301,7 +301,11 @@ impl GitBackend for CliBackend {
     }
 
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError> {
-        let remotes = self.remotes(repo, cancel)?;
+        let remotes: Vec<String> = self
+            .remotes(repo, cancel)?
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
         let out = self.read(repo, REFS_ARGS, cancel)?;
         parse_refs(&out.stdout, &remotes).map_err(|e| unexpected(REFS_ARGS, e))
     }
@@ -622,8 +626,10 @@ impl GitBackend for CliBackend {
         Ok(())
     }
 
-    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<String>, GitError> {
-        Ok(parse_remotes(&self.read(repo, &["remote"], cancel)?.stdout))
+    fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Remote>, GitError> {
+        Ok(parse_remote_urls(
+            &self.read(repo, &["remote", "-v"], cancel)?.stdout,
+        ))
     }
 
     fn sync(
@@ -723,6 +729,10 @@ impl GitBackend for CliBackend {
                 .run()
                 .map(drop),
             RefOp::DeleteTag { name } => git(&["tag", "--delete", name]),
+            RefOp::AddRemote { name, url } => git(&["remote", "add", "--", name, url]),
+            RefOp::RenameRemote { old, new } => git(&["remote", "rename", "--", old, new]),
+            RefOp::RemoveRemote { name } => git(&["remote", "remove", "--", name]),
+            RefOp::SetRemoteUrl { name, url } => git(&["remote", "set-url", "--", name, url]),
             RefOp::CherryPick { commit } => {
                 let parents = ["rev-list", "--parents", "-n", "1", commit, "--"];
                 let out = self.read(toplevel, &parents, cancel)?;

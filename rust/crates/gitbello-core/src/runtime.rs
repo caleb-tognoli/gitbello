@@ -32,8 +32,8 @@ use crate::ops::{
     PUSH_JOB_LABEL,
 };
 use crate::repo::{
-    CommitDetails, FileState, Head, Operation, Ref, RefKind, RepoPaths, RepoStatus, StashEntry,
-    Worktree,
+    CommitDetails, FileState, Head, Operation, Ref, RefKind, Remote, RepoPaths, RepoStatus,
+    StashEntry, Worktree,
 };
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
@@ -149,6 +149,7 @@ pub struct RepoState {
     status: Option<RepoStatus>,
     refs: Option<Vec<Ref>>,
     remotes: Option<Vec<String>>,
+    remote_list: Option<Vec<Remote>>,
     worktrees: Option<Vec<Worktree>>,
     stashes: Option<Vec<StashEntry>>,
     operation: Option<Operation>,
@@ -183,6 +184,7 @@ impl RepoState {
             status: None,
             refs: None,
             remotes: None,
+            remote_list: None,
             worktrees: None,
             stashes: None,
             operation: None,
@@ -371,6 +373,11 @@ impl RepoState {
     /// Names of the configured remotes (empty until refs are read).
     pub fn remotes(&self) -> &[String] {
         self.remotes.as_deref().unwrap_or(&[])
+    }
+
+    /// The configured remotes with their URLs (empty until refs are read).
+    pub fn remote_list(&self) -> &[Remote] {
+        self.remote_list.as_deref().unwrap_or(&[])
     }
 
     /// The checked-out branch (`None` when detached or not yet known).
@@ -1020,7 +1027,13 @@ impl Runtime {
             }
             | RefOp::DeleteBranch { .. }
             | RefOp::CreateTag { .. }
-            | RefOp::DeleteTag { .. } => RefreshSet::EMPTY.with(RefreshKind::Refs),
+            | RefOp::DeleteTag { .. }
+            | RefOp::AddRemote { .. }
+            | RefOp::SetRemoteUrl { .. } => RefreshSet::EMPTY.with(RefreshKind::Refs),
+            // Upstreams of local branches name the remote.
+            RefOp::RenameRemote { .. } | RefOp::RemoveRemote { .. } => RefreshSet::EMPTY
+                .with(RefreshKind::Refs)
+                .with(RefreshKind::Status),
             RefOp::SetUpstream { .. } => RefreshSet::EMPTY
                 .with(RefreshKind::Refs)
                 .with(RefreshKind::Status),
@@ -1447,7 +1460,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             }
             state.labels = labels_by_commit(&refs);
             state.refs = Some(refs);
-            state.remotes = Some(remotes);
+            state.remotes = Some(remotes.iter().map(|r| r.name.clone()).collect());
+            state.remote_list = Some(remotes);
         }
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
         JobOutput::Operation(operation) => state.operation = operation,

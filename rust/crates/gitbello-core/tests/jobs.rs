@@ -14,7 +14,7 @@ use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
 use gitbello_core::ops::{RefOp, SyncOp, WorktreeOp};
-use gitbello_core::repo::{Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use gitbello_core::repo::{Operation, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree};
 
 #[derive(Default)]
 struct FakeBackend {
@@ -111,7 +111,7 @@ impl GitBackend for FakeBackend {
     ) -> Result<(), GitError> {
         Ok(())
     }
-    fn remotes(&self, _: &Path, _: &CancelToken) -> Result<Vec<String>, GitError> {
+    fn remotes(&self, _: &Path, _: &CancelToken) -> Result<Vec<Remote>, GitError> {
         Ok(Vec::new())
     }
     fn sync(&self, _: &Path, _: &SyncOp, _: ProgressSink, _: &CancelToken) -> Result<(), GitError> {

@@ -22,7 +22,9 @@ use std::thread::{self, JoinHandle};
 use crate::backend::GitBackend;
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
-use crate::repo::{CommitDetails, Operation, Ref, RepoPaths, RepoStatus, StashEntry, Worktree};
+use crate::repo::{
+    CommitDetails, Operation, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree,
+};
 use crate::sidebar::Badge;
 use crate::worktrees::CleanupCandidate;
 
@@ -135,7 +137,7 @@ impl fmt::Debug for RefreshSet {
 pub enum JobOutput {
     Status(RepoStatus),
     /// Refs and the configured remote names.
-    Refs(Vec<Ref>, Vec<String>),
+    Refs(Vec<Ref>, Vec<Remote>),
     Worktrees(Vec<Worktree>),
     Operation(Option<Operation>),
     Stashes(Vec<StashEntry>),

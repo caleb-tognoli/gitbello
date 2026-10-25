@@ -237,6 +237,7 @@ mod tests {
             is_head: head,
             symref_target: None,
             worktree: None,
+            committed_at: None,
         }
     }
 

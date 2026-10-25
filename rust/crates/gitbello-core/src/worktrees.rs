@@ -242,6 +242,7 @@ mod tests {
             is_head: false,
             symref_target: symref.map(str::to_owned),
             worktree: None,
+            committed_at: None,
         }
     }
 

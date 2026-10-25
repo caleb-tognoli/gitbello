@@ -149,6 +149,22 @@ pub enum RefOp {
     DeleteTag {
         name: String,
     },
+    AddRemote {
+        name: String,
+        url: String,
+    },
+    RenameRemote {
+        old: String,
+        new: String,
+    },
+    RemoveRemote {
+        name: String,
+    },
+    /// Sets the fetch and push URL.
+    SetRemoteUrl {
+        name: String,
+        url: String,
+    },
     /// Merge commits are picked against their first parent.
     CherryPick {
         commit: String,
@@ -168,6 +184,10 @@ impl RefOp {
             Self::SetUpstream { .. } => "set upstream",
             Self::CreateTag { .. } => "create tag",
             Self::DeleteTag { .. } => "delete tag",
+            Self::AddRemote { .. } => "add remote",
+            Self::RenameRemote { .. } => "rename remote",
+            Self::RemoveRemote { .. } => "remove remote",
+            Self::SetRemoteUrl { .. } => "set remote URL",
             Self::CherryPick { .. } => "cherry-pick",
             Self::Abort(_) => "abort",
         }

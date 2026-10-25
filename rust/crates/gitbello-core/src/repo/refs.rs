@@ -1,16 +1,17 @@
-//! `git for-each-ref` with NUL-separated fields, plus `git remote` for
-//! splitting remote-tracking names.
+//! `git for-each-ref` with NUL-separated fields, plus `git remote -v` for
+//! the remotes (their names split remote-tracking names).
 
 use std::path::PathBuf;
 
 use super::{git_path, text, ParseError};
 
 const FORMAT: &str = "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)\
-%00%(upstream)%00%(upstream:track,nobracket)%00%(HEAD)%00%(symref)%00%(worktreepath)";
+%00%(upstream)%00%(upstream:track,nobracket)%00%(HEAD)%00%(symref)%00%(worktreepath)\
+%00%(committerdate:unix)";
 
 pub const REFS_ARGS: &[&str] = &["for-each-ref", FORMAT];
 
-const FIELDS: usize = 9;
+const FIELDS: usize = 10;
 const WHAT: &str = "refs";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -51,6 +52,18 @@ pub struct Ref {
     pub symref_target: Option<String>,
     /// Worktree where this branch is checked out, if any.
     pub worktree: Option<PathBuf>,
+    /// Committer date (Unix seconds) of the commit the ref points at; `None`
+    /// for annotated tags and symbolic refs.
+    pub committed_at: Option<i64>,
+}
+
+/// A configured remote and its URLs (`git remote -v`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub name: String,
+    pub fetch_url: String,
+    /// Usually the fetch URL; differs when `pushurl` is set.
+    pub push_url: String,
 }
 
 impl Ref {
@@ -79,6 +92,39 @@ pub fn parse_remotes(output: &[u8]) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// `git remote -v` output: `name<TAB>url (fetch|push)` lines, two per remote,
+/// in the order git lists the remotes.
+pub fn parse_remote_urls(output: &[u8]) -> Vec<Remote> {
+    let mut remotes: Vec<Remote> = Vec::new();
+    for line in text(output).lines() {
+        let Some((name, rest)) = line.split_once('\t') else {
+            continue;
+        };
+        let (url, push) = if let Some(url) = rest.strip_suffix(" (push)") {
+            (url, true)
+        } else {
+            (rest.strip_suffix(" (fetch)").unwrap_or(rest), false)
+        };
+        let index = match remotes.iter().position(|r| r.name == name) {
+            Some(index) => index,
+            None => {
+                remotes.push(Remote {
+                    name: name.to_owned(),
+                    fetch_url: url.to_owned(),
+                    push_url: url.to_owned(),
+                });
+                remotes.len() - 1
+            }
+        };
+        if push {
+            remotes[index].push_url = url.to_owned();
+        } else {
+            remotes[index].fetch_url = url.to_owned();
+        }
+    }
+    remotes
 }
 
 /// Parses [`REFS_ARGS`] output. `remotes` (from [`parse_remotes`]) resolves
@@ -110,6 +156,7 @@ pub fn parse_refs(output: &[u8], remotes: &[String]) -> Result<Vec<Ref>, ParseEr
             is_head: f[6] == b"*",
             symref_target: non_empty(f[7]),
             worktree: (!f[8].is_empty()).then(|| git_path(f[8])),
+            committed_at: text(f[9]).trim().parse().ok(),
             name,
         });
     }
@@ -161,23 +208,31 @@ mod tests {
     const A: &str = "1111111111111111111111111111111111111111";
     const B: &str = "2222222222222222222222222222222222222222";
 
-    fn line(fields: [&str; FIELDS]) -> String {
-        fields.join("\0") + "\n"
+    /// A ref line without a commit date.
+    fn line(fields: [&str; FIELDS - 1]) -> String {
+        line_at(fields, "")
+    }
+
+    fn line_at(fields: [&str; FIELDS - 1], date: &str) -> String {
+        fields.join("\0") + "\0" + date + "\n"
     }
 
     fn captured() -> Vec<u8> {
         [
-            line([
-                "refs/heads/main",
-                A,
-                "commit",
-                "",
-                "refs/remotes/origin/main",
-                "ahead 2, behind 1",
-                "*",
-                "",
-                "/home/a/repo",
-            ]),
+            line_at(
+                [
+                    "refs/heads/main",
+                    A,
+                    "commit",
+                    "",
+                    "refs/remotes/origin/main",
+                    "ahead 2, behind 1",
+                    "*",
+                    "",
+                    "/home/a/repo",
+                ],
+                "1700000000",
+            ),
             line([
                 "refs/heads/feature/wörk",
                 B,
@@ -262,6 +317,8 @@ mod tests {
             }
         );
         assert_eq!(main.worktree, Some(PathBuf::from("/home/a/repo")));
+        assert_eq!(main.committed_at, Some(1_700_000_000));
+        assert_eq!(refs[1].committed_at, None);
 
         let gone = &refs[1];
         assert_eq!(gone.short_name, "feature/wörk");
@@ -311,6 +368,26 @@ mod tests {
     #[test]
     fn parses_remote_list_and_rejects_bad_lines() {
         assert_eq!(parse_remotes(b"origin\nteam/x\n\n"), ["origin", "team/x"]);
+        let urls = parse_remote_urls(
+            "origin\thttps://example.com/a.git (fetch)\norigin\thttps://example.com/a.git (push)\n\
+             team/x\tC:/My Repos/x (fetch)\nteam/x\tgit@host:x.git (push)\n"
+                .as_bytes(),
+        );
+        assert_eq!(
+            urls,
+            [
+                Remote {
+                    name: "origin".into(),
+                    fetch_url: "https://example.com/a.git".into(),
+                    push_url: "https://example.com/a.git".into(),
+                },
+                Remote {
+                    name: "team/x".into(),
+                    fetch_url: "C:/My Repos/x".into(),
+                    push_url: "git@host:x.git".into(),
+                },
+            ]
+        );
         assert!(parse_refs(b"refs/heads/a\0only two\n", &[]).is_err());
         let bad = line([
             "refs/heads/a",
