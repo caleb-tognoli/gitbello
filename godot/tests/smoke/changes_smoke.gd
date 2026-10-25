@@ -33,6 +33,14 @@ func run() -> void:
 	expect_eq(list.cursor, 0, "cursor on the first file")
 	expect_eq(session.picked_count(), 2, "nothing staged: every file is included")
 	expect_eq(view.check_all().state, "all", "the check-all box is checked")
+	var badge: CountBadge = page.active_view().changes_badge()
+	expect(await wait_until(func() -> bool: return badge.visible and badge.count == 2),
+			"the Changes button shows the count in a badge: %d" % badge.count)
+	await get_tree().process_frame
+	var button: Button = badge.get_parent() as Button
+	expect_eq(button.text, "Changes", "the count is not in the button's text")
+	expect(badge.position.x + badge.size.x <= button.size.x and badge.position.x > 0.0,
+			"the button makes room for its badge: %s in %s" % [badge.get_rect(), button.size])
 
 	# The highlighted file's diff loads.
 	var diff: DiffView = view.diff_view()
@@ -72,6 +80,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return empty.visible), "the empty state shows")
 	expect_eq(empty.title(), "No local changes", "it says there is nothing to commit")
 	expect("New task" in empty.button_labels(), "it suggests a new task: %s" % [empty.button_labels()])
+	expect(await wait_until(func() -> bool: return not badge.visible), "no badge without changes")
 
 	# Amend: Ctrl+Shift+A loads HEAD's message; edit the summary and commit.
 	press("Ctrl+Shift+A")

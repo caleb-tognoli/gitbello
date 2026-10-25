@@ -715,6 +715,12 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"hover", &"SegmentButton", _box(p.hover, 4, segment))
 	theme.set_stylebox(&"pressed", &"SegmentButton", _box(Color(p.accent, 0.35), 4, segment))
 	theme.set_stylebox(&"hover_pressed", &"SegmentButton", _box(Color(p.accent, 0.4), 4, segment))
+	# The number of changes on the Changes button, in a pill
+	_variation(theme, &"CountBadge", &"Label")
+	theme.set_stylebox(&"normal", &"CountBadge", _box(Color(p.text, 0.16), 8, Vector4(6, 0, 6, 1)))
+	theme.set_color(&"font_color", &"CountBadge", p.text)
+	theme.set_font_size(&"font_size", &"CountBadge", 11)
+	theme.set_constant(&"gap", &"CountBadge", 6)
 	# Icon-only joined buttons (the diff layout): one outline, rounded outside
 	_variation(theme, &"IconSwitch", &"HBoxContainer")
 	theme.set_constant(&"separation", &"IconSwitch", 0)

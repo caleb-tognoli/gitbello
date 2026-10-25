@@ -72,6 +72,8 @@ var _popover: BranchPopover = BranchPopover.new()
 var _switch: HBoxContainer = HBoxContainer.new()
 var _history_button: Button = Button.new()
 var _changes_button: Button = Button.new()
+## The number of changed files on the Changes button.
+var _changes_badge: CountBadge = CountBadge.new()
 ## The blocking job the overlay shows, or -1.
 var _overlay_job: int = -1
 
@@ -107,6 +109,7 @@ func _ready() -> void:
 		button.pressed.connect(show_view.bind(entry[3]))
 		button.tooltip_text = Actions.tooltip(entry[4])
 		_switch.add_child(button)
+	_changes_button.add_child(_changes_badge)
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
@@ -199,6 +202,11 @@ func branch_button() -> BigButton:
 
 func sync_button() -> BigButton:
 	return _sync_button
+
+
+## The number of changes on the Changes button.
+func changes_badge() -> CountBadge:
+	return _changes_badge
 
 
 func branch_popover() -> BranchPopover:
@@ -427,8 +435,7 @@ func _on_state() -> void:
 		return
 	_update_header()
 	_update_banner()
-	var changed: int = int(session.badge().get("changed", 0))
-	_changes_button.text = "Changes" if changed == 0 else "Changes · %d" % changed
+	_changes_badge.count = int(session.badge().get("changed", 0))
 	state_changed.emit()
 
 
