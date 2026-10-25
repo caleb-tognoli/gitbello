@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use gitbello_core::changes::{commit_message, diff_target, ChangeGroup};
+use gitbello_core::changes::{commit_message, PickState};
 use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
@@ -81,6 +81,9 @@ impl RepoSession {
     /// The selected diff loaded, reloaded or failed (see `diff_info`).
     #[signal]
     fn diff_changed();
+    /// The commit selection changed: picks, or reseeding after a status.
+    #[signal]
+    fn selection_changed();
     /// HEAD's message, split into summary and body (`load_head_message`).
     #[signal]
     fn head_message_loaded(summary: GString, body: GString);
@@ -617,24 +620,19 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.cleanup(&self.key, items, delete_branches)).flatten())
     }
 
-    // --- Changes panel ------------------------------------------------------
+    // --- Changes view ---------------------------------------------------------
 
-    /// Files in a change list: `conflicted`, `unstaged`, `staged` or `untracked`.
+    /// Changed files: conflicted first, then the rest by path.
     #[func]
-    fn change_count(&self, group: GString) -> i64 {
-        let Some(group) = parse_group(&group) else {
-            return 0;
-        };
-        self.read(|s| to_i64(s.changes().len(group))).unwrap_or(0)
+    fn change_count(&self) -> i64 {
+        self.read(|s| to_i64(s.changes().len())).unwrap_or(0)
     }
 
-    /// Rows `start..start + count` of a change list, sorted by path:
-    /// `{path, original_path, code, group}` (code is `M`, `A`, `D`, `R`, `?`, ...).
+    /// Rows `start..start + count` of the changed files:
+    /// `{path, original_path, code, pick, conflicted, as_staged}` (code is
+    /// `M`, `A`, `D`, `R`, `?`, `U`, ...; pick is `all`, `none` or `partial`).
     #[func]
-    fn change_rows(&self, group: GString, start: i64, count: i64) -> Array<VarDictionary> {
-        let Some(group) = parse_group(&group) else {
-            return Array::new();
-        };
+    fn change_rows(&self, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
@@ -642,20 +640,17 @@ impl RepoSession {
             let Some(status) = s.status() else {
                 return rows;
             };
-            for &i in s.changes().indices(group).iter().skip(start).take(count) {
-                rows.push(&convert::change_row(&status.changes[i], group));
+            for &i in s.changes().indices().iter().skip(start).take(count) {
+                rows.push(&convert::change_row(&status.changes[i], s.selection()));
             }
             rows
         })
         .unwrap_or_default()
     }
 
-    /// Paths of rows `start..start + count` of a change list.
+    /// Paths of rows `start..start + count`.
     #[func]
-    fn change_paths(&self, group: GString, start: i64, count: i64) -> PackedStringArray {
-        let Some(group) = parse_group(&group) else {
-            return PackedStringArray::new();
-        };
+    fn change_paths(&self, start: i64, count: i64) -> PackedStringArray {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
@@ -663,7 +658,7 @@ impl RepoSession {
                 return PackedStringArray::new();
             };
             s.changes()
-                .indices(group)
+                .indices()
                 .iter()
                 .skip(start)
                 .take(count)
@@ -673,76 +668,80 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Row of `path` in a change list, or -1.
+    /// Row of `path`, or -1.
     #[func]
-    fn change_index(&self, group: GString, path: GString) -> i64 {
-        let Some(group) = parse_group(&group) else {
-            return -1;
-        };
+    fn change_index(&self, path: GString) -> i64 {
         let path = PathBuf::from(path.to_string());
         self.read(|s| {
             let status = s.status()?;
-            let indices = s.changes().indices(group);
-            indices
-                .binary_search_by(|&i| status.changes[i].path.cmp(&path))
-                .ok()
+            s.changes()
+                .indices()
+                .iter()
+                .position(|&i| status.changes[i].path == path)
                 .map(to_i64)
         })
         .flatten()
         .unwrap_or(-1)
     }
 
-    /// Stages (or, for the `staged` list, unstages) `paths` from `group`.
-    /// Returns the job id, or -1 when the repository is not ready.
+    /// Files the next commit takes something of.
     #[func]
-    fn stage_paths(&self, group: GString, paths: PackedStringArray) -> i64 {
-        let Some(group) = parse_group(&group) else {
-            return -1;
-        };
+    fn picked_count(&self) -> i64 {
+        self.read(|s| to_i64(s.selection().picked_count()))
+            .unwrap_or(0)
+    }
+
+    /// Includes or excludes whole files in the commit. `selection_changed`
+    /// follows on the next poll. Returns whether any file had a pick.
+    #[func]
+    fn pick_files(&self, paths: PackedStringArray, include: bool) -> bool {
         let paths: Vec<PathBuf> = paths
             .as_slice()
             .iter()
             .map(|p| PathBuf::from(p.to_string()))
             .collect();
-        let job = runtime_cell::with(|rt| {
-            if group.stages() {
-                rt.stage(&self.key, Some(paths))
-            } else {
-                rt.unstage(&self.key, Some(paths))
-            }
-        });
-        job_id(job.flatten())
+        runtime_cell::with(|rt| rt.pick_files(&self.key, &paths, include)).unwrap_or(false)
     }
 
-    /// `git add -A` of the whole worktree.
+    /// The check-all box: `all`, `none` or `partial`.
     #[func]
-    fn stage_all(&self) -> i64 {
-        job_id(runtime_cell::with(|rt| rt.stage(&self.key, None)).flatten())
+    fn selection_state(&self) -> GString {
+        self.read(|s| GString::from(s.selection().overall_state().id()))
+            .unwrap_or_else(|| GString::from("none"))
     }
 
-    /// Unstages everything.
+    /// Includes or excludes every file.
     #[func]
-    fn unstage_all(&self) -> i64 {
-        job_id(runtime_cell::with(|rt| rt.unstage(&self.key, None)).flatten())
+    fn pick_all(&self, include: bool) {
+        runtime_cell::with(|rt| rt.pick_all(&self.key, include));
     }
 
-    /// Shows the diff of `path` from `group`; `full` loads it past the size
-    /// limit. `diff_changed` fires when it is loaded and after every reload.
+    /// Whether lines of the selected diff can be picked.
     #[func]
-    fn select_diff(&self, group: GString, path: GString, full: bool) {
-        let Some(group) = parse_group(&group) else {
-            return;
-        };
+    fn can_pick_lines(&self) -> bool {
+        self.read(RepoState::can_pick_lines).unwrap_or(false)
+    }
+
+    /// Picks or unpicks lines of the selected diff (`diff_lines` indices; a
+    /// hunk header takes its whole hunk). Returns false when its lines
+    /// cannot be picked.
+    #[func]
+    fn pick_lines(&self, lines: PackedInt32Array, include: bool) -> bool {
+        let lines: Vec<usize> = lines
+            .as_slice()
+            .iter()
+            .filter_map(|&l| usize::try_from(l).ok())
+            .collect();
+        runtime_cell::with(|rt| rt.pick_lines(&self.key, &lines, include)).unwrap_or(false)
+    }
+
+    /// Shows the diff of changed file `path` (against HEAD); `full` loads it
+    /// past the size limit. `diff_changed` fires when it is loaded and after
+    /// every reload.
+    #[func]
+    fn select_change(&self, path: GString, full: bool) {
         let path = PathBuf::from(path.to_string());
-        runtime_cell::with(|rt| {
-            let target = rt
-                .repo(&self.key)
-                .and_then(RepoState::status)
-                .map(|status| diff_target(status, group, &path));
-            if let Some(target) = target {
-                rt.select_diff(&self.key, Some(target), full);
-            }
-        });
+        runtime_cell::with(|rt| rt.select_change(&self.key, &path, full));
     }
 
     #[func]
@@ -750,15 +749,23 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.select_diff(&self.key, None, false));
     }
 
-    /// See `convert::diff_info`: `{state, path, kind, content, notes, ...}`.
+    /// See `convert::diff_info`: `{state, path, kind, content, notes, ...}`,
+    /// plus `pickable` (lines can be picked) and `as_staged` (the file is
+    /// committed exactly as staged outside gitbello).
     #[func]
     fn diff_info(&self) -> VarDictionary {
-        self.read(|s| convert::diff_info(s.diff()))
-            .unwrap_or_default()
+        self.read(|s| {
+            let mut info = convert::diff_info(s.diff());
+            info.set("pickable", s.can_pick_lines());
+            info.set("as_staged", s.diff_as_staged());
+            info
+        })
+        .unwrap_or_default()
     }
 
-    /// Visible slice of the selected diff: `{kind, old, new, text, no_newline}`
-    /// (kind 0 = hunk header, 1 = context, 2 = added, 3 = removed).
+    /// Visible slice of the selected diff: `{kind, old, new, text, no_newline,
+    /// picked}` (kind 0 = hunk header, 1 = context, 2 = added, 3 = removed;
+    /// picked is `all`, `none`, `partial` or empty when lines cannot be picked).
     #[func]
     fn diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
@@ -766,9 +773,11 @@ impl RepoSession {
         self.read(|s| {
             let state = s.diff()?;
             let language = convert::diff_language(&state.target().path);
-            state
-                .diff()
-                .map(|diff| convert::diff_lines(diff, start, count, language))
+            let lines = convert::diff_lines(state.diff()?, start, count, language);
+            for mut line in lines.iter_shared() {
+                mark_picked(&mut line, s.diff_picks());
+            }
+            Some(lines)
         })
         .flatten()
         .unwrap_or_default()
@@ -785,9 +794,19 @@ impl RepoSession {
         self.read(|s| {
             let state = if commit { s.commit_diff() } else { s.diff() }?;
             let language = convert::diff_language(&state.target().path);
-            state
-                .diff()
-                .map(|diff| convert::split_rows(diff, start, count, language))
+            let rows = convert::split_rows(state.diff()?, start, count, language);
+            if !commit {
+                for row in rows.iter_shared() {
+                    for side in ["left", "right"] {
+                        if let Some(Ok(mut line)) =
+                            row.get(side).map(|v| v.try_to::<VarDictionary>())
+                        {
+                            mark_picked(&mut line, s.diff_picks());
+                        }
+                    }
+                }
+            }
+            Some(rows)
         })
         .flatten()
         .unwrap_or_default()
@@ -862,8 +881,8 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Whether the selected diff's lines can be used with `mode` (`stage`,
-    /// `unstage` or `discard`).
+    /// Whether the selected diff's lines can be discarded (`mode` is
+    /// `discard`).
     #[func]
     fn can_apply_lines(&self, mode: GString) -> bool {
         let Some(mode) = parse_mode(&mode) else {
@@ -872,9 +891,9 @@ impl RepoSession {
         self.read(|s| s.can_apply_lines(mode)).unwrap_or(false)
     }
 
-    /// Stages, unstages or discards the selected diff lines (`diff_lines`
-    /// indices; a hunk header row takes its whole hunk). Returns the job id
-    /// (label `stage`, `unstage` or `discard`), or -1 when nothing applies.
+    /// Discards the selected diff lines from the working tree (`mode` is
+    /// `discard`; `diff_lines` indices, a hunk header row takes its whole
+    /// hunk). Returns the job id (label `discard`), or -1 when nothing applies.
     #[func]
     fn apply_lines(&self, mode: GString, lines: PackedInt32Array) -> i64 {
         let Some(mode) = parse_mode(&mode) else {
@@ -888,7 +907,8 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.apply_lines(&self.key, &lines, mode)).flatten())
     }
 
-    /// Restores `paths` from the index in the working tree (backed up first).
+    /// Restores `paths` to HEAD, index and working tree (untracked files are
+    /// deleted; everything is backed up first for `undo_discard`).
     #[func]
     fn discard_paths(&self, paths: PackedStringArray) -> i64 {
         let paths: Vec<PathBuf> = paths
@@ -910,15 +930,26 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.undo_discard(&self.key)).flatten())
     }
 
-    /// Whether `commit(…, amend)` can run now.
+    /// Whether `commit(…, amend)` can run now (the summary aside).
     #[func]
     fn can_commit(&self, amend: bool) -> bool {
         self.read(|s| s.can_commit(amend)).unwrap_or(false)
     }
 
-    /// Commits the index (or amends HEAD). Returns the job id, or -1 when the
-    /// summary is empty or the repository is not ready. The result arrives as
-    /// `job_finished` with label `commit`; hook output is in the error's stderr.
+    /// Why the selection cannot be committed now (`Nothing included`,
+    /// `Resolve conflicts first`, ...), or "" when it can (the summary aside).
+    #[func]
+    fn commit_block_reason(&self, amend: bool) -> GString {
+        match self.read(|s| s.commit_block_reason(amend)) {
+            Some(reason) => GString::from(reason.unwrap_or_default()),
+            None => GString::from("Opening the repository"),
+        }
+    }
+
+    /// Commits the selection (or amends HEAD with it) through a temporary
+    /// index. Returns the job id, or -1 when the summary is empty or nothing
+    /// can be committed. The result arrives as `job_finished` with label
+    /// `commit`; hook output is in the error's stderr.
     #[func]
     fn commit(&self, summary: GString, body: GString, amend: bool) -> i64 {
         let Some(message) = commit_message(&summary.to_string(), &body.to_string()) else {
@@ -1012,17 +1043,19 @@ impl RepoSession {
     }
 }
 
-fn parse_group(id: &GString) -> Option<ChangeGroup> {
-    ChangeGroup::from_id(&id.to_string())
+fn parse_mode(id: &GString) -> Option<PatchMode> {
+    (*id == "discard").then_some(PatchMode::Discard)
 }
 
-fn parse_mode(id: &GString) -> Option<PatchMode> {
-    match id.to_string().as_str() {
-        "stage" => Some(PatchMode::Stage),
-        "unstage" => Some(PatchMode::Unstage),
-        "discard" => Some(PatchMode::Discard),
-        _ => None,
-    }
+/// Sets `picked` on a `diff_lines` row from the diff's line picks.
+fn mark_picked(line: &mut VarDictionary, picks: &[PickState]) {
+    let picked = line
+        .get("index")
+        .and_then(|v| v.try_to::<i64>().ok())
+        .and_then(|i| usize::try_from(i).ok())
+        .and_then(|i| picks.get(i))
+        .map_or("", |p| p.id());
+    line.set("picked", picked);
 }
 
 fn job_id(job: Option<JobId>) -> i64 {

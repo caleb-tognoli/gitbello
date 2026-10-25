@@ -255,6 +255,24 @@ impl Selection {
         }
     }
 
+    /// The check-all box: `All` when every file is included whole, `None`
+    /// when none is picked (or there are no files), else `Partial`.
+    pub fn overall_state(&self) -> PickState {
+        let mut states = self.files.values().map(|e| match e.pick {
+            FilePick::Included => PickState::All,
+            FilePick::Excluded => PickState::None,
+            FilePick::AsStaged | FilePick::Lines(_) => PickState::Partial,
+        });
+        let Some(first) = states.next() else {
+            return PickState::None;
+        };
+        if states.all(|s| s == first) {
+            first
+        } else {
+            PickState::Partial
+        }
+    }
+
     /// Files the next commit takes something of.
     pub fn picked_count(&self) -> usize {
         self.files
@@ -661,6 +679,11 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
             Some(&FilePick::AsStaged)
         );
         assert_eq!(selection.picked_count(), 3);
+        assert_eq!(selection.overall_state(), PickState::Partial);
+        selection.pick_all(true);
+        assert_eq!(selection.overall_state(), PickState::All);
+        selection.pick_all(false);
+        assert_eq!(selection.overall_state(), PickState::None);
     }
 
     #[test]

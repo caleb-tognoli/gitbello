@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use gitbello_core::changes::{change_code, ChangeGroup};
+use gitbello_core::changes::{change_code, is_conflicted, FilePick, Selection};
 use gitbello_core::diff::{
     changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LineKind,
 };
@@ -341,13 +341,15 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
     }
 }
 
-/// A changes-panel row: `{path, original_path, code, group}`.
-pub fn change_row(change: &FileChange, group: ChangeGroup) -> VarDictionary {
+/// A Changes view row: `{path, original_path, code, pick, conflicted, as_staged}`.
+pub fn change_row(change: &FileChange, selection: &Selection) -> VarDictionary {
     vdict! {
         "path" => &path_str(&change.path),
         "original_path" => &change.original_path.as_deref().map_or_else(GString::new, path_str),
-        "code" => change_code(change, group),
-        "group" => group.id(),
+        "code" => change_code(change),
+        "pick" => selection.state(&change.path).id(),
+        "conflicted" => is_conflicted(change),
+        "as_staged" => selection.pick(&change.path) == Some(&FilePick::AsStaged),
     }
 }
 
@@ -372,6 +374,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
         DiffKind::Unstaged => "unstaged",
         DiffKind::Staged => "staged",
         DiffKind::Untracked => "untracked",
+        DiffKind::Head => "head",
         DiffKind::Commit => "commit",
     };
     let mut info = vdict! {

@@ -151,6 +151,11 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.bind_mut().reset_graph();
             }
         }
+        RuntimeEvent::SelectionChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("selection_changed", &[]);
+            }
+        }
         RuntimeEvent::DiffChanged { repo, slot } => {
             if let Some(mut session) = find(sessions, &repo) {
                 let signal = match slot {
