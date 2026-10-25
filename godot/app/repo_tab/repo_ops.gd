@@ -580,7 +580,6 @@ func new_task() -> void:
 	_form.add_choice("base", "Start from", bases, 0)
 	_form.add_check("track", "", true)
 	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
-	_add_folder_note()
 	_form.validator = _check_task
 	_form.waits_for = "name"
 	_show_remote_match()
@@ -588,12 +587,6 @@ func new_task() -> void:
 	# Typing goes after the prefix instead of replacing it.
 	name_line.deselect()
 	name_line.caret_column = name_line.text.length()
-
-
-## The folder field shows paths relative to the main worktree's parent;
-## this note says which folder that is.
-func _add_folder_note() -> void:
-	_form.add_note("In %s" % Paths.shown(_folder_base()))
 
 
 ## Where the folder field's relative paths start: the main worktree's parent.
@@ -706,7 +699,6 @@ func add_existing_worktree() -> void:
 		_track(job, "Adding a worktree for %s" % branch, "Added a worktree for %s" % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
 	_form.add_folder("folder", "Folder", _shown_folder(session.worktree_path_for(branches[0])), "", _shown_folder)
-	_add_folder_note()
 	_form.validator = func(values: Dictionary) -> String:
 		return Core.new_worktree_path_error(_folder_path(String(values.get("folder", ""))))
 	_form.open()
