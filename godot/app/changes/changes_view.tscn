@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://ui/pick_box/pick_box.gd" id="4_pick"]
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="5_panel"]
 [ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="6_empty"]
+[ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="7_shelves"]
 
 [node name="ChangesView" type="HSplitContainer"]
 anchors_preset = 15
@@ -24,6 +25,28 @@ theme_type_variation = &"PaneColumn"
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"PaneHeader"
+
+[node name="OfferBar" type="PanelContainer" parent="Files"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"OfferBar"
+
+[node name="Row" type="HBoxContainer" parent="Files/OfferBar"]
+layout_mode = 2
+theme_type_variation = &"ListHeaderRow"
+
+[node name="OfferLabel" type="Label" parent="Files/OfferBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+autowrap_mode = 3
+
+[node name="OfferButton" type="Button" parent="Files/OfferBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+text = "Restore"
 
 [node name="ListHeader" type="PanelContainer" parent="Files"]
 layout_mode = 2
@@ -50,6 +73,12 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("2_list")
+
+[node name="Shelves" type="VBoxContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"PaneColumn"
+script = ExtResource("7_shelves")
 
 [node name="CommitPanel" type="PanelContainer" parent="Files"]
 layout_mode = 2

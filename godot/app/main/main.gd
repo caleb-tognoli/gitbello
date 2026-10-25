@@ -443,6 +443,33 @@ func _register_change_actions() -> void:
 	var amend: ActionRegistry.Action = Actions.register(&"changes.toggle_amend", "Toggle amend last commit", "Changes",
 			func() -> void: changes.call().toggle_amend(), PackedStringArray(["Ctrl+Shift+A"]), in_changes)
 	amend.in_text_fields = true
+	# Shelves (PLAN §4 Shelves): on the highlighted files, the selected shelf,
+	# or the newest one left on this branch by a switch.
+	Actions.register(&"changes.shelve", "Shelve selected files…", "Shelves",
+			func() -> void: changes.call().shelve_selected(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().can_shelve(),
+			_says("Select changed files in the Changes view first."))
+	var has_shelf: Callable = func() -> bool:
+		return in_changes.call() and not current_page().changes().selected_shelf().is_empty()
+	var no_shelf: Callable = _says("Select a shelf in the Shelved section first.")
+	Actions.register(&"shelf.restore", "Restore shelf", "Shelves",
+			func() -> void: current_page().ops().restore_shelf(changes.call().selected_shelf()),
+			PackedStringArray(), has_shelf, no_shelf)
+	Actions.register(&"shelf.rename", "Rename shelf…", "Shelves",
+			func() -> void: current_page().ops().rename_shelf(changes.call().selected_shelf()),
+			PackedStringArray(), has_shelf, no_shelf)
+	Actions.register(&"shelf.discard", "Discard shelf…", "Shelves",
+			func() -> void: current_page().ops().discard_shelf(changes.call().selected_shelf()),
+			PackedStringArray(), has_shelf, no_shelf)
+	Actions.register(&"shelf.undo_discard", "Undo shelf discard", "Shelves",
+			func() -> void: current_page().ops().undo_shelf_discard(), PackedStringArray(),
+			func() -> bool: return repo_ready.call() and current_page().session.can_undo_shelf_discard(),
+			_says("There is no shelf discard to undo."))
+	Actions.register(&"shelf.restore_left", "Restore changes left on this branch", "Shelves",
+			func() -> void: current_page().ops().restore_shelf(changes.call().left_shelf()),
+			PackedStringArray(),
+			func() -> bool: return repo_ready.call() and not current_page().changes().left_shelf().is_empty(),
+			_says("No changes were left on this branch."))
 	var commit: ActionRegistry.Action = Actions.register(&"changes.commit", "Commit", "Changes",
 			func() -> void: changes.call().commit(), PackedStringArray(["Ctrl+Enter"]),
 			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit(),

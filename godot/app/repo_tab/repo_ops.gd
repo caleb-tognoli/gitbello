@@ -2,10 +2,11 @@ class_name RepoOps
 extends Node
 ## Sync, branch, tag, remote, commit and worktree operations of one worktree,
 ## with the dialogs they need (PLAN §4): names for new branches and tags,
-## confirmations for deletes, force pushes and cherry-picks, the dirty-tree
-## checkout flow that offers to stash, switch and re-apply, the Sync button's
-## choice, and the new-task and cleanup flows for worktrees. Every job it
-## starts goes to `feedback`, with the control that started the flow.
+## confirmations for deletes, force pushes and cherry-picks, the switch with
+## local changes (bring them along, or leave them on the branch as a shelf),
+## shelving, the Sync button's choice, and the new-task and cleanup flows for
+## worktrees. Every job it starts goes to `feedback`, with the control that
+## started the flow.
 
 ## Something the user should read (an editor that did not start, ...).
 signal notice(title: String, message: String)
@@ -28,7 +29,7 @@ var _form: FormDialog = null
 var _confirm: ConfirmationDialog = ConfirmationDialog.new()
 var _on_confirm: Callable = Callable()
 ## Checkouts started here: job id -> `{name, start, origin}`; `start` is
-## `func(stash: bool) -> int` and retries the checkout.
+## `func(changes: String) -> int` (`keep`, `bring` or `leave`).
 var _checkouts: Dictionary[int, Dictionary] = {}
 ## Branch deletes started here: job id -> branch name.
 var _deletes: Dictionary[int, String] = {}
@@ -42,6 +43,11 @@ var _form_kind: String = ""
 var _folder_edited: bool = false
 var _cleanup_requested: bool = false
 var _cleanup_list: Array[Dictionary] = []
+## Switching with local changes: bring them (OK) or leave them (a button).
+var _switch: ConfirmationDialog = ConfirmationDialog.new()
+var _leave_button: Button = null
+## The checkout the switch dialog is about: `{name, start, origin}`.
+var _pending_switch: Dictionary = {}
 
 
 func _ready() -> void:
@@ -52,6 +58,16 @@ func _ready() -> void:
 	_confirm.confirmed.connect(_on_confirmed)
 	_confirm.get_ok_button().theme_type_variation = &"PrimaryButton"
 	add_child(_confirm)
+	_switch.title = "Switch with local changes"
+	_switch.dialog_autowrap = true
+	_switch.get_ok_button().theme_type_variation = &"PrimaryButton"
+	_leave_button = _switch.add_button("Leave them", false, "leave")
+	_switch.confirmed.connect(func() -> void: _answer_switch("bring"))
+	_switch.custom_action.connect(func(action: StringName) -> void:
+		if action == &"leave":
+			_switch.hide()
+			_answer_switch("leave"))
+	add_child(_switch)
 
 
 func set_session(value: RepoSession) -> void:
@@ -70,6 +86,15 @@ func form() -> FormDialog:
 
 func confirm_dialog() -> ConfirmationDialog:
 	return _confirm
+
+
+## The bring-or-leave dialog of a switch with local changes.
+func switch_dialog() -> ConfirmationDialog:
+	return _switch
+
+
+func leave_button() -> Button:
+	return _leave_button
 
 
 ## Errors a dialog here follows up (stash and switch, delete anyway), so
@@ -166,14 +191,16 @@ func force_push() -> void:
 
 # --- Checkout -------------------------------------------------------------------
 
+## Checks out `name`; with local changes, asks first whether to bring them
+## or leave them (then returns -1: the job starts on the answer).
 func checkout_branch(name: String) -> int:
-	return _checkout(name, func(stash: bool) -> int: return session.checkout_branch(name, stash))
+	return _checkout(name, func(changes: String) -> int: return session.checkout_branch(name, changes))
 
 
 ## `ref_name` is a remote-tracking ref (`refs/remotes/origin/x`).
 func checkout_remote(ref_name: String) -> int:
 	var shown: String = ref_name.trim_prefix("refs/remotes/")
-	return _checkout(shown, func(stash: bool) -> int: return session.checkout_remote(ref_name, stash))
+	return _checkout(shown, func(changes: String) -> int: return session.checkout_remote(ref_name, changes))
 
 
 func checkout_commit(oid: String) -> void:
@@ -182,14 +209,102 @@ func checkout_commit(oid: String) -> void:
 
 
 func _checkout_detached(oid: String) -> void:
-	_checkout(oid.left(7), func(stash: bool) -> int: return session.checkout_commit(oid, stash))
+	_checkout(oid.left(7), func(changes: String) -> int: return session.checkout_commit(oid, changes))
 
 
 func _checkout(name: String, start: Callable) -> int:
-	var job: int = start.call(false)
+	var origin: Control = Actions.origin()
+	if session.change_count() > 0:
+		_ask_switch(name, start, origin)
+		return -1
+	return _start_checkout(name, start, "keep", origin)
+
+
+## Asks whether to bring the local changes to `name` or leave them here.
+func _ask_switch(name: String, start: Callable, origin: Control) -> void:
+	_pending_switch = {"name": name, "start": start, "origin": origin}
+	var here: String = _here()
+	_switch.dialog_text = "You have local changes. Bring them to %s, or leave them on %s? Left changes are shelved and offered back when you return." % [name, here]
+	_switch.ok_button_text = "Bring them to %s" % name
+	_leave_button.text = "Leave them on %s" % here
+	_switch.popup_centered()
+	_switch.get_ok_button().grab_focus()
+
+
+func _answer_switch(changes: String) -> void:
+	if _pending_switch.is_empty():
+		return
+	var entry: Dictionary = _pending_switch
+	_pending_switch = {}
+	_start_checkout(String(entry["name"]), entry["start"], changes, entry.get("origin") as Control)
+
+
+func _start_checkout(name: String, start: Callable, changes: String, origin: Control) -> int:
+	var job: int = start.call(changes)
 	if job >= 0:
-		_checkouts[job] = {"name": name, "start": start, "origin": Actions.origin()}
-	return _track(job, "Switching to %s" % name, "Switched to %s" % name)
+		_checkouts[job] = {"name": name, "start": start, "origin": origin}
+	var done: String = "Switched to %s" % name
+	if changes == "bring":
+		done = "Switched to %s with your changes" % name
+	elif changes == "leave":
+		done = "Switched to %s; your changes stay on %s" % [name, _here()]
+	return _track(job, "Switching to %s" % name, done, Callable(), origin)
+
+
+## The current branch's name, or "this commit" when detached.
+func _here() -> String:
+	var branch: String = session.current_branch()
+	return branch if not branch.is_empty() else "this commit"
+
+
+# --- Shelves (PLAN §4 Shelves) ----------------------------------------------------
+
+## Asks for a name, then shelves `paths` on the current branch.
+func shelve(paths: PackedStringArray) -> void:
+	if paths.is_empty():
+		return
+	var what: String = paths[0].get_file() if paths.size() == 1 else "%d files" % paths.size()
+	_begin_form("shelve", "Shelve changes", "Shelve", _shelve.bind(paths))
+	_form.add_note("%s will be put aside on %s and removed from the working copy." % [what, _here()])
+	_form.add_line("name", "Name", "Changes to %s" % what)
+	_form.validator = func(values: Dictionary) -> String:
+		return "Name the shelf." if String(values["name"]).strip_edges().is_empty() else ""
+	_form.open()
+
+
+func _shelve(values: Dictionary, paths: PackedStringArray) -> void:
+	var name: String = String(values["name"]).strip_edges()
+	_track(session.shelve(paths, name), "Shelving", "Shelved “%s” on %s" % [name, _here()])
+
+
+## `shelf` as in `RepoSession.shelves()`.
+func restore_shelf(shelf: Dictionary) -> int:
+	var name: String = String(shelf["name"])
+	return _track(session.restore_shelf(String(shelf["oid"])), "Restoring “%s”" % name, "Restored “%s”" % name)
+
+
+func rename_shelf(shelf: Dictionary) -> void:
+	_begin_form("rename_shelf", "Rename shelf", "Rename", func(values: Dictionary) -> void:
+		var name: String = String(values["name"]).strip_edges()
+		if name != String(shelf["name"]):
+			_track(session.rename_shelf(String(shelf["oid"]), name), "Renaming the shelf", "Renamed the shelf to “%s”" % name))
+	_form.add_line("name", "Name", String(shelf["name"]))
+	_form.validator = func(values: Dictionary) -> String:
+		return "Name the shelf." if String(values["name"]).strip_edges().is_empty() else ""
+	_form.open()
+
+
+func discard_shelf(shelf: Dictionary) -> void:
+	var name: String = String(shelf["name"])
+	_ask("Discard shelf", "Discard the shelf “%s”? Its changes are lost unless you undo right away." % name, "Discard",
+			func() -> void:
+				_track(session.discard_shelf(String(shelf["oid"])), "Discarding the shelf",
+						"Discarded the shelf “%s”" % name, Callable(), null, undo_shelf_discard))
+
+
+func undo_shelf_discard() -> void:
+	if session.can_undo_shelf_discard():
+		_track(session.undo_shelf_discard(), "Restoring the shelf", "The shelf is back")
 
 
 # --- Branches -----------------------------------------------------------------
@@ -207,19 +322,23 @@ func new_branch(start: String, start_label: String) -> void:
 
 func _create_branch(values: Dictionary, start: String) -> void:
 	var name: String = String(values["name"])
-	if bool(values["checkout"]):
+	var here: bool = start == "HEAD" or start == "refs/heads/" + session.current_branch()
+	if bool(values["checkout"]) and here:
+		# From the current commit, local changes simply come along.
+		_start_checkout(name, _create_and_switch.bind(name, start), "keep", Actions.origin())
+	elif bool(values["checkout"]):
 		_checkout(name, _create_and_switch.bind(name, start))
 	else:
 		_track(session.create_branch(name, start, false), "Creating %s" % name, "Created branch %s" % name)
 
 
-## Creates `name` at `start` and switches to it; with `stash`, as two steps
-## so the switch can carry local changes over.
-func _create_and_switch(stash: bool, name: String, start: String) -> int:
-	if not stash:
+## Creates `name` at `start` and switches to it; bringing or leaving local
+## changes takes two steps (create, then a checkout that handles them).
+func _create_and_switch(changes: String, name: String, start: String) -> int:
+	if changes == "keep":
 		return session.create_branch(name, start, true)
 	session.create_branch(name, start, false)
-	return session.checkout_branch(name, true)
+	return session.checkout_branch(name, changes)
 
 
 func rename_branch(name: String) -> void:
@@ -623,15 +742,9 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 	if _checkouts.has(job):
 		var entry: Dictionary = _checkouts[job]
 		_checkouts.erase(job)
-		var start: Callable = entry["start"]
+		# Changes that appeared after the switch started: ask now.
 		if not ok and kind == "local_changes":
-			var name: String = String(entry["name"])
-			var origin: Control = entry.get("origin") as Control
-			_ask("Switch with local changes",
-					"Your local changes would be overwritten by checking out %s.\n\nStash them, switch, and re-apply them on %s?" % [name, name],
-					"Stash and switch", func() -> void:
-						_track(start.call(true), "Switching to %s" % name, "Switched to %s with your changes" % name,
-								Callable(), origin))
+			_ask_switch(String(entry["name"]), entry["start"], entry.get("origin") as Control)
 	elif _deletes.has(job):
 		var name: String = _deletes[job]
 		_deletes.erase(job)
@@ -655,9 +768,9 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 
 ## Reports `job` to `feedback` (see `Feedback.track`) and returns it.
 func _track(job: int, doing: String, done: String = "", then: Callable = Callable(),
-		origin: Control = null) -> int:
+		origin: Control = null, undo: Callable = Callable()) -> int:
 	if feedback != null:
-		feedback.track(session, job, doing, done, origin, then)
+		feedback.track(session, job, doing, done, origin, then, undo)
 	elif then.is_valid():
 		then.call(job >= 0)
 	return job

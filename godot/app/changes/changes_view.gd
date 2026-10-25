@@ -4,7 +4,8 @@ extends HSplitContainer
 ## changed files with commit checkboxes, the commit box under it, and the diff
 ## of the highlighted file with line checkboxes. The checkboxes are the commit
 ## selection kept in core (PLAN §3.10). With no changes, suggested actions
-## take the diff's place.
+## take the diff's place. Under the list, the Shelved section; above it, the
+## offer to restore changes left on this branch (PLAN §4 Shelves).
 ## Keyboard: arrows move, Space or Enter toggle the checkboxes of the
 ## highlighted files or diff lines (a hunk header takes its hunk), Right and
 ## Left move between the list and the diff, Delete discards, Ctrl+Z undoes the
@@ -21,12 +22,16 @@ var feedback: Feedback = null:
 		feedback = value
 		if is_node_ready():
 			_commit_box.feedback = value
+## Runs the shelf flows (forms, confirmations); set by the worktree view.
+var ops: RepoOps = null
 
 var _confirm: ConfirmationDialog = ConfirmationDialog.new()
 ## Runs when the user confirms the discard dialog.
 var _pending_discard: Callable = Callable()
 var _menu: PopupMenu = PopupMenu.new()
 var _menu_actions: Array[StringName] = []
+## The diff shows a shelved file (not a change): keep it over status reloads.
+var _showing_shelf: bool = false
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
@@ -37,6 +42,10 @@ var _menu_actions: Array[StringName] = []
 @onready var _diff_panel: DiffPanel = %DiffPanel
 @onready var _diff_view: DiffView = _diff_panel.view()
 @onready var _empty: EmptyState = %Empty
+@onready var _shelves: ShelfList = %Shelves
+@onready var _offer_bar: Control = %OfferBar
+@onready var _offer_label: Label = %OfferLabel
+@onready var _offer_button: Button = %OfferButton
 
 
 func _ready() -> void:
@@ -65,6 +74,10 @@ func _ready() -> void:
 	add_child(_confirm)
 	add_child(_menu)
 	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_menu_actions[id]))
+	_shelves.files_wanted.connect(func(oid: String) -> void: session.load_shelf_files(oid))
+	_shelves.file_chosen.connect(_show_shelf_file)
+	_shelves.menu_requested.connect(_show_shelf_menu)
+	_offer_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.restore_left", _offer_button))
 
 
 func set_session(value: RepoSession) -> void:
@@ -72,14 +85,19 @@ func set_session(value: RepoSession) -> void:
 		session.status_changed.disconnect(reload)
 		session.diff_changed.disconnect(_on_diff_changed)
 		session.selection_changed.disconnect(_on_selection_changed)
+		session.stashes_changed.disconnect(reload_shelves)
+		session.shelf_files_loaded.disconnect(_on_shelf_files_loaded)
 	session = value
 	if session != null:
 		session.status_changed.connect(reload)
 		session.diff_changed.connect(_on_diff_changed)
 		session.selection_changed.connect(_on_selection_changed)
+		session.stashes_changed.connect(reload_shelves)
+		session.shelf_files_loaded.connect(_on_shelf_files_loaded)
 	_list.session = session
 	_commit_box.session = session
 	reload()
+	reload_shelves()
 
 
 func list() -> ChangeList:
@@ -116,6 +134,104 @@ func check_all() -> PickBox:
 	return _check_all
 
 
+func shelf_list() -> ShelfList:
+	return _shelves
+
+
+func offer_bar() -> Control:
+	return _offer_bar
+
+
+func offer_label_text() -> String:
+	return _offer_label.text
+
+
+# --- Shelves ------------------------------------------------------------------
+
+## Re-reads the shelves (after every stash list change).
+func reload_shelves() -> void:
+	if not is_node_ready() or session == null:
+		return
+	_shelves.show_shelves(session.shelves(), session.current_branch())
+	_update_offer()
+
+
+## The shelf selected in the Shelved section, or {}.
+func selected_shelf() -> Dictionary:
+	return _shelves.selected_shelf()
+
+
+## Shelves the highlighted files after asking for a name.
+func shelve_selected() -> void:
+	if ops == null:
+		return
+	var paths: PackedStringArray = PackedStringArray()
+	for index: int in _list.highlighted_rows():
+		var row: Dictionary = _list.row(index)
+		if not row.is_empty() and not bool(row.get("conflicted", false)):
+			paths.append(String(row["path"]))
+	ops.shelve(paths)
+
+
+func can_shelve() -> bool:
+	for index: int in _list.highlighted_rows():
+		if not bool(_list.row(index).get("conflicted", true)):
+			return true
+	return false
+
+
+## The newest shelf left on the current branch by a switch, or {}.
+func left_shelf() -> Dictionary:
+	for shelf: Dictionary in _shelves.own_shelves():
+		if bool(shelf["auto"]) and bool(shelf["made_here"]):
+			return shelf
+	return {}
+
+
+## "3 changes were left on main · Restore" while such a shelf exists.
+func _update_offer() -> void:
+	var shelf: Dictionary = left_shelf()
+	_offer_bar.visible = not shelf.is_empty()
+	if shelf.is_empty():
+		return
+	var oid: String = String(shelf["oid"])
+	var files: Array[Dictionary] = session.shelf_files(oid)
+	var branch: String = session.current_branch()
+	if files.is_empty():
+		session.load_shelf_files(oid)
+		_offer_label.text = "Changes were left on %s" % branch
+	else:
+		_offer_label.text = "%s left on %s" % [
+			"1 change was" if files.size() == 1 else "%d changes were" % files.size(), branch]
+	_offer_button.tooltip_text = Actions.tooltip(&"shelf.restore_left")
+
+
+func _on_shelf_files_loaded(oid: String) -> void:
+	_shelves.set_files(oid, session.shelf_files(oid))
+	if String(left_shelf().get("oid", "")) == oid:
+		_update_offer()
+
+
+func _show_shelf_file(oid: String, path: String) -> void:
+	_list.deselect()
+	_showing_shelf = true
+	session.select_shelf_file(oid, path, false)
+
+
+func _show_shelf_menu(_shelf: Dictionary, at: Vector2) -> void:
+	_menu.clear()
+	_menu_actions.clear()
+	for id: StringName in [&"shelf.restore", &"shelf.rename", &"shelf.discard"]:
+		if Actions.is_enabled(id):
+			_menu.add_item(Actions.get_action(id).label, _menu_actions.size())
+			_menu_actions.append(id)
+	if _menu.item_count == 0:
+		return
+	_menu.position = Vector2i(at)
+	_menu.reset_size()
+	_menu.popup()
+
+
 ## Re-reads the list from the session (after every status change).
 func reload() -> void:
 	if not is_node_ready():
@@ -126,8 +242,10 @@ func reload() -> void:
 	_update_empty()
 	if had_focus and _list.row_count() == 0:
 		focus_files()
-	if _list.cursor < 0:
+	if _list.cursor < 0 and not _showing_shelf:
 		_clear_diff()
+	# The branch may have changed, and with it the shelves that are its own.
+	reload_shelves()
 
 
 ## Focuses the list (cursor on its first row if none), or the summary when
@@ -319,7 +437,7 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu_actions.clear()
 	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
 	if source == _list:
-		ids.append_array([&"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
+		ids.append_array([&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
 	ids.append_array([&"", &"changes.undo_discard"])
 	for id: StringName in ids:
 		if id == &"":
@@ -353,8 +471,11 @@ func menu_labels() -> PackedStringArray:
 
 func _on_current_changed(path: String) -> void:
 	if path.is_empty():
-		_clear_diff()
+		if not _showing_shelf:
+			_clear_diff()
 		return
+	_showing_shelf = false
+	_shelves.deselect()
 	session.select_change(path, false)
 	_on_diff_changed()
 
@@ -383,6 +504,10 @@ func _clear_diff() -> void:
 
 
 func _load_full_diff() -> void:
+	if _showing_shelf:
+		var shelf: Dictionary = _shelves.selected_shelf()
+		session.select_shelf_file(String(shelf.get("oid", "")), String(session.diff_info().get("path", "")), true)
+		return
 	session.select_change(String(session.diff_info().get("path", "")), true)
 
 

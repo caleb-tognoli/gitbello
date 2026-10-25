@@ -21,6 +21,8 @@ const VERBS: Dictionary[String, String] = {
 	"push": "Pushing",
 	"push tag": "Pushing tag",
 	"checkout": "Checking out",
+	"shelve": "Shelving",
+	"restore shelf": "Restoring the shelf",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
 	"commit": "Committing",

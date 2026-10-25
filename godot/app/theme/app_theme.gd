@@ -750,6 +750,24 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_font_size(&"font_size", &"SuggestionButton", 15)
 	theme.set_constant(&"h_separation", &"SuggestionButton", 10)
 	theme.set_constant(&"button_width", &"EmptyState", 340)
+	# M6.5 P4: the Shelved section and the offer to restore left changes
+	_variation(theme, &"OfferBar", &"PanelContainer")
+	var offer: StyleBoxFlat = _box(p.background.blend(Color(p.accent, 0.18)), 0, Vector4(10, 6, 8, 6))
+	offer.border_color = p.accent
+	offer.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"OfferBar", offer)
+	_variation(theme, &"SectionHeaderButton", &"Button")
+	var section: Vector4 = Vector4(8, 4, 8, 4)
+	theme.set_stylebox(&"normal", &"SectionHeaderButton", _box(p.background, 0, section, p.border, 0))
+	theme.set_stylebox(&"hover", &"SectionHeaderButton", _box(p.hover, 0, section))
+	theme.set_stylebox(&"pressed", &"SectionHeaderButton", _box(p.hover, 0, section))
+	theme.set_color(&"font_color", &"SectionHeaderButton", p.text_muted)
+	theme.set_color(&"icon_normal_color", &"SectionHeaderButton", p.text_muted)
+	_variation(theme, &"ShelfTree", &"Tree")
+	theme.set_stylebox(&"panel", &"ShelfTree", _box(p.background, 0, Vector4(0, 2, 0, 2)))
+	theme.set_constant(&"row_height", &"ShelfList", 26)
+	theme.set_constant(&"max_height", &"ShelfList", 220)
+	theme.set_color(&"group_color", &"ShelfList", p.text_muted)
 	# The first suggestion (Open repository…) in the accent colour
 	_variation(theme, &"PrimarySuggestionButton", &"SuggestionButton")
 	var accent_text: Color = readable_text([p.accent, p.accent.lightened(0.08), p.accent.darkened(0.1)], p.text)

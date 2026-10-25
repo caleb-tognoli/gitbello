@@ -40,6 +40,8 @@ const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"sync.pull_merge", &"sync.
 ## Jobs that change the worktree's files: its panes dim while they run.
 const BLOCKING: Dictionary[String, String] = {
 	"checkout": "Switching branches",
+	"shelve": "Shelving",
+	"restore shelf": "Restoring the shelf",
 	"pull": "Pulling",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
@@ -145,6 +147,7 @@ func setup(value: RepoSession) -> void:
 	_history.session = session
 	_changes.session = session
 	_changes.feedback = feedback
+	_changes.ops = _ops
 	_ops.session = session
 	_ops.feedback = feedback
 	_popover.session = session
