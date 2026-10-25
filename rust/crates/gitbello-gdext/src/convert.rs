@@ -197,6 +197,7 @@ fn ref_dict(r: &Ref) -> VarDictionary {
         "behind" => i64::from(r.tracking.behind),
         "gone" => r.tracking.gone,
         "worktree" => &r.worktree.as_deref().map_or_else(GString::new, path_str),
+        "committed_at" => r.committed_at.unwrap_or(0),
     }
 }
 
@@ -283,6 +284,10 @@ pub fn worktrees(
         out.push(&vdict! {
             "badge" => &gstr(&badge.as_ref().map(Badge::summary).unwrap_or_default()),
             "changed" => badge.as_ref().map_or(-1, |b| to_i64(b.changed)),
+            "conflicts" => badge.as_ref().map_or(0, |b| to_i64(b.conflicts)),
+            "ahead" => badge.as_ref().map_or(0, |b| i64::from(b.ahead)),
+            "behind" => badge.as_ref().map_or(0, |b| i64::from(b.behind)),
+            "operation" => &gstr(operation_id(badge.as_ref().and_then(|b| b.operation))),
             "path" => &path_str(&wt.path),
             "name" => &gstr(&wt.path.file_name().map_or_else(|| wt.path.to_string_lossy(), |n| n.to_string_lossy())),
             "branch" => &gstr(wt.branch_name().unwrap_or_default()),

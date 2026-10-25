@@ -185,8 +185,9 @@ impl RepoSession {
     }
 
     /// `{path, name, branch, head, detached, bare, locked, prunable, is_main,
-    /// is_current, badge, changed}`; `badge` is the summary text (`3 ↑1`) and
-    /// `changed` is -1 until the worktree's status is known.
+    /// is_current, badge, changed, conflicts, ahead, behind, operation}`;
+    /// `badge` is the summary text (`3 ↑1`), `changed` is -1 until the
+    /// worktree's status is known and `operation` an id as in `operation()`.
     #[func]
     fn worktrees(&self) -> Array<VarDictionary> {
         self.read(|s| {
@@ -219,6 +220,59 @@ impl RepoSession {
 
     // --- Sync, branches and tags -----------------------------------------------
 
+    /// The configured remotes: `{name, fetch_url, push_url}`.
+    #[func]
+    fn remote_list(&self) -> Array<VarDictionary> {
+        self.read(|s| {
+            s.remote_list()
+                .iter()
+                .map(|r| {
+                    vdict! {
+                        "name" => &gstr(&r.name),
+                        "fetch_url" => &gstr(&r.fetch_url),
+                        "push_url" => &gstr(&r.push_url),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Label `add remote`.
+    #[func]
+    fn add_remote(&self, name: GString, url: GString) -> i64 {
+        self.ref_op(RefOp::AddRemote {
+            name: name.to_string(),
+            url: url.to_string(),
+        })
+    }
+
+    /// Label `rename remote`.
+    #[func]
+    fn rename_remote(&self, old: GString, new: GString) -> i64 {
+        self.ref_op(RefOp::RenameRemote {
+            old: old.to_string(),
+            new: new.to_string(),
+        })
+    }
+
+    /// Also drops its remote-tracking branches. Label `remove remote`.
+    #[func]
+    fn remove_remote(&self, name: GString) -> i64 {
+        self.ref_op(RefOp::RemoveRemote {
+            name: name.to_string(),
+        })
+    }
+
+    /// Sets the fetch and push URL. Label `set remote URL`.
+    #[func]
+    fn set_remote_url(&self, name: GString, url: GString) -> i64 {
+        self.ref_op(RefOp::SetRemoteUrl {
+            name: name.to_string(),
+            url: url.to_string(),
+        })
+    }
+
     /// Configured remote names.
     #[func]
     fn remotes(&self) -> PackedStringArray {
@@ -243,7 +297,8 @@ impl RepoSession {
     }
 
     /// Local then remote branches: `{name, short_name, commit, is_head,
-    /// upstream, ahead, behind, gone, worktree, kind}` (kind `branch` or `remote`).
+    /// upstream, ahead, behind, gone, worktree, committed_at, kind}` (kind
+    /// `branch` or `remote`; `committed_at` in Unix seconds, 0 when unknown).
     #[func]
     fn branch_refs(&self) -> Array<VarDictionary> {
         self.read(|s| s.refs().map(convert::branch_refs))

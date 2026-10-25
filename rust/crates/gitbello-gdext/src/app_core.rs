@@ -10,6 +10,7 @@ use gitbello_core::launch::{self, LaunchKind};
 use gitbello_core::ops::{ref_name_error, PullMode};
 use gitbello_core::paths;
 use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
+use gitbello_core::ui_state::{self, UiState};
 use gitbello_core::worktrees::new_worktree_path_error;
 use godot::prelude::*;
 
@@ -27,6 +28,7 @@ pub struct AppCore {
     sessions: HashMap<PathBuf, Gd<RepoSession>>,
     start_error: String,
     config_warning: String,
+    ui_state: UiState,
 }
 
 #[godot_api]
@@ -37,6 +39,7 @@ impl INode for AppCore {
             sessions: HashMap::new(),
             start_error: String::new(),
             config_warning: String::new(),
+            ui_state: UiState::default(),
         }
     }
 
@@ -45,6 +48,12 @@ impl INode for AppCore {
         let config_path = std::env::var_os("GITBELLO_CONFIG")
             .map(PathBuf::from)
             .or_else(paths::config_file);
+        // Per-repo UI state goes next to a scratch config, else in the data dir.
+        let ui_dir = match std::env::var_os("GITBELLO_CONFIG") {
+            Some(config) => PathBuf::from(config).parent().map(Path::to_path_buf),
+            None => paths::data_dir(),
+        };
+        self.ui_state = UiState::load(ui_dir.map(|dir| dir.join(ui_state::FILE_NAME)));
         let (config, warning) = Runtime::load_config(config_path.as_deref());
         if let Some(warning) = warning {
             self.config_warning = warning.to_string();
@@ -372,6 +381,27 @@ impl AppCore {
             rt.save_config().is_ok()
         })
         .unwrap_or(false)
+    }
+
+    /// UI state saved for repository `repo` (any of its paths), such as
+    /// `history_width`: name to integer.
+    #[func]
+    fn repo_ui_state(&self, repo: GString) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        for (name, value) in self.ui_state.get(Path::new(&repo.to_string())) {
+            out.set(&gstr(&name), value);
+        }
+        out
+    }
+
+    /// Saves one UI state value for `repo`. Returns an error message, or an
+    /// empty string.
+    #[func]
+    fn set_repo_ui_state(&mut self, repo: GString, name: GString, value: i64) -> GString {
+        self.ui_state
+            .set(Path::new(&repo.to_string()), &name.to_string(), value)
+            .err()
+            .map_or_else(GString::new, |e| gstr(&e.to_string()))
     }
 
     /// Whether diffs show side by side (saved in the config).
