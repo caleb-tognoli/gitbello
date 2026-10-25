@@ -1,8 +1,8 @@
 class_name CommitList
 extends VirtualList
-## History rows (graph, ref labels, subject, hash, author, date) driven by
+## History rows (graph, ref labels and subject) driven by
 ## `RepoSession.graph_rows()`. Only a window around the visible rows is fetched.
-## In a narrow list the hash column goes first, then the author.
+## Hash, author and date are in the commit details.
 
 const LIST_THEME_TYPE: StringName = &"CommitList"
 ## Rows fetched beyond each edge of the visible range.
@@ -29,9 +29,6 @@ var rows_drawn: int = 0
 class RowText:
 	extends RefCounted
 	var subject: TextLine
-	var hash: TextLine
-	var author: TextLine
-	var date: TextLine
 	var labels: Array[TextLine] = []
 	var label_styles: Array[StringName] = []
 	## Width the labels take before the subject, including gaps.
@@ -55,15 +52,7 @@ var _font_size: int = 0
 var _label_font_size: int = 0
 var _padding: float = 0.0
 var _label_gap: float = 0.0
-var _author_width: float = 0.0
-var _date_width: float = 0.0
-var _hash_width: float = 0.0
-var _hide_hash_below: float = 0.0
-var _hide_author_below: float = 0.0
 var _subject_color: Color = Color.WHITE
-var _hash_color: Color = Color.WHITE
-var _author_color: Color = Color.WHITE
-var _date_color: Color = Color.WHITE
 var _label_color: Color = Color.WHITE
 var _label_boxes: Dictionary[StringName, StyleBox] = {}
 ## Ref label pills drawn last frame: row -> `[[Rect2, label dict], ...]`.
@@ -90,15 +79,7 @@ func _update_theme() -> void:
 	_label_font_size = get_theme_font_size(&"label_font_size", LIST_THEME_TYPE)
 	_padding = float(get_theme_constant(&"padding", LIST_THEME_TYPE))
 	_label_gap = float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
-	_author_width = float(get_theme_constant(&"author_width", LIST_THEME_TYPE))
-	_date_width = float(get_theme_constant(&"date_width", LIST_THEME_TYPE))
-	_hash_width = float(get_theme_constant(&"hash_width", LIST_THEME_TYPE))
-	_hide_hash_below = float(get_theme_constant(&"hide_hash_below", LIST_THEME_TYPE))
-	_hide_author_below = float(get_theme_constant(&"hide_author_below", LIST_THEME_TYPE))
 	_subject_color = get_theme_color(&"subject_color", LIST_THEME_TYPE)
-	_hash_color = get_theme_color(&"hash_color", LIST_THEME_TYPE)
-	_author_color = get_theme_color(&"author_color", LIST_THEME_TYPE)
-	_date_color = get_theme_color(&"date_color", LIST_THEME_TYPE)
 	_label_color = get_theme_color(&"label_color", LIST_THEME_TYPE)
 	for style: StringName in LABEL_STYLES.values():
 		_label_boxes[style] = get_theme_stylebox(style, LIST_THEME_TYPE)
@@ -148,11 +129,6 @@ func label_at(row: int, at: Vector2) -> Dictionary:
 	return {}
 
 
-## Whether the hash and author columns show at the current width.
-func columns_shown() -> Dictionary:
-	return {"hash": size.x >= _hide_hash_below, "author": size.x >= _hide_author_below}
-
-
 ## Local date and time (`YYYY-MM-DD HH:MM`) of a unix time.
 func date_text(unix_time: int) -> String:
 	return _date(unix_time)
@@ -197,14 +173,8 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 		_geometry[row] = geometry
 	_graph.draw(self, geometry, rect.position)
 
-	var right: float = rect.end.x - _padding
-	var show_author: bool = rect.size.x >= _hide_author_below
-	var show_hash: bool = rect.size.x >= _hide_hash_below
-	var date_x: float = right - _date_width
-	var author_x: float = date_x - _padding - _author_width if show_author else date_x
-	var hash_x: float = author_x - _padding - _hash_width if show_hash else author_x
 	var subject_x: float = rect.position.x + _graph.width_for(_graph_lanes) + _padding
-	var subject_width: float = hash_x - _padding - subject_x
+	var subject_width: float = rect.end.x - _padding - subject_x
 	if subject_width != _text_layout_width:
 		_text.clear()
 		_text_layout_width = subject_width
@@ -226,11 +196,6 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	_label_rects[row] = hits
 	if subject_width - text.labels_width > 0.0:
 		text.subject.draw(canvas, Vector2(subject_x + text.labels_width, top), _subject_color)
-	if show_hash:
-		text.hash.draw(canvas, Vector2(hash_x, top), _hash_color)
-	if show_author:
-		text.author.draw(canvas, Vector2(author_x, top), _author_color)
-	text.date.draw(canvas, Vector2(date_x, top), _date_color)
 
 
 ## Draws one ref label pill at `x`; returns its width.
@@ -257,18 +222,14 @@ func _shape_row(data: Dictionary, subject_width: float) -> RowText:
 		text.labels.append(line)
 		text.label_styles.append(style)
 		text.labels_width += line.get_size().x + _label_boxes[style].get_minimum_size().x + _label_gap
-	text.subject = _shape(data["subject"], subject_width - text.labels_width, HORIZONTAL_ALIGNMENT_LEFT)
-	text.hash = _shape(String(data["hash"]).left(7), _hash_width, HORIZONTAL_ALIGNMENT_LEFT)
-	text.author = _shape(data["author"], _author_width, HORIZONTAL_ALIGNMENT_LEFT)
-	text.date = _shape(_date(int(data["time"])), _date_width, HORIZONTAL_ALIGNMENT_RIGHT)
+	text.subject = _shape(data["subject"], subject_width - text.labels_width)
 	return text
 
 
-func _shape(value: String, width: float, alignment: HorizontalAlignment) -> TextLine:
+func _shape(value: String, width: float) -> TextLine:
 	var line: TextLine = TextLine.new()
 	line.add_string(value, _font, _font_size)
 	line.width = maxf(0.0, width)
-	line.alignment = alignment
 	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	return line
 
