@@ -394,6 +394,12 @@ func _register_actions() -> void:
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings)
 	Actions.register(&"diff.toggle_side_by_side", "Side-by-side diff", "View",
 			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
+	Actions.register(&"diff.copy", "Copy", "Edit",
+			func() -> void: _focused_diff().copy_selection(), PackedStringArray(["Ctrl+C"]),
+			func() -> bool: return _focused_diff() != null and _focused_diff().has_selection())
+	Actions.register(&"diff.select_all", "Select all", "Edit",
+			func() -> void: _focused_diff().select_all(), PackedStringArray(["Ctrl+A"]),
+			func() -> bool: return _focused_diff() != null and _focused_diff().row_count() > 0)
 	Actions.register(&"diff.toggle_whole_file", "Show whole file", "View",
 			func() -> void: _shown_diff_panel().toggle_whole_file(), PackedStringArray(),
 			func() -> bool: return _shown_diff_panel() != null)
@@ -775,6 +781,11 @@ func _error_handled_elsewhere(repo_path: String, error: Dictionary) -> bool:
 	var page: RepoTab = page_for(repo_path)
 	var view: WorktreeView = page.view_for(repo_path) if page != null else null
 	return view != null and view.ops().handles_error(error)
+
+
+## The diff with keyboard focus, or null.
+func _focused_diff() -> DiffView:
+	return get_viewport().gui_get_focus_owner() as DiffView
 
 
 ## The diff panel on screen that can show its whole file, or null.

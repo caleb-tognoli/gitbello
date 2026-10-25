@@ -11,12 +11,14 @@ extends VirtualList
 ## `split_source.call(start, count)` as `{left, right}` lines (or {}).
 ## Only a window around the visible rows is fetched.
 ##
-## The text is selected like plain text: drag, double-click a word,
-## triple-click a line, Shift+click to extend, Ctrl+A, Ctrl+C; side by side,
-## on one side at a time. The arrow keys move a line at a time (Shift
-## extends). `selected_or_cursor()` gives the lines the selection touches.
-## A header row with `expand` (`up`, `down`, `both`, `all`) draws buttons for
-## its `gap` that emit `expand_requested`.
+## The text is selected like plain text: drag, double-click a word (drag on
+## by words), triple-click a line (drag on by lines), Shift+click to extend,
+## Shift+Left/Right (with Ctrl, by words), Ctrl+A, Ctrl+C; side by side, on
+## one side at a time. The arrow keys move a line at a time (Shift extends)
+## and show a caret. `selected_or_cursor()` gives the lines the selection
+## touches. A header row with `expand` (`up`, `down`, `both`, `all`) draws
+## buttons for its `gap` that emit `expand_requested`, and says how many
+## lines the gap hides (`hidden`); the end row is one button.
 ## With `pickable`, a gutter of commit checkboxes comes first, from each
 ## line's `picked` (`all`, `none`, `partial`, or empty for no box); clicking
 ## one emits `pick_clicked`.
@@ -50,6 +52,10 @@ const EXPANDER_TIPS: Dictionary[String, String] = {
 	"down": "Show more lines below",
 	"all": "Show the hidden lines",
 }
+## Expander buttons are this many rows wide.
+const EXPANDER_WIDTH: float = 1.6
+## What a drag extends by after the click that started it.
+enum Unit { CHAR, WORD, LINE }
 ## Clicks this close in time (ms) and space (px) count as one double or
 ## triple click.
 const MULTI_CLICK_MSEC: int = 450
@@ -86,11 +92,19 @@ var _sel_to: Vector2i = Vector2i(-1, 0)
 var _sel_side: int = 0
 var _dragging: bool = false
 var _drag_mouse: Vector2 = Vector2.ZERO
+var _drag_unit: Unit = Unit.CHAR
+## The word or line a double or triple click selected, which a drag keeps.
+var _unit_from: Vector2i = Vector2i.ZERO
+var _unit_to: Vector2i = Vector2i.ZERO
 var _clicks: int = 0
 var _last_click_msec: int = 0
 var _last_click_at: Vector2 = Vector2.ZERO
+## The caret shows after the keyboard moved it, not after the mouse.
+var _keyboard_caret: bool = false
 ## `[row, how]` of the expander under the mouse, or [].
 var _hover: Array = []
+## Gap whose expander was pressed, until the rows change; -1 for none.
+var _expanding_gap: int = -1
 
 var _font: Font = null
 var _font_size: int = 0
@@ -136,6 +150,8 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool, split_
 	_split_count = split_count if split_count >= 0 else line_count
 	_number_digits = maxi(1, str(max_line_number).length())
 	_cache.clear()
+	if rows_changed or not keep_scroll:
+		_expanding_gap = -1
 	if not keep_scroll:
 		_widest = 0.0
 		_h_scroll.value = 0.0
@@ -309,7 +325,36 @@ func row_expanders(row: int) -> String:
 func press_expander(row: int, how: String) -> void:
 	var data: Dictionary = _side_line(row, 0)
 	if EXPANDERS.get(String(data.get("expand", "")), []).has(how):
-		expand_requested.emit(int(data.get("gap", -1)), how)
+		_expanding_gap = int(data.get("gap", -1))
+		queue_redraw()
+		expand_requested.emit(_expanding_gap, how)
+
+
+## What `row`'s expanders say: the lines its gap hides, or that they load.
+func expander_label(row: int) -> String:
+	var data: Dictionary = _side_line(row, 0)
+	if String(data.get("expand", "")).is_empty():
+		return ""
+	if int(data.get("gap", -1)) == _expanding_gap:
+		return "Loading…"
+	var hidden: int = int(data.get("hidden", -1))
+	var lines: String = "1 line" if hidden == 1 else "%d lines" % hidden
+	if String(data.get("text", "")).is_empty():
+		return "Show %d more %s" % [hidden, "line" if hidden == 1 else "lines"] if hidden > 0 else "Show more lines"
+	return "%s hidden" % lines if hidden > 0 else ""
+
+
+## Copies the selected text; false when nothing is selected.
+func copy_selection() -> bool:
+	if not has_selection():
+		return false
+	DisplayServer.clipboard_set(selected_text())
+	return true
+
+
+## Whether the caret is drawn (after keyboard moves).
+func caret_shown() -> bool:
+	return _keyboard_caret and has_focus() and _sel_to.x >= 0
 
 
 # --- Selection ----------------------------------------------------------------
@@ -373,12 +418,12 @@ func _reset_selection() -> void:
 	_collapse(-1)
 
 
-## The word (or run of spaces, or single other character) at `at`.
-func _select_word(at: Vector2i) -> void:
+## `[start, end]` of the word (or run of spaces, or single other character)
+## at `at`; both at `at` on an empty line.
+func _word_at(at: Vector2i) -> Array[Vector2i]:
 	var text: String = String(_side_line(at.x, _sel_side).get("text", ""))
 	if _line_length(at.x, _sel_side) == 0:
-		_collapse(at.x)
-		return
+		return [Vector2i(at.x, 0), Vector2i(at.x, 0)]
 	var column: int = clampi(at.y, 0, text.length() - 1)
 	var kind: int = _char_class(text[column])
 	var start: int = column
@@ -388,11 +433,49 @@ func _select_word(at: Vector2i) -> void:
 			start -= 1
 		while end < text.length() and _char_class(text[end]) == kind:
 			end += 1
-	_sel_from = Vector2i(at.x, start)
-	_sel_to = Vector2i(at.x, end)
-	cursor = at.x
+	return [Vector2i(at.x, start), Vector2i(at.x, end)]
+
+
+## Selects from `from` to `to` (the caret).
+func _select_span(from: Vector2i, to: Vector2i) -> void:
+	_sel_from = from
+	_sel_to = to
+	cursor = to.x
 	queue_redraw()
 	selection_changed.emit()
+
+
+## The caret moved one character (or with `by_word`, one word) left or right
+## of `at`, across line ends.
+func _step(at: Vector2i, forward: bool, by_word: bool) -> Vector2i:
+	var text: String = String(_side_line(at.x, _sel_side).get("text", ""))
+	var length: int = _line_length(at.x, _sel_side)
+	var column: int = mini(at.y, length)
+	if forward:
+		if column >= length:
+			return Vector2i(at.x + 1, 0) if at.x + 1 < row_count() else at
+		if not by_word:
+			return Vector2i(at.x, column + 1)
+		while column < length and _char_class(text[column]) == 1:
+			column += 1
+		var kind: int = _char_class(text[mini(column, length - 1)])
+		column += 1
+		while column < length and _char_class(text[column]) == kind and kind != 2:
+			column += 1
+		return Vector2i(at.x, column)
+	if column <= 0:
+		return Vector2i(at.x - 1, _line_length(at.x - 1, _sel_side)) if at.x > 0 else at
+	if not by_word:
+		return Vector2i(at.x, column - 1)
+	while column > 0 and _char_class(text[column - 1]) == 1:
+		column -= 1
+	if column == 0:
+		return Vector2i(at.x, 0)
+	var kind: int = _char_class(text[column - 1])
+	column -= 1
+	while column > 0 and _char_class(text[column - 1]) == kind and kind != 2:
+		column -= 1
+	return Vector2i(at.x, column)
 
 
 ## 0 = word character, 1 = space, 2 = anything else.
@@ -469,13 +552,18 @@ func _baseline(rect: Rect2) -> float:
 
 
 ## `[how, rect]` per expander button of a header row drawn from `left`.
+## The end row (no text) is one button across the row.
 func _expander_rects(data: Dictionary, left: float, rect: Rect2) -> Array:
 	var out: Array = []
-	var side: float = rect.size.y
-	var x: float = left + _padding * 0.5
-	for how: String in EXPANDERS.get(String(data.get("expand", "")), []):
-		out.append([how, Rect2(x, rect.position.y, side, side)])
-		x += side
+	var hows: Array = EXPANDERS.get(String(data.get("expand", "")), [])
+	if hows.size() == 1 and String(data.get("text", "")).is_empty():
+		out.append([hows[0], Rect2(left, rect.position.y, rect.end.x - left, rect.size.y)])
+		return out
+	var width: float = roundf(rect.size.y * EXPANDER_WIDTH)
+	var x: float = left + _padding * 0.25
+	for how: String in hows:
+		out.append([how, Rect2(x, rect.position.y, width, rect.size.y)])
+		x += width
 	return out
 
 
@@ -589,8 +677,9 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 		draw_rect(rect, bg)
 	var baseline: float = _baseline(rect)
 	if kind == KIND_HUNK:
-		var buttons_end: float = _draw_expanders(data, row, rect)
-		_draw_text(data, kind, row, side, maxf(rect.position.x + gutter, buttons_end), rect, baseline)
+		var span: Vector2 = _draw_expanders(data, row, rect)
+		var text_rect: Rect2 = Rect2(rect.position, Vector2(span.y - rect.position.x, rect.size.y))
+		_draw_text(data, kind, row, side, maxf(rect.position.x + gutter, span.x), text_rect, baseline)
 		return
 	draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), _colors[&"gutter_bg"])
 	var x: float = rect.position.x + _padding
@@ -613,22 +702,40 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 	_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
 
 
-## Draws a header's expander buttons; returns where the text can start.
-func _draw_expanders(data: Dictionary, row: int, rect: Rect2) -> float:
+## Draws a header's expander buttons and what they show (right-aligned; on
+## the end row, after its icon); returns where the header text can start and
+## end.
+func _draw_expanders(data: Dictionary, row: int, rect: Rect2) -> Vector2:
 	var end: float = rect.position.x
+	var label: String = expander_label(row)
+	var label_left: float = -1.0
+	var any_hovered: bool = false
 	for entry: Array in _expander_rects(data, rect.position.x, rect):
 		var how: String = entry[0]
 		var button: Rect2 = entry[1]
 		var hovered: bool = _hover == [row, how]
+		any_hovered = any_hovered or hovered
 		if hovered:
-			draw_rect(button.grow(-1.0), _colors[&"expander_hover_bg"])
+			draw_rect(button.grow_individual(0.0, -1.0, 0.0, -1.0), _colors[&"expander_hover_bg"])
 		var icon: Texture2D = AppTheme.icon(EXPANDER_ICONS[how])
 		var side: float = minf(16.0, button.size.y - 4.0)
-		var icon_rect: Rect2 = Rect2(button.get_center() - Vector2(side, side) / 2.0, Vector2(side, side))
+		var icon_width: float = roundf(button.size.y * EXPANDER_WIDTH)
+		var icon_center: Vector2 = Vector2(button.position.x + icon_width / 2.0, button.get_center().y)
+		var icon_rect: Rect2 = Rect2(icon_center - Vector2(side, side) / 2.0, Vector2(side, side))
 		draw_texture_rect(icon, icon_rect, false,
 				_colors[&"expander_hover_color"] if hovered else _colors[&"expander_color"])
-		end = button.end.x + _padding * 0.5
-	return end
+		end = button.position.x + icon_width + _padding * 0.5
+		if button.size.x > icon_width:
+			label_left = end
+	if label.is_empty():
+		return Vector2(end, rect.end.x)
+	var color: Color = _colors[&"expander_hover_color"] if any_hovered else _colors[&"expander_color"]
+	var label_width: float = _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x
+	var x: float = label_left if label_left >= 0.0 else rect.end.x - label_width - _padding
+	if label_left < 0.0 and x < end + _char_width * 20.0:
+		return Vector2(end, rect.end.x)
+	draw_string(_font, Vector2(x, _baseline(rect)), label, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, color)
+	return Vector2(end, x - _padding)
 
 
 ## The line's text from `left`, scrolled sideways: changed-word background,
@@ -666,7 +773,7 @@ func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, r
 		var chars: int = mini(end - start, int((right - x) / _char_width) + 1)
 		draw_string(_font, Vector2(x, baseline), text.substr(start, chars), HORIZONTAL_ALIGNMENT_LEFT, -1,
 				_font_size, segment[2])
-	if has_focus() and row == _sel_to.x and side == _sel_side:
+	if caret_shown() and row == _sel_to.x and side == _sel_side:
 		var caret: float = column_x.call(_sel_to.y)
 		if caret >= left and caret < right:
 			draw_rect(Rect2(caret, rect.position.y + 2.0, 1.0, rect.size.y - 4.0), _colors[&"caret_color"])
@@ -707,8 +814,17 @@ func _row_bg(kind: int) -> Color:
 func _gui_input(event: InputEvent) -> void:
 	var key: InputEventKey = event as InputEventKey
 	if key != null and key.pressed and key.keycode == KEY_C and key.is_command_or_control_pressed():
-		if has_selection():
-			DisplayServer.clipboard_set(selected_text())
+		copy_selection()
+		accept_event()
+		return
+	if key != null and key.pressed and key.shift_pressed and key.keycode in [KEY_LEFT, KEY_RIGHT] \
+			and row_count() > 0:
+		var caret: Vector2i = _sel_to if _sel_to.x >= 0 else Vector2i(maxi(cursor, 0), 0)
+		var from: Vector2i = _sel_from if _sel_from.x >= 0 else caret
+		var to: Vector2i = _step(caret, key.keycode == KEY_RIGHT, key.is_command_or_control_pressed())
+		_keyboard_caret = true
+		_select_span(from, to)
+		scroll_to_row(to.x)
 		accept_event()
 		return
 	var motion: InputEventMouseMotion = event as InputEventMouseMotion
@@ -756,6 +872,7 @@ func _on_left_press(mouse: InputEventMouseButton) -> void:
 	if not expander.is_empty():
 		press_expander(int(expander[0]), String(expander[1]))
 		return
+	_keyboard_caret = false
 	var now: int = Time.get_ticks_msec()
 	var repeated: bool = now - _last_click_msec < MULTI_CLICK_MSEC \
 			and at.distance_to(_last_click_at) < MULTI_CLICK_DISTANCE
@@ -768,20 +885,23 @@ func _on_left_press(mouse: InputEventMouseButton) -> void:
 	var spot: Vector2i = _position_at(at, _sel_side)
 	if spot.x < 0:
 		return
+	_dragging = true
+	_drag_mouse = at
 	match _clicks:
 		2:
-			_select_word(spot)
+			var word: Array[Vector2i] = _word_at(spot)
+			_drag_unit = Unit.WORD
+			_unit_from = word[0]
+			_unit_to = word[1]
+			_select_span(word[0], word[1])
 		3:
+			_drag_unit = Unit.LINE
 			_select_lines(spot.x, spot.x)
+			_unit_from = _sel_from
+			_unit_to = _sel_to
 		_:
-			if not extend:
-				_sel_from = spot
-			_sel_to = spot
-			cursor = spot.x
-			_dragging = true
-			_drag_mouse = at
-			queue_redraw()
-			selection_changed.emit()
+			_drag_unit = Unit.CHAR
+			_select_span(_sel_from if extend else spot, spot)
 	_anchor = spot.x
 
 
@@ -826,14 +946,24 @@ func _set_hover(expander: Array) -> void:
 		queue_redraw()
 
 
+## Extends the selection to `at`, by the unit the drag started with.
 func _drag_to(at: Vector2) -> void:
 	var spot: Vector2i = _position_at(at, _sel_side)
-	if spot.x < 0 or spot == _sel_to:
+	if spot.x < 0:
 		return
-	_sel_to = spot
-	cursor = spot.x
-	queue_redraw()
-	selection_changed.emit()
+	var before: bool = spot.x < _unit_from.x or (spot.x == _unit_from.x and spot.y < _unit_from.y)
+	var from: Vector2i = _sel_from
+	var to: Vector2i = spot
+	match _drag_unit:
+		Unit.WORD:
+			var word: Array[Vector2i] = _word_at(spot)
+			from = _unit_to if before else _unit_from
+			to = word[0] if before else word[1]
+		Unit.LINE:
+			from = _unit_to if before else _unit_from
+			to = Vector2i(spot.x, 0) if before else Vector2i(spot.x, _line_length(spot.x, _sel_side))
+	if from != _sel_from or to != _sel_to:
+		_select_span(from, to)
 
 
 ## While dragging past an edge, scrolls towards the mouse and extends the
@@ -864,6 +994,7 @@ func _process(delta: float) -> void:
 ## Arrow keys, Page Up/Down, Home and End: whole lines (Shift extends from
 ## the line where it started).
 func _move_cursor(row: int, extend: bool) -> void:
+	_keyboard_caret = true
 	if extend and _anchor >= 0:
 		_select_lines(_anchor, row)
 	else:

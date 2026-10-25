@@ -10,7 +10,7 @@ extends MenuBar
 ## submenu filled by `dynamic_menus`.
 const MENUS: Array[Array] = [
 	["File", [&"repo.open", "Open recent", &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
-	["Edit", [&"changes.undo_discard", &"shelf.undo_discard", &"", &"app.command_palette"]],
+	["Edit", [&"diff.copy", &"diff.select_all", &"", &"changes.undo_discard", &"shelf.undo_discard", &"", &"app.command_palette"]],
 	["Repository", [&"sync.fetch", &"sync.pull", &"sync.push", &"", &"task.new", &"worktree.cleanup", &"",
 		&"repo.open_in_editor", &"repo.open_terminal", &"repo.show_in_file_manager", &"",
 		&"repo.remotes", &"repo.tags", &"", &"repo.refresh"]],

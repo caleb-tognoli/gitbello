@@ -439,6 +439,8 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu.clear()
 	_menu_actions.clear()
 	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
+	if source == _diff_view:
+		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard"]
 	if source == _list:
 		ids.append_array([&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
 	ids.append_array([&"", &"changes.undo_discard"])
