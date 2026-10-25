@@ -96,6 +96,9 @@ func _ready() -> void:
 			while Time.get_ticks_msec() < deadline and diff.row_expanders(0).is_empty():
 				await get_tree().process_frame
 			await _shot(out, "diff_expanders")
+			diff.grab_focus()
+			diff._select_span(Vector2i(3, 4), Vector2i(5, 12))
+			await _shot(out, "diff_selection_colors")
 			for header: int in diff.row_count():
 				if diff.row_expanders(header) == "both":
 					var rows: int = diff.row_count()

@@ -46,6 +46,8 @@ func run() -> void:
 	expect_eq(diff.row_expanders(0), "up", "the first header opens upwards")
 	expect_eq(diff.row_expanders(9), "both", "the second header opens both ways")
 	expect_eq(diff.row_expanders(18), "down", "the end row opens downwards")
+	expect_eq(diff.expander_label(9), "43 lines hidden", "the header says what it hides")
+	expect_eq(diff.expander_label(18), "Show 37 more lines", "the end row says what follows")
 	expect(Actions.is_enabled(&"diff.toggle_whole_file"), "Show whole file is offered")
 
 	# Up from the second header: 20 more lines between it and its hunk.
@@ -69,6 +71,8 @@ func run() -> void:
 	_drag(diff, at.call(3, 2))
 	_mouse(diff, at.call(3, 2), false)
 	expect(diff.has_selection(), "a drag selects text")
+	expect(not diff.caret_shown(), "the mouse shows no caret")
+	expect(Actions.is_enabled(&"diff.copy"), "Copy is offered for the selection")
 	expect_eq(diff.selected_text(), "7\nl8\nl9", "the selection is plain text from column to column")
 	expect_eq(diff.selected_rows(), PackedInt32Array([1, 2, 3]), "it touches three rows")
 	expect_eq(diff.selected_or_cursor(), PackedInt32Array([1, 2, 3]), "its lines can be picked")
@@ -77,12 +81,21 @@ func run() -> void:
 	_mouse(diff, at.call(4, 1), false)
 	_mouse(diff, at.call(4, 1), true)
 	expect_eq(diff.selected_text(), "l10", "a double click selects the word")
-	_mouse(diff, at.call(4, 1), false)
+	_drag(diff, at.call(5, 1))
+	expect_eq(diff.selected_text(), "l10\nL10", "dragging on after it goes by words")
+	_mouse(diff, at.call(5, 1), false)
+	_mouse(diff, at.call(4, 0), true)
+	_mouse(diff, at.call(4, 0), false)
 	# Down selects the next line whole; Shift+Down extends.
 	press("Down")
+	expect(diff.caret_shown(), "the keyboard shows the caret")
 	expect_eq(diff.selected_text(), "L10", "Down selects the next line")
 	press("Shift+Down")
 	expect_eq(diff.selected_text(), "L10\nl11", "Shift+Down extends")
+	press("Shift+Left")
+	expect_eq(diff.selected_text(), "L10\nl1", "Shift+Left takes back a character")
+	press("Ctrl+Shift+Left")
+	expect_eq(diff.selected_text(), "L10\n", "Ctrl+Shift+Left takes back a word")
 
 	# Show whole file: every line, the button pressed; again for the changes.
 	Actions.run_action(&"diff.toggle_whole_file")
