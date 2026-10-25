@@ -353,7 +353,7 @@ pub fn worktrees(
 }
 
 /// `{oid, parents, author, email, time, committer, committer_email,
-/// commit_time, summary, body, file_count}`.
+/// commit_time, summary, body, file_count, additions, deletions}`.
 pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
     let parents: PackedStringArray = commit.parents.iter().map(|p| gstr(p)).collect();
     vdict! {
@@ -368,6 +368,8 @@ pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
         "summary" => &gstr(commit.summary()),
         "body" => &gstr(commit.body()),
         "file_count" => to_i64(commit.files.len()),
+        "additions" => i64::from(commit.additions),
+        "deletions" => i64::from(commit.deletions),
     }
 }
 

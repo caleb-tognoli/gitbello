@@ -17,9 +17,10 @@ use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, Git
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
-    parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
-    ParseError, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
-    COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
+    parse_repo_paths, parse_shortstat, parse_stash_list, parse_status, parse_worktrees,
+    CommitDetails, Operation, ParseError, Ref, Remote, RepoPaths, RepoStatus, ShelfFile,
+    StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS,
+    STATUS_ARGS, WORKTREES_ARGS,
 };
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
@@ -594,13 +595,17 @@ impl GitBackend for CliBackend {
             "--name-status",
             "--no-commit-id",
         ];
-        match details.parents.first() {
-            Some(parent) => args.push(parent),
-            None => args.push("--root"),
-        }
-        args.push(&details.oid);
+        let range: Vec<&str> = match details.parents.first() {
+            Some(parent) => vec![parent, &details.oid],
+            None => vec!["--root", &details.oid],
+        };
+        args.extend(&range);
         let out = self.read(repo, &args, cancel)?;
         let files = parse_name_status(&out.stdout).map_err(|e| unexpected(&args, e))?;
+        let mut stat_args = vec!["diff-tree", "-r", "-M", "--shortstat", "--no-commit-id"];
+        stat_args.extend(&range);
+        let stat = self.read(repo, &stat_args, cancel)?;
+        (details.additions, details.deletions) = parse_shortstat(&stat.stdout);
         details.files = files;
         Ok(details)
     }

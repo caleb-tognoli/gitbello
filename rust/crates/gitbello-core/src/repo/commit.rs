@@ -1,5 +1,6 @@
-//! One commit's details: `git show -s --format=...` for the header and
-//! `git diff-tree -r -z -M --name-status` for its files.
+//! One commit's details: `git show -s --format=...` for the header,
+//! `git diff-tree -r -z -M --name-status` for its files and
+//! `git diff-tree -M --shortstat` for its line totals.
 
 use std::path::PathBuf;
 
@@ -27,6 +28,9 @@ pub struct CommitDetails {
     pub message: String,
     /// Files changed against the first parent (all files for a root commit).
     pub files: Vec<CommitFile>,
+    /// Lines added and removed in those files (binary files count none).
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 impl CommitDetails {
@@ -88,8 +92,29 @@ pub fn parse_commit_header(output: &[u8]) -> Result<CommitDetails, ParseError> {
         committer_email,
         committer_time: time(&committer_time)?,
         message: message.trim_end_matches('\0').to_owned(),
-        files: Vec::new(),
+        ..CommitDetails::default()
     })
+}
+
+/// Lines added and removed from `git diff --shortstat` output, such as
+/// ` 3 files changed, 10 insertions(+), 2 deletions(-)` (git leaves out a
+/// count that is zero, and prints nothing for no changes). Needs `LC_ALL=C`.
+pub fn parse_shortstat(output: &[u8]) -> (u32, u32) {
+    let line = text(output);
+    let mut totals = (0, 0);
+    for part in line.split(',') {
+        let mut words = part.split_whitespace();
+        let (Some(count), Some(what)) = (words.next(), words.next()) else {
+            continue;
+        };
+        let count: u32 = count.parse().unwrap_or(0);
+        if what.starts_with("insertion") {
+            totals.0 = count;
+        } else if what.starts_with("deletion") {
+            totals.1 = count;
+        }
+    }
+    totals
 }
 
 /// Parses `git diff-tree -r -z --name-status` output.
@@ -140,6 +165,27 @@ mod tests {
     /// Joins fields with NUL, as `%x00` in the format does.
     fn fields(parts: &[&str]) -> Vec<u8> {
         parts.join("\u{0}").into_bytes()
+    }
+
+    #[test]
+    fn parses_shortstat_totals() {
+        assert_eq!(
+            parse_shortstat(b" 3 files changed, 10 insertions(+), 2 deletions(-)\n"),
+            (10, 2)
+        );
+        assert_eq!(
+            parse_shortstat(b" 1 file changed, 1 insertion(+)\n"),
+            (1, 0)
+        );
+        assert_eq!(
+            parse_shortstat(b" 1 file changed, 4 deletions(-)\n"),
+            (0, 4)
+        );
+        assert_eq!(
+            parse_shortstat(b" 1 file changed, 0 insertions(+), 0 deletions(-)\n"),
+            (0, 0)
+        );
+        assert_eq!(parse_shortstat(b""), (0, 0));
     }
 
     #[test]

@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 pub use commit::{
-    parse_commit_header, parse_name_status, CommitDetails, CommitFile, COMMIT_SHOW_FORMAT,
+    parse_commit_header, parse_name_status, parse_shortstat, CommitDetails, CommitFile,
+    COMMIT_SHOW_FORMAT,
 };
 pub use operation::{detect_operation, parse_repo_paths, Operation, RepoPaths, REPO_PATHS_ARGS};
 pub use refs::{

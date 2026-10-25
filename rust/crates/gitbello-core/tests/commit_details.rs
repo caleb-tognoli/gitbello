@@ -38,6 +38,11 @@ fn details_of_root_normal_rename_and_merge_commits() {
     assert_eq!(details.author_name, "Ada Lövelace");
     assert_eq!(details.files.len(), 1);
     assert_eq!(details.files[0].change, Change::Added);
+    assert_eq!(
+        (details.additions, details.deletions),
+        (1, 0),
+        "the root adds a.txt's line"
+    );
 
     let details = b
         .commit_details(repo.path(), &renamed, &CancelToken::new())
@@ -50,6 +55,11 @@ fn details_of_root_normal_rename_and_merge_commits() {
         .expect("rename listed");
     assert_eq!(rename.path, PathBuf::from("new näme.txt"));
     assert_eq!(rename.original_path, Some(PathBuf::from("old name.txt")));
+    assert_eq!(
+        (details.additions, details.deletions),
+        (1, 0),
+        "a pure rename adds no lines, a.txt one"
+    );
 
     // A file diff in that commit, and the root commit's diff.
     let target = DiffTarget {
