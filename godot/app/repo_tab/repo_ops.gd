@@ -570,7 +570,7 @@ func new_task() -> void:
 	_begin_form("task", "New worktree", "Create", _create_task)
 	_form.add_line("name", "Branch", "", true)
 	_form.add_choice("base", "Start from", bases, 0)
-	_form.add_line("folder", "Folder", "", false, "Follows the branch name")
+	_form.add_line("folder", "Folder", "", false, "-")
 	_form.validator = _check_task
 	_form.open()
 

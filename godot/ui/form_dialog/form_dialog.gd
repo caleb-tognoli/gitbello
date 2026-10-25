@@ -12,12 +12,17 @@ signal field_changed(key: String)
 const THEME_TYPE: StringName = &"FormDialog"
 
 ## `func(values: Dictionary) -> String`: an error to show, or "" when valid.
-## Errors show once the user changed something; OK is disabled before that too.
+## Errors show once the user changed something, but not while the first text
+## field is still empty and untouched (a choice made before typing a name);
+## OK is disabled before that too.
 var validator: Callable = Callable()
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
-var _touched: bool = false
+## Fields the user changed.
+var _touched: Dictionary[String, bool] = {}
+## The user tried to submit: every error shows.
+var _attempted: bool = false
 ## `func(values: Dictionary) -> void`, called with the submitted values.
 var _on_submit: Callable = Callable()
 
@@ -50,7 +55,8 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_intro.hide()
 	_fields.clear()
 	_ref_names.clear()
-	_touched = false
+	_touched.clear()
+	_attempted = false
 	_error.text = ""
 
 
@@ -211,7 +217,7 @@ func open() -> void:
 
 ## Submits like the OK button, if the form is valid. Returns whether it did.
 func submit() -> bool:
-	_touched = true
+	_attempted = true
 	if not _validate():
 		return false
 	hide()
@@ -226,16 +232,26 @@ func _submit() -> void:
 
 func _validate() -> bool:
 	var error: String = String(validator.call(values())) if validator.is_valid() else ""
-	_error.text = error if _touched else ""
+	var shown: bool = _attempted or (not _touched.is_empty() and not _first_line_unfilled())
+	_error.text = error if shown else ""
 	_error.visible = not _error.text.is_empty()
 	get_ok_button().disabled = not error.is_empty()
 	return error.is_empty()
 
 
-func _touch(key: String = "") -> void:
-	_touched = true
-	if not key.is_empty():
-		field_changed.emit(key)
+## Whether the first text field is empty and the user has not typed in it.
+func _first_line_unfilled() -> bool:
+	for key: String in _fields:
+		var control: Control = _fields[key]
+		if control is LineEdit or control is TextEdit:
+			var text: String = (control as LineEdit).text if control is LineEdit else (control as TextEdit).text
+			return text.strip_edges().is_empty() and not _touched.has(key)
+	return false
+
+
+func _touch(key: String) -> void:
+	_touched[key] = true
+	field_changed.emit(key)
 	_validate()
 
 

@@ -52,6 +52,10 @@ func run() -> void:
 	press("Ctrl+T")
 	var form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks for the task")
+	var base: OptionButton = form.field("base") as OptionButton
+	base.item_selected.emit(base.selected)
+	expect_eq(form.error_text(), "", "choosing a base before the name shows no error")
+	expect(form.get_ok_button().disabled, "Create waits for a name")
 	type_text("task one")
 	var folder: LineEdit = form.field("folder") as LineEdit
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
