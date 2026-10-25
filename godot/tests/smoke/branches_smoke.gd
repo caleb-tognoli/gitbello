@@ -1,7 +1,8 @@
 extends SmokeTest
-## M5: branches, tags and cherry-pick from the keyboard, dialogs and context
-## menus, including the dirty-tree checkout that stashes, switches and
-## re-applies, and deleting an unmerged branch. GDScript only writes
+## M5, reworked in M6.5 P2: branches, tags and cherry-pick from the keyboard,
+## the branch list (Ctrl+B), dialogs and context menus (a branch row's, a
+## commit's, a ref label's), including the dirty-tree checkout that stashes,
+## switches and re-applies, and deleting an unmerged branch. GDScript only writes
 ## `lines.txt`; the app runs git. Uses fixture `repo-9`. Skipped without
 ## `--fixtures`.
 
@@ -45,19 +46,16 @@ func run() -> void:
 	write_file(lines_path, lines.replace("line 1\n", "topic 1\n"))
 	expect(await _commit(session, "unstaged", "lines.txt", "Edit line 1"), "committed on topic-one")
 
-	# Enter on a sidebar branch checks it out.
-	var sidebar: RepoSidebar = page.sidebar()
-	expect(await wait_until(func() -> bool: return sidebar.select_ref("refs/heads/main")), "main is in the sidebar")
-	sidebar.grab_focus()
-	press("Enter")
+	# Ctrl+B lists the branches; Enter in the filter checks out the first.
+	var popover: BranchPopover = page.active_view().branch_popover()
+	expect(await _choose_branch(popover, "main"), "the branch list finds main")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "Enter checked out main")
 
 	# A local edit that topic-one's version would overwrite: the checkout is
 	# refused, a dialog offers to stash, switch and re-apply.
 	write_file(lines_path, lines.replace("line 10\n", "local 10\n"))
 	expect(await wait_until(func() -> bool: return session.change_count("unstaged") == 2), "lines.txt is modified")
-	expect(sidebar.select_ref("refs/heads/topic-one"), "topic-one is in the sidebar")
-	press("Enter")
+	expect(await _choose_branch(popover, "topic-one"), "the branch list finds topic-one")
 	var confirm: ConfirmationDialog = ops.confirm_dialog()
 	expect(await wait_until(func() -> bool: return confirm.visible), "the refused checkout offers to stash")
 	expect(confirm.dialog_text.contains("Stash"), "the dialog explains: %s" % confirm.dialog_text)
@@ -71,8 +69,7 @@ func run() -> void:
 	# F2 on the current branch renames it.
 	session.discard_paths(PackedStringArray(["lines.txt"]))
 	expect(await wait_until(func() -> bool: return session.change_count("unstaged") == 1), "lines.txt discarded")
-	sidebar.select_ref("refs/heads/topic-one")
-	sidebar.grab_focus()
+	page.focus_view()
 	press("F2")
 	expect(await wait_until(func() -> bool: return form.visible), "F2 asks for the new name")
 	(form.field("name") as LineEdit).text = "renamed"
@@ -80,15 +77,13 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.current_branch() == "renamed"), "renamed the branch")
 
 	# Back on main: cherry-pick renamed's commit from the history.
-	expect(await wait_until(func() -> bool: return sidebar.select_ref("refs/heads/main")), "main is listed")
-	sidebar.grab_focus()
-	press("Enter")
+	expect(await _choose_branch(popover, "main"), "main is listed")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "back on main")
 	# Another commit first, so the picked commit gets a new parent: picked
 	# within the same second onto the same parent, git would produce the
 	# very same commit and `renamed` would count as merged.
 	expect(await _commit(session, "untracked", "notes.txt", "Add notes"), "committed notes.txt on main")
-	press("Ctrl+1")
+	press("Ctrl+Shift+H")
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
 	var row: int = await _row_with_subject(session, "Edit line 1")
@@ -103,9 +98,12 @@ func run() -> void:
 
 	# Deleting renamed from its context menu: it is not merged, so a second
 	# dialog offers to delete anyway.
-	expect(await wait_until(func() -> bool: return sidebar.select_ref("refs/heads/renamed")), "renamed is listed")
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), Vector2.ZERO)
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "Ctrl+B opens the branch list")
+	popover.set_filter("renamed")
+	expect_eq(popover.row_names(), PackedStringArray(["renamed"]), "the filter narrows the list")
+	popover.menu_requested.emit(popover.first_ref(), Vector2.ZERO)
+	popover.hide()
 	expect("Delete branch…" in page.menu_labels(), "the branch menu offers delete: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete branch…"), "delete chosen from the menu")
 	expect(await wait_until(func() -> bool: return confirm.visible), "delete asks first")
@@ -126,9 +124,9 @@ func run() -> void:
 	(form.field("message") as TextEdit).text = "Second release"
 	expect(form.submit(), "the tag form submits")
 	expect(await wait_until(func() -> bool: return _has_tag(session, "v2.0")), "tagged v2.0")
-	expect(await wait_until(func() -> bool: return sidebar.select_ref("refs/tags/v2.0")), "the tag is in the sidebar")
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), Vector2.ZERO)
+	# The tag's label in the graph has its own menu.
+	history.label_menu_requested.emit({"name": "refs/tags/v2.0", "short": "v2.0", "kind": "tag", "is_head": false},
+			Vector2.ZERO)
 	expect("Push tag" in page.menu_labels(), "the tag menu offers push: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete tag…"), "delete tag chosen")
 	expect(await wait_until(func() -> bool: return confirm.visible), "tag delete asks first")
@@ -139,6 +137,18 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## Opens the branch list with Ctrl+B, filters it by `name` and presses
+## Enter; returns whether the list opened and the first row is `name`.
+func _choose_branch(popover: BranchPopover, name: String) -> bool:
+	press("Ctrl+B")
+	if not await wait_until(func() -> bool: return popover.visible):
+		return false
+	popover.set_filter(name)
+	var found: bool = not popover.row_names().is_empty() and popover.row_names()[0] == name
+	press("Enter", popover)
+	return found
 
 
 ## Stages `path` from `group` and commits it; returns whether that worked.

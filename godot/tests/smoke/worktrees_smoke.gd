@@ -1,11 +1,11 @@
 extends SmokeTest
-## M6: worktrees from the sidebar and the keyboard. Enter opens a linked
-## worktree as a tab; Ctrl+T runs the new-task flow (the folder follows the
-## branch name) and opens the result; the worktree menu locks, unlocks and
-## removes; a branch checked out in a worktree cannot be deleted; cleanup
-## removes merged worktrees with their branches and closes their tabs; the
-## Settings dialog saves. Uses fixture `repo-10`. Skipped without
-## `--fixtures`.
+## M6, reworked in M6.5 P2: worktrees as chips in one repository tab. A chip
+## shows its worktree; a branch checked out in another worktree jumps there
+## from the branch list and cannot be deleted; Ctrl+T runs the new-task flow
+## (the folder follows the branch name) and shows the result; a chip's menu
+## locks, unlocks and removes; cleanup removes merged worktrees with their
+## branches and closes their views; the Settings dialog saves. Uses fixture
+## `repo-10`. Skipped without `--fixtures`.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 
@@ -24,25 +24,29 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.worktrees().size() == 2 and not session.default_base().is_empty()),
 			"the fixture's linked worktree is listed")
 	expect_eq(session.default_base(), "origin/main", "tasks start from the remote's main")
-	var linked: String = String(session.worktrees()[1]["path"])
-	var sidebar: RepoSidebar = page.sidebar()
+	var strip: WorktreeStrip = page.strip()
+	expect(await wait_until(func() -> bool: return strip.chips().size() == 2), "two chips")
 
-	# A branch checked out in a worktree cannot be deleted from its menu.
-	expect(sidebar.select_ref("refs/heads/feature/login"), "feature/login is listed")
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), Vector2.ZERO)
+	# A branch checked out in a worktree: the list says where, cannot delete
+	# it, and choosing it shows that worktree.
+	var view: WorktreeView = page.active_view()
+	var popover: BranchPopover = view.branch_popover()
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "Ctrl+B opens the branch list")
+	popover.set_filter("feature/login")
+	var login: Dictionary = popover.first_ref()
+	expect(not String(login.get("worktree", "")).is_empty(), "feature/login says which worktree has it")
+	popover.menu_requested.emit(login, Vector2.ZERO)
 	expect(not ("Delete branch…" in page.menu_labels()), "no delete for a branch in a worktree: %s" % [page.menu_labels()])
 	page.close_menu()
-
-	# Enter on the linked worktree opens it in a tab.
-	expect(sidebar.select_ref("worktree:" + linked), "the linked worktree has a row")
-	sidebar.grab_focus()
-	press("Enter")
-	expect(await wait_until(func() -> bool: return main.tab_count() == 2), "Enter opened the worktree in a tab")
-	var linked_page: RepoTab = main.current_page()
-	expect(await wait_until(func() -> bool: return linked_page.title().begins_with("repo-10/")),
-			"a linked worktree's tab names its repository: %s" % linked_page.title())
-	main.tab_bar().current_tab = 0
+	popover.branch_chosen.emit(login)
+	popover.hide()
+	expect(await wait_until(func() -> bool: return page.active_view().session.current_branch() == "feature/login"),
+			"choosing it shows its worktree")
+	expect_eq(main.tab_count(), 1, "in the same tab")
+	expect(strip.chips()[1].selected, "its chip is selected")
+	strip.chips()[0].chosen.emit()
+	expect(page.active_view() == view, "a click on the first chip goes back")
 
 	# Ctrl+T: a new task; the folder follows the branch name.
 	press("Ctrl+T")
@@ -56,29 +60,28 @@ func run() -> void:
 	var task_path: String = folder.text
 	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
 	press("Enter")
-	expect(await wait_until(func() -> bool: return main.tab_count() == 3), "the new task opened in a tab")
+	expect(await wait_until(func() -> bool: return page.views().size() == 3), "the new task shows as a chip")
+	expect_eq(main.tab_count(), 1, "no new tab")
 	expect(FileAccess.file_exists(task_path.path_join("README.md")), "the task's worktree has the files")
-	expect(await wait_until(func() -> bool: return main.current_page().session.current_branch() == "task-one"),
-			"the new tab is on task-one")
-	main.tab_bar().current_tab = 0
-	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "three worktrees listed")
+	expect(await wait_until(func() -> bool: return page.session.current_branch() == "task-one"),
+			"the task's worktree shows, on task-one")
+	expect(await wait_until(func() -> bool: return strip.chips().size() == 3), "three chips")
+	strip.chips()[0].chosen.emit()
 
-	# Lock, unlock and remove a worktree from its menu.
+	# Lock, unlock and remove a worktree from its chip's menu.
 	var spare: String = fixtures.path_join("repo-10-spare")
 	session.add_worktree(spare, "spare", "main")
 	expect(await wait_until(func() -> bool: return session.worktrees().size() == 4), "a spare worktree was added")
-	# git lists linked worktrees by their internal names, not by age.
-	var spare_row: String = "worktree:" + String(_worktree(session, "repo-10-spare")["path"])
-	expect(await _menu_for(page, sidebar, spare_row, "Lock worktree…"), "the menu offers lock")
+	expect(await _menu_for(page, session, "repo-10-spare", "Lock…"), "the menu offers lock")
 	expect(await wait_until(func() -> bool: return form.visible), "lock asks for a reason")
 	(form.field("reason") as LineEdit).text = "on a usb disk"
 	expect(form.submit(), "lock submitted")
 	expect(await wait_until(func() -> bool: return bool(_worktree(session, "repo-10-spare").get("locked", false))),
 			"the worktree is locked")
-	expect(await _menu_for(page, sidebar, spare_row, "Unlock worktree"), "the menu offers unlock")
+	expect(await _menu_for(page, session, "repo-10-spare", "Unlock"), "the menu offers unlock")
 	expect(await wait_until(func() -> bool: return not bool(_worktree(session, "repo-10-spare").get("locked", true))),
 			"unlocked")
-	expect(await _menu_for(page, sidebar, spare_row, "Remove worktree…"), "the menu offers remove")
+	expect(await _menu_for(page, session, "repo-10-spare", "Remove…"), "the menu offers remove")
 	var confirm: ConfirmationDialog = page.ops().confirm_dialog()
 	expect(await wait_until(func() -> bool: return confirm.visible), "remove asks first")
 	press("Enter")
@@ -92,7 +95,8 @@ func run() -> void:
 	expect(form.field("wt0") != null and form.field("wt1") != null, "both worktrees are offered")
 	expect(form.submit(), "cleanup submitted")
 	expect(await wait_until(func() -> bool: return session.worktrees().size() == 1), "both worktrees were removed")
-	expect(await wait_until(func() -> bool: return main.tab_count() == 1), "their tabs closed")
+	expect(await wait_until(func() -> bool: return page.views().size() == 1), "their views closed")
+	expect(await wait_until(func() -> bool: return strip.chips().size() == 1), "one chip left")
 	expect(await wait_until(func() -> bool: return not _has_branch(session, "task-one") and not _has_branch(session, "feature/login")),
 			"their branches were deleted")
 
@@ -113,12 +117,12 @@ func run() -> void:
 	await get_tree().process_frame
 
 
-## Opens the sidebar menu of row `name` and presses `label`.
-func _menu_for(page: RepoTab, sidebar: RepoSidebar, name: String, label: String) -> bool:
-	if not await wait_until(func() -> bool: return sidebar.select_ref(name)):
+## Opens the menu of the chip whose folder ends with `folder` and presses
+## `label`.
+func _menu_for(page: RepoTab, session: RepoSession, folder: String, label: String) -> bool:
+	if not await wait_until(func() -> bool: return not _worktree(session, folder).is_empty()):
 		return false
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), Vector2.ZERO)
+	page.strip().worktree_menu_requested.emit(_worktree(session, folder), Vector2.ZERO)
 	return page.press_menu(label)
 
 

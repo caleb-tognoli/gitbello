@@ -26,8 +26,8 @@ func run() -> void:
 	expect(ready, "repo-6 has one modified and one untracked file")
 
 	var view: ChangesView = page.changes()
-	press("Ctrl+2")
-	expect_eq(page.view, RepoTab.View.CHANGES, "Ctrl+2 shows the changes view")
+	press("Ctrl+Shift+G")
+	expect_eq(page.view, WorktreeView.View.CHANGES, "Ctrl+Shift+G shows the changes view")
 	expect(view.unstaged_list().has_focus(), "the unstaged list has focus")
 	expect_eq(view.unstaged_list().cursor, 0, "cursor on the first file")
 
@@ -104,8 +104,8 @@ func run() -> void:
 		return false)
 	expect(badged, "linked worktree has a badge: %s" % [session.worktrees()])
 
-	press("Ctrl+1")
-	expect_eq(page.view, RepoTab.View.HISTORY, "Ctrl+1 shows history")
+	press("Ctrl+Shift+H")
+	expect_eq(page.view, WorktreeView.View.HISTORY, "Ctrl+Shift+H shows history")
 	while _main.tab_count() > 0:
 		_main.close_tab(0)
 	_main.queue_free()

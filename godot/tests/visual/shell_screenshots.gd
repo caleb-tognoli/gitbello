@@ -58,7 +58,7 @@ func _ready() -> void:
 	Actions.run_action(&"view.toggle_git_log")
 
 	var page: RepoTab = main.page_at(0)
-	page.show_view(RepoTab.View.CHANGES)
+	page.show_view(WorktreeView.View.CHANGES)
 	deadline = Time.get_ticks_msec() + WAIT_MS
 	while Time.get_ticks_msec() < deadline and page.changes().diff_view().row_count() == 0:
 		await get_tree().process_frame
@@ -72,41 +72,61 @@ func _ready() -> void:
 	Actions.run_action(&"changes.focus_message")
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
-	page.show_view(RepoTab.View.HISTORY)
+	page.show_view(WorktreeView.View.HISTORY)
 
-	# M5: a branch's context menu, the new-branch form, the jobs bar and a
-	# toast with fixes (fetching and pulling change only the fixture repo).
-	var sidebar: RepoSidebar = page.sidebar()
-	sidebar.select_ref("refs/heads/main")
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), sidebar.get_screen_position() + Vector2(120.0, 290.0))
+	# M6.5 P2: the branch list and a branch's menu, the new-branch form, a
+	# busy Sync button, a progress toast, the busy overlay, the operation
+	# banner and a toast with fixes (fetching changes only the fixture repo).
+	var view: WorktreeView = page.active_view()
+	view.open_branches()
+	await _shot_window(view.branch_popover(), out, "branch_list")
+	view.branch_popover().set_filter("feature")
+	var ref: Dictionary = view.branch_popover().first_ref()
+	view.branch_popover().hide()
+	view.show_ref_menu(ref, view.get_screen_position() + Vector2(160.0, 120.0))
 	await _shot_window(page.context_menu(), out, "branch_menu")
 	page.close_menu()
 	Actions.run_action(&"branch.new")
 	await _shot_window(page.ops().form(), out, "new_branch")
 	page.ops().form().hide()
-	var bar: JobsBar = main.jobs_bar()
-	bar._on_started(-2, "push", page.session)
-	bar._on_progress(-2, "push", 45, "Writing objects:  45% (9/20)", page.session)
-	await _shot(out, "jobs_bar")
-	bar._on_cancelled(-2, "push", page.session)
+	view.sync_button().set_busy(true, "Pushing main…  45%", 45)
+	var progress: PanelContainer = main.toasts().show_progress("Fetching repo-2…")
+	await _shot(out, "busy")
+	view.sync_button().set_busy(false, "", -1)
+	main.toasts().finish_progress(progress)
+	view.banner().show()
+	view.overlay().show()
+	await _shot(out, "overlay_banner")
+	view.overlay().hide()
+	view.banner().hide()
 	Actions.run_action(&"sync.fetch")
 	deadline = Time.get_ticks_msec() + WAIT_MS
 	while Time.get_ticks_msec() < deadline and int(page.session.badge().get("behind", 0)) == 0:
 		await get_tree().process_frame
-	Actions.run_action(&"sync.pull")
+	await _settle()
+	Actions.run_action(&"sync.sync", view.sync_button())
 	deadline = Time.get_ticks_msec() + WAIT_MS
 	while Time.get_ticks_msec() < deadline and main.toasts().fix_labels().is_empty():
 		await get_tree().process_frame
 	await _shot(out, "sync_toast")
 
-	# M6: a worktree row's menu, the new-task form, cleanup and settings.
-	var linked: String = String(page.session.worktrees()[1]["path"])
-	sidebar.select_ref("worktree:" + linked)
-	sidebar.grab_focus()
-	sidebar.context_menu_requested.emit(sidebar.selected_ref(), sidebar.get_screen_position() + Vector2(120.0, 180.0))
+	# Repository → Remotes… and Tags…, and a menu of the menu bar.
+	Actions.run_action(&"repo.remotes")
+	await _shot_window(main.remotes_dialog(), out, "remotes")
+	main.remotes_dialog().hide()
+	Actions.run_action(&"repo.tags")
+	await _shot_window(main.tags_dialog(), out, "tags")
+	main.tags_dialog().hide()
+
+	# M6: a worktree chip's menu, the new-task form, cleanup and settings.
+	page.strip().worktree_menu_requested.emit(page.session.worktrees()[1],
+			page.strip().get_screen_position() + Vector2(160.0, 30.0))
 	await _shot_window(page.context_menu(), out, "worktree_menu")
 	page.close_menu()
+	page.select_chip(1)
+	await _settle()
+	await _shot(out, "second_worktree")
+	page.select_chip(0)
 	page.ops().new_task()
 	var form: FormDialog = page.ops().form()
 	(form.field("name") as LineEdit).text = "fix-login"

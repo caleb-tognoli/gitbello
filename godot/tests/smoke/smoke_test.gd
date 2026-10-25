@@ -37,8 +37,9 @@ func wait_until(condition: Callable, timeout_ms: int = 30_000) -> bool:
 	return bool(condition.call())
 
 
-## Sends a key press and release such as `Ctrl+Enter` through the viewport.
-func press(shortcut: String) -> void:
+## Sends a key press and release such as `Ctrl+Enter` through the viewport
+## (or `into`, such as a popup window).
+func press(shortcut: String, into: Viewport = null) -> void:
 	var event: InputEventKey = Shortcuts.parse(shortcut)
 	if event == null:
 		failures.append("bad shortcut in test: %s" % shortcut)
@@ -46,10 +47,11 @@ func press(shortcut: String) -> void:
 	event.physical_keycode = event.keycode
 	if event.keycode == KEY_SPACE:
 		event.unicode = 32
-	get_viewport().push_input(event)
+	var target: Viewport = into if into != null else get_viewport()
+	target.push_input(event)
 	var release: InputEventKey = event.duplicate() as InputEventKey
 	release.pressed = false
-	get_viewport().push_input(release)
+	target.push_input(release)
 
 
 ## Types `text` into the focused control, one key event per character.
