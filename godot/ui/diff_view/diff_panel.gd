@@ -31,13 +31,13 @@ func _ready() -> void:
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
 	var group: ButtonGroup = ButtonGroup.new()
 	var shortcut: String = Actions.shortcut_label(&"diff.toggle_side_by_side")
-	for entry: Array in [[_unified_button, &"Panels1", false, "Old and new lines in one column"],
-			[_split_button, &"Panels2Alt", true, "Old lines on the left, new lines on the right"]]:
+	for entry: Array in [[_unified_button, &"Panels1", false, "Unified", "Old and new lines in one column"],
+			[_split_button, &"Panels2Alt", true, "Side by side", "Old lines on the left, new lines on the right"]]:
 		var button: Button = entry[0]
 		button.icon = AppTheme.icon(entry[1])
 		button.button_group = group
-		var hint: String = String(entry[3])
-		button.tooltip_text = hint if shortcut.is_empty() else "%s\n%s switches" % [hint, shortcut]
+		var tip: String = "%s\n%s" % [String(entry[3]), String(entry[4])]
+		button.tooltip_text = tip if shortcut.is_empty() else "%s\n%s switches" % [tip, shortcut]
 		button.pressed.connect(func() -> void:
 			if bool(entry[2]) != _view.side_by_side:
 				Actions.run_action(&"diff.toggle_side_by_side"))

@@ -699,6 +699,23 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"hover", &"SegmentButton", _box(p.hover, 4, segment))
 	theme.set_stylebox(&"pressed", &"SegmentButton", _box(Color(p.accent, 0.35), 4, segment))
 	theme.set_stylebox(&"hover_pressed", &"SegmentButton", _box(Color(p.accent, 0.4), 4, segment))
+	# Icon-only joined buttons (the diff layout): one outline, rounded outside
+	_variation(theme, &"IconSwitch", &"HBoxContainer")
+	theme.set_constant(&"separation", &"IconSwitch", 0)
+	var icon_segment: Vector4 = Vector4(7, 4, 7, 4)
+	for entry: Array in [[&"IconSegmentFirst", true], [&"IconSegmentLast", false]]:
+		_variation(theme, entry[0], &"SegmentButton")
+		for state: Array in [[&"normal", p.raised], [&"hover", p.hover],
+				[&"pressed", Color(p.accent, 0.35)], [&"hover_pressed", Color(p.accent, 0.4)]]:
+			var box: StyleBoxFlat = _box(state[1], 4, icon_segment, p.border, 1)
+			if entry[1]:
+				box.corner_radius_top_right = 0
+				box.corner_radius_bottom_right = 0
+			else:
+				box.corner_radius_top_left = 0
+				box.corner_radius_bottom_left = 0
+				box.border_width_left = 0
+			theme.set_stylebox(state[0], entry[0], box)
 	# Panes: a header row over each left column, a status line, details
 	_variation(theme, &"PaneColumn", &"VBoxContainer")
 	theme.set_constant(&"separation", &"PaneColumn", 0)

@@ -33,23 +33,21 @@ theme_type_variation = &"DimLabel"
 [node name="LayoutSwitch" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"ViewSwitch"
+theme_type_variation = &"IconSwitch"
 
 [node name="UnifiedButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_type_variation = &"SegmentButton"
+theme_type_variation = &"IconSegmentFirst"
 toggle_mode = true
-text = "Unified"
 
 [node name="SplitButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_type_variation = &"SegmentButton"
+theme_type_variation = &"IconSegmentLast"
 toggle_mode = true
-text = "Side by side"
 
 [node name="DiffStack" type="Control" parent="."]
 layout_mode = 2
