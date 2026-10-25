@@ -32,8 +32,10 @@ const LIGHT_ICON_COLORS: Dictionary[String, String] = {
 	"#474747": "#d6d6d6",
 	"#919191": "#6e6e6e",
 }
-## Icons that keep their colours in the light theme.
-const ICON_EXCEPTIONS: Array[StringName] = [&"StatusWarning", &"StatusSuccess"]
+## Icons that keep their colours in the light theme. The file status icons
+## are white and tinted with their status colour where drawn.
+const ICON_EXCEPTIONS: Array[StringName] = [&"StatusWarning", &"StatusSuccess",
+	&"FileAdded", &"FileModified", &"FileDeleted", &"FileRenamed", &"FileConflict"]
 ## The common icon grey in each theme, to turn pressed icons into the accent.
 const DARK_ICON_GREY: Color = Color("e0e0e0")
 const LIGHT_ICON_GREY: Color = Color("5a5a5a")
@@ -620,7 +622,8 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 			[&"renamed", p.renamed], [&"untracked", p.added], [&"conflict", p.error]]:
 		theme.set_color(StringName("%s_color" % entry[0]), &"ChangeList", entry[1])
 	theme.set_constant(&"padding", &"ChangeList", 8)
-	theme.set_constant(&"code_width", &"ChangeList", 18)
+	theme.set_constant(&"code_width", &"ChangeList", 22)
+	theme.set_constant(&"icon_size", &"ChangeList", 14)
 	# Diff backgrounds are the git colours blended into the background, so they
 	# follow both themes.
 	theme.set_font(&"font", &"DiffView", mono_font())
@@ -877,11 +880,13 @@ static func icon_color_map(light: bool) -> Dictionary:
 
 
 ## Recolours every icon in place, so the controls that show one follow the
-## theme. Each is drawn again from its SVG at the interface's scale.
+## theme. Each is drawn again from its SVG at the interface's scale. The
+## exceptions are loaded too: an icon only drawn with `draw_texture_rect`
+## (no node holds it) would otherwise be freed after each draw.
 static func recolor_icons(light: bool) -> void:
 	var colors: Dictionary = icon_color_map(light)
 	for file: String in ResourceLoader.list_directory(ICON_DIR):
-		if file.get_extension() != "svg" or StringName(file.get_basename()) in ICON_EXCEPTIONS:
+		if file.get_extension() != "svg":
 			continue
 		if not _icons.has(file):
 			var loaded: DPITexture = load(ICON_DIR.path_join(file)) as DPITexture
@@ -889,6 +894,8 @@ static func recolor_icons(light: bool) -> void:
 				push_warning("%s isn't imported as a DPITexture" % file)
 				continue
 			_icons[file] = loaded
+		if StringName(file.get_basename()) in ICON_EXCEPTIONS:
+			continue
 		if _icons[file].color_map != colors:
 			_icons[file].color_map = colors
 

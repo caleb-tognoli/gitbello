@@ -181,8 +181,13 @@ func _add_shelf(parent: TreeItem, shelf: Dictionary, text: String) -> void:
 		loading.set_selectable(0, false)
 	for file: Dictionary in files:
 		var row: TreeItem = _tree.create_item(item)
-		row.set_text(0, "%s  %s" % [file["code"], file["path"]])
-		row.set_tooltip_text(0, String(file["path"]))
+		var code: String = String(file["code"])
+		row.set_text(0, String(file["path"]))
+		row.set_icon(0, FileRowPainter.code_icon(code))
+		row.set_icon_modulate(0, FileRowPainter.code_color(_tree, code))
+		row.set_icon_max_width(0, _tree.get_theme_constant(&"icon_size", FileRowPainter.THEME_TYPE))
+		var status: String = FileRowPainter.code_name(code)
+		row.set_tooltip_text(0, String(file["path"]) if status.is_empty() else "%s\n%s" % [file["path"], status])
 		row.set_metadata(0, {"kind": "file", "oid": oid, "path": String(file["path"])})
 	item.collapsed = not _expanded.get(oid, false)
 

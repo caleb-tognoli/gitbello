@@ -19,6 +19,12 @@ theme_type_variation = &"DiffHeader"
 [node name="DiffHeader" type="HBoxContainer" parent="DiffHeaderPanel"]
 layout_mode = 2
 
+[node name="StatusIcon" type="TextureRect" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
 [node name="DiffPath" type="Label" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
 layout_mode = 2

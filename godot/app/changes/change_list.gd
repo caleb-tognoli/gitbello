@@ -197,6 +197,8 @@ func _get_tooltip(at_position: Vector2) -> String:
 	var tip: String = String(data["path"])
 	if bool(data.get("conflicted", false)):
 		tip += "\nConflicted: resolve it before committing."
+	elif not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
+		tip += "\n" + FileRowPainter.code_name(String(data["code"]))
 	elif bool(data.get("as_staged", false)):
 		tip += "\nStaged in part outside gitbello: committed as staged."
 	return tip

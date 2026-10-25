@@ -29,6 +29,9 @@ func run() -> void:
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
 	expect_eq(history.status_text(), "3 commits", "the status line has no load time")
+	var first_code: String = String(details.file_list().row(0).get("code", ""))
+	expect(not first_code.is_empty(), "the first file has a status code")
+	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
 	await get_tree().process_frame
 	var files_rect: Rect2 = details.file_list().get_global_rect()

@@ -1,17 +1,22 @@
 class_name DiffPanel
 extends VBoxContainer
-## A file diff with its header (path, notes, +/− counts, unified or side by
-## side) and
-## the messages shown instead of lines (loading, binary, too large, no
-## changes, errors). Callers pass `RepoSession.diff_info()`-style
+## A file diff with its header (status icon, path, notes, +/− counts,
+## unified or side by side) and the messages shown instead of lines
+## (loading, binary, too large, no changes, errors). Callers pass `RepoSession.diff_info()`-style
 ## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
 ## the layout can change everywhere at once.
 
 const GROUP: StringName = &"diff_panels"
+## What an empty diff says, by status code.
+const EMPTY_MESSAGES: Dictionary[String, String] = {
+	"A": "New empty file.",
+	"D": "Deleted an empty file.",
+}
 
 ## The user asked to load a diff past the size limit.
 signal load_full_requested()
 
+@onready var _status_icon: TextureRect = %StatusIcon
 @onready var _path: Label = %DiffPath
 @onready var _stats: Label = %DiffStats
 @onready var _view: DiffView = %DiffView
@@ -24,6 +29,8 @@ signal load_full_requested()
 ## `kind:path` of the diff shown, to keep the scroll position on reloads.
 var _shown: String = ""
 var _placeholder: String = ""
+## Status code of the diff shown ("A", "M", ...), or "".
+var _code: String = ""
 
 
 func _ready() -> void:
@@ -42,6 +49,12 @@ func _ready() -> void:
 			if bool(entry[2]) != _view.side_by_side:
 				Actions.run_action(&"diff.toggle_side_by_side"))
 	set_side_by_side(Core.diff_side_by_side())
+	_apply_theme()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+		_apply_theme()
 
 
 func view() -> DiffView:
@@ -75,6 +88,7 @@ func clear(placeholder: String = "") -> void:
 		_placeholder = placeholder
 	_shown = ""
 	_view.show_lines(0, 0, false)
+	_show_code("")
 	_path.text = ""
 	_stats.text = ""
 	show_message(_placeholder)
@@ -89,6 +103,8 @@ func show_info(info: Dictionary) -> void:
 		return
 	var path: String = String(info["path"])
 	var key: String = String(info["kind"]) + ":" + path
+	var code: String = String(info.get("code", ""))
+	_show_code(code)
 	_path.text = path
 	var notes: PackedStringArray = info.get("notes", PackedStringArray())
 	var stats: PackedStringArray = PackedStringArray(notes)
@@ -123,7 +139,7 @@ func show_info(info: Dictionary) -> void:
 			show_message("This diff is large (more than %s)." % _size_text(int(info["bytes"])), true)
 		"empty":
 			_view.show_lines(0, 0, false)
-			show_message("No changes to show." if notes.is_empty() else "\n".join(notes))
+			show_message("\n".join(notes) if not notes.is_empty() else EMPTY_MESSAGES.get(code, "No changes to show."))
 
 
 func show_message(text: String, offer_full: bool = false) -> void:
@@ -134,6 +150,26 @@ func show_message(text: String, offer_full: bool = false) -> void:
 
 func message_text() -> String:
 	return _message_label.text if _message.visible else ""
+
+
+## The status icon of `code` ("A", "M", ...), tinted like the file lists'.
+func _show_code(code: String) -> void:
+	_code = code
+	_status_icon.texture = FileRowPainter.code_icon(code)
+	_status_icon.visible = _status_icon.texture != null
+	_status_icon.self_modulate = FileRowPainter.code_color(self, code)
+	_status_icon.tooltip_text = FileRowPainter.code_name(code)
+
+
+## Status code of the diff shown ("A", "M", ...), or "".
+func status_code() -> String:
+	return _code
+
+
+func _apply_theme() -> void:
+	var icon_size: float = float(get_theme_constant(&"icon_size", FileRowPainter.THEME_TYPE))
+	_status_icon.custom_minimum_size = Vector2(icon_size, icon_size)
+	_show_code(_code)
 
 
 static func _size_text(bytes: int) -> String:

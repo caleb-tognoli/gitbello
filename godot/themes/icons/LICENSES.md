@@ -3,7 +3,8 @@
 The icons in this folder named like Godot's editor icons (`Add`, `Close`, `Folder`,
 `GuiTreeArrowDown`, …) come from the Godot Engine editor and are under its MIT
 license, below. The `Git*`, `Terminal`, `User` and `Clock` icons were drawn for gitbello
-in the same style and are under gitbello's license (MIT OR Apache-2.0).
+in the same style, and the `File*` status icons after GitHub Desktop's; they are
+under gitbello's license (MIT OR Apache-2.0).
 
 ```
 Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md).

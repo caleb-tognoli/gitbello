@@ -73,4 +73,8 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 
 
 func _get_tooltip(at_position: Vector2) -> String:
-	return path_at(row_at(at_position))
+	var data: Dictionary = row(row_at(at_position))
+	if data.is_empty():
+		return ""
+	var status: String = FileRowPainter.code_name(String(data.get("code", "")))
+	return String(data["path"]) if status.is_empty() else "%s\n%s" % [data["path"], status]
