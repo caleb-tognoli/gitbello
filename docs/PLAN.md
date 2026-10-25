@@ -257,7 +257,7 @@ File  Edit  Repository  Branch  View  Help
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
 - A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Enter or a click checks out.
 - A branch checked out in another worktree shows "in fix-login ↗"; choosing it selects that worktree's chip instead of checking out.
-- A New branch button. Row context menu: Merge into current…, Rebase current onto…, Rename, Delete, Set upstream.
+- A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge into current… and Rebase current onto… come with M7.
 - **Remotes and tags** are a couple of steps away: Repository → Remotes… and Tags… open management dialogs (add, rename, remove; create, delete, push tags).
 - **Graph menus keep a few actions:** a commit offers Check out, Create branch here, Tag here, Cherry-pick and Copy SHA; a ref label offers check out, push tag and delete.
 
@@ -330,6 +330,7 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+B | branch popover (was the sidebar toggle) |
 | Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
 | Ctrl+T | new task |
+| Ctrl+Shift+Y | Sync |
 
 The other existing shortcuts stay.
 
@@ -441,17 +442,19 @@ Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D1
 *Result:* `godot/app/theme/app_theme.gd` builds the theme into the project theme (`themes/app_theme.tres`, empty on disk) like spritesheetbelli, so dialogs under plain nodes get it too. The accent is a core config key (`accent = "#rrggbb"`, normalised, empty for the default) edited in Settings with seven swatches and a picker. Ref labels are darkened until their text reads, and diff backgrounds are the git colours blended into the background. `theme_smoke.gd` checks WCAG AA contrast for selected rows with 11 accents in both themes, text and muted text on every surface, ref labels, icon recolouring and the accent setting. 26 Godot editor icons plus 12 drawn ones (`Git*`, `Terminal`), licenses in `themes/icons/LICENSES.md`. Forms use a label column with intro notes and hints, and the main button of each form is the accent colour. Screenshots: `shell_screenshots.tscn` now also saves `accent_teal_light` and `accent_pink_dark`.
 
 #### P2 — Shell (≈2.5 weeks)
-- [ ] Menu bar from the registry (global menu on macOS where Godot supports it), disabled reasons in tooltips
-- [ ] Repo-only tabs with the attention dot and job spinner; worktree paths open their repo's tab with the chip selected; migrate saved worktree tabs
-- [ ] Worktree strip: chips, chip menu, + New task with its menu, Ctrl+1…9; one `RepoSession` per worktree, created on first selection
-- [ ] Branch button and popover; Repository → Remotes… and Tags… dialogs; the reduced graph menus
-- [ ] Sync button with its state table and ▾
-- [ ] Left pane Changes | History with the right pane, per-view widths and column collapsing; the operation banner's slot
-- [ ] Feedback: in-place progress through the action's origin, progress toasts, toasts with fixes, Undo and Details, the per-worktree overlay
-- [ ] Remove the refs sidebar and the jobs bar
-- [ ] Rewrite the smoke tests and the screenshot script for the new shell
+- [x] Menu bar from the registry (global menu on macOS where Godot supports it), disabled reasons in tooltips
+- [x] Repo-only tabs with the attention dot and job spinner; worktree paths open their repo's tab with the chip selected; migrate saved worktree tabs
+- [x] Worktree strip: chips, chip menu, + New task with its menu, Ctrl+1…9; one `RepoSession` per worktree, created on first selection
+- [x] Branch button and popover; Repository → Remotes… and Tags… dialogs; the reduced graph menus
+- [x] Sync button with its state table and ▾
+- [x] Left pane Changes | History with the right pane, per-view widths and column collapsing; the operation banner's slot
+- [x] Feedback: in-place progress through the action's origin, progress toasts, toasts with fixes, Undo and Details, the per-worktree overlay
+- [x] Remove the refs sidebar and the jobs bar
+- [x] Rewrite the smoke tests and the screenshot script for the new shell
 
 **Accept when** switching repo, worktree and branch and syncing all work with the keyboard only; five repos show live attention dots after outside CLI changes; a job running under the overlay never blocks another worktree or tab.
+
+*Result:* core gained remote URLs and remote add/rename/remove/set-url (`tests/remotes.rs`), ref commit dates (for Recent), structured worktree badges and per-repository UI state in the data dir (`ui_state.rs`, next to a scratch `GITBELLO_CONFIG` in tests). In the shell, `RepoTab` holds the chips and one `WorktreeView` per opened worktree; two tabs found to be one repository (old saved worktree tabs) merge. Jobs report to `Feedback` through `RepoOps`, with the control that started the flow. `shell_smoke.gd` covers five tabs with live dots and chips, Ctrl+1…9, opening a worktree path, the overlay of one worktree leaving the other usable, saved widths, the menu bar and restore; `branches_smoke.gd` drives the branch list and label menus; `sync_smoke.gd` the Sync button on diverged branches (merge or rebase, then push); `worktrees_smoke.gd` the chips' menus, new task and cleanup. Changes from the design: Sync has a shortcut (Ctrl+Shift+Y); merge and rebase in the branch menu wait for M7 (with Continue and Open resolver on the banner, which has Abort now); a toast's Details opens a dialog with the command and its output rather than jumping into the git log; stashes have no view until shelves (P4).
 
 #### P3 — Changes (≈1.5 weeks)
 - [ ] Core commit selection per worktree, seeded and reseeded from the index (§3.10); core and gdext API proposed for review first
