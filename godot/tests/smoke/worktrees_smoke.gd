@@ -142,12 +142,21 @@ func run() -> void:
 	expect(await _menu_for(page, session, "repo-10-spare", "Unlock"), "the menu offers unlock")
 	expect(await wait_until(func() -> bool: return not bool(_worktree(session, "repo-10-spare").get("locked", true))),
 			"unlocked")
-	expect(await _menu_for(page, session, "repo-10-spare", "Remove…"), "the menu offers remove")
-	var confirm: ConfirmationDialog = page.ops().confirm_dialog()
-	expect(await wait_until(func() -> bool: return confirm.visible), "remove asks first")
+	# Deleting the shown worktree moves to the main one; its branch goes too.
+	expect(page.show_worktree(spare), "the spare worktree shows")
+	expect(await wait_until(func() -> bool: return page.session.is_ready()), "and loads")
+	expect(await _menu_for(page, session, "repo-10-spare", "Delete…"), "the menu offers delete for the shown worktree")
+	var delete_form: FormDialog = page.ops().form()
+	expect(await wait_until(func() -> bool: return delete_form.visible), "delete asks first")
+	var with_branch: CheckBox = delete_form.field("delete_branch") as CheckBox
+	expect(with_branch != null and with_branch.button_pressed and with_branch.text.contains("spare"),
+			"deleting the branch too is offered, on")
+	expect_eq(delete_form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
 	press("Enter")
-	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "the spare worktree was removed")
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "the spare worktree was deleted")
 	expect(not DirAccess.dir_exists_absolute(spare), "its folder is gone")
+	expect(Paths.same(page.active_view().worktree_path(), repo), "the main worktree shows")
+	expect(await wait_until(func() -> bool: return not _has_branch(session, "spare")), "its branch was deleted")
 
 	# Cleanup: feature/login and task-one are both merged into origin/main.
 	expect(Actions.run_action(&"worktree.cleanup"), "cleanup runs")

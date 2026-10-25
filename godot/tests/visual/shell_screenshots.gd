@@ -135,6 +135,14 @@ func _ready() -> void:
 			page.strip().get_screen_position() + Vector2(160.0, 30.0))
 	await _shot_window(page.context_menu(), out, "worktree_menu")
 	page.close_menu()
+	var linked: Dictionary = page.session.worktrees()[1]
+	page.ops().remove_worktree({"path": String(linked["path"]), "short": String(linked["name"]),
+			"branch": String(linked["branch"]), "detached": false, "changed": 2, "locked": false})
+	await _shot_window(page.ops().form(), out, "delete_worktree")
+	page.ops().form().hide()
+	page.ops().delete_branch("feature/login")
+	await _shot_window(page.ops().confirm_dialog(), out, "delete_branch")
+	page.ops().confirm_dialog().hide()
 	page.select_chip(1)
 	await _settle()
 	await _shot(out, "second_worktree")

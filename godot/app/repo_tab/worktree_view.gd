@@ -15,6 +15,8 @@ signal notice(title: String, message: String)
 signal worktree_open_requested(path: String)
 ## A worktree is about to be removed: its view should close.
 signal worktree_close_requested(path: String)
+## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
+signal worktree_delete_requested(path: String, force: bool, branch: String)
 
 enum View { HISTORY, CHANGES }
 
@@ -111,6 +113,8 @@ func _ready() -> void:
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
 	_ops.close_requested.connect(func(path: String) -> void: worktree_close_requested.emit(path))
+	_ops.delete_requested.connect(func(path: String, force: bool, branch: String) -> void:
+		worktree_delete_requested.emit(path, force, branch))
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
 	add_child(_sync_menu)

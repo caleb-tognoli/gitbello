@@ -43,6 +43,7 @@ func _notification(what: int) -> void:
 func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	title = title_text
 	ok_button_text = ok_text
+	get_ok_button().theme_type_variation = &"PrimaryButton"
 	_on_submit = on_submit
 	validator = Callable()
 	for parent: Node in [_intro, _box]:
@@ -93,6 +94,11 @@ func add_folder(key: String, label: String, value: String = "", placeholder: Str
 	if on_pick.is_valid():
 		_pickers[key] = on_pick
 	return line
+
+
+## Makes OK the red button of a delete or discard (until the next `begin`).
+func make_destructive() -> void:
+	get_ok_button().theme_type_variation = &"DangerButton"
 
 
 ## Shows or hides field `key` with its label.
@@ -264,9 +270,12 @@ func error_text() -> String:
 
 func open() -> void:
 	_validate()
+	_fit_label_column()
 	# Shrink to this form's fields (an earlier, larger form set the size).
 	reset_size()
 	popup_centered(Vector2i(get_theme_constant(&"width", THEME_TYPE), 0))
+	# Wrapped notes measure themselves tall until laid out at full width.
+	_shrink_to_content.call_deferred()
 	for key: String in _fields:
 		var control: Control = _fields[key]
 		if control is LineEdit or control is TextEdit:
@@ -314,6 +323,24 @@ func _on_line_changed(text: String, line: LineEdit) -> void:
 
 ## The label column's cell for the next field: `text`, or empty space.
 ## `top` keeps it at the top of a tall field.
+## A form without labelled fields (only check boxes and notes) drops the
+## label column, so its fields line up with the intro.
+func _fit_label_column() -> void:
+	var labelled: bool = false
+	for i: int in range(0, _box.get_child_count(), 2):
+		labelled = labelled or not (_box.get_child(i) as Label).text.is_empty()
+	_box.columns = 2 if labelled else 1
+	if not labelled:
+		for i: int in range(0, _box.get_child_count(), 2):
+			(_box.get_child(i) as Control).hide()
+
+
+func _shrink_to_content() -> void:
+	if visible:
+		# The dialog wraps its contents: a zero height becomes the least that fits.
+		size = Vector2i(maxi(size.x, get_theme_constant(&"width", THEME_TYPE)), 0)
+
+
 func _add_label(text: String, top: bool = false) -> void:
 	var label: Label = Label.new()
 	label.text = text

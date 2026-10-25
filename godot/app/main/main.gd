@@ -706,11 +706,11 @@ func _register_worktree_actions() -> void:
 	Actions.register(&"worktree.unlock", "Unlock", "Worktrees",
 			func() -> void: ops.call().unlock_worktree(String(worktree.call()["path"])), PackedStringArray(),
 			func() -> bool: return bool(worktree.call().get("locked", false)))
-	Actions.register(&"worktree.remove", "Remove…", "Worktrees",
+	Actions.register(&"worktree.remove", "Delete…", "Worktrees",
 			func() -> void: ops.call().remove_worktree(worktree.call()), PackedStringArray(),
 			func() -> bool:
 				var wt: Dictionary = worktree.call()
-				return openable.call() and not bool(wt["is_main"]) and not bool(wt["is_head"]))
+				return openable.call() and not bool(wt["is_main"]))
 
 
 ## The Settings dialog: pull mode, auto-fetch, editor, terminal, the

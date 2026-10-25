@@ -253,7 +253,7 @@ File  Edit  Repository  Branch  View  Help
 **Worktree strip.** One row of chips: the main worktree first, then the linked ones by folder name.
 - A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
-- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Remove….
+- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Delete… (also for the shown worktree, which moves to the main one; offers to delete its branch too, on by default).
 - Right after the last chip, **+** (New worktree) runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
 - When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees.
 

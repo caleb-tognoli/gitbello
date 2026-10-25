@@ -14,6 +14,10 @@ signal notice(title: String, message: String)
 signal open_requested(path: String)
 ## A worktree is about to be removed: close its view, if open.
 signal close_requested(path: String)
+## The user confirmed deleting worktree `path` (`force` for changes or a
+## lock), then `branch` unless empty: run it from another worktree (see
+## `delete_worktree`).
+signal delete_requested(path: String, force: bool, branch: String)
 
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 ## Choice in the upstream dialog that removes the upstream.
@@ -35,6 +39,8 @@ var _checkouts: Dictionary[int, Dictionary] = {}
 var _deletes: Dictionary[int, String] = {}
 ## Tags to push once created: job id -> tag name.
 var _tag_pushes: Dictionary[int, String] = {}
+## Branches to delete once their worktree is deleted: job id -> branch.
+var _worktree_branches: Dictionary[int, String] = {}
 ## New tasks and added worktrees started here, shown once created: job id -> path.
 var _tasks: Dictionary[int, String] = {}
 ## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
@@ -304,7 +310,7 @@ func discard_shelf(shelf: Dictionary) -> void:
 	_ask("Discard shelf", "Discard the shelf “%s”? Its changes are lost unless you undo right away." % name, "Discard",
 			func() -> void:
 				_track(session.discard_shelf(String(shelf["oid"])), "Discarding the shelf",
-						"Discarded the shelf “%s”" % name, Callable(), null, undo_shelf_discard))
+						"Discarded the shelf “%s”" % name, Callable(), null, undo_shelf_discard), true)
 
 
 func undo_shelf_discard() -> void:
@@ -361,7 +367,7 @@ func _rename_branch(values: Dictionary, old: String) -> void:
 
 
 func delete_branch(name: String) -> void:
-	_ask("Delete branch", "Delete branch %s?" % name, "Delete", _delete_branch.bind(name))
+	_ask("Delete branch", "Delete branch %s?" % name, "Delete", _delete_branch.bind(name), true)
 
 
 func _delete_branch(name: String) -> void:
@@ -448,7 +454,7 @@ func _check_tag_name(values: Dictionary) -> String:
 
 func delete_tag(name: String) -> void:
 	_ask("Delete tag", "Delete tag %s? Copies already pushed to a remote stay there." % name, "Delete",
-			func() -> void: _track(session.delete_tag(name), "Deleting tag %s" % name, "Deleted tag %s" % name))
+			func() -> void: _track(session.delete_tag(name), "Deleting tag %s" % name, "Deleted tag %s" % name), true)
 
 
 func push_tag(name: String) -> int:
@@ -496,7 +502,8 @@ func rename_remote(name: String) -> void:
 
 func remove_remote(name: String) -> void:
 	_ask("Remove remote", "Remove %s? Its remote-tracking branches go too, and local branches stop following it. Nothing changes on the remote itself." % name,
-			"Remove", func() -> void: _track(session.remove_remote(name), "Removing %s" % name, "Removed remote %s" % name))
+			"Remove", func() -> void: _track(session.remove_remote(name), "Removing %s" % name, "Removed remote %s" % name),
+			true)
 
 
 func _check_remote(values: Dictionary, current: String, needs_url: bool) -> String:
@@ -737,21 +744,34 @@ func unlock_worktree(path: String) -> void:
 	_track(session.unlock_worktree(path), "Unlocking", "Unlocked %s" % path.get_file())
 
 
-## Asks, then removes the worktree described by `worktree` (`path`,
-## `changed`, `locked`), closing its view first. Its branch stays.
+## Asks before deleting `worktree` (a chip's ref: `path`, `short`, `branch`,
+## `detached`, `changed`, `locked`), offering to delete its branch too.
 func remove_worktree(worktree: Dictionary) -> void:
 	var path: String = String(worktree["path"])
 	var changed: int = int(worktree.get("changed", 0))
 	var locked: bool = bool(worktree.get("locked", false))
-	var text: String = "Remove the worktree at %s? Its branch stays." % path
+	var branch: String = "" if bool(worktree.get("detached", false)) else String(worktree.get("branch", ""))
+	_begin_form("delete_worktree", "Delete worktree", "Delete", func(values: Dictionary) -> void:
+		delete_requested.emit(path, changed > 0 or locked, branch if bool(values.get("delete_branch", false)) else ""))
+	var text: String = "Delete %s and its folder?" % String(worktree.get("short", path.get_file()))
 	if changed > 0:
-		text += "\n\nIts %d changed files are lost." % changed
+		text += " Its %d changed file%s will be lost." % [changed, "" if changed == 1 else "s"]
 	if locked:
-		text += "\n\nIt is locked."
-	_ask("Remove worktree", text, "Remove", func() -> void:
-		close_requested.emit(path)
-		_track(session.remove_worktree(path, changed > 0 or locked), "Removing %s" % path.get_file(),
-				"Removed the worktree %s" % path.get_file()))
+		text += " It is locked."
+	_form.add_note(text)
+	if not branch.is_empty():
+		_form.add_check("delete_branch", "Also delete the branch %s" % branch, true)
+	_form.make_destructive()
+	_form.open()
+
+
+## Deletes worktree `path` from this worktree, then `branch` unless empty
+## (asking again if it has commits merged nowhere else).
+func delete_worktree(path: String, force: bool, branch: String) -> void:
+	var job: int = _track(session.remove_worktree(path, force), "Deleting %s" % path.get_file(),
+			"Deleted the worktree %s" % path.get_file())
+	if job >= 0 and not branch.is_empty():
+		_worktree_branches[job] = branch
 
 
 func prune_worktrees() -> int:
@@ -776,7 +796,7 @@ func _on_cleanup_loaded() -> void:
 	if _cleanup_list.is_empty():
 		notice.emit("Nothing to clean up", "No worktree's branch is merged into %s or has lost its upstream." % base)
 		return
-	_begin_form("cleanup", "Clean up worktrees", "Remove", _run_cleanup)
+	_begin_form("cleanup", "Clean up worktrees", "Delete", _run_cleanup)
 	_form.add_note("Merged into %s, or their upstream is gone:" % base)
 	for i: int in _cleanup_list.size():
 		var item: Dictionary = _cleanup_list[i]
@@ -794,6 +814,7 @@ func _on_cleanup_loaded() -> void:
 		_form.add_check("wt%d" % i, label, warnings.is_empty())
 	_form.add_check("delete_branches", "Also delete their branches", true)
 	_form.validator = _check_cleanup
+	_form.make_destructive()
 	_form.open()
 
 
@@ -817,7 +838,7 @@ func _run_cleanup(values: Dictionary) -> void:
 			"force": int(item["changed"]) > 0 or bool(item["locked"]),
 		})
 	_track(session.cleanup(items, bool(values["delete_branches"])), "Cleaning up",
-			"Removed %d worktree%s" % [items.size(), "" if items.size() == 1 else "s"])
+			"Deleted %d worktree%s" % [items.size(), "" if items.size() == 1 else "s"])
 
 
 # --- Follow-ups ---------------------------------------------------------------
@@ -836,7 +857,12 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		if not ok and kind == "not_fully_merged":
 			_ask("Delete branch", "%s has commits that are not merged anywhere else. Delete it anyway?" % name,
 					"Delete anyway", func() -> void:
-						_track(session.delete_branch(name, true), "Deleting %s" % name, "Deleted branch %s" % name))
+						_track(session.delete_branch(name, true), "Deleting %s" % name, "Deleted branch %s" % name), true)
+	elif _worktree_branches.has(job):
+		var branch: String = _worktree_branches[job]
+		_worktree_branches.erase(job)
+		if ok:
+			_delete_branch(branch)
 	elif _tag_pushes.has(job):
 		var tag: String = _tag_pushes[job]
 		_tag_pushes.erase(job)
@@ -864,10 +890,13 @@ func _begin_form(kind: String, title_text: String, ok_text: String, on_submit: C
 	_form.begin(title_text, ok_text, on_submit)
 
 
-func _ask(title_text: String, text: String, ok_text: String, run: Callable) -> void:
+## Asks `text` with OK `ok_text`, then calls `run`; `danger` makes OK red
+## (deletes and discards).
+func _ask(title_text: String, text: String, ok_text: String, run: Callable, danger: bool = false) -> void:
 	_confirm.title = title_text
 	_confirm.dialog_text = text
 	_confirm.ok_button_text = ok_text
+	_confirm.get_ok_button().theme_type_variation = &"DangerButton" if danger else &"PrimaryButton"
 	_on_confirm = run
 	_confirm.popup_centered(Vector2i(_form.get_theme_constant(&"width", FormDialog.THEME_TYPE), 0))
 	_confirm.get_ok_button().grab_focus()

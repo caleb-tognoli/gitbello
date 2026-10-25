@@ -341,6 +341,17 @@ static func _add_buttons(theme: Theme, p: Palette, focus: StyleBox) -> void:
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
 			&"font_pressed_color", &"font_hover_pressed_color"]:
 		theme.set_color(color, &"PrimaryButton", accent_text)
+	# The main button of a dialog that deletes or discards, in the error colour
+	_variation(theme, &"DangerButton", &"PrimaryButton")
+	var danger_text: Color = readable_text([p.error, p.error.lightened(0.08), p.error.darkened(0.1)], p.text)
+	theme.set_stylebox(&"normal", &"DangerButton", _box(p.error, 4, margins))
+	theme.set_stylebox(&"hover", &"DangerButton", _box(p.error.lightened(0.08), 4, margins))
+	theme.set_stylebox(&"pressed", &"DangerButton", _box(p.error.darkened(0.1), 4, margins))
+	theme.set_stylebox(&"hover_pressed", &"DangerButton", _box(p.error.darkened(0.1), 4, margins))
+	theme.set_stylebox(&"focus", &"DangerButton", _box(Color.TRANSPARENT, 4, Vector4.ZERO, danger_text, 1))
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
+			&"font_pressed_color", &"font_hover_pressed_color"]:
+		theme.set_color(color, &"DangerButton", danger_text)
 
 
 ## Text fields: raised, outlined, in the accent colour while focused.
