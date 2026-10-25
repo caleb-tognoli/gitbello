@@ -19,6 +19,8 @@ var validator: Callable = Callable()
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
+## Folder fields' `on_pick` (see `add_folder`).
+var _pickers: Dictionary[String, Callable] = {}
 ## Fields the user changed.
 var _touched: Dictionary[String, bool] = {}
 ## The user tried to submit: every error shows.
@@ -55,6 +57,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_intro.hide()
 	_fields.clear()
 	_ref_names.clear()
+	_pickers.clear()
 	_touched.clear()
 	_attempted = false
 	_error.text = ""
@@ -75,6 +78,59 @@ func add_line(key: String, label: String, value: String = "", ref_name: bool = f
 	if ref_name:
 		_ref_names.append(key)
 	return line
+
+
+## A folder path: a line with a button that picks a folder in the system's
+## dialog. `on_pick` (`func(dir: String) -> String`) turns the picked folder
+## into the line's text; without it the line takes the folder itself.
+func add_folder(key: String, label: String, value: String = "", placeholder: String = "",
+		on_pick: Callable = Callable()) -> LineEdit:
+	var line: LineEdit = add_line(key, label, value, false, placeholder)
+	_box.remove_child(line)
+	var row: HBoxContainer = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(line)
+	var browse: Button = Button.new()
+	browse.icon = AppTheme.icon(&"Folder")
+	browse.tooltip_text = "Choose a folder"
+	browse.focus_mode = Control.FOCUS_NONE
+	browse.pressed.connect(_browse.bind(key))
+	row.add_child(browse)
+	_box.add_child(row)
+	if on_pick.is_valid():
+		_pickers[key] = on_pick
+	return line
+
+
+## Sets folder field `key` from `dir`, as if picked in the dialog.
+func pick_folder(key: String, dir: String) -> void:
+	var line: LineEdit = _fields.get(key) as LineEdit
+	if line == null:
+		return
+	line.text = String(_pickers[key].call(dir)) if _pickers.has(key) else dir
+	line.caret_column = line.text.length()
+	_touched[key] = true
+	_validate()
+
+
+func _browse(key: String) -> void:
+	var dialog: FileDialog = FileDialog.new()
+	dialog.use_native_dialog = true
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dialog.title = "Choose a folder"
+	# Start at the nearest folder of the path typed so far that exists.
+	var dir: String = (_fields[key] as LineEdit).text.strip_edges()
+	while not dir.is_empty() and not DirAccess.dir_exists_absolute(dir) and dir.get_base_dir() != dir:
+		dir = dir.get_base_dir()
+	if not dir.is_empty() and DirAccess.dir_exists_absolute(dir):
+		dialog.current_dir = dir
+	dialog.dir_selected.connect(func(path: String) -> void: pick_folder(key, path))
+	dialog.visibility_changed.connect(func() -> void:
+		if not dialog.visible:
+			dialog.queue_free())
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
 
 
 func add_check(key: String, label: String, value: bool = false) -> CheckBox:

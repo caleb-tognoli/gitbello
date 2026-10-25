@@ -41,6 +41,9 @@ var _tasks: Dictionary[int, String] = {}
 var _form_kind: String = ""
 ## The new-task folder was edited by hand: stop following the branch name.
 var _folder_edited: bool = false
+## A folder picked for new tasks to go in (its name still follows the
+## branch), or "" for the template's.
+var _folder_parent: String = ""
 var _cleanup_requested: bool = false
 var _cleanup_list: Array[Dictionary] = []
 ## Switching with local changes: bring them (OK) or leave them (a button).
@@ -567,12 +570,33 @@ func new_task() -> void:
 	if bases.is_empty():
 		bases.append("HEAD")
 	_folder_edited = false
+	_folder_parent = ""
 	_begin_form("task", "New worktree", "Create", _create_task)
 	_form.add_line("name", "Branch", "", true)
 	_form.add_choice("base", "Start from", bases, 0)
-	_form.add_line("folder", "Folder", "", false, "-")
+	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
 	_form.validator = _check_task
 	_form.open()
+
+
+## A picked empty folder is the worktree's folder; any other is where it
+## goes, in a folder named after the branch.
+func _pick_task_folder(dir: String) -> String:
+	if Core.new_worktree_path_error(dir).is_empty():
+		_folder_edited = true
+		return dir
+	_folder_edited = false
+	_folder_parent = dir
+	return _task_folder(String(_form.values()["name"]))
+
+
+## The new-task folder for branch `name` (just the picked folder, or "",
+## without a name).
+func _task_folder(name: String) -> String:
+	if name.is_empty():
+		return _folder_parent.path_join("") if not _folder_parent.is_empty() else ""
+	var path: String = session.worktree_path_for(name)
+	return _folder_parent.path_join(path.get_file()) if not _folder_parent.is_empty() else path
 
 
 func _check_task(values: Dictionary) -> String:
@@ -614,7 +638,7 @@ func add_existing_worktree() -> void:
 			_tasks[job] = path
 		_track(job, "Adding a worktree for %s" % branch, "Added a worktree for %s" % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
-	_form.add_line("folder", "Folder", session.worktree_path_for(branches[0]))
+	_form.add_folder("folder", "Folder", session.worktree_path_for(branches[0]))
 	_form.validator = func(values: Dictionary) -> String:
 		return Core.new_worktree_path_error(String(values.get("folder", "")))
 	_form.open()
@@ -629,8 +653,7 @@ func _on_form_field(key: String) -> void:
 	if key == "folder":
 		_folder_edited = true
 	elif key == "name" and not _folder_edited:
-		var name: String = String(_form.values()["name"])
-		(_form.field("folder") as LineEdit).text = session.worktree_path_for(name) if not name.is_empty() else ""
+		(_form.field("folder") as LineEdit).text = _task_folder(String(_form.values()["name"]))
 
 
 func open_worktree(path: String) -> void:

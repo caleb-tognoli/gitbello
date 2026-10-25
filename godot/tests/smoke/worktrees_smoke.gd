@@ -62,6 +62,15 @@ func run() -> void:
 			"the folder follows the branch: %s" % folder.text)
 	expect(folder.text.contains("repo-10.worktrees"), "the default template is used: %s" % folder.text)
 	var task_path: String = folder.text
+	# Browse: a folder with things in it is where the worktree goes; an empty
+	# one is the worktree's folder.
+	form.pick_folder("folder", fixtures)
+	expect_eq(folder.text, fixtures.path_join("task-one"), "a picked folder holds the worktree")
+	var empty: String = fixtures.path_join("picked empty")
+	DirAccess.make_dir_absolute(empty)
+	form.pick_folder("folder", empty)
+	expect_eq(folder.text, empty, "a picked empty folder is the worktree's")
+	folder.text = task_path
 	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
 	expect(form.field("open_tab") == null, "the new worktree always shows; no switch to ask about")
 	press("Enter")
