@@ -82,6 +82,34 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return strip.chips().size() == 3), "three chips")
 	strip.chips()[0].chosen.emit()
 
+	# A name that matches a remote branch offers to check it out instead; a
+	# loose ref stands in for a branch someone pushed.
+	var main_commit: String = ""
+	for ref: Dictionary in session.branch_refs():
+		if String(ref["short_name"]) == "main":
+			main_commit = String(ref["commit"])
+	DirAccess.make_dir_recursive_absolute(repo.path_join(".git/refs/remotes/origin"))
+	write_file(repo.path_join(".git/refs/remotes/origin/remote-only"), main_commit + "\n")
+	Core.focus_in(session)
+	expect(await wait_until(func() -> bool:
+		return session.branch_refs().any(func(r: Dictionary) -> bool: return String(r["short_name"]) == "origin/remote-only")),
+			"the remote branch is listed")
+	press("Ctrl+T")
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks again")
+	var track: CheckBox = form.field("track") as CheckBox
+	var start: OptionButton = form.field("base") as OptionButton
+	expect(not track.is_visible_in_tree(), "no offer before a name")
+	type_text("remote-only")
+	expect(await wait_until(func() -> bool: return track.is_visible_in_tree()), "the remote branch is offered")
+	expect(track.button_pressed, "checking it out is on")
+	expect(track.text.contains("origin/remote-only"), "it names the remote branch: %s" % track.text)
+	expect(start.disabled, "the base does not apply while tracking")
+	track.button_pressed = false
+	expect(not start.disabled, "unticked, the base applies again")
+	type_text("x")
+	expect(await wait_until(func() -> bool: return not track.is_visible_in_tree()), "another name drops the offer")
+	form.hide()
+
 	# Lock, unlock and remove a worktree from its chip's menu.
 	var spare: String = fixtures.path_join("repo-10-spare")
 	session.add_worktree(spare, "spare", "main")

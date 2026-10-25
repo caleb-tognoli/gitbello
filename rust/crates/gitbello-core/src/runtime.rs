@@ -1927,7 +1927,17 @@ fn new_task_job(
         branch: task.branch.clone(),
         start: Some(task.base.clone()),
     };
-    let Err(err) = backend.worktree_op(repo, &add, cancel) else {
+    let added = backend.worktree_op(repo, &add, cancel).and_then(|()| {
+        if !task.track_base {
+            return Ok(());
+        }
+        let track = RefOp::SetUpstream {
+            branch: task.branch.clone(),
+            upstream: Some(task.base.clone()),
+        };
+        backend.ref_op(repo, &track, cancel)
+    });
+    let Err(err) = added else {
         return Ok(());
     };
     // Rolling back must not be cut short by a cancel.

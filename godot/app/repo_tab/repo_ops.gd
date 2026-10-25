@@ -44,6 +44,8 @@ var _folder_edited: bool = false
 ## A folder picked for new tasks to go in (its name still follows the
 ## branch), or "" for the template's.
 var _folder_parent: String = ""
+## The remote branch the typed new-task name matches (`origin/<name>`), or "".
+var _remote_match: String = ""
 var _cleanup_requested: bool = false
 var _cleanup_list: Array[Dictionary] = []
 ## Switching with local changes: bring them (OK) or leave them (a button).
@@ -571,12 +573,37 @@ func new_task() -> void:
 		bases.append("HEAD")
 	_folder_edited = false
 	_folder_parent = ""
+	_remote_match = ""
 	_begin_form("task", "New worktree", "Create", _create_task)
 	_form.add_line("name", "Branch", "", true)
 	_form.add_choice("base", "Start from", bases, 0)
+	_form.add_check("track", "", true)
 	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
 	_form.validator = _check_task
+	_show_remote_match()
 	_form.open()
+
+
+## The remote branch named `name` (`origin/<name>` first), when no local
+## branch has that name; else "".
+func _remote_branch_named(name: String) -> String:
+	if name.is_empty() or not _branch_ref("branch", name).is_empty():
+		return ""
+	var found: String = ""
+	for remote: String in session.remotes():
+		var short_name: String = remote + "/" + name
+		if not _branch_ref("remote", short_name).is_empty() and (found.is_empty() or remote == "origin"):
+			found = short_name
+	return found
+
+
+## Offers to check out the remote branch the typed name matches; while that
+## is on, the base does not apply.
+func _show_remote_match() -> void:
+	var check: CheckBox = _form.field("track") as CheckBox
+	check.text = "Check out %s and track it" % _remote_match
+	_form.set_field_visible("track", not _remote_match.is_empty())
+	(_form.field("base") as OptionButton).disabled = not _remote_match.is_empty() and check.button_pressed
 
 
 ## A picked empty folder is the worktree's folder; any other is where it
@@ -608,17 +635,21 @@ func _check_task(values: Dictionary) -> String:
 
 
 func _create_task(values: Dictionary) -> void:
-	var base: String = String(values["base"])
+	var track: bool = not _remote_match.is_empty() and bool(values["track"])
+	var base: String = _remote_match if track else String(values["base"])
 	var remote: String = ""
 	for name: String in session.remotes():
 		if base.begins_with(name + "/") and name.length() > remote.length():
 			remote = name
 	var folder: String = String(values["folder"])
 	var name: String = String(values["name"])
-	var job: int = session.new_task(name, base, folder, remote)
+	var job: int = session.new_task(name, base, folder, remote, track)
 	if job >= 0:
 		_tasks[job] = folder
-	_track(job, "Creating the worktree %s" % name, "Created the worktree %s" % name)
+	if track:
+		_track(job, "Checking out %s" % base, "Checked out %s in a new worktree" % base)
+	else:
+		_track(job, "Creating the worktree %s" % name, "Created the worktree %s" % name)
 
 
 ## A worktree for an existing local branch that no worktree has checked out.
@@ -652,8 +683,14 @@ func _on_form_field(key: String) -> void:
 		return
 	if key == "folder":
 		_folder_edited = true
-	elif key == "name" and not _folder_edited:
-		(_form.field("folder") as LineEdit).text = _task_folder(String(_form.values()["name"]))
+	elif key == "name":
+		var name: String = String(_form.values()["name"])
+		_remote_match = _remote_branch_named(name)
+		_show_remote_match()
+		if not _folder_edited:
+			(_form.field("folder") as LineEdit).text = _task_folder(name)
+	elif key == "track":
+		_show_remote_match()
 
 
 func open_worktree(path: String) -> void:

@@ -102,6 +102,20 @@ func add_folder(key: String, label: String, value: String = "", placeholder: Str
 	return line
 
 
+## Shows or hides field `key` with its label.
+func set_field_visible(key: String, shown: bool) -> void:
+	var node: Node = _fields.get(key)
+	while node != null and node.get_parent() != _box:
+		node = node.get_parent()
+	if node == null:
+		return
+	(node as Control).visible = shown
+	var index: int = node.get_index()
+	if index > 0:
+		(_box.get_child(index - 1) as Control).visible = shown
+	reset_size()
+
+
 ## Sets folder field `key` from `dir`, as if picked in the dialog.
 func pick_folder(key: String, dir: String) -> void:
 	var line: LineEdit = _fields.get(key) as LineEdit

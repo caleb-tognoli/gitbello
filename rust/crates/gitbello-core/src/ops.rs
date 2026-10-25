@@ -263,6 +263,9 @@ pub struct NewTask {
     pub path: PathBuf,
     /// Fetched first so the base is current.
     pub fetch_remote: Option<String>,
+    /// The branch tracks `base`, a remote-tracking branch of the same name
+    /// (checking out a remote branch), instead of starting from it.
+    pub track_base: bool,
 }
 
 pub const NEW_TASK_JOB_LABEL: &str = "new task";

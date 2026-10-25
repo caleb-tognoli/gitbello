@@ -147,6 +147,7 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
         base: "origin/main".into(),
         path: path.clone(),
         fetch_remote: Some("origin".into()),
+        track_base: false,
     };
     ok(&mut rt, &key, |rt| rt.new_task(&key, task.clone()));
     settle_worktrees(&mut rt, &key);
@@ -176,6 +177,47 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
 }
 
 #[test]
+fn new_task_can_check_out_a_remote_branch_tracking_it() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let remote = repo.add_remote();
+    let other = repo.clone_remote(&remote, "other");
+    let git = |args: &[&str]| {
+        repo.command_in(&other)
+            .args(args)
+            .run()
+            .unwrap_or_else(|err| panic!("git {args:?}: {err}"));
+    };
+    git(&["checkout", "--quiet", "-b", "topic"]);
+    fs::write(other.join("t.txt"), "t\n").unwrap();
+    git(&["add", "--", "t.txt"]);
+    git(&["commit", "--quiet", "-m", "topic work"]);
+    git(&["push", "--quiet", "origin", "topic"]);
+    let (mut rt, key) = open(&repo);
+
+    let path = repo.sibling("topic wört");
+    let task = NewTask {
+        branch: "topic".into(),
+        base: "origin/topic".into(),
+        path: path.clone(),
+        fetch_remote: Some("origin".into()),
+        track_base: true,
+    };
+    ok(&mut rt, &key, |rt| rt.new_task(&key, task));
+    settle_worktrees(&mut rt, &key);
+    assert!(listed(&rt, &key, &path));
+    assert!(
+        path.join("t.txt").is_file(),
+        "the fetched remote branch is checked out"
+    );
+    let branch = rt.repo(&key).unwrap().branch("topic").unwrap().clone();
+    assert_eq!(
+        branch.upstream.as_deref(),
+        Some("refs/remotes/origin/topic")
+    );
+}
+
+#[test]
 fn new_task_rolls_back_when_the_worktree_cannot_be_added() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
@@ -190,6 +232,7 @@ fn new_task_rolls_back_when_the_worktree_cannot_be_added() {
         base: "main".into(),
         path: path.clone(),
         fetch_remote: None,
+        track_base: false,
     };
     let err = outcome(&mut rt, &key, |rt| rt.new_task(&key, task)).expect("refused");
     assert!(err.stderr.contains("already exists"), "{err}");
