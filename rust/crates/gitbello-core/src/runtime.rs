@@ -13,7 +13,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard};
-use crate::changes::{self, ChangeList, FilePick, PickState, Selection};
+use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::{
     build_patch, CommitSide, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
@@ -186,6 +186,7 @@ pub struct RepoState {
     operation: Option<Operation>,
     labels: HashMap<String, Vec<RefLabel>>,
     changes: ChangeList,
+    change_filter: ChangeFilter,
     selection: Selection,
     /// [`Selection::line_states`] of the Changes diff, per line.
     diff_picks: Vec<PickState>,
@@ -227,6 +228,7 @@ impl RepoState {
             operation: None,
             labels: HashMap::new(),
             changes: ChangeList::default(),
+            change_filter: ChangeFilter::default(),
             selection: Selection::default(),
             diff_picks: Vec::new(),
             worktree_badges: HashMap::new(),
@@ -367,9 +369,44 @@ impl RepoState {
         self.graph.as_ref()
     }
 
-    /// The Changes view's list (indices into the status's changes).
+    /// The Changes view's list (indices into the status's changes), as
+    /// filtered by [`Runtime::set_change_filter`].
     pub fn changes(&self) -> &ChangeList {
         &self.changes
+    }
+
+    pub fn change_filter(&self) -> &ChangeFilter {
+        &self.change_filter
+    }
+
+    /// The check-all box over the files shown.
+    pub fn shown_selection_state(&self) -> PickState {
+        match (&self.status, self.change_filter.is_active()) {
+            (Some(status), true) => self.selection.state_of(
+                self.changes
+                    .indices()
+                    .iter()
+                    .map(|&i| status.changes[i].path.as_path()),
+            ),
+            _ => self.selection.overall_state(),
+        }
+    }
+
+    /// Paths of the files shown.
+    fn shown_paths(&self) -> Vec<PathBuf> {
+        self.status.as_ref().map_or_else(Vec::new, |status| {
+            self.changes
+                .indices()
+                .iter()
+                .map(|&i| status.changes[i].path.clone())
+                .collect()
+        })
+    }
+
+    fn rebuild_changes(&mut self) {
+        if let Some(status) = &self.status {
+            self.changes = ChangeList::filtered(status, &self.selection, &self.change_filter);
+        }
     }
 
     /// The commit selection (PLAN §3.10).
@@ -869,13 +906,26 @@ impl Runtime {
         self.selection_changed(key, changed)
     }
 
-    /// Includes or excludes every file.
+    /// Includes or excludes every file shown (every file without a filter).
     pub fn pick_all(&mut self, key: &Path, include: bool) -> bool {
         let Some(state) = self.repos.get_mut(key) else {
             return false;
         };
-        state.selection.pick_all(include);
+        if state.change_filter.is_active() {
+            let paths = state.shown_paths();
+            state.selection.pick_files(&paths, include);
+        } else {
+            state.selection.pick_all(include);
+        }
         self.selection_changed(key, true)
+    }
+
+    /// Shows only the changed files `filter` lets through.
+    pub fn set_change_filter(&mut self, key: &Path, filter: ChangeFilter) {
+        if let Some(state) = self.repos.get_mut(key) {
+            state.change_filter = filter;
+            state.rebuild_changes();
+        }
     }
 
     /// Picks or unpicks lines of the Changes diff (a hunk header takes its
@@ -901,6 +951,9 @@ impl Runtime {
         if changed {
             if let Some(state) = self.repos.get_mut(key) {
                 refresh_diff_picks(state);
+                if state.change_filter.uses_picks() {
+                    state.rebuild_changes();
+                }
             }
             self.pending.push(RuntimeEvent::SelectionChanged {
                 repo: key.to_path_buf(),
@@ -1846,9 +1899,9 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             if moved {
                 state.graph_dirty_since = Some(Instant::now());
             }
-            state.changes = ChangeList::new(&status);
             state.selection.reconcile(&status);
             state.status = Some(status);
+            state.rebuild_changes();
             refresh_diff_picks(state);
         }
         JobOutput::Refs(refs, remotes) => {

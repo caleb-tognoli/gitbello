@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use gitbello_core::backend::{CliBackend, GitBackend};
-use gitbello_core::changes::PickState;
+use gitbello_core::changes::{ChangeFilter, PickState};
 use gitbello_core::config::Config;
 use gitbello_core::diff::{DiffContent, DiffKind, DiffTarget, LineKind};
 use gitbello_core::git::{CancelToken, GitErrorKind};
@@ -425,6 +425,91 @@ fn runtime_pick_commit_amend_cycle() {
         repo.git(&["show", "--name-only", "--format=", "HEAD"]),
         "app.txt"
     );
+}
+
+fn shown(rt: &Runtime, key: &Path) -> Vec<String> {
+    let state = rt.repo(key).expect("repo open");
+    let status = state.status().expect("status loaded");
+    state
+        .changes()
+        .indices()
+        .iter()
+        .map(|&i| status.changes[i].path.to_string_lossy().into_owned())
+        .collect()
+}
+
+#[test]
+fn runtime_filters_changes_and_checks_only_the_shown_files() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "src/app.rs",
+        "v1
+",
+        "base",
+    );
+    repo.write(
+        "src/app.rs",
+        "v2
+",
+    );
+    repo.write(
+        "src/new.rs",
+        "n
+",
+    );
+    repo.write(
+        "notes.txt",
+        "n
+",
+    );
+    let (mut rt, key) = open(&repo);
+    assert_eq!(shown(&rt, &key).len(), 3);
+
+    rt.set_change_filter(
+        &key,
+        ChangeFilter {
+            text: "SRC/".into(),
+            ..ChangeFilter::default()
+        },
+    );
+    assert_eq!(shown(&rt, &key), ["src/app.rs", "src/new.rs"]);
+    assert_eq!(rt.repo(&key).unwrap().changes().total(), 3);
+    // The check-all box covers the shown files only.
+    rt.pick_all(&key, false);
+    assert_eq!(picked(&rt, &key), 1);
+    let state = rt.repo(&key).unwrap();
+    assert_eq!(state.shown_selection_state(), PickState::None);
+    assert_eq!(state.selection().overall_state(), PickState::Partial);
+
+    // The filter holds over status reloads.
+    repo.write(
+        "src/more.rs",
+        "m
+",
+    );
+    rt.refresh(
+        &key,
+        gitbello_core::jobs::RefreshSet::EMPTY.with(RefreshKind::Status),
+    );
+    poll_until(&mut rt, |rt, _| shown(rt, &key).len() == 3);
+    assert_eq!(
+        shown(&rt, &key),
+        ["src/app.rs", "src/more.rs", "src/new.rs"]
+    );
+
+    // With "included" checked, leaving a file out hides it at once.
+    rt.set_change_filter(
+        &key,
+        ChangeFilter {
+            included: true,
+            ..ChangeFilter::default()
+        },
+    );
+    assert_eq!(shown(&rt, &key), ["notes.txt", "src/more.rs"]);
+    rt.pick_files(&key, &paths(&["notes.txt"]), false);
+    assert_eq!(shown(&rt, &key), ["src/more.rs"]);
+    rt.set_change_filter(&key, ChangeFilter::default());
+    assert_eq!(shown(&rt, &key).len(), 4);
 }
 
 #[test]

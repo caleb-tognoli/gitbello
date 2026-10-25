@@ -10,34 +10,108 @@ use crate::diff::{build_patch, DiffKind, DiffTarget, FileDiff, LineKind, PatchMo
 use crate::repo::{Change, FileChange, FileState, RepoStatus};
 
 /// Indices into [`RepoStatus::changes`]: conflicted files first, then the
-/// rest, each sorted by path. Ignored files are left out.
+/// rest, each sorted by path. Ignored files are left out, and so are the
+/// files a [`ChangeFilter`] hides (`total` still counts them).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChangeList {
     indices: Vec<usize>,
+    total: usize,
 }
 
 impl ChangeList {
     pub fn new(status: &RepoStatus) -> Self {
+        Self::filtered(status, &Selection::default(), &ChangeFilter::default())
+    }
+
+    /// The files `filter` shows (`selection` answers its pick options).
+    pub fn filtered(status: &RepoStatus, selection: &Selection, filter: &ChangeFilter) -> Self {
         let mut indices: Vec<usize> = (0..status.changes.len())
             .filter(|&i| status.changes[i].state != FileState::Ignored)
             .collect();
+        let total = indices.len();
+        indices.retain(|&i| filter.matches(&status.changes[i], selection));
         indices.sort_by(|&a, &b| {
             let (a, b) = (&status.changes[a], &status.changes[b]);
             (!is_conflicted(a), &a.path).cmp(&(!is_conflicted(b), &b.path))
         });
-        Self { indices }
+        Self { indices, total }
     }
 
     pub fn indices(&self) -> &[usize] {
         &self.indices
     }
 
+    /// Files shown.
     pub fn len(&self) -> usize {
         self.indices.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
+    }
+
+    /// Changed files, shown or not.
+    pub fn total(&self) -> usize {
+        self.total
+    }
+}
+
+/// Which changed files the Changes list shows (PLAN §4, like GitHub
+/// Desktop's filter): paths containing `text`, ignoring case (a rename's
+/// source path counts too), then narrowed by the options. Among the pick
+/// options and among the kinds, any checked one lets a file through; with
+/// none checked, all do.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChangeFilter {
+    pub text: String,
+    /// Files the next commit takes something of.
+    pub included: bool,
+    /// Files left out of the next commit (conflicted ones too).
+    pub excluded: bool,
+    /// Added and untracked files.
+    pub new: bool,
+    /// Modified, renamed, copied and type-changed files.
+    pub modified: bool,
+    pub deleted: bool,
+}
+
+impl ChangeFilter {
+    /// Whether it hides anything.
+    pub fn is_active(&self) -> bool {
+        !self.text.trim().is_empty() || self.uses_picks() || self.uses_kinds()
+    }
+
+    /// Whether including or leaving out a file can change what is shown.
+    pub fn uses_picks(&self) -> bool {
+        self.included != self.excluded
+    }
+
+    fn uses_kinds(&self) -> bool {
+        self.new || self.modified || self.deleted
+    }
+
+    pub fn matches(&self, change: &FileChange, selection: &Selection) -> bool {
+        let text = self.text.trim().to_lowercase();
+        let has_text = |path: &PathBuf| path.to_string_lossy().to_lowercase().contains(&text);
+        if !text.is_empty()
+            && !has_text(&change.path)
+            && !change.original_path.as_ref().is_some_and(has_text)
+        {
+            return false;
+        }
+        if self.uses_picks() && (selection.state(&change.path) != PickState::None) != self.included
+        {
+            return false;
+        }
+        if self.uses_kinds() {
+            return match change_code(change) {
+                "A" | "?" => self.new,
+                "D" => self.deleted,
+                "M" | "T" | "R" | "C" => self.modified,
+                _ => false,
+            };
+        }
+        true
     }
 }
 
@@ -180,6 +254,29 @@ pub enum FilePick {
     Lines(Vec<LineKey>),
 }
 
+impl FilePick {
+    /// The file's checkbox.
+    pub fn state(&self) -> PickState {
+        match self {
+            Self::Included => PickState::All,
+            Self::Excluded => PickState::None,
+            Self::AsStaged | Self::Lines(_) => PickState::Partial,
+        }
+    }
+}
+
+/// `All` or `None` when every state is, else `Partial` (`None` for no states).
+fn combined(mut states: impl Iterator<Item = PickState>) -> PickState {
+    let Some(first) = states.next() else {
+        return PickState::None;
+    };
+    if states.all(|s| s == first) {
+        first
+    } else {
+        PickState::Partial
+    }
+}
+
 /// A file's checkbox, or a line's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickState {
@@ -248,29 +345,23 @@ impl Selection {
 
     /// The checkbox of `path` (`None` for files without an entry).
     pub fn state(&self, path: &Path) -> PickState {
-        match self.pick(path) {
-            Some(FilePick::Included) => PickState::All,
-            Some(FilePick::AsStaged | FilePick::Lines(_)) => PickState::Partial,
-            Some(FilePick::Excluded) | None => PickState::None,
-        }
+        self.pick(path).map_or(PickState::None, FilePick::state)
     }
 
     /// The check-all box: `All` when every file is included whole, `None`
     /// when none is picked (or there are no files), else `Partial`.
     pub fn overall_state(&self) -> PickState {
-        let mut states = self.files.values().map(|e| match e.pick {
-            FilePick::Included => PickState::All,
-            FilePick::Excluded => PickState::None,
-            FilePick::AsStaged | FilePick::Lines(_) => PickState::Partial,
-        });
-        let Some(first) = states.next() else {
-            return PickState::None;
-        };
-        if states.all(|s| s == first) {
-            first
-        } else {
-            PickState::Partial
-        }
+        combined(self.files.values().map(|e| e.pick.state()))
+    }
+
+    /// The check-all box over `paths` only (files without a checkbox, such
+    /// as conflicted ones, are skipped).
+    pub fn state_of<'a>(&self, paths: impl IntoIterator<Item = &'a Path>) -> PickState {
+        combined(
+            paths
+                .into_iter()
+                .filter_map(|path| self.files.get(path).map(|e| e.pick.state())),
+        )
     }
 
     /// Files the next commit takes something of.
@@ -625,6 +716,92 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
                 "M z.txt"
             ]
         );
+    }
+
+    fn shown(status: &RepoStatus, selection: &Selection, filter: ChangeFilter) -> Vec<String> {
+        ChangeList::filtered(status, selection, &filter)
+            .indices()
+            .iter()
+            .map(|&i| status.changes[i].path.display().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn filters_by_text_kind_and_pick() {
+        let status = status();
+        let mut selection = Selection::default();
+        selection.reconcile(&status);
+        let list = ChangeList::filtered(&status, &selection, &ChangeFilter::default());
+        assert_eq!((list.len(), list.total()), (6, 6));
+        let text = |text: &str| ChangeFilter {
+            text: text.into(),
+            ..ChangeFilter::default()
+        };
+        assert_eq!(shown(&status, &selection, text(" NOTE ")), ["notes.txt"]);
+        // A rename's source path matches too.
+        assert_eq!(shown(&status, &selection, text("old")), ["new.txt"]);
+        let filter = text("zzz");
+        let list = ChangeList::filtered(&status, &selection, &filter);
+        assert_eq!((list.len(), list.total()), (0, 6));
+        assert!(filter.is_active());
+        assert!(!ChangeFilter::default().is_active());
+
+        let kinds = ChangeFilter {
+            new: true,
+            deleted: true,
+            ..ChangeFilter::default()
+        };
+        assert_eq!(
+            shown(&status, &selection, kinds),
+            ["added.txt", "notes.txt"]
+        );
+        let modified = ChangeFilter {
+            modified: true,
+            ..ChangeFilter::default()
+        };
+        assert_eq!(
+            shown(&status, &selection, modified),
+            ["both.txt", "new.txt", "z.txt"]
+        );
+
+        // Partly included counts as included; conflicts have no checkbox.
+        let included = ChangeFilter {
+            included: true,
+            ..ChangeFilter::default()
+        };
+        assert!(included.uses_picks());
+        assert_eq!(
+            shown(&status, &selection, included),
+            ["added.txt", "both.txt", "new.txt"]
+        );
+        let excluded = ChangeFilter {
+            excluded: true,
+            text: "t".into(),
+            ..ChangeFilter::default()
+        };
+        assert_eq!(
+            shown(&status, &selection, excluded),
+            ["clash.txt", "notes.txt", "z.txt"]
+        );
+        let both = ChangeFilter {
+            included: true,
+            excluded: true,
+            ..ChangeFilter::default()
+        };
+        assert!(!both.is_active());
+        assert_eq!(shown(&status, &selection, both).len(), 6);
+    }
+
+    #[test]
+    fn check_all_state_of_some_files() {
+        let status = status();
+        let mut selection = Selection::default();
+        selection.reconcile(&status);
+        let state = |paths: &[&str]| selection.state_of(paths.iter().map(Path::new)).id();
+        assert_eq!(state(&["added.txt", "new.txt"]), "all");
+        assert_eq!(state(&["notes.txt", "clash.txt"]), "none");
+        assert_eq!(state(&["added.txt", "z.txt"]), "partial");
+        assert_eq!(state(&[]), "none");
     }
 
     #[test]
