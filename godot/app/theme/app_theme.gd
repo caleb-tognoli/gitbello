@@ -222,6 +222,7 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT) -> Theme:
 	_add_history(theme, p)
 	_add_changes(theme, p)
 	_add_shell_p2(theme, p)
+	_add_changes_p3(theme, p)
 	return theme
 
 
@@ -711,6 +712,55 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 		toast.shadow_size = 6
 		theme.set_stylebox(&"panel", entry[0], toast)
 	theme.set_constant(&"bottom_margin", &"Toasts", 40)
+
+
+## The Changes view of M6.5 P3: commit checkboxes, the list header, the
+## commit panel and empty states with suggested actions.
+static func _add_changes_p3(theme: Theme, p: Palette) -> void:
+	theme.set_constant(&"size", &"PickBox", 14)
+	theme.set_color(&"border_color", &"PickBox", p.text_muted)
+	theme.set_color(&"fill_color", &"PickBox", p.accent)
+	theme.set_color(&"mark_color", &"PickBox", readable_text([p.accent], DARK_TEXT))
+	_variation(theme, &"ListHeader", &"PanelContainer")
+	var header: StyleBoxFlat = _box(p.background, 0, Vector4(8, 4, 8, 4))
+	header.border_color = p.border
+	header.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"ListHeader", header)
+	_variation(theme, &"ListHeaderRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ListHeaderRow", 8)
+	_variation(theme, &"CommitPanel", &"PanelContainer")
+	var commit: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 8, 8, 8))
+	commit.border_color = p.border
+	commit.border_width_top = 1
+	theme.set_stylebox(&"panel", &"CommitPanel", commit)
+	_variation(theme, &"EmptyStateBox", &"VBoxContainer")
+	theme.set_constant(&"separation", &"EmptyStateBox", 10)
+	_variation(theme, &"EmptyStateTitle", &"Label")
+	theme.set_font_size(&"font_size", &"EmptyStateTitle", 22)
+	_variation(theme, &"SuggestionList", &"VBoxContainer")
+	theme.set_constant(&"separation", &"SuggestionList", 8)
+	_variation(theme, &"SuggestionButton", &"Button")
+	var margins: Vector4 = Vector4(14, 10, 14, 10)
+	theme.set_stylebox(&"normal", &"SuggestionButton", _box(p.raised, 6, margins, p.border, 1))
+	theme.set_stylebox(&"hover", &"SuggestionButton", _box(p.hover, 6, margins, p.border, 1))
+	theme.set_stylebox(&"pressed", &"SuggestionButton", _box(Color(p.accent, 0.35), 6, margins, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"SuggestionButton", _box(Color(p.accent, 0.35), 6, margins, p.accent, 1))
+	theme.set_stylebox(&"disabled", &"SuggestionButton", _box(Color(p.raised, 0.5), 6, margins, p.border, 1))
+	theme.set_stylebox(&"focus", &"SuggestionButton", _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 1))
+	theme.set_font_size(&"font_size", &"SuggestionButton", 15)
+	theme.set_constant(&"h_separation", &"SuggestionButton", 10)
+	theme.set_constant(&"button_width", &"EmptyState", 340)
+	# The first suggestion (Open repository…) in the accent colour
+	_variation(theme, &"PrimarySuggestionButton", &"SuggestionButton")
+	var accent_text: Color = readable_text([p.accent, p.accent.lightened(0.08), p.accent.darkened(0.1)], p.text)
+	theme.set_stylebox(&"normal", &"PrimarySuggestionButton", _box(p.accent, 6, margins))
+	theme.set_stylebox(&"hover", &"PrimarySuggestionButton", _box(p.accent.lightened(0.08), 6, margins))
+	theme.set_stylebox(&"pressed", &"PrimarySuggestionButton", _box(p.accent.darkened(0.1), 6, margins))
+	theme.set_stylebox(&"hover_pressed", &"PrimarySuggestionButton", _box(p.accent.darkened(0.1), 6, margins))
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color", &"font_pressed_color",
+			&"font_hover_pressed_color", &"icon_normal_color", &"icon_hover_color", &"icon_focus_color",
+			&"icon_pressed_color", &"icon_hover_pressed_color"]:
+		theme.set_color(color, &"PrimarySuggestionButton", accent_text)
 
 
 ## Frame `frame` of the busy spinner, in the icon grey of the light or dark

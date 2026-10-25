@@ -1,7 +1,9 @@
 class_name CommitBox
 extends VBoxContainer
-## Commit message (summary and body), amend toggle and commit button. Hook or
-## git output from a failed commit is shown below until the next attempt.
+## Commit message (summary and body), amend toggle and the commit button,
+## which says what it commits ("Commit 2 files to main") and, when it cannot,
+## why in its tooltip. Hook or git output from a failed commit is shown below
+## until the next attempt.
 
 ## A commit or amend finished successfully.
 signal committed()
@@ -11,6 +13,8 @@ const COMMIT_LABEL: String = "commit"
 
 var session: RepoSession = null:
 	set = set_session
+## Shows the commit's progress on the button and its success; may be null.
+var feedback: Feedback = null
 
 var _job: int = -1
 ## Message loaded from HEAD for amending, to tell it apart from user edits.
@@ -88,8 +92,30 @@ func output_text() -> String:
 
 
 func can_commit() -> bool:
-	return session != null and _job < 0 and not _summary.text.strip_edges().is_empty() \
-			and session.can_commit(_amend.button_pressed)
+	return session != null and _job < 0 and block_reason().is_empty()
+
+
+## Why the commit button is disabled, or "".
+func block_reason() -> String:
+	if session == null:
+		return "No repository"
+	var reason: String = session.commit_block_reason(_amend.button_pressed)
+	if not reason.is_empty():
+		return reason
+	if _summary.text.strip_edges().is_empty():
+		return "Write a summary"
+	return ""
+
+
+## What the button commits: "Commit 2 files to main", "Amend last commit"...
+func button_text() -> String:
+	var count: int = session.picked_count() if session != null else 0
+	var files: String = "1 file" if count == 1 else "%d files" % count
+	if _amend.button_pressed:
+		return "Amend last commit" if count == 0 else "Amend last commit with %s" % files
+	var branch: String = session.current_branch() if session != null else ""
+	var what: String = "Commit" if count == 0 else "Commit " + files
+	return "%s to %s" % [what, branch] if not branch.is_empty() else what
 
 
 func focus_summary() -> void:
@@ -104,7 +130,11 @@ func update_state() -> void:
 	if _job >= 0:
 		_commit_button.text = "Committing…"
 	else:
-		_commit_button.text = "Amend last commit" if _amend.button_pressed else "Commit"
+		_commit_button.text = button_text()
+	var shortcut: String = Actions.shortcut_label(&"changes.commit")
+	var why: String = block_reason() if _job < 0 else ""
+	_commit_button.tooltip_text = why if not why.is_empty() \
+			else (button_text() + (" (%s)" % shortcut if not shortcut.is_empty() else ""))
 
 
 ## Commits (or amends) with the current message. Returns whether it started.
@@ -112,9 +142,22 @@ func commit() -> bool:
 	if not can_commit():
 		return false
 	_output.hide()
+	var done: String = _done_text()
 	_job = session.commit(_summary.text, _body.text, _amend.button_pressed)
+	if feedback != null:
+		feedback.track(session, _job, "Committing", done, _commit_button)
 	update_state()
 	return _job >= 0
+
+
+## The success toast of the commit about to start.
+func _done_text() -> String:
+	var count: int = session.picked_count()
+	var files: String = "1 file" if count == 1 else "%d files" % count
+	var branch: String = session.current_branch()
+	if _amend.button_pressed:
+		return "Amended the last commit" if count == 0 else "Amended the last commit with %s" % files
+	return "Committed %s to %s" % [files, branch] if not branch.is_empty() else "Committed %s" % files
 
 
 func _on_amend_toggled(on: bool) -> void:

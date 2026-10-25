@@ -10,6 +10,13 @@ extends VirtualList
 ## `split_source.call(start, count)` as `{left, right}` lines (or {}).
 ## Only a window around the visible rows is fetched. Rows can be selected
 ## and copied (Ctrl+C); `selected_or_cursor()` gives the selected lines.
+## With `pickable`, a gutter of commit checkboxes comes first, from each
+## line's `picked` (`all`, `none`, `partial`, or empty for no box); clicking
+## one emits `pick_clicked`.
+
+## A checkbox was clicked: the line indices of its row, and whether to pick
+## them (the box was not `all`).
+signal pick_clicked(lines: PackedInt32Array, include: bool)
 
 const DIFF_THEME_TYPE: StringName = &"DiffView"
 const FETCH_MARGIN: int = 128
@@ -30,6 +37,13 @@ var split_source: Callable = Callable()
 ## Show the old and new sides next to each other.
 var side_by_side: bool = false:
 	set = set_side_by_side
+## Show the commit checkboxes' gutter.
+var pickable: bool = false:
+	set(value):
+		if value != pickable:
+			pickable = value
+			queue_redraw()
+			_update_h_range()
 
 var _line_count: int = 0
 var _split_count: int = 0
@@ -44,6 +58,7 @@ var _char_width: float = 0.0
 var _padding: float = 0.0
 var _colors: Dictionary[StringName, Color] = {}
 var _syntax: Array[Color] = []
+var _picks: PickPainter = PickPainter.new()
 
 
 func _ready() -> void:
@@ -85,6 +100,41 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool, split_
 		_anchor = cursor
 		selection_changed.emit()
 	_update_h_range()
+
+
+## Drops the fetched rows so they are read again (their picks changed).
+func invalidate() -> void:
+	_cache.clear()
+	queue_redraw()
+
+
+## The checkbox of `row`: its line's `picked`, both sides combined side by
+## side (`all` or `none` when they agree, else `partial`); "" for no box.
+func row_pick(row: int) -> String:
+	var states: PackedStringArray = PackedStringArray()
+	for data: Dictionary in _row_lines(row):
+		var picked: String = String(data.get("picked", ""))
+		if not picked.is_empty() and int(data.get("kind", -1)) != KIND_CONTEXT:
+			states.append(picked)
+	if states.is_empty():
+		return ""
+	for state: String in states:
+		if state != states[0]:
+			return "partial"
+	return states[0]
+
+
+## Whether every line with a checkbox among the selected rows (or the
+## cursor's row) is picked.
+func selection_fully_picked() -> bool:
+	var rows: PackedInt32Array = selected_rows()
+	if rows.is_empty() and cursor >= 0:
+		rows.append(cursor)
+	for row: int in rows:
+		var state: String = row_pick(row)
+		if not state.is_empty() and state != "all":
+			return false
+	return true
 
 
 func set_side_by_side(value: bool) -> void:
@@ -214,6 +264,11 @@ func _fetch(start: int, count: int) -> void:
 		_update_h_range.call_deferred()
 
 
+## Width of the checkbox gutter (0 when not `pickable`).
+func _pick_width() -> float:
+	return _picks.size + _padding if pickable else 0.0
+
+
 ## Width of a number gutter: `columns` number columns, the +/- mark, a space.
 func _gutter_width(columns: int) -> float:
 	return (_number_digits * columns + columns + 2) * _char_width + _padding * 2.0
@@ -227,6 +282,14 @@ func _draw_row(index: int, rect: Rect2, selected_row: bool) -> void:
 	var data: Dictionary = _cache.get(index, {})
 	if data.is_empty():
 		return
+	if pickable:
+		var gutter: float = _pick_width()
+		if not selected_row:
+			draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), _colors[&"gutter_bg"])
+		var state: String = row_pick(index)
+		if not state.is_empty():
+			_picks.draw(self, _picks.box_rect(rect, rect.position.x + _padding * 0.5), state)
+		rect = Rect2(rect.position + Vector2(gutter, 0.0), Vector2(rect.size.x - gutter, rect.size.y))
 	if not side_by_side:
 		_draw_side(data, rect, selected_row, 2)
 		return
@@ -346,6 +409,17 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	var mouse: InputEventMouseButton = event as InputEventMouseButton
+	if pickable and mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT \
+			and not mouse.double_click and mouse.position.x < _pick_width():
+		var row: int = row_at(mouse.position)
+		if row >= 0 and not row_pick(row).is_empty():
+			grab_focus()
+			var lines: PackedInt32Array = PackedInt32Array()
+			for data: Dictionary in _row_lines(row):
+				lines.append(int(data.get("index", -1)))
+			pick_clicked.emit(lines, row_pick(row) != "all")
+			accept_event()
+			return
 	if mouse != null and mouse.pressed and mouse.shift_pressed \
 			and mouse.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		var direction: float = -1.0 if mouse.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0
@@ -362,7 +436,7 @@ func _gui_input(event: InputEvent) -> void:
 
 func _update_h_range() -> void:
 	var columns: int = 1 if side_by_side else 2
-	var text_width: float = content_width() / (2.0 if side_by_side else 1.0) - _gutter_width(columns)
+	var text_width: float = (content_width() - _pick_width()) / (2.0 if side_by_side else 1.0) - _gutter_width(columns)
 	var total: float = _widest + _char_width * 4.0
 	_h_scroll.max_value = total
 	_h_scroll.page = maxf(0.0, text_width)
@@ -379,6 +453,7 @@ func _update_theme() -> void:
 			&"added_bg", &"removed_bg", &"added_mark", &"removed_mark", &"gutter_bg", &"empty_bg",
 			&"added_hl_bg", &"removed_hl_bg"]:
 		_colors[color_name] = get_theme_color(color_name, DIFF_THEME_TYPE)
+	_picks.update_theme(self)
 	_syntax.clear()
 	for color_name: StringName in SYNTAX_COLORS:
 		_syntax.append(get_theme_color(color_name, DIFF_THEME_TYPE))

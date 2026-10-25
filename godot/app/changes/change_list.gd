@@ -1,28 +1,27 @@
 class_name ChangeList
 extends VirtualList
-## Files of one or more change lists (`conflicted`, `unstaged`, `staged`,
-## `untracked`), shown in that order. Rows come from
-## `RepoSession.change_rows()` for a window around the visible range only.
-## Activating rows (Enter, Space, double-click) asks to stage or unstage them.
+## The changed files of a worktree, one list with commit checkboxes (PLAN §4
+## Changes view): conflicted files first, then the rest by path. Rows come
+## from `RepoSession.change_rows()` for a window around the visible range only.
+## Highlighting rows (click, Shift, Ctrl) drives the diff and the context menu;
+## the checkboxes are separate: clicking one toggles its file, Space, Enter or
+## a double-click toggles the highlighted files.
 
-## The user activated rows: `{group: PackedStringArray of paths}`.
-signal stage_requested(paths_by_group: Dictionary)
-## The row under the cursor changed (empty strings when none).
-signal current_changed(group: String, path: String)
+## The user toggled the checkboxes of `paths`.
+signal pick_toggled(paths: PackedStringArray, include: bool)
+## The row under the cursor changed (an empty path when none).
+signal current_changed(path: String)
 
 ## Rows fetched beyond each edge of the visible range.
 const FETCH_MARGIN: int = 64
 ## Larger selections are not carried over a reload (only the cursor is).
 const MAX_KEPT_SELECTION: int = 500
 var session: RepoSession = null
-## Group ids shown, in order.
-var groups: PackedStringArray = PackedStringArray()
 
-## Rows per group, in `groups` order (as of the last reload).
-var _counts: PackedInt32Array = PackedInt32Array()
+var _count: int = 0
 var _cache: Dictionary[int, Dictionary] = {}
-## Selected paths and cursor path, recorded when the user changes the
-## selection (while rows and status still agree).
+## Highlighted paths and cursor path, recorded when the user changes the
+## highlight (while rows and status still agree).
 var _kept_paths: PackedStringArray = PackedStringArray()
 var _kept_cursor: String = ""
 var _reloading: bool = false
@@ -31,9 +30,10 @@ var _painter: FileRowPainter = FileRowPainter.new()
 
 func _ready() -> void:
 	super()
+	_painter.show_picks = true
 	_update_theme()
 	selection_changed.connect(_on_selection_changed)
-	row_activated.connect(func(_row: int) -> void: activate_selection())
+	row_activated.connect(func(_row: int) -> void: toggle_selection())
 
 
 func _notification(what: int) -> void:
@@ -42,18 +42,16 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
-## Re-reads the lists after a status change, keeping the selection on the
-## same paths. When the cursor's file left the list, the row that took its
-## place gets the cursor, so Enter can be pressed repeatedly.
+## Re-reads the rows after a status change, keeping the highlight on the same
+## paths. When the cursor's file left the list, the row that took its place
+## gets the cursor.
 func reload() -> void:
 	var kept: PackedStringArray = _kept_paths
 	var cursor_path: String = _kept_cursor
 	var old_cursor: int = cursor
 	_reloading = true
 	_cache.clear()
-	_counts.resize(groups.size())
-	for i: int in groups.size():
-		_counts[i] = session.change_count(groups[i]) if session != null else 0
+	_count = session.change_count() if session != null else 0
 	refresh()
 	_selected.clear()
 	var new_cursor: int = _find(cursor_path)
@@ -73,7 +71,13 @@ func reload() -> void:
 	selection_changed.emit()
 
 
-## `{path, original_path, code, group}` of a row, or {}.
+## Re-reads the checkboxes only (the selection changed, the files did not).
+func reload_picks() -> void:
+	_cache.clear()
+	queue_redraw()
+
+
+## `{path, original_path, code, pick, conflicted, as_staged}` of a row, or {}.
 func row(index: int) -> Dictionary:
 	if index < 0 or index >= row_count():
 		return {}
@@ -86,43 +90,50 @@ func path_at(index: int) -> String:
 	return String(row(index).get("path", ""))
 
 
-## Paths of `rows` grouped by list: `{group: PackedStringArray}`.
-func paths_by_group(rows: PackedInt32Array) -> Dictionary:
-	var out: Dictionary = {}
-	if rows.is_empty():
+## Paths of `rows`, in row order.
+func paths(rows: PackedInt32Array) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if rows.is_empty() or session == null:
 		return out
-	# Selections are mostly contiguous: fetch each group's span in one call.
-	var start: int = 0
-	for i: int in groups.size():
-		var end: int = start + _counts[i]
-		var first: int = -1
-		var last: int = -1
-		for index: int in rows:
-			if index >= start and index < end:
-				first = index if first < 0 else mini(first, index)
-				last = maxi(last, index)
-		if first >= 0:
-			var span: PackedStringArray = session.change_paths(groups[i], first - start, last - first + 1)
-			var picked: PackedStringArray = PackedStringArray()
-			for index: int in rows:
-				if index >= first and index <= last and index - first < span.size():
-					picked.append(span[index - first])
-			out[groups[i]] = picked
-		start = end
+	var sorted: PackedInt32Array = rows.duplicate()
+	sorted.sort()
+	# Selections are mostly contiguous: fetch their span in one call.
+	var first: int = sorted[0]
+	var span: PackedStringArray = session.change_paths(first, sorted[sorted.size() - 1] - first + 1)
+	for index: int in sorted:
+		if index - first < span.size():
+			out.append(span[index - first])
 	return out
 
 
-## Asks to stage or unstage the selected rows (or the cursor row).
-func activate_selection() -> void:
+## The highlighted rows, or the cursor row when none is.
+func highlighted_rows() -> PackedInt32Array:
 	var rows: PackedInt32Array = selected_rows()
 	if rows.is_empty() and cursor >= 0:
 		rows = PackedInt32Array([cursor])
-	var paths: Dictionary = paths_by_group(rows)
-	if not paths.is_empty():
-		stage_requested.emit(paths)
+	return rows
 
 
-## Clears the selection and the cursor (another list took the selection).
+## Toggles the checkboxes of the highlighted rows: all included unless they
+## all already are. Conflicted files are skipped.
+func toggle_selection() -> void:
+	toggle_rows(highlighted_rows())
+
+
+func toggle_rows(rows: PackedInt32Array) -> void:
+	var include: bool = false
+	var picked: PackedInt32Array = PackedInt32Array()
+	for index: int in rows:
+		var data: Dictionary = row(index)
+		if data.is_empty() or bool(data.get("conflicted", false)):
+			continue
+		picked.append(index)
+		include = include or String(data.get("pick", "none")) != "all"
+	if not picked.is_empty():
+		pick_toggled.emit(paths(picked), include)
+
+
+## Clears the highlight and the cursor.
 func deselect() -> void:
 	cursor = -1
 	_anchor = -1
@@ -136,10 +147,7 @@ func ensure_cursor() -> void:
 
 
 func _get_row_count() -> int:
-	var total: int = 0
-	for count: int in _counts:
-		total += count
-	return total
+	return _count
 
 
 func _prepare_rows(first: int, count: int) -> void:
@@ -151,30 +159,31 @@ func _prepare_rows(first: int, count: int) -> void:
 			return
 
 
-## Caches rows `start..start + count`, one `change_rows` call per group.
 func _fetch(start: int, count: int) -> void:
-	var group_start: int = 0
-	for i: int in groups.size():
-		var group_end: int = group_start + _counts[i]
-		var from: int = maxi(start, group_start)
-		var to: int = mini(start + count, group_end)
-		if from < to:
-			var rows: Array[Dictionary] = session.change_rows(groups[i], from - group_start, to - from)
-			for j: int in rows.size():
-				_cache[from + j] = rows[j]
-		group_start = group_end
+	if session == null:
+		return
+	var rows: Array[Dictionary] = session.change_rows(start, count)
+	for j: int in rows.size():
+		_cache[start + j] = rows[j]
 
 
 func _find(path: String) -> int:
 	if path.is_empty() or session == null:
 		return -1
-	var start: int = 0
-	for i: int in groups.size():
-		var index: int = session.change_index(groups[i], path)
-		if index >= 0:
-			return start + index
-		start += _counts[i]
-	return -1
+	return session.change_index(path)
+
+
+## A click on a checkbox toggles that file without moving the highlight.
+func _gui_input(event: InputEvent) -> void:
+	var mouse: InputEventMouseButton = event as InputEventMouseButton
+	if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT and not mouse.double_click:
+		var index: int = row_at(mouse.position)
+		if index >= 0 and _painter.is_on_pick(Rect2(0.0, 0.0, content_width(), row_height()), mouse.position):
+			grab_focus()
+			toggle_rows(PackedInt32Array([index]))
+			accept_event()
+			return
+	super(event)
 
 
 func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
@@ -182,7 +191,15 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 
 
 func _get_tooltip(at_position: Vector2) -> String:
-	return path_at(row_at(at_position))
+	var data: Dictionary = row(row_at(at_position))
+	if data.is_empty():
+		return ""
+	var tip: String = String(data["path"])
+	if bool(data.get("conflicted", false)):
+		tip += "\nConflicted: resolve it before committing."
+	elif bool(data.get("as_staged", false)):
+		tip += "\nStaged in part outside gitbello: committed as staged."
+	return tip
 
 
 func _on_selection_changed() -> void:
@@ -192,10 +209,8 @@ func _on_selection_changed() -> void:
 	_kept_paths = PackedStringArray()
 	var rows: PackedInt32Array = selected_rows()
 	if rows.size() <= MAX_KEPT_SELECTION:
-		for paths: PackedStringArray in paths_by_group(rows).values():
-			_kept_paths.append_array(paths)
-	var data: Dictionary = row(cursor)
-	current_changed.emit(String(data.get("group", "")), String(data.get("path", "")))
+		_kept_paths = paths(rows)
+	current_changed.emit(_kept_cursor)
 
 
 func _update_theme() -> void:

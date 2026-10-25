@@ -1,35 +1,31 @@
 class_name Welcome
-extends CenterContainer
-## Shown when no tab is open: open a repository, pick a recent one, or drop a
-## folder on the window.
+extends EmptyState
+## Shown when no tab is open (PLAN §4), in the empty-state pattern: big
+## buttons to open a repository or one of the recent ones; a folder can also
+## be dropped on the window.
 
 signal open_requested()
 signal recent_chosen(path: String)
 
-@onready var _recent: ItemList = %Recent
-@onready var _open_button: Button = %OpenButton
-@onready var _hint: Label = %Hint
+## Recent repositories offered as buttons.
+const MAX_RECENT: int = 6
 
 
 func _ready() -> void:
-	_open_button.icon = AppTheme.icon(&"Folder")
-	_open_button.theme_type_variation = &"PrimaryButton"
-	_open_button.pressed.connect(func() -> void: open_requested.emit())
-	_recent.item_activated.connect(_on_recent_activated)
 	refresh()
 
 
 func refresh() -> void:
-	_recent.clear()
-	for path: String in Core.recent_repos():
-		var index: int = _recent.add_item(path.get_file())
-		_recent.set_item_tooltip(index, path)
-		_recent.set_item_metadata(index, path)
-	_recent.visible = _recent.item_count > 0
+	if not is_node_ready():
+		return
 	var shortcut: String = Actions.shortcut_label(&"repo.open")
-	_hint.text = "Open a repository (%s) or drop a folder here" % shortcut if not shortcut.is_empty() \
-			else "Open a repository or drop a folder here"
-
-
-func _on_recent_activated(index: int) -> void:
-	recent_chosen.emit(String(_recent.get_item_metadata(index)))
+	show_state("gitbello", "Open a repository (%s) or drop a folder here" % shortcut if not shortcut.is_empty() \
+			else "Open a repository or drop a folder here", [])
+	var open_button: Button = add_button("Open repository…", &"Folder", func() -> void: open_requested.emit())
+	open_button.theme_type_variation = &"PrimarySuggestionButton"
+	var recent: PackedStringArray = Core.recent_repos()
+	for i: int in mini(recent.size(), MAX_RECENT):
+		var path: String = recent[i]
+		var button: Button = add_button(path.replace("\\", "/").trim_suffix("/").get_file(), &"History",
+				func() -> void: recent_chosen.emit(path))
+		button.tooltip_text = path

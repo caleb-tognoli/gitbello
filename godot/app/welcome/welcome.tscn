@@ -1,39 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://app/welcome/welcome.gd" id="1_welcome"]
+[ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="1_empty"]
+[ext_resource type="Script" path="res://app/welcome/welcome.gd" id="2_welcome"]
 
-[node name="Welcome" type="CenterContainer"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("1_welcome")
-
-[node name="Layout" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_type_variation = &"WelcomeBox"
-
-[node name="Title" type="Label" parent="Layout"]
-layout_mode = 2
-theme_type_variation = &"HeaderLabel"
-text = "gitbello"
-horizontal_alignment = 1
-
-[node name="Hint" type="Label" parent="Layout"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DimLabel"
-horizontal_alignment = 1
-
-[node name="OpenButton" type="Button" parent="Layout"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 4
-text = "Open repository…"
-
-[node name="Recent" type="ItemList" parent="Layout"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"RecentList"
-auto_height = true
+[node name="Welcome" instance=ExtResource("1_empty")]
+script = ExtResource("2_welcome")

@@ -414,12 +414,21 @@ func _register_change_actions() -> void:
 		return page != null and page.session != null and page.session.is_ready() \
 				and page.view == WorktreeView.View.CHANGES
 	var changes: Callable = func() -> ChangesView: return current_page().changes()
-	Actions.register(&"changes.stage_selected", "Stage or unstage the selection", "Changes",
-			func() -> void: changes.call().stage_selected(), PackedStringArray(), in_changes)
-	Actions.register(&"changes.stage_all", "Stage all changes", "Changes",
-			func() -> void: changes.call().stage_all(), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
-	Actions.register(&"changes.unstage_all", "Unstage all changes", "Changes",
-			func() -> void: changes.call().unstage_all(), PackedStringArray(["Ctrl+Shift+U"]), repo_ready)
+	var has_file: Callable = func() -> bool:
+		return in_changes.call() and not current_page().changes().current_path().is_empty()
+	var no_file: Callable = _says("Select a changed file first.")
+	Actions.register(&"changes.toggle_selected", "Include or leave out the selection", "Changes",
+			func() -> void: changes.call().toggle_selected(), PackedStringArray(), in_changes)
+	Actions.register(&"changes.include_all", "Include all changes", "Changes",
+			func() -> void: changes.call().pick_all(true), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
+	Actions.register(&"changes.exclude_all", "Leave out all changes", "Changes",
+			func() -> void: changes.call().pick_all(false), PackedStringArray(["Ctrl+Shift+U"]), repo_ready)
+	Actions.register(&"changes.open_file", "Open file", "Changes",
+			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
+	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
+			func() -> void: changes.call().show_file(), PackedStringArray(), has_file, no_file)
+	Actions.register(&"changes.copy_path", "Copy file path", "Changes",
+			func() -> void: changes.call().copy_path(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.focus_message", "Write commit message", "Changes",
 			func() -> void:
 				current_page().show_view(WorktreeView.View.CHANGES)
@@ -436,7 +445,10 @@ func _register_change_actions() -> void:
 	amend.in_text_fields = true
 	var commit: ActionRegistry.Action = Actions.register(&"changes.commit", "Commit", "Changes",
 			func() -> void: changes.call().commit(), PackedStringArray(["Ctrl+Enter"]),
-			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit())
+			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit(),
+			func() -> String:
+				var page: RepoTab = current_page()
+				return page.changes().commit_box().block_reason() if page != null and page.session != null 						else "Open a repository first.")
 	commit.in_text_fields = true
 
 
