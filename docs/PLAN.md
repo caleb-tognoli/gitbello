@@ -480,6 +480,17 @@ Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D1
 
 *Result:* `repo/stash.rs` reads shelves from the stash list; the backend shelves, restores, drops, stores and renames by commit; the runtime adds the shelf jobs, `load_shelf_files`, shelf previews in the Changes diff, and `CheckoutChanges` (keep, bring, leave). Shelf jobs refresh the stash list of every open worktree of the repository. `tests/shelves.rs` covers shelving with untracked files and previews, finding a shelf by commit after other stashes moved (and a rename keeping its commit), a shelf seen and restored from another worktree on its branch, a conflicting restore that keeps the shelf, discard with undo, and leave-on-switch (also when the switch fails). `shelves_smoke.gd` shelves a file, leaves changes on a switch, restores them from the offer, previews and restores a shelf, and discards a stash with undo; `branches_smoke.gd` answers the new switch prompt. Changes from the design: a new branch made from the current commit takes local changes along without asking; the smoke fixtures grew to eleven repositories.
 
+#### P5 — History search (≈1 week, pulled forward from M8 on 2026-10-25)
+Find and highlight, not a filter: hiding rows would break the graph's lanes. Searches what the graph index already holds (subject, author name and email, hash), so no git call.
+- [ ] Core `CommitSearch` (`graph/search.rs`): case-insensitive substring of subject, author name or email; 4+ hex characters also match hash prefixes. Runs as a job over the index in chunks under its read lock, follows rows as the graph loads, cancels on a new query, reruns on a graph reload. Results are sorted match rows plus progress (rows searched, done)
+- [ ] `RepoSession`: `search_commits(query)`, `search_info()` (`{matches, searched, done}`), `next_match(row, forward)` (wraps), a `match` flag in `graph_rows`, and a `search_changed` signal
+- [ ] Shared `ui/filter_field` (the Changes filter field with an optional options button); in History it sits above the list header, which reads "3 of 41 matches" while searching. Enter / Shift+Enter and ↑ ↓ buttons move between matches and select the commit; Escape clears; Ctrl+F focuses the current view's field. Non-matching rows are dimmed and matched text highlighted (dimming to be confirmed in review)
+- [ ] Smoke test (search, step, count, clear) and the search time on git/git in `docs/perf.md`
+
+**Accept when** core tests cover subject, author and hash-prefix matches, a search while the graph loads, cancelling and a reload; searching git/git takes well under a frame budget per chunk; a smoke test finds and steps through matches with the keyboard only.
+
+Later (M8): "Show only matches" as a flat list without the graph, search by path (`git log -- <path>`) and in full messages (`git log --grep`).
+
 **Accept the milestone when** Caleb uses gitbello instead of GitHub Desktop for a full week (moved from M6). Collect friction notes for the next milestones.
 
 ### M7 — Merge workflows (≈2 weeks)
@@ -492,7 +503,7 @@ Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D1
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit
 - [ ] File history (`git log --follow`) with per-commit diffs
 - [ ] Editable working copy in `DiffView` with live re-diff, save, and dirty protection (§3.10)
-- [ ] Graph search and filter: by message, author, hash, path
+- [ ] Graph filter: "Show only matches", search by path and in full messages (find and highlight by subject, author and hash moved to M6.5 P5)
 
 ### M9 — Power features (≈1.5 weeks)
 - [ ] Operation log and undo (§3.11) with an "advanced restore" reflog view
