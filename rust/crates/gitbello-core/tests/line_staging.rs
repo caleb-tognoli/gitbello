@@ -471,12 +471,13 @@ fn runtime_line_staging_discard_and_undo() {
     poll_until(&mut rt, |_, ev| finished(ev, job));
     assert_eq!(worktree(&repo, "f.txt"), b"a\nB\nc\nd\n");
 
-    // Whole-file discard, then undo.
+    // Whole-file discard (back to HEAD, staged lines included), then undo.
     let job = rt
         .discard_files(&key, vec![PathBuf::from("f.txt")])
         .expect("job");
     poll_until(&mut rt, |_, ev| finished(ev, job));
-    assert_eq!(worktree(&repo, "f.txt"), b"a\nb\nc\nd\n");
+    assert_eq!(worktree(&repo, "f.txt"), b"a\nb\nc\n");
+    assert_eq!(index(&repo, "f.txt"), b"a\nb\nc\n");
     let job = rt.undo_discard(&key).expect("undo job");
     poll_until(&mut rt, |_, ev| finished(ev, job));
     assert_eq!(worktree(&repo, "f.txt"), b"a\nB\nc\nd\n");

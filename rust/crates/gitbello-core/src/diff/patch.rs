@@ -152,7 +152,14 @@ pub fn build_patch(
     }
     let a = quote_path(&format!("a/{path}"));
     let b = quote_path(&format!("b/{path}"));
-    let mut patch = format!("diff --git {a} {b}\n--- {a}\n+++ {b}\n").into_bytes();
+    // Added to an index that lacks the file: say it is new.
+    let mut patch = if mode == PatchMode::Stage && diff.header.new_file {
+        let file_mode = diff.header.new_mode.as_deref().unwrap_or("100644");
+        format!("diff --git {a} {b}\nnew file mode {file_mode}\n--- /dev/null\n+++ {b}\n")
+    } else {
+        format!("diff --git {a} {b}\n--- {a}\n+++ {b}\n")
+    }
+    .into_bytes();
     patch.extend_from_slice(&body);
     Some(patch)
 }
@@ -361,6 +368,11 @@ mod tests {
         assert!(p.ends_with("@@ -1,2 +1,3 @@\n 1\n+2\n 3\n"), "{p}");
         let staged =
             String::from_utf8(build_patch(&diff, "n", &[1], PatchMode::Stage).unwrap()).unwrap();
+        assert!(
+            staged
+                .starts_with("diff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n"),
+            "{staged}"
+        );
         assert!(
             staged.ends_with("@@ -0,0 +1 @@\n+1\n") || staged.ends_with("@@ -0,0 +1,1 @@\n+1\n"),
             "{staged}"

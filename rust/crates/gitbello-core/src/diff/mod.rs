@@ -32,6 +32,9 @@ pub enum DiffKind {
     Staged,
     /// A file git does not track yet: everything is added.
     Untracked,
+    /// Working tree against HEAD (the empty tree before the first commit):
+    /// what the Changes view shows and commit selections pick from.
+    Head,
     /// A file in a commit, against the commit's first parent.
     Commit,
 }

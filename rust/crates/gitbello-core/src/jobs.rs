@@ -147,6 +147,8 @@ pub enum JobOutput {
     Diff {
         generation: u64,
         diff: Box<FileDiff>,
+        /// The staged diff loaded alongside (see `Selection::resolve_as_staged`).
+        staged: Option<Box<FileDiff>>,
     },
     /// The HEAD commit's message.
     HeadMessage(String),

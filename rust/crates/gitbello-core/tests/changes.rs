@@ -8,11 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use gitbello_core::backend::{CliBackend, GitBackend};
-use gitbello_core::changes::{ChangeGroup, ChangeLists};
+use gitbello_core::changes::PickState;
 use gitbello_core::config::Config;
 use gitbello_core::diff::{DiffContent, DiffKind, DiffTarget, LineKind};
 use gitbello_core::git::{CancelToken, GitErrorKind};
 use gitbello_core::jobs::RefreshKind;
+use gitbello_core::repo::{Change, FileState};
 use gitbello_core::runtime::{JobState, Runtime, RuntimeEvent, COMMIT_JOB_LABEL};
 use support::TestRepo;
 
@@ -39,22 +40,34 @@ fn paths(list: &[&str]) -> Vec<PathBuf> {
     list.iter().map(PathBuf::from).collect()
 }
 
-/// `path` per group, as the changes panel would list them.
-fn lists(repo: &TestRepo) -> Vec<(ChangeGroup, String)> {
+/// Which side of git's index a change is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Staged,
+    Unstaged,
+    Untracked,
+}
+
+/// `(side, path)` of every change (a file staged and edited is on both sides).
+fn lists(repo: &TestRepo) -> Vec<(Side, String)> {
     let status = backend(repo)
         .status(repo.path(), &no_cancel())
         .expect("status");
-    let lists = ChangeLists::new(&status);
-    ChangeGroup::ALL
-        .into_iter()
-        .flat_map(|g| {
-            lists
-                .indices(g)
-                .iter()
-                .map(|&i| (g, status.changes[i].path.to_string_lossy().into_owned()))
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    let mut out = Vec::new();
+    for change in &status.changes {
+        let path = change.path.to_string_lossy().into_owned();
+        if change.is_staged() {
+            out.push((Side::Staged, path.clone()));
+        }
+        match change.state {
+            FileState::Untracked => out.push((Side::Untracked, path)),
+            FileState::Tracked { worktree, .. } if worktree != Change::Unmodified => {
+                out.push((Side::Unstaged, path))
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 #[test]
@@ -200,39 +213,36 @@ fn stage_and_unstage_files_including_odd_names() {
     // `[ab].txt` is literal: `a.txt` is not staged with it.
     let listed = lists(&repo);
     assert!(
-        listed.contains(&(ChangeGroup::Staged, "[ab].txt".into())),
+        listed.contains(&(Side::Staged, "[ab].txt".into())),
         "{listed:?}"
     );
     assert!(
-        listed.contains(&(ChangeGroup::Untracked, "a.txt".into())),
+        listed.contains(&(Side::Untracked, "a.txt".into())),
         "{listed:?}"
     );
     assert!(
-        listed.contains(&(ChangeGroup::Unstaged, "gone.txt".into())),
+        listed.contains(&(Side::Unstaged, "gone.txt".into())),
         "{listed:?}"
     );
 
     b.stage(repo.path(), Some(&all), &no_cancel()).unwrap();
     let listed = lists(&repo);
-    assert!(
-        listed.iter().all(|(g, _)| *g == ChangeGroup::Staged),
-        "{listed:?}"
-    );
+    assert!(listed.iter().all(|(g, _)| *g == Side::Staged), "{listed:?}");
     assert_eq!(listed.len(), 5);
 
     b.unstage(repo.path(), Some(&all[2..4]), &no_cancel())
         .unwrap();
     let listed = lists(&repo);
     assert!(
-        listed.contains(&(ChangeGroup::Untracked, "a.txt".into())),
+        listed.contains(&(Side::Untracked, "a.txt".into())),
         "{listed:?}"
     );
-    assert!(listed.contains(&(ChangeGroup::Untracked, "dir/spaced ünï.txt".into())));
+    assert!(listed.contains(&(Side::Untracked, "dir/spaced ünï.txt".into())));
 
     b.unstage(repo.path(), None, &no_cancel()).unwrap();
-    assert!(lists(&repo).iter().all(|(g, _)| *g != ChangeGroup::Staged));
+    assert!(lists(&repo).iter().all(|(g, _)| *g != Side::Staged));
     b.stage(repo.path(), None, &no_cancel()).unwrap();
-    assert!(lists(&repo).iter().all(|(g, _)| *g == ChangeGroup::Staged));
+    assert!(lists(&repo).iter().all(|(g, _)| *g == Side::Staged));
 }
 
 #[test]
@@ -245,12 +255,10 @@ fn unstage_works_on_an_unborn_branch() {
     b.unstage(repo.path(), Some(&paths(&["first.txt"])), &no_cancel())
         .unwrap();
     let listed = lists(&repo);
-    assert!(listed.contains(&(ChangeGroup::Untracked, "first.txt".into())));
-    assert!(listed.contains(&(ChangeGroup::Staged, "second.txt".into())));
+    assert!(listed.contains(&(Side::Untracked, "first.txt".into())));
+    assert!(listed.contains(&(Side::Staged, "second.txt".into())));
     b.unstage(repo.path(), None, &no_cancel()).unwrap();
-    assert!(lists(&repo)
-        .iter()
-        .all(|(g, _)| *g == ChangeGroup::Untracked));
+    assert!(lists(&repo).iter().all(|(g, _)| *g == Side::Untracked));
 }
 
 #[test]
@@ -328,30 +336,34 @@ fn open(repo: &TestRepo) -> (Runtime, PathBuf) {
     (rt, key)
 }
 
-fn group_len(rt: &Runtime, key: &Path, group: ChangeGroup) -> usize {
-    rt.repo(key).map_or(0, |s| s.changes().len(group))
+fn picked(rt: &Runtime, key: &Path) -> usize {
+    rt.repo(key).map_or(0, |s| s.selection().picked_count())
 }
 
 #[test]
-fn runtime_stage_commit_amend_cycle() {
+fn runtime_pick_commit_amend_cycle() {
     let repo = TestRepo::init();
     repo.commit("app.txt", "v1\n", "base");
     repo.write("app.txt", "v2\n");
     repo.write("notes.txt", "n\n");
     let (mut rt, key) = open(&repo);
-    assert_eq!(group_len(&rt, &key, ChangeGroup::Unstaged), 1);
-    assert_eq!(group_len(&rt, &key, ChangeGroup::Untracked), 1);
-    assert!(!rt.repo(&key).unwrap().can_commit(false));
+    // Nothing staged: everything starts picked.
+    assert_eq!(picked(&rt, &key), 2);
+    assert!(rt.repo(&key).unwrap().can_commit(false));
     assert!(rt.repo(&key).unwrap().can_commit(true));
 
-    // Selecting a diff loads it; editing the file reloads it.
-    rt.select_diff(&key, Some(target(DiffKind::Unstaged, "app.txt")), false);
+    // Selecting a change loads its diff against HEAD; editing reloads it.
+    rt.select_change(&key, Path::new("app.txt"), false);
     poll_until(&mut rt, |rt, _| {
         rt.repo(&key)
             .and_then(|s| s.diff())
             .and_then(|d| d.diff())
             .is_some_and(|d| d.additions == 1)
     });
+    assert_eq!(
+        rt.repo(&key).unwrap().diff().unwrap().target().kind,
+        DiffKind::Head
+    );
     repo.write("app.txt", "v2\nv3\n");
     rt.refresh(
         &key,
@@ -363,29 +375,34 @@ fn runtime_stage_commit_amend_cycle() {
             .and_then(|d| d.diff())
             .is_some_and(|d| d.additions == 2)
     });
+    let picks = rt.repo(&key).unwrap().diff_picks().to_vec();
+    assert!(picks.iter().filter(|p| **p == PickState::All).count() >= 3);
 
-    rt.stage(&key, Some(paths(&["app.txt", "notes.txt"])))
-        .unwrap();
-    poll_until(&mut rt, |rt, _| {
-        group_len(rt, &key, ChangeGroup::Staged) == 2
-    });
-    assert!(rt.repo(&key).unwrap().can_commit(false));
-    rt.unstage(&key, Some(paths(&["notes.txt"]))).unwrap();
-    poll_until(&mut rt, |rt, _| {
-        group_len(rt, &key, ChangeGroup::Staged) == 1
-    });
+    assert!(rt.pick_files(&key, &paths(&["notes.txt"]), false));
+    assert!(rt
+        .poll()
+        .contains(&RuntimeEvent::SelectionChanged { repo: key.clone() }));
+    assert_eq!(picked(&rt, &key), 1);
+    rt.pick_all(&key, false);
+    assert_eq!(
+        rt.repo(&key).unwrap().commit_block_reason(false),
+        Some("Nothing included")
+    );
+    assert!(rt.commit(&key, "Nothing\n".into(), false).is_none());
+    rt.pick_files(&key, &paths(&["app.txt"]), true);
 
     let job = rt.commit(&key, "Ship v3\n".into(), false).unwrap();
     let events = poll_until(&mut rt, |rt, ev| {
         let finished = ev.iter().any(|e| {
             matches!(e, RuntimeEvent::Job { job: j, state: JobState::Finished(None), .. } if *j == job)
         });
-        finished && group_len(rt, &key, ChangeGroup::Staged) == 0
+        finished && rt.repo(&key).is_some_and(|s| s.changes().len() == 1)
     });
     assert!(events
         .iter()
         .any(|e| matches!(e, RuntimeEvent::Job { label, .. } if label == COMMIT_JOB_LABEL)));
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "Ship v3");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "?? notes.txt");
 
     rt.load_head_message(&key).unwrap();
     let events = poll_until(&mut rt, |_, ev| {
@@ -397,12 +414,17 @@ fn runtime_stage_commit_amend_cycle() {
         message: "Ship v3\n\n".into()
     }));
 
+    // notes.txt is still unpicked: amending rewords only.
     let job = rt.commit(&key, "Ship v3 (amended)\n".into(), true).unwrap();
     poll_until(&mut rt, |_, ev| {
         ev.iter().any(|e| matches!(e, RuntimeEvent::Job { job: j, state: JobState::Finished(None), .. } if *j == job))
     });
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "Ship v3 (amended)");
+    assert_eq!(
+        repo.git(&["show", "--name-only", "--format=", "HEAD"]),
+        "app.txt"
+    );
 }
 
 #[test]

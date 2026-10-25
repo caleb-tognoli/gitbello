@@ -12,8 +12,8 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use crate::backend::{CliBackend, GitBackend, PatchGuard};
-use crate::changes::{self, ChangeGroup, ChangeLists};
+use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard};
+use crate::changes::{self, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::{
     build_patch, CommitSide, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
@@ -108,6 +108,10 @@ pub enum RuntimeEvent {
     GraphReset {
         repo: PathBuf,
     },
+    /// The commit selection changed (picks, or reseeding after a status).
+    SelectionChanged {
+        repo: PathBuf,
+    },
     /// A selected diff loaded or failed.
     DiffChanged {
         repo: PathBuf,
@@ -154,7 +158,10 @@ pub struct RepoState {
     stashes: Option<Vec<StashEntry>>,
     operation: Option<Operation>,
     labels: HashMap<String, Vec<RefLabel>>,
-    changes: ChangeLists,
+    changes: ChangeList,
+    selection: Selection,
+    /// [`Selection::line_states`] of the Changes diff, per line.
+    diff_picks: Vec<PickState>,
     worktree_badges: HashMap<PathBuf, Badge>,
     diff: Option<DiffState>,
     commit: Option<CommitDetails>,
@@ -189,7 +196,9 @@ impl RepoState {
             stashes: None,
             operation: None,
             labels: HashMap::new(),
-            changes: ChangeLists::default(),
+            changes: ChangeList::default(),
+            selection: Selection::default(),
+            diff_picks: Vec::new(),
             worktree_badges: HashMap::new(),
             diff: None,
             commit: None,
@@ -313,9 +322,45 @@ impl RepoState {
         self.graph.as_ref()
     }
 
-    /// The changes panel's lists (indices into the status's changes).
-    pub fn changes(&self) -> &ChangeLists {
+    /// The Changes view's list (indices into the status's changes).
+    pub fn changes(&self) -> &ChangeList {
         &self.changes
+    }
+
+    /// The commit selection (PLAN §3.10).
+    pub fn selection(&self) -> &Selection {
+        &self.selection
+    }
+
+    /// Per line of the Changes diff: whether it is picked (a hunk header
+    /// may be partial). Empty when its lines cannot be picked.
+    pub fn diff_picks(&self) -> &[PickState] {
+        &self.diff_picks
+    }
+
+    /// Whether lines of the Changes diff can be picked: a loaded text diff
+    /// against HEAD (or of an untracked file), not a rename or copy.
+    pub fn can_pick_lines(&self) -> bool {
+        let Some(state) = &self.diff else {
+            return false;
+        };
+        let Some(diff) = &state.diff else {
+            return false;
+        };
+        matches!(state.target.kind, DiffKind::Head | DiffKind::Untracked)
+            && self.selection.pick(&state.target.path).is_some()
+            && diff.content == DiffContent::Text
+            && !diff.hunks.is_empty()
+            && diff.header.renamed_from.is_none()
+            && diff.header.copied_from.is_none()
+    }
+
+    /// Whether the Changes file is committed exactly as staged (staged in
+    /// part outside gitbello in a way line picks cannot express).
+    pub fn diff_as_staged(&self) -> bool {
+        self.diff
+            .as_ref()
+            .is_some_and(|d| self.selection.pick(&d.target.path) == Some(&FilePick::AsStaged))
     }
 
     /// Badge of a worktree, by the path `git worktree list` prints.
@@ -352,8 +397,11 @@ impl RepoState {
             return false;
         };
         let kind_ok = match mode {
-            PatchMode::Stage | PatchMode::Discard => state.target.kind == DiffKind::Unstaged,
+            PatchMode::Stage => state.target.kind == DiffKind::Unstaged,
             PatchMode::Unstage => state.target.kind == DiffKind::Staged,
+            PatchMode::Discard => {
+                matches!(state.target.kind, DiffKind::Unstaged | DiffKind::Head)
+            }
         };
         let Some(diff) = &state.diff else {
             return false;
@@ -467,19 +515,27 @@ impl RepoState {
             && self.default_remote().is_some()
     }
 
-    /// Whether a commit can be made: no conflicts, and something staged (or
-    /// amending an existing commit).
+    /// Whether the selection can be committed (see [`Self::commit_block_reason`]).
     pub fn can_commit(&self, amend: bool) -> bool {
+        self.commit_block_reason(amend).is_none()
+    }
+
+    /// Why the selection cannot be committed now, or `None`. Amending
+    /// needs a commit but may take nothing new.
+    pub fn commit_block_reason(&self, amend: bool) -> Option<&'static str> {
         let Some(status) = &self.status else {
-            return false;
+            return Some("Reading the changes");
         };
         if status.has_conflicts() {
-            return false;
+            return Some("Resolve conflicts first");
         }
         if amend {
-            return status.oid.is_some();
+            return status
+                .oid
+                .is_none()
+                .then_some("There is no commit to amend");
         }
-        !self.changes.is_empty(ChangeGroup::Staged)
+        (self.selection.picked_count() == 0).then_some("Nothing included")
     }
 }
 
@@ -546,6 +602,8 @@ pub struct Runtime {
     log_seq: u64,
     diff_generation: u64,
     auto_fetch_override: Option<Duration>,
+    /// Events of synchronous calls, returned by the next poll.
+    pending: Vec<RuntimeEvent>,
 }
 
 impl Runtime {
@@ -595,6 +653,7 @@ impl Runtime {
             log_seq: 0,
             diff_generation: 0,
             auto_fetch_override: None,
+            pending: Vec::new(),
         }
     }
 
@@ -744,6 +803,67 @@ impl Runtime {
         submit_diff(&self.scheduler, state, slot, self.diff_generation);
     }
 
+    /// Shows the Changes view's diff of `path` (see [`changes::diff_target`]).
+    pub fn select_change(&mut self, key: &Path, path: &Path, full: bool) {
+        let target = self
+            .repos
+            .get(key)
+            .and_then(RepoState::status)
+            .map(|status| changes::diff_target(status, path));
+        if let Some(target) = target {
+            self.select_diff(key, Some(target), full);
+        }
+    }
+
+    /// Includes or excludes whole files in the commit selection.
+    pub fn pick_files(&mut self, key: &Path, paths: &[PathBuf], include: bool) -> bool {
+        let Some(state) = self.repos.get_mut(key) else {
+            return false;
+        };
+        let changed = state.selection.pick_files(paths, include);
+        self.selection_changed(key, changed)
+    }
+
+    /// Includes or excludes every file.
+    pub fn pick_all(&mut self, key: &Path, include: bool) -> bool {
+        let Some(state) = self.repos.get_mut(key) else {
+            return false;
+        };
+        state.selection.pick_all(include);
+        self.selection_changed(key, true)
+    }
+
+    /// Picks or unpicks lines of the Changes diff (a hunk header takes its
+    /// hunk). False when its lines cannot be picked.
+    pub fn pick_lines(&mut self, key: &Path, lines: &[usize], include: bool) -> bool {
+        let Some(state) = self.repos.get_mut(key).filter(|s| s.can_pick_lines()) else {
+            return false;
+        };
+        let changed = match &state.diff {
+            Some(DiffState {
+                target,
+                diff: Some(diff),
+                ..
+            }) => state
+                .selection
+                .pick_lines(&target.path, diff, lines, include),
+            _ => false,
+        };
+        self.selection_changed(key, changed)
+    }
+
+    fn selection_changed(&mut self, key: &Path, changed: bool) -> bool {
+        if changed {
+            if let Some(state) = self.repos.get_mut(key) {
+                refresh_diff_picks(state);
+            }
+            self.pending.push(RuntimeEvent::SelectionChanged {
+                repo: key.to_path_buf(),
+            });
+        }
+        changed
+    }
+
     /// Stages `paths` (worktree-root relative, as in status), or everything.
     pub fn stage(&self, key: &Path, paths: Option<Vec<PathBuf>>) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
@@ -764,7 +884,7 @@ impl Runtime {
         let toplevel = self.toplevel_of(key)?;
         let status = self.repos.get(key).and_then(RepoState::status);
         let paths = match (paths, status) {
-            (Some(paths), Some(status)) => Some(changes::unstage_paths(status, &paths)),
+            (Some(paths), Some(status)) => Some(changes::with_rename_sources(status, &paths)),
             (paths, _) => paths,
         };
         Some(self.scheduler.submit(JobSpec::write(
@@ -799,7 +919,14 @@ impl Runtime {
                 .cloned()
         };
         let (old, new) = (&diff.header.old_oid, &diff.header.new_oid);
+        let against_head = diff_state.target.kind == DiffKind::Head;
         let guard = match mode {
+            // Against HEAD only the working tree matters.
+            PatchMode::Discard if against_head => PatchGuard {
+                path: path.clone(),
+                index_oid: None,
+                worktree_oid: real(new),
+            },
             PatchMode::Stage => PatchGuard {
                 path: path.clone(),
                 index_oid: real(old),
@@ -842,13 +969,24 @@ impl Runtime {
         )))
     }
 
-    /// Restores `paths` in the working tree from the index, after backing
+    /// Restores `paths` to HEAD (index and working tree; untracked files
+    /// are deleted, a staged rename takes its source along), after backing
     /// up their current content for [`Runtime::undo_discard`].
     pub fn discard_files(&self, key: &Path, paths: Vec<PathBuf>) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
+        let status = self.repos.get(key)?.status()?;
         if paths.is_empty() {
             return None;
         }
+        let (untracked, tracked): (Vec<PathBuf>, Vec<PathBuf>) =
+            changes::with_rename_sources(status, &paths)
+                .into_iter()
+                .partition(|path| {
+                    status
+                        .changes
+                        .iter()
+                        .any(|c| c.path == *path && c.state == FileState::Untracked)
+                });
         Some(self.scheduler.submit(JobSpec::write(
             key,
             DISCARD_JOB_LABEL,
@@ -856,7 +994,7 @@ impl Runtime {
             move |ctx| {
                 let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
                 let backups = backend.backup(&toplevel, &paths, cancel)?;
-                backend.discard(&toplevel, &paths, cancel)?;
+                backend.discard(&toplevel, &tracked, &untracked, cancel)?;
                 Ok(JobOutput::Discarded(backups))
             },
         )))
@@ -878,17 +1016,36 @@ impl Runtime {
         )))
     }
 
-    /// Commits the index (or amends HEAD) with `message`.
+    /// Commits the selection (or amends HEAD with it) with `message`, through
+    /// a temporary index (PLAN §3.10). `None` when it cannot be committed.
     pub fn commit(&self, key: &Path, message: String, amend: bool) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get(key).filter(|s| s.can_commit(amend))?;
+        let plan = state.selection.plan(state.status()?);
         let refresh = RefreshSet::EMPTY
             .with(RefreshKind::Status)
             .with(RefreshKind::Refs);
         Some(
             self.scheduler
                 .submit(JobSpec::write(key, COMMIT_JOB_LABEL, refresh, move |ctx| {
-                    ctx.backend()
-                        .commit(&toplevel, &message, amend, ctx.cancel_token())
+                    let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                    let paths = plan.paths();
+                    let mut patches = Vec::with_capacity(plan.lines.len());
+                    for (target, keys) in &plan.lines {
+                        let diff = backend.diff(&toplevel, target, None, cancel)?;
+                        let git_path = target.path.to_string_lossy().replace('\\', "/");
+                        let patch = changes::lines_patch(&diff, &git_path, keys)
+                            .ok_or_else(|| picks_stale(&target.path))?;
+                        patches.push(patch);
+                    }
+                    let write = IndexWrite {
+                        whole: plan.whole,
+                        staged: plan.staged,
+                        patches,
+                        paths,
+                    };
+                    backend
+                        .commit_selection(&toplevel, &write, &message, amend, cancel)
                         .map(|()| JobOutput::Done)
                 })),
         )
@@ -1216,7 +1373,7 @@ impl Runtime {
 
     /// Applies finished jobs and returns what changed. Call once per frame.
     pub fn poll(&mut self) -> Vec<RuntimeEvent> {
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.pending);
         while let Ok(event) = self.events.try_recv() {
             self.apply(event, &mut out);
         }
@@ -1269,6 +1426,7 @@ impl Runtime {
         }
         if label == DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
+            refresh_diff_picks(state);
             return;
         }
         if label == COMMIT_DIFF_JOB_LABEL {
@@ -1316,6 +1474,9 @@ impl Runtime {
             match kind {
                 EventKind::Finished(Ok(output)) => {
                     apply_refresh(state, output);
+                    if refresh == RefreshKind::Status {
+                        out.push(RuntimeEvent::SelectionChanged { repo: repo.clone() });
+                    }
                     // Staging, edits and commits all show up as a status change.
                     if refresh == RefreshKind::Status && state.diff.is_some() {
                         self.diff_generation += 1;
@@ -1451,8 +1612,10 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             if moved {
                 state.graph_dirty_since = Some(Instant::now());
             }
-            state.changes = ChangeLists::new(&status);
+            state.changes = ChangeList::new(&status);
+            state.selection.reconcile(&status);
             state.status = Some(status);
+            refresh_diff_picks(state);
         }
         JobOutput::Refs(refs, remotes) => {
             if state.refs.as_ref().is_some_and(|old| *old != refs) {
@@ -1604,10 +1767,12 @@ fn pop_stash(
     }
 }
 
-/// Starts loading `state`'s selected diff in `slot` as `generation`.
+/// Starts loading `state`'s selected diff in `slot` as `generation`. A file
+/// committed as staged also loads its staged diff, to try picking its lines.
 fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, generation: u64) {
     let key = state.key.clone();
     let toplevel = state.toplevel.clone();
+    let as_staged = slot == DiffSlot::Changes && state.diff_as_staged();
     let (Some(diff), Some(toplevel)) = (state.slot_mut(slot).as_mut(), toplevel) else {
         return;
     };
@@ -1616,13 +1781,51 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
     let target = diff.target.clone();
     let limit = (!diff.full).then_some(LARGE_DIFF_BYTES);
     scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
-        ctx.backend()
-            .diff(&toplevel, &target, limit, ctx.cancel_token())
-            .map(|diff| JobOutput::Diff {
-                generation,
-                diff: Box::new(diff),
-            })
+        let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+        let diff = backend.diff(&toplevel, &target, limit, cancel)?;
+        let staged = if as_staged {
+            let staged = DiffTarget {
+                kind: DiffKind::Staged,
+                ..target.clone()
+            };
+            Some(Box::new(backend.diff(&toplevel, &staged, limit, cancel)?))
+        } else {
+            None
+        };
+        Ok(JobOutput::Diff {
+            generation,
+            diff: Box::new(diff),
+            staged,
+        })
     }));
+}
+
+/// Recomputes [`RepoState::diff_picks`] after the diff or the selection changed.
+fn refresh_diff_picks(state: &mut RepoState) {
+    state.diff_picks = if state.can_pick_lines() {
+        match &state.diff {
+            Some(DiffState {
+                target,
+                diff: Some(diff),
+                ..
+            }) => state.selection.line_states(&target.path, diff),
+            _ => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+}
+
+/// The commit job's error when picked lines no longer match their file.
+fn picks_stale(path: &Path) -> GitError {
+    GitError::new(
+        format!("commit {}", path.display()),
+        GitErrorKind::Stale,
+        format!(
+            "{} changed since its lines were picked; check them and commit again",
+            path.display()
+        ),
+    )
 }
 
 /// Stores a finished diff load if it is still the current one.
@@ -1633,16 +1836,20 @@ fn apply_diff(
     repo: &Path,
     out: &mut Vec<RuntimeEvent>,
 ) {
+    let mut resolve: Option<Box<FileDiff>> = None;
     let Some(current) = state.slot_mut(slot).as_mut() else {
         return;
     };
     match kind {
-        EventKind::Finished(Ok(JobOutput::Diff { generation, diff }))
-            if generation == current.generation =>
-        {
+        EventKind::Finished(Ok(JobOutput::Diff {
+            generation,
+            diff,
+            staged,
+        })) if generation == current.generation => {
             current.loading = false;
             current.diff = Some(*diff);
             current.error = None;
+            resolve = staged;
         }
         EventKind::Finished(Err(error))
             if error.kind != GitErrorKind::Cancelled && current.loading =>
@@ -1651,6 +1858,19 @@ fn apply_diff(
             current.error = Some(error);
         }
         _ => return,
+    }
+    if let (
+        Some(staged),
+        Some(DiffState {
+            target,
+            diff: Some(diff),
+            ..
+        }),
+    ) = (resolve, &state.diff)
+    {
+        state
+            .selection
+            .resolve_as_staged(&target.path, diff, &staged);
     }
     out.push(RuntimeEvent::DiffChanged {
         repo: repo.to_path_buf(),

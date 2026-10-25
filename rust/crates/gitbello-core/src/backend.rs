@@ -9,6 +9,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::changes::IndexEntry;
 use crate::diff::{
     parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
 };
@@ -76,6 +77,18 @@ pub trait GitBackend: Send + Sync {
         amend: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+    /// Commits `write` (or amends HEAD with it) through a temporary index
+    /// that starts as HEAD's tree, so a failure or a rejecting hook leaves
+    /// the real index untouched. After the commit, `write.paths` are reset
+    /// to it in the real index.
+    fn commit_selection(
+        &self,
+        toplevel: &Path,
+        write: &IndexWrite,
+        message: &str,
+        amend: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
 
     /// A commit's header and changed files (against its first parent).
     fn commit_details(
@@ -104,11 +117,13 @@ pub trait GitBackend: Send + Sync {
         paths: &[PathBuf],
         cancel: &CancelToken,
     ) -> Result<Vec<(PathBuf, String)>, GitError>;
-    /// Restores the working tree of `paths` from the index.
+    /// Restores `tracked` to HEAD in the index and the working tree (files
+    /// HEAD lacks go away) and deletes the `untracked` files.
     fn discard(
         &self,
         toplevel: &Path,
-        paths: &[PathBuf],
+        tracked: &[PathBuf],
+        untracked: &[PathBuf],
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
     /// Writes backed-up blobs back to their paths.
@@ -184,6 +199,23 @@ pub struct PatchGuard {
     /// Expected working-tree content id (full), if checked.
     pub worktree_oid: Option<String>,
 }
+
+/// What [`GitBackend::commit_selection`] writes into its temporary index,
+/// in this order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IndexWrite {
+    /// Taken whole from the working tree (`git add -A`).
+    pub whole: Vec<PathBuf>,
+    /// Index entries copied as they are (mode `0` removes the path).
+    pub staged: Vec<IndexEntry>,
+    /// Patches applied with `git apply --cached --recount`.
+    pub patches: Vec<Vec<u8>>,
+    /// Every path the commit writes, reset in the real index afterwards.
+    pub paths: Vec<PathBuf>,
+}
+
+/// Name of the temporary index under the worktree's git dir.
+const COMMIT_INDEX: &str = "gitbello-commit-index";
 
 /// [`GitBackend`] over the system git executable.
 #[derive(Debug, Clone)]
@@ -378,6 +410,13 @@ impl GitBackend for CliBackend {
         if target.kind == DiffKind::Staged {
             cmd = cmd.args(["--cached", "-M"]);
         }
+        if target.kind == DiffKind::Head {
+            let base = match self.resolve(toplevel, "HEAD", cancel)? {
+                Some(head) => head,
+                None => self.empty_tree(toplevel, cancel)?,
+            };
+            cmd = cmd.args(["-M", &base]);
+        }
         cmd = cmd.arg("--");
         if let Some(original) = &target.original_path {
             cmd = cmd.arg(original);
@@ -466,6 +505,33 @@ impl GitBackend for CliBackend {
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    fn commit_selection(
+        &self,
+        toplevel: &Path,
+        write: &IndexWrite,
+        message: &str,
+        amend: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let args = [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            COMMIT_INDEX,
+        ];
+        let index = PathBuf::from(self.read(toplevel, &args, cancel)?.stdout_text().trim());
+        let remove = |index: &Path| {
+            let _ = fs::remove_file(index);
+            let _ = fs::remove_file(index.with_extension("lock"));
+        };
+        remove(&index);
+        let committed = self.commit_with_index(toplevel, &index, write, message, amend, cancel);
+        remove(&index);
+        committed?;
+        // The commit exists: bring the real index along, whatever happens.
+        self.unstage(toplevel, Some(&write.paths), &CancelToken::new())
     }
 
     fn commit_details(
@@ -590,11 +656,42 @@ impl GitBackend for CliBackend {
     fn discard(
         &self,
         toplevel: &Path,
-        paths: &[PathBuf],
+        tracked: &[PathBuf],
+        untracked: &[PathBuf],
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
-        let cmd = self.runner.write(toplevel).args(["restore", "--worktree"]);
-        run_with_paths(cmd, Some(paths), cancel)
+        let has_head = self.resolve(toplevel, "HEAD", cancel)?.is_some();
+        let delete = |paths: &[PathBuf]| -> Result<(), GitError> {
+            for path in paths {
+                let target = toplevel.join(path);
+                match fs::remove_file(&target) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => {
+                        return Err(GitError::new(
+                            format!("delete {}", target.display()),
+                            GitErrorKind::Io,
+                            err.to_string(),
+                        ))
+                    }
+                }
+            }
+            Ok(())
+        };
+        if has_head {
+            let cmd = self.runner.write(toplevel).args([
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+            ]);
+            run_with_paths(cmd, Some(tracked), cancel)?;
+        } else if !tracked.is_empty() {
+            // Before the first commit everything tracked is new.
+            self.unstage(toplevel, Some(tracked), cancel)?;
+            delete(tracked)?;
+        }
+        delete(untracked)
     }
 
     fn restore_backup(
@@ -897,6 +994,67 @@ fn run_with_paths(
 }
 
 impl CliBackend {
+    /// The steps of [`GitBackend::commit_selection`] that use the temporary
+    /// index at `index`.
+    fn commit_with_index(
+        &self,
+        toplevel: &Path,
+        index: &Path,
+        write: &IndexWrite,
+        message: &str,
+        amend: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let git = || {
+            self.runner
+                .write(toplevel)
+                .env("GIT_INDEX_FILE", index)
+                .cancel_token(cancel)
+        };
+        let base = if self.resolve(toplevel, "HEAD", cancel)?.is_some() {
+            "HEAD"
+        } else {
+            "--empty"
+        };
+        git().args(["read-tree", base]).run()?;
+        run_with_paths(git().args(["add", "-A"]), Some(&write.whole), cancel)?;
+        if !write.staged.is_empty() {
+            let mut input = Vec::new();
+            for entry in &write.staged {
+                let path = entry.path.to_string_lossy().replace('\\', "/");
+                input.extend_from_slice(format!("{} {}\t{path}", entry.mode, entry.oid).as_bytes());
+                input.push(0);
+            }
+            git()
+                .args(["update-index", "-z", "--index-info"])
+                .stdin(input)
+                .run()?;
+        }
+        for patch in &write.patches {
+            git()
+                .args(["apply", "--cached", "--recount", "--whitespace=nowarn", "-"])
+                .stdin(patch.clone())
+                .run()?;
+        }
+        let mut commit = git().args(["commit", "-F", "-"]);
+        if amend {
+            commit = commit.arg("--amend");
+        }
+        commit.stdin(message.as_bytes().to_vec()).run().map(drop)
+    }
+
+    /// Id of the empty tree in this repository's hash format (not written).
+    fn empty_tree(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError> {
+        let out = self
+            .runner
+            .read(repo)
+            .args(["hash-object", "-t", "tree", "--stdin"])
+            .stdin(Vec::new())
+            .cancel_token(cancel)
+            .run()?;
+        Ok(out.stdout_text().trim().to_owned())
+    }
+
     /// Commit id of the newest stash, if any.
     fn stash_top(&self, toplevel: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError> {
         let verify = ["rev-parse", "-q", "--verify", "refs/stash"];
@@ -924,6 +1082,7 @@ impl CliBackend {
             .map_or_else(|| path.clone(), slashed);
         let (old_spec, new_spec) = match target.kind {
             DiffKind::Staged => (format!("HEAD:{old_path}"), Some(format!(":{path}"))),
+            DiffKind::Head => (format!("HEAD:{old_path}"), None),
             DiffKind::Unstaged | DiffKind::Untracked => (format!(":{path}"), None),
             DiffKind::Commit => {
                 let oid = target.commit.as_ref().map_or("HEAD", |c| c.oid.as_str());

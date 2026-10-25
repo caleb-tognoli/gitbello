@@ -120,6 +120,10 @@ pub struct FileChange {
     /// Similarity score of a rename or copy (0–100).
     pub score: Option<u8>,
     pub submodule: bool,
+    /// Index entry of a tracked file: mode (`100644`, `000000` when the
+    /// index has no entry) and blob id.
+    pub index_mode: Option<String>,
+    pub index_oid: Option<String>,
 }
 
 impl FileChange {
@@ -245,6 +249,8 @@ fn parse_ordinary(record: &[u8]) -> Result<FileChange, ParseError> {
         state: tracked_state(f[1])?,
         score: None,
         submodule: is_submodule(f[2]),
+        index_mode: Some(text(f[4])),
+        index_oid: Some(text(f[7])),
     })
 }
 
@@ -258,6 +264,8 @@ fn parse_renamed(record: &[u8]) -> Result<FileChange, ParseError> {
         state: tracked_state(f[1])?,
         score,
         submodule: is_submodule(f[2]),
+        index_mode: Some(text(f[4])),
+        index_oid: Some(text(f[7])),
     })
 }
 
@@ -272,6 +280,8 @@ fn parse_unmerged(record: &[u8]) -> Result<FileChange, ParseError> {
         state: FileState::Unmerged(conflict),
         score: None,
         submodule: is_submodule(f[2]),
+        index_mode: None,
+        index_oid: None,
     })
 }
 
@@ -287,6 +297,8 @@ fn simple(record: &[u8], state: FileState) -> Result<FileChange, ParseError> {
         state,
         score: None,
         submodule: false,
+        index_mode: None,
+        index_oid: None,
     })
 }
 
@@ -366,6 +378,9 @@ mod tests {
             Some(PathBuf::from("dir/old name.txt"))
         );
         assert_eq!(renamed.score, Some(87));
+        assert_eq!(renamed.index_mode.as_deref(), Some("100644"));
+        assert_eq!(renamed.index_oid.as_deref(), Some(Z));
+        assert_eq!(by_path("untracked/ünïcode.txt").index_oid, None);
 
         assert!(by_path("vendor/lib").submodule);
         assert_eq!(

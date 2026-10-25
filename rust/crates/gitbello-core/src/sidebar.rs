@@ -335,6 +335,8 @@ mod tests {
             state,
             score: None,
             submodule: false,
+            index_mode: None,
+            index_oid: None,
         };
         let status = RepoStatus {
             head: Head::Branch("main".into()),

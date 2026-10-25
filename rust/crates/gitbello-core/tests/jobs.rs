@@ -74,6 +74,16 @@ impl GitBackend for FakeBackend {
     fn commit(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
+    fn commit_selection(
+        &self,
+        _: &Path,
+        _: &gitbello_core::backend::IndexWrite,
+        _: &str,
+        _: bool,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
+        Ok(())
+    }
     fn commit_details(
         &self,
         _: &Path,
@@ -100,7 +110,13 @@ impl GitBackend for FakeBackend {
     ) -> Result<Vec<(PathBuf, String)>, GitError> {
         Ok(Vec::new())
     }
-    fn discard(&self, _: &Path, _: &[PathBuf], _: &CancelToken) -> Result<(), GitError> {
+    fn discard(
+        &self,
+        _: &Path,
+        _: &[PathBuf],
+        _: &[PathBuf],
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
         Ok(())
     }
     fn restore_backup(
