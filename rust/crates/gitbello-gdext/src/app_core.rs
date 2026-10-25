@@ -4,6 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use gitbello_core::changes::split_message;
 use gitbello_core::config::{parse_accent, ThemeChoice};
+use gitbello_core::diff::rename_parts;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
@@ -412,6 +413,17 @@ impl AppCore {
             .set(Path::new(&repo.to_string()), &name.to_string(), value)
             .err()
             .map_or_else(GString::new, |e| gstr(&e.to_string()))
+    }
+
+    /// The rename of `old` to `new` as `[prefix, old, new, suffix]`, to
+    /// show as `prefix{old → new}suffix` (see `diff::rename_parts`).
+    #[func]
+    fn rename_parts(&self, old: GString, new: GString) -> PackedStringArray {
+        let parts = rename_parts(&old.to_string(), &new.to_string());
+        [parts.prefix, parts.old, parts.new, parts.suffix]
+            .iter()
+            .map(|p| gstr(p))
+            .collect()
     }
 
     /// Whether diffs show side by side (saved in the config).

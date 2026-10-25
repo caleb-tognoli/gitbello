@@ -401,9 +401,10 @@ fn diff_content_id(content: DiffContent) -> &'static str {
     }
 }
 
-/// `{state, path, kind, content, code, notes, additions, deletions, line_count,
-/// max_line, old_size, new_size, bytes, error}`; `state` is `none`,
-/// `loading`, `error` or `ready`. Sizes are -1 when unknown.
+/// `{state, path, kind, content, code, original_path, similarity, notes,
+/// additions, deletions, line_count, max_line, old_size, new_size, bytes,
+/// error}`; `state` is `none`, `loading`, `error` or `ready`. Sizes and
+/// `similarity` are -1 when unknown.
 pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
     let Some(state) = state else {
         return vdict! { "state" => "none" };
@@ -449,6 +450,11 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             let notes: PackedStringArray = diff.header.notes().iter().map(|n| gstr(n)).collect();
             info.set("content", content);
             info.set("code", change_letter(diff.header.change()));
+            info.set(
+                "original_path",
+                diff.header.original_path().unwrap_or_default(),
+            );
+            info.set("similarity", diff.header.similarity.map_or(-1, i64::from));
             info.set("notes", &notes);
             info.set("additions", i64::from(diff.additions));
             info.set("deletions", i64::from(diff.deletions));

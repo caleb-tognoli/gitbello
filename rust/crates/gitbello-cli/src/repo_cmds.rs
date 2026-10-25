@@ -264,6 +264,10 @@ pub fn diff(args: &[String]) -> Result<()> {
     let diff = backend.diff(Path::new(root), &target, limit, &CancelToken::new())?;
     let elapsed = started.elapsed();
     println!("# {:?}", diff.header.change());
+    if let Some(from) = diff.header.original_path() {
+        let similarity = diff.header.similarity.map(|s| format!(" ({s}% similar)"));
+        println!("# from {from}{}", similarity.unwrap_or_default());
+    }
     for note in diff.header.notes() {
         println!("# {note}");
     }

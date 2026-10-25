@@ -134,26 +134,75 @@ impl DiffHeader {
         }
     }
 
-    /// Short human-readable notes on what `change()` doesn't say: where a
-    /// rename or copy came from, a mode change ("Mode 100644 → 100755").
+    /// Where a renamed or copied file came from.
+    pub fn original_path(&self) -> Option<&str> {
+        self.renamed_from.as_deref().or(self.copied_from.as_deref())
+    }
+
+    /// Short human-readable notes on what `change()` and `original_path()`
+    /// don't say: a mode change ("Mode 100644 → 100755").
     pub fn notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
-        let similarity = self
-            .similarity
-            .map(|s| format!(" ({s}% similar)"))
-            .unwrap_or_default();
-        if let Some(from) = &self.renamed_from {
-            notes.push(format!("From {from}{similarity}"));
-        }
-        if let Some(from) = &self.copied_from {
-            notes.push(format!("Copy of {from}{similarity}"));
-        }
         if let (Some(old), Some(new)) = (&self.old_mode, &self.new_mode) {
             if !self.new_file && !self.deleted_file && old != new {
                 notes.push(format!("Mode {old} → {new}"));
             }
         }
         notes
+    }
+}
+
+/// A rename written the way `git diff --stat` does, `docs/{a.md → b.md}`:
+/// the path components both paths share at the start and the end, and the
+/// changed middle of each. `prefix` ends with `/` and `suffix` starts with
+/// one when not empty; a middle may be empty (`a/{ → x}/b.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenameParts {
+    pub prefix: String,
+    pub old: String,
+    pub new: String,
+    pub suffix: String,
+}
+
+/// Splits the rename of `old` to `new` (`/`-separated) into `RenameParts`.
+/// The file name is never shared, so a rename always shows one.
+pub fn rename_parts(old: &str, new: &str) -> RenameParts {
+    let old_parts: Vec<&str> = old.split('/').collect();
+    let new_parts: Vec<&str> = new.split('/').collect();
+    let shortest = old_parts.len().min(new_parts.len());
+    let same_name = old_parts.last() == new_parts.last();
+    // Folders shared at the start, never the file name.
+    let start = old_parts
+        .iter()
+        .zip(&new_parts)
+        .take(shortest - 1)
+        .take_while(|(a, b)| a == b)
+        .count();
+    // Components shared at the end (the file name when it didn't change),
+    // leaving at least one component of the longer path in the middle.
+    let end = if same_name {
+        old_parts
+            .iter()
+            .rev()
+            .zip(new_parts.iter().rev())
+            .take(shortest - start)
+            .take_while(|(a, b)| a == b)
+            .count()
+            .min(old_parts.len().max(new_parts.len()) - start - 1)
+    } else {
+        0
+    };
+    let join = |parts: &[&str]| parts.join("/");
+    let with_slash = |text: String, before: bool| match (text.is_empty(), before) {
+        (true, _) => text,
+        (false, true) => format!("/{text}"),
+        (false, false) => format!("{text}/"),
+    };
+    RenameParts {
+        prefix: with_slash(join(&old_parts[..start]), false),
+        old: join(&old_parts[start..old_parts.len() - end]),
+        new: join(&new_parts[start..new_parts.len() - end]),
+        suffix: with_slash(join(&old_parts[old_parts.len() - end..]), true),
     }
 }
 
@@ -269,7 +318,8 @@ impl FileDiff {
         }
     }
 
-    /// No lines and nothing else to report (the file matches its base).
+    /// No lines and no notes: the file matches its base, or a rename or
+    /// copy changed nothing in it.
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty() && self.content == DiffContent::Text && self.header.notes().is_empty()
     }
@@ -729,12 +779,37 @@ index 1111111..2222222 100644
         )
         .unwrap();
         assert_eq!(renamed.header.change(), Change::Renamed);
-        assert_eq!(renamed.header.notes(), ["From old (90% similar)"]);
-        assert!(!renamed.is_empty());
+        assert_eq!(renamed.header.original_path(), Some("old"));
+        assert_eq!(renamed.header.similarity, Some(90));
+        assert!(renamed.header.notes().is_empty());
+        assert!(
+            renamed.is_empty(),
+            "a rename without edits has no lines to show"
+        );
 
         let mode = parse_diff(b"diff --git a/s b/s\nold mode 100644\nnew mode 100755\n").unwrap();
         assert_eq!(mode.header.change(), Change::Modified);
         assert_eq!(mode.header.notes(), ["Mode 100644 → 100755"]);
+    }
+
+    #[test]
+    fn rename_parts_share_folders_and_file_names() {
+        let parts = |old: &str, new: &str| {
+            let p = rename_parts(old, new);
+            format!("{}{{{} → {}}}{}", p.prefix, p.old, p.new, p.suffix)
+        };
+        assert_eq!(
+            parts("docs/README.md", "docs/GUIDE.md"),
+            "docs/{README.md → GUIDE.md}"
+        );
+        assert_eq!(parts("src/util.rs", "lib/util.rs"), "{src → lib}/util.rs");
+        assert_eq!(parts("src/a.rs", "lib/b.rs"), "{src/a.rs → lib/b.rs}");
+        assert_eq!(parts("a.md", "b.md"), "{a.md → b.md}");
+        assert_eq!(parts("a/b/c/x.rs", "a/z/c/x.rs"), "a/{b → z}/c/x.rs");
+        assert_eq!(parts("a/b.rs", "a/x/b.rs"), "a/{ → x}/b.rs");
+        assert_eq!(parts("a/x/b.rs", "a/b.rs"), "a/{x → }/b.rs");
+        assert_eq!(parts("b.rs", "x/b.rs"), "{ → x}/b.rs");
+        assert_eq!(parts("dir é/ñ.txt", "dir é/ö.txt"), "dir é/{ñ.txt → ö.txt}");
     }
 
     #[test]
