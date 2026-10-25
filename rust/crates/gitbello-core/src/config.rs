@@ -62,6 +62,9 @@ pub struct Config {
     /// platform's terminal.
     pub terminal_command: Option<String>,
     pub theme: ThemeChoice,
+    /// Accent colour as `#rrggbb` (see [`parse_accent`]); `None` uses the
+    /// app's default.
+    pub accent: Option<String>,
     /// Show diffs side by side instead of unified.
     pub diff_side_by_side: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
@@ -111,11 +114,32 @@ impl Default for Config {
             editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
             terminal_command: None,
             theme: ThemeChoice::System,
+            accent: None,
             diff_side_by_side: false,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
     }
+}
+
+/// `#rrggbb` (lower case) from `#rrggbb`, `rrggbb`, `#rgb` or `rgb` in any
+/// case, or `None` when `text` is not such a colour.
+pub fn parse_accent(text: &str) -> Option<String> {
+    let hex = text.trim();
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let full: String = match hex.len() {
+        6 => hex.to_ascii_lowercase(),
+        3 => hex
+            .chars()
+            .flat_map(|c| [c, c])
+            .collect::<String>()
+            .to_ascii_lowercase(),
+        _ => return None,
+    };
+    Some(format!("#{full}"))
 }
 
 const KEYS: &[&str] = &[
@@ -129,6 +153,7 @@ const KEYS: &[&str] = &[
     "editor_command",
     "terminal_command",
     "theme",
+    "accent",
     "diff_side_by_side",
     "keybindings",
 ];
@@ -192,6 +217,13 @@ impl Config {
                     expected: "\"system\", \"light\" or \"dark\"",
                 })?,
             },
+            accent: match take_string(&mut table, "accent")? {
+                None => None,
+                Some(text) => Some(parse_accent(&text).ok_or(ConfigError::Invalid {
+                    key: "accent",
+                    expected: "a colour like \"#4c9cff\"",
+                })?),
+            },
             diff_side_by_side: take_bool(&mut table, "diff_side_by_side")?.unwrap_or(false),
             keybindings: take_string_map(&mut table, "keybindings")?,
             extra: table,
@@ -232,6 +264,9 @@ impl Config {
             );
         }
         table.insert("theme".into(), Value::String(self.theme.as_str().into()));
+        if let Some(accent) = &self.accent {
+            table.insert("accent".into(), Value::String(accent.clone()));
+        }
         table.insert(
             "diff_side_by_side".into(),
             Value::Boolean(self.diff_side_by_side),
@@ -380,11 +415,32 @@ mod tests {
             editor_command: "subl -n {path}".into(),
             terminal_command: Some("wt -d \"{path}\"".into()),
             theme: ThemeChoice::Dark,
+            accent: Some("#e0569a".into()),
             diff_side_by_side: true,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };
         assert_eq!(Config::parse(&config.to_toml()).unwrap(), config);
+    }
+
+    #[test]
+    fn accents_are_normalised_hex_colours() {
+        assert_eq!(parse_accent("#4C9CFF").as_deref(), Some("#4c9cff"));
+        assert_eq!(parse_accent(" 4c9cff ").as_deref(), Some("#4c9cff"));
+        assert_eq!(parse_accent("#F0a").as_deref(), Some("#ff00aa"));
+        for bad in [
+            "",
+            "#",
+            "#12345",
+            "#1234567",
+            "#ggg000",
+            "blue",
+            "#4c9cff80",
+        ] {
+            assert_eq!(parse_accent(bad), None, "{bad}");
+        }
+        let config = Config::parse("accent = \"#ABC\"").unwrap();
+        assert_eq!(config.accent.as_deref(), Some("#aabbcc"));
     }
 
     #[test]
@@ -439,6 +495,10 @@ mod tests {
         assert!(matches!(
             Config::parse("theme = \"purple\""),
             Err(ConfigError::Invalid { key: "theme", .. })
+        ));
+        assert!(matches!(
+            Config::parse("accent = \"blue\""),
+            Err(ConfigError::Invalid { key: "accent", .. })
         ));
         assert!(matches!(
             Config::parse("[keybindings]\npalette = 3"),
