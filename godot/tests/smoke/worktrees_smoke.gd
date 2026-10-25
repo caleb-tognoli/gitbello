@@ -52,6 +52,8 @@ func run() -> void:
 	press("Ctrl+T")
 	var form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks for the task")
+	await get_tree().process_frame
+	var form_width: int = form.size.x
 	var base: OptionButton = form.field("base") as OptionButton
 	base.item_selected.emit(base.selected)
 	expect(form.get_ok_button().disabled, "Create waits for a name")
@@ -60,6 +62,7 @@ func run() -> void:
 	var folder: LineEdit = form.field("folder") as LineEdit
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
 			"the folder follows the branch: %s" % folder.text)
+	expect_eq(form.size.x, form_width, "typing the name does not resize the form")
 	expect(folder.text.begins_with("repo-10.worktrees/"),
 			"the default template is used, shown from the repository's folder: %s" % folder.text)
 	var task_path: String = fixtures.path_join(folder.text)

@@ -101,18 +101,19 @@ func make_destructive() -> void:
 	get_ok_button().theme_type_variation = &"DangerButton"
 
 
-## Shows or hides field `key` with its label.
+## Shows or hides field `key` with its label. The dialog keeps its width;
+## only its height follows.
 func set_field_visible(key: String, shown: bool) -> void:
-	var node: Node = _fields.get(key)
+	var node: Control = _fields.get(key)
 	while node != null and node.get_parent() != _box:
-		node = node.get_parent()
-	if node == null:
+		node = node.get_parent() as Control
+	if node == null or node.visible == shown:
 		return
-	(node as Control).visible = shown
+	node.visible = shown
 	var index: int = node.get_index()
-	if index > 0:
+	if index > 0 and _box.columns == 2:
 		(_box.get_child(index - 1) as Control).visible = shown
-	reset_size()
+	_shrink_to_content()
 
 
 ## Sets folder field `key` from `dir`, as if picked in the dialog.

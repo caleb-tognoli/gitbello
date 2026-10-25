@@ -638,6 +638,10 @@ func _remote_branch_named(name: String) -> String:
 func _show_remote_match() -> void:
 	var check: CheckBox = _form.field("track") as CheckBox
 	check.text = "Check out %s and track it" % _remote_match
+	check.tooltip_text = check.text
+	# A long branch name is cut short instead of widening the dialog.
+	check.clip_text = true
+	check.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_form.set_field_visible("track", not _remote_match.is_empty())
 	(_form.field("base") as OptionButton).disabled = not _remote_match.is_empty() and check.button_pressed
 
