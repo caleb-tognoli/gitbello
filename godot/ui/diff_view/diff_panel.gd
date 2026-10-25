@@ -1,6 +1,7 @@
 class_name DiffPanel
 extends VBoxContainer
-## A file diff with its header (path, notes, +/− counts, layout toggle) and
+## A file diff with its header (path, notes, +/− counts, unified or side by
+## side) and
 ## the messages shown instead of lines (loading, binary, too large, no
 ## changes, errors). Callers pass `RepoSession.diff_info()`-style
 ## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
@@ -17,7 +18,8 @@ signal load_full_requested()
 @onready var _message: Control = %DiffMessage
 @onready var _message_label: Label = %DiffMessageLabel
 @onready var _load_anyway: Button = %LoadAnywayButton
-@onready var _layout_button: Button = %LayoutButton
+@onready var _unified_button: Button = %UnifiedButton
+@onready var _split_button: Button = %SplitButton
 
 ## `kind:path` of the diff shown, to keep the scroll position on reloads.
 var _shown: String = ""
@@ -26,16 +28,29 @@ var _placeholder: String = ""
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	_layout_button.icon = AppTheme.icon(&"Panels2")
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
-	_layout_button.toggled.connect(func(on: bool) -> void:
-		if on != _view.side_by_side:
-			Actions.run_action(&"diff.toggle_side_by_side"))
+	var group: ButtonGroup = ButtonGroup.new()
+	var shortcut: String = Actions.shortcut_label(&"diff.toggle_side_by_side")
+	for entry: Array in [[_unified_button, &"Panels1", false, "Old and new lines in one column"],
+			[_split_button, &"Panels2Alt", true, "Old lines on the left, new lines on the right"]]:
+		var button: Button = entry[0]
+		button.icon = AppTheme.icon(entry[1])
+		button.button_group = group
+		var hint: String = String(entry[3])
+		button.tooltip_text = hint if shortcut.is_empty() else "%s\n%s switches" % [hint, shortcut]
+		button.pressed.connect(func() -> void:
+			if bool(entry[2]) != _view.side_by_side:
+				Actions.run_action(&"diff.toggle_side_by_side"))
 	set_side_by_side(Core.diff_side_by_side())
 
 
 func view() -> DiffView:
 	return _view
+
+
+## The Unified or the Side by side button.
+func layout_button(side_by_side: bool) -> Button:
+	return _split_button if side_by_side else _unified_button
 
 
 ## Where lines come from: `func(start, count) -> Array` (see DiffView).
@@ -50,7 +65,8 @@ func set_split_source(source: Callable) -> void:
 
 func set_side_by_side(value: bool) -> void:
 	_view.side_by_side = value
-	_layout_button.set_pressed_no_signal(value)
+	_unified_button.set_pressed_no_signal(not value)
+	_split_button.set_pressed_no_signal(value)
 
 
 ## Clears the diff and shows `placeholder` (also used by later `clear()` calls).

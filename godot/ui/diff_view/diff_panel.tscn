@@ -22,18 +22,32 @@ layout_mode = 2
 [node name="DiffPath" type="Label" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
+text_overrun_behavior = 3
 
 [node name="DiffStats" type="Label" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_horizontal = 3
 theme_type_variation = &"DimLabel"
-text_overrun_behavior = 3
 
-[node name="LayoutButton" type="Button" parent="DiffHeaderPanel/DiffHeader"]
+[node name="LayoutSwitch" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ViewSwitch"
+
+[node name="UnifiedButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
+theme_type_variation = &"SegmentButton"
+toggle_mode = true
+text = "Unified"
+
+[node name="SplitButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"SegmentButton"
 toggle_mode = true
 text = "Side by side"
 
