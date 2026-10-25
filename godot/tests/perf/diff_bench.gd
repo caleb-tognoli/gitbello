@@ -23,14 +23,14 @@ func _ready() -> void:
 	var session: RepoSession = Core.open_session(repo)
 	add_child(session)
 	var deadline: int = Time.get_ticks_msec() + LOAD_TIMEOUT_MS
-	while not session.is_ready() or session.change_count("unstaged") == 0:
+	while not session.is_ready() or session.change_count() == 0:
 		if Time.get_ticks_msec() > deadline:
-			printerr("diff_bench: repository did not load: ready=%s unstaged=%d error=%s" % [session.is_ready(), session.change_count("unstaged"), session.open_error()])
+			printerr("diff_bench: repository did not load: ready=%s unstaged=%d error=%s" % [session.is_ready(), session.change_count(), session.open_error()])
 			get_tree().quit(1)
 			return
 		await get_tree().process_frame
 	var started: int = Time.get_ticks_usec()
-	session.select_diff("unstaged", file, true)
+	session.select_change(file, true)
 	while String(session.diff_info().get("state", "")) != "ready":
 		if Time.get_ticks_msec() > deadline:
 			printerr("diff_bench: diff did not load: %s" % [session.diff_info()])

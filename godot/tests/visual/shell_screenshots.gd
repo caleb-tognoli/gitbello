@@ -66,9 +66,21 @@ func _ready() -> void:
 	Actions.run_action(&"view.theme_light")
 	await _shot(out, "changes_light")
 	Actions.run_action(&"view.theme_dark")
-	page.changes().untracked_list().grab_focus()
-	page.changes().untracked_list().select_only(0)
-	await _shot(out, "changes_untracked")
+	# M6.5 P3: a file left out, then a line left out of the highlighted file.
+	var changes: ChangesView = page.changes()
+	changes.list().grab_focus()
+	changes.list().select_only(changes.list().row_count() - 1)
+	changes.list().toggle_selection()
+	changes.list().select_only(0)
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and not changes.diff_view().pickable:
+		await get_tree().process_frame
+	for row: int in changes.diff_view().row_count():
+		if int(changes.diff_view().line(row).get("kind", 0)) == DiffView.KIND_ADDED:
+			changes.diff_view().select_only(row)
+			changes.toggle_diff_lines()
+			break
+	await _shot(out, "changes_picks")
 	Actions.run_action(&"changes.focus_message")
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
@@ -142,6 +154,14 @@ func _ready() -> void:
 	Actions.run_action(&"app.settings")
 	await _shot_window(main.settings_form(), out, "settings")
 	main.settings_form().hide()
+
+	# M6.5 P3: no local changes (discarding touches only the fixture repo).
+	page.session.discard_paths(page.session.change_paths(0, page.session.change_count()))
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and page.session.change_count() > 0:
+		await get_tree().process_frame
+	page.show_view(WorktreeView.View.CHANGES)
+	await _shot(out, "changes_empty")
 
 	while main.tab_count() > 0:
 		main.close_tab(0)

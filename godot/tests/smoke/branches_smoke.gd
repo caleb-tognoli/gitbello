@@ -27,8 +27,8 @@ func run() -> void:
 	var page: RepoTab = main.open_repo(repo)
 	var session: RepoSession = page.session
 	var ops: RepoOps = page.ops()
-	expect(await wait_until(func() -> bool: return session.change_count("untracked") == 2), "lines.txt is untracked")
-	expect(await _commit(session, "untracked", "lines.txt", "Add lines"), "committed lines.txt on main")
+	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "?"), "lines.txt is untracked")
+	expect(await _commit(session, "lines.txt", "Add lines"), "committed lines.txt on main")
 
 	# Ctrl+Shift+N: a new branch from HEAD; typed spaces become dashes.
 	press("Ctrl+Shift+N")
@@ -44,7 +44,8 @@ func run() -> void:
 			"created and checked out topic-one: %s" % session.current_branch())
 
 	write_file(lines_path, lines.replace("line 1\n", "topic 1\n"))
-	expect(await _commit(session, "unstaged", "lines.txt", "Edit line 1"), "committed on topic-one")
+	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "M"), "lines.txt is edited")
+	expect(await _commit(session, "lines.txt", "Edit line 1"), "committed on topic-one")
 
 	# Ctrl+B lists the branches; Enter in the filter checks out the first.
 	var popover: BranchPopover = page.active_view().branch_popover()
@@ -54,7 +55,7 @@ func run() -> void:
 	# A local edit that topic-one's version would overwrite: the checkout is
 	# refused, a dialog offers to stash, switch and re-apply.
 	write_file(lines_path, lines.replace("line 10\n", "local 10\n"))
-	expect(await wait_until(func() -> bool: return session.change_count("unstaged") == 2), "lines.txt is modified")
+	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "M"), "lines.txt is modified")
 	expect(await _choose_branch(popover, "topic-one"), "the branch list finds topic-one")
 	var confirm: ConfirmationDialog = ops.confirm_dialog()
 	expect(await wait_until(func() -> bool: return confirm.visible), "the refused checkout offers to stash")
@@ -68,7 +69,7 @@ func run() -> void:
 
 	# F2 on the current branch renames it.
 	session.discard_paths(PackedStringArray(["lines.txt"]))
-	expect(await wait_until(func() -> bool: return session.change_count("unstaged") == 1), "lines.txt discarded")
+	expect(await wait_until(func() -> bool: return _code(session, "lines.txt").is_empty()), "lines.txt discarded")
 	page.focus_view()
 	press("F2")
 	expect(await wait_until(func() -> bool: return form.visible), "F2 asks for the new name")
@@ -82,7 +83,7 @@ func run() -> void:
 	# Another commit first, so the picked commit gets a new parent: picked
 	# within the same second onto the same parent, git would produce the
 	# very same commit and `renamed` would count as merged.
-	expect(await _commit(session, "untracked", "notes.txt", "Add notes"), "committed notes.txt on main")
+	expect(await _commit(session, "notes.txt", "Add notes"), "committed notes.txt on main")
 	press("Ctrl+Shift+H")
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
@@ -151,10 +152,10 @@ func _choose_branch(popover: BranchPopover, name: String) -> bool:
 	return found
 
 
-## Stages `path` from `group` and commits it; returns whether that worked.
-func _commit(session: RepoSession, group: String, path: String, message: String) -> bool:
-	session.stage_paths(group, PackedStringArray([path]))
-	if not await wait_until(func() -> bool: return session.can_commit(false)):
+## Commits `path` alone (the only file included); returns whether that worked.
+func _commit(session: RepoSession, path: String, message: String) -> bool:
+	session.pick_all(false)
+	if not session.pick_files(PackedStringArray([path]), true) or not session.can_commit(false):
 		return false
 	var done: Array[bool] = [false, false]
 	var on_finished: Callable = func(_job: int, label: String, ok: bool, _error: Dictionary) -> void:
@@ -195,3 +196,12 @@ static func _has_tag(session: RepoSession, name: String) -> bool:
 		if String(tag["name"]) == name:
 			return true
 	return false
+
+
+## The change code of `path` in the Changes list (`M`, `?`, ...), or "".
+func _code(session: RepoSession, path: String) -> String:
+	var index: int = session.change_index(path)
+	if index < 0:
+		return ""
+	var rows: Array[Dictionary] = session.change_rows(index, 1)
+	return String(rows[0].get("code", "")) if not rows.is_empty() else ""
