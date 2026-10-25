@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use gitbello_core::changes::split_message;
-use gitbello_core::config::ThemeChoice;
+use gitbello_core::config::{parse_accent, ThemeChoice};
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
@@ -435,7 +435,8 @@ impl AppCore {
 
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
-    /// worktree_template}`; an empty terminal command means the platform's.
+    /// worktree_template, accent}`; an empty terminal command means the
+    /// platform's, an empty accent the app's default (else `#rrggbb`).
     #[func]
     fn settings(&self) -> VarDictionary {
         runtime_cell::with(|rt| {
@@ -446,6 +447,7 @@ impl AppCore {
                 "editor_command" => &gstr(&c.editor_command),
                 "terminal_command" => &gstr(c.terminal_command.as_deref().unwrap_or_default()),
                 "worktree_template" => &gstr(&c.worktree_template),
+                "accent" => &gstr(c.accent.as_deref().unwrap_or_default()),
             }
         })
         .unwrap_or_default()
@@ -482,6 +484,14 @@ impl AppCore {
         if template.as_deref().is_some_and(|t| t.trim().is_empty()) {
             return gstr("Enter a worktree folder template.");
         }
+        let accent = match text("accent") {
+            None => None,
+            Some(a) if a.trim().is_empty() => Some(None),
+            Some(a) => match parse_accent(&a) {
+                Some(a) => Some(Some(a)),
+                None => return gstr("The accent colour must look like #4c9cff."),
+            },
+        };
         runtime_cell::with(|rt| {
             let config = rt.config_mut();
             if let Some(mode) = pull_mode {
@@ -499,6 +509,9 @@ impl AppCore {
             }
             if let Some(template) = template {
                 config.worktree_template = template.trim().to_owned();
+            }
+            if let Some(accent) = accent {
+                config.accent = accent;
             }
             rt.save_config()
                 .err()
