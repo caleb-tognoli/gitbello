@@ -280,8 +280,8 @@ File  Edit  Repository  Branch  View  Help
 
 **Main panes.** The left pane switches between **Changes** and **History** with a segmented toggle that shows counts.
 - Changes: the file list and commit box on the left, the selected file's diff on the right.
-- History: the graph list on the left; on the right, the selected commit's details (subject, body, hash, author, date, parents, file list) above the diff of the selected file.
-- Each view remembers its own left-pane width per repo. History hides the hash, then the author column, as the pane narrows.
+- History: the graph list (graph, ref labels and subject only) on the left; on the right, the selected commit's details (subject, author, date, hash, parents, a scrollable and selectable body) above its file list, which sits beside the diff of the selected file. The diff header picks Unified or Side by side with two joined buttons.
+- Each view remembers its own left-pane width per repo; History also remembers the details' height and the file list's width.
 
 **Operation banner.** While a merge, rebase or cherry-pick is in progress, a full-width banner sits under the Branch/Sync row, e.g. "Merging feature/login into main · 2 conflicts", with Continue (disabled until every conflict is resolved), Abort and Open resolver. It is the only red element in the UI, and the chip shows a marker too. M6.5 places it; M7 implements its behaviour.
 

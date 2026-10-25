@@ -1,6 +1,8 @@
 extends SmokeTest
 ## M4b: selecting a commit in the history shows its details, files and the
-## first file's diff; Right and Left move between list, files and diff.
+## first file's diff; Right and Left move between list, files and diff. The
+## files sit beside the diff, the layout buttons work like radio buttons and
+## the details' sizes are saved.
 ## Uses fixture `repo-5` read-only. Skipped without `--fixtures`.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
@@ -26,6 +28,13 @@ func run() -> void:
 			"details show the newest commit: %s" % details.summary_text())
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
+	expect_eq(history.status_text(), "3 commits", "the status line has no load time")
+	expect(details.body_text().is_empty(), "a one-line message has no body")
+	await get_tree().process_frame
+	var files_rect: Rect2 = details.file_list().get_global_rect()
+	var diff_rect: Rect2 = diff.get_global_rect()
+	expect(files_rect.end.x <= diff_rect.position.x and files_rect.position.y < diff_rect.end.y,
+			"the files are beside the diff: %s %s" % [files_rect, diff_rect])
 
 	# Ctrl+Shift+D switches every diff to side by side (and back).
 	press("Ctrl+Shift+D")
@@ -38,6 +47,29 @@ func run() -> void:
 	expect(Array(row["right"]["hl"]).is_empty(), "a whole-line change has no word highlight: %s" % [row["right"]["hl"]])
 	press("Ctrl+Shift+D")
 	expect(not diff.side_by_side and not Core.diff_side_by_side(), "Ctrl+Shift+D switches back")
+
+	# Unified and Side by side are one choice.
+	var unified: Button = details.diff_panel().layout_button(false)
+	var split: Button = details.diff_panel().layout_button(true)
+	expect(unified.button_pressed and not split.button_pressed, "Unified is the chosen layout")
+	split.button_pressed = true
+	split.pressed.emit()
+	expect(diff.side_by_side and Core.diff_side_by_side(), "Side by side switches the layout")
+	expect(not unified.button_pressed, "and Unified is no longer chosen")
+	unified.button_pressed = true
+	unified.pressed.emit()
+	expect(not diff.side_by_side and not split.button_pressed, "Unified switches back")
+	unified.pressed.emit()
+	expect(not diff.side_by_side, "pressing the chosen layout again keeps it")
+
+	# The details' height and the files' width are saved per repository.
+	details.split_offset = 240
+	details.drag_ended.emit()
+	details.files_split().split_offset = 260
+	details.files_split().drag_ended.emit()
+	var saved: Dictionary = Core.repo_ui_state(page.key())
+	expect_eq(int(saved.get("details_height", 0)), 240, "the details height is saved")
+	expect_eq(int(saved.get("details_files_width", 0)), 260, "the files width is saved")
 
 	press("Down")
 	expect(await wait_until(func() -> bool: return details.summary_text() == "Add app"),

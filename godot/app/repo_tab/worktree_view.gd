@@ -133,7 +133,7 @@ func _ready() -> void:
 	_overlay_cancel.pressed.connect(func() -> void:
 		if _overlay_job >= 0:
 			session.cancel_job(_overlay_job))
-	var panes: Array[SplitContainer] = [_history, _changes]
+	var panes: Array[SplitContainer] = [_history, _changes, _history.details(), _history.details().files_split()]
 	for pane: SplitContainer in panes:
 		pane.drag_ended.connect(_on_split_dragged.bind(pane))
 	show_view(View.HISTORY)
@@ -384,19 +384,34 @@ func focus_view() -> void:
 		_history.commit_list().grab_focus()
 
 
-## The left-pane width of each view is saved per repository.
+## The left-pane width of each view, and the commit details' height and
+## files width, are saved per repository.
 func _on_split_dragged(pane: SplitContainer) -> void:
-	var key: String = "history_width" if pane == _history else "changes_width"
-	Core.set_repo_ui_state(_repo_key(), key, pane.split_offset)
+	Core.set_repo_ui_state(_repo_key(), _split_key(pane), pane.split_offset)
 
 
-## Saved widths, else the theme's default (a split's offset is the left
-## column's width).
+func _split_key(pane: SplitContainer) -> String:
+	if pane == _history:
+		return "history_width"
+	if pane == _changes:
+		return "changes_width"
+	if pane == _history.details():
+		return "details_height"
+	return "details_files_width"
+
+
+## Saved sizes, else the theme's defaults (a split's offset is the size of
+## its first part).
 func _restore_widths() -> void:
 	var saved: Dictionary = Core.repo_ui_state(_repo_key())
 	var default: int = get_theme_constant(&"default_left_width", &"Panes")
 	_history.split_offset = int(saved.get("history_width", default))
 	_changes.split_offset = int(saved.get("changes_width", default))
+	var details: CommitDetails = _history.details()
+	details.split_offset = int(saved.get("details_height",
+			details.get_theme_constant(&"details_height", CommitDetails.THEME_TYPE)))
+	details.files_split().split_offset = int(saved.get("details_files_width",
+			details.get_theme_constant(&"files_width", CommitDetails.THEME_TYPE)))
 
 
 ## Per-repository state is saved under the main worktree's path.

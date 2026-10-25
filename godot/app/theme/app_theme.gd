@@ -231,6 +231,8 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"panel", &"PanelContainer", _box(p.background))
 	theme.set_color(&"font_color", &"Label", p.text)
 	theme.set_color(&"default_color", &"RichTextLabel", p.text)
+	theme.set_color(&"selection_color", &"RichTextLabel", Color(p.accent, 0.35))
+	theme.set_stylebox(&"focus", &"RichTextLabel", StyleBoxEmpty.new())
 	var separator: StyleBoxLine = StyleBoxLine.new()
 	separator.color = p.border
 	theme.set_stylebox(&"separator", &"HSeparator", separator)
@@ -267,8 +269,6 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"ErrorLabel", p.error)
 	_variation(theme, &"AccentLabel", &"Label")
 	theme.set_color(&"font_color", &"AccentLabel", p.accent_text)
-	_variation(theme, &"CommitSummary", &"Label")
-	theme.set_font_size(&"font_size", &"CommitSummary", 16)
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_pressed_color",
 			&"font_focus_color", &"font_hover_pressed_color"]:
 		theme.set_color(color, &"LinkButton", p.accent_text)
@@ -554,11 +554,6 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"max_lanes", &"GraphView", 24)
 	theme.set_constant(&"node_radius", &"GraphView", 4)
 	theme.set_color(&"subject_color", &"CommitList", p.text)
-	for color: StringName in [&"author_color", &"hash_color", &"date_color"]:
-		theme.set_color(color, &"CommitList", p.text_muted)
-	theme.set_constant(&"author_width", &"CommitList", 160)
-	theme.set_constant(&"date_width", &"CommitList", 130)
-	theme.set_constant(&"hash_width", &"CommitList", 64)
 	theme.set_constant(&"padding", &"CommitList", 8)
 	theme.set_constant(&"label_gap", &"CommitList", 4)
 	theme.set_font_size(&"label_font_size", &"CommitList", 12)
@@ -567,9 +562,49 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 			[&"remote", p.label_remote], [&"tag", p.label_tag]]:
 		theme.set_stylebox(StringName("label_%s" % entry[0]), &"CommitList",
 				_box(entry[1], 3, Vector4(6, 1, 6, 1)))
-	theme.set_constant(&"details_height", &"CommitDetails", 300)
-	theme.set_constant(&"files_width", &"CommitDetails", 340)
-	theme.set_constant(&"body_height", &"CommitDetails", 80)
+	_add_commit_details(theme, p)
+
+
+## The commit details, from most to least prominent: the summary, who and
+## when, the hashes, then the message.
+static func _add_commit_details(theme: Theme, p: Palette) -> void:
+	_variation(theme, &"DetailsInfo", &"VBoxContainer")
+	theme.set_constant(&"separation", &"DetailsInfo", 8)
+	_variation(theme, &"CommitSummary", &"RichTextLabel")
+	theme.set_font(&"normal_font", &"CommitSummary", bold_font())
+	theme.set_font_size(&"normal_font_size", &"CommitSummary", 17)
+	_variation(theme, &"DetailsRow", &"HFlowContainer")
+	theme.set_constant(&"h_separation", &"DetailsRow", 18)
+	theme.set_constant(&"v_separation", &"DetailsRow", 4)
+	_variation(theme, &"DetailsGroup", &"HBoxContainer")
+	theme.set_constant(&"separation", &"DetailsGroup", 6)
+	_variation(theme, &"DetailsName", &"Label")
+	theme.set_font(&"font", &"DetailsName", bold_font())
+	_variation(theme, &"DetailsMeta", &"Label")
+	theme.set_color(&"font_color", &"DetailsMeta", p.text_muted)
+	theme.set_font_size(&"font_size", &"DetailsMeta", 13)
+	_variation(theme, &"DetailsHash", &"Label")
+	theme.set_font(&"font", &"DetailsHash", mono_font())
+	theme.set_font_size(&"font_size", &"DetailsHash", 13)
+	theme.set_color(&"font_color", &"DetailsHash", p.accent_text)
+	_variation(theme, &"DetailsId", &"DetailsHash")
+	theme.set_color(&"font_color", &"DetailsId", p.text_muted)
+	_variation(theme, &"DetailsIconButton", &"ToolbarButton")
+	var small: Vector4 = Vector4(3, 2, 3, 2)
+	theme.set_stylebox(&"normal", &"DetailsIconButton", _box(Color.TRANSPARENT, 4, small))
+	theme.set_stylebox(&"hover", &"DetailsIconButton", _box(p.hover, 4, small))
+	theme.set_stylebox(&"pressed", &"DetailsIconButton", _box(Color(p.accent, 0.25), 4, small))
+	theme.set_stylebox(&"hover_pressed", &"DetailsIconButton", _box(Color(p.accent, 0.35), 4, small))
+	_variation(theme, &"CommitBody", &"RichTextLabel")
+	theme.set_font_size(&"normal_font_size", &"CommitBody", 14)
+	theme.set_constant(&"line_separation", &"CommitBody", 2)
+	# Icons beside the details are dimmed with their text.
+	theme.set_color(&"icon_tint", &"CommitDetails", Color(1, 1, 1, 0.65))
+	theme.set_constant(&"icon_size", &"CommitDetails", 14)
+	# Defaults of the two splits; the user's sizes are saved per repository.
+	theme.set_constant(&"details_height", &"CommitDetails", 200)
+	theme.set_constant(&"files_width", &"CommitDetails", 300)
+	theme.set_constant(&"min_files_width", &"CommitDetails", 180)
 
 
 static func _add_changes(theme: Theme, p: Palette) -> void:
@@ -674,15 +709,12 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_font_size(&"font_size", &"StatusLine", 12)
 	theme.set_stylebox(&"normal", &"StatusLine", _box(Color.TRANSPARENT, 0, Vector4(10, 0, 8, 4)))
 	_variation(theme, &"DetailsHeader", &"PanelContainer")
-	var details: StyleBoxFlat = _box(p.background, 0, Vector4(12, 8, 12, 8))
+	var details: StyleBoxFlat = _box(p.background, 0, Vector4(14, 12, 14, 10))
 	details.border_color = p.border
 	details.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"DetailsHeader", details)
-	theme.set_constant(&"files_height", &"CommitDetails", 120)
 	theme.set_constant(&"min_left_width", &"Panes", 300)
 	theme.set_constant(&"default_left_width", &"Panes", 440)
-	theme.set_constant(&"hide_hash_below", &"CommitList", 640)
-	theme.set_constant(&"hide_author_below", &"CommitList", 520)
 	# An operation in progress: the only red element (PLAN §4)
 	_variation(theme, &"OperationBanner", &"PanelContainer")
 	var banner: StyleBoxFlat = _box(p.background.blend(Color(p.error, 0.18)), 0, Vector4(12, 6, 8, 6))
@@ -802,6 +834,14 @@ static func dot(color: Color) -> Texture2D:
 		svg += '<circle cx="6" cy="8" r="3.5" fill="#%s"/></svg>' % color.to_html(false)
 		_dots[color] = DPITexture.create_from_string(svg)
 	return _dots[color]
+
+
+## The interface font, bolder: titles and names.
+static func bold_font() -> Font:
+	var font: FontVariation = FontVariation.new()
+	font.base_font = ThemeDB.fallback_font
+	font.variation_embolden = 0.6
+	return font
 
 
 static func mono_font() -> SystemFont:

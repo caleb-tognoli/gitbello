@@ -72,6 +72,11 @@ func details() -> CommitDetails:
 	return _details
 
 
+## The line above the list: the commit count, progress or an error.
+func status_text() -> String:
+	return _status_label.text
+
+
 ## The commit under the cursor: `{hash, subject}`, or empty.
 func selected_commit() -> Dictionary:
 	var row: int = _commit_list.cursor
@@ -121,11 +126,7 @@ func _on_graph_loaded(row_count: int, error: String) -> void:
 	if not error.is_empty():
 		_status_label.text = error
 	else:
-		var stats: Dictionary = session.load_stats()
-		_status_label.text = "%s commits · loaded in %d ms" % [
-			_thousands(row_count),
-			int(stats.get("total_ms", 0.0)),
-		]
+		_status_label.text = "%s commit%s" % [_thousands(row_count), "" if row_count == 1 else "s"]
 	repo_loaded.emit(row_count, error)
 
 
