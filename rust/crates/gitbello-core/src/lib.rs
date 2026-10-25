@@ -19,6 +19,7 @@ pub mod paths;
 pub mod repo;
 pub mod runtime;
 pub mod sidebar;
+pub mod ui_state;
 pub mod watch;
 pub mod worktrees;
 
