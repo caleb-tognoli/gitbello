@@ -4,7 +4,7 @@
 [ext_resource type="Script" path="res://app/history/commit_file_list.gd" id="2_files"]
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="3_panel"]
 
-[node name="CommitDetails" type="HSplitContainer"]
+[node name="CommitDetails" type="VBoxContainer"]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -12,45 +12,58 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_details")
 
-[node name="Info" type="VBoxContainer" parent="."]
+[node name="InfoPanel" type="PanelContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"DetailsHeader"
+
+[node name="Info" type="VBoxContainer" parent="InfoPanel"]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="Summary" type="Label" parent="Info"]
+[node name="Summary" type="Label" parent="InfoPanel/Info"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"CommitSummary"
 autowrap_mode = 3
 
-[node name="Meta" type="Label" parent="Info"]
+[node name="Meta" type="Label" parent="InfoPanel/Info"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DimLabel"
 autowrap_mode = 3
 
-[node name="BodyScroll" type="ScrollContainer" parent="Info"]
+[node name="BodyScroll" type="ScrollContainer" parent="InfoPanel/Info"]
 unique_name_in_owner = true
 layout_mode = 2
 horizontal_scroll_mode = 0
 
-[node name="Body" type="Label" parent="Info/BodyScroll"]
+[node name="Body" type="Label" parent="InfoPanel/Info/BodyScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 autowrap_mode = 3
 
-[node name="FilesLabel" type="Label" parent="Info"]
+[node name="Split" type="VSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FilesBox" type="VBoxContainer" parent="Split"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="FilesLabel" type="Label" parent="Split/FilesBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SectionHeader"
 
-[node name="Files" type="Control" parent="Info"]
+[node name="Files" type="Control" parent="Split/FilesBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("2_files")
 
-[node name="CommitDiffPanel" parent="." instance=ExtResource("3_panel")]
+[node name="CommitDiffPanel" parent="Split" instance=ExtResource("3_panel")]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_horizontal = 3
+size_flags_vertical = 3

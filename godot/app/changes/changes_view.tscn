@@ -17,6 +17,11 @@ script = ExtResource("1_view")
 unique_name_in_owner = true
 layout_mode = 2
 
+[node name="SwitchSlot" type="PanelContainer" parent="Files"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"PaneHeader"
+
 [node name="UnstagedSection" type="VBoxContainer" parent="Files"]
 unique_name_in_owner = true
 layout_mode = 2

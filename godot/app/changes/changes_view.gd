@@ -19,7 +19,11 @@ var _pending_discard: Callable = Callable()
 var _menu: PopupMenu = PopupMenu.new()
 var _menu_actions: Array[StringName] = []
 
+## Shows the results of discards (with Undo); may be null in tests.
+var feedback: Feedback = null
+
 @onready var _files: VBoxContainer = %Files
+@onready var _switch_slot: Container = %SwitchSlot
 @onready var _unstaged_section: Control = %UnstagedSection
 @onready var _unstaged_label: Label = %UnstagedLabel
 @onready var _unstaged: ChangeList = %UnstagedList
@@ -103,6 +107,16 @@ func untracked_list() -> ChangeList:
 
 func staged_list() -> ChangeList:
 	return _staged
+
+
+## Where the Changes/History switch goes while this view shows.
+func switch_slot() -> Container:
+	return _switch_slot
+
+
+## The left column (its width is saved per repository).
+func left_pane() -> Control:
+	return _files
 
 
 func commit_box() -> CommitBox:
@@ -209,7 +223,10 @@ func discard_selection() -> void:
 		parts.append("Move %s to the trash?" % _describe(untracked))
 	_ask("\n".join(parts), func() -> void:
 		if not tracked.is_empty():
-			session.discard_paths(tracked)
+			var job: int = session.discard_paths(tracked)
+			if feedback != null:
+				feedback.track(session, job, "Discarding", "Discarded changes in %s" % _describe(tracked),
+						null, Callable(), undo_discard)
 		if not untracked.is_empty():
 			_trash(untracked))
 

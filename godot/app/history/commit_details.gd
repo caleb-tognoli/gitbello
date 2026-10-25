@@ -1,7 +1,8 @@
 class_name CommitDetails
-extends HSplitContainer
-## The selected commit (PLAN M4b): summary, author, date, hashes, the full
-## message, its files, and the diff of the selected file.
+extends VBoxContainer
+## The selected commit (PLAN M4b, laid out in M6.5): summary, author, date,
+## hashes and the full message on top, then its files above the diff of the
+## selected file.
 
 const THEME_TYPE: StringName = &"CommitDetails"
 
@@ -10,7 +11,7 @@ var session: RepoSession = null:
 ## Formats unix times (the commit list's local-time format).
 var date_format: Callable = Callable()
 
-@onready var _info: VBoxContainer = %Info
+@onready var _files_box: VBoxContainer = %FilesBox
 @onready var _summary: Label = %Summary
 @onready var _meta: Label = %Meta
 @onready var _body: Label = %Body
@@ -147,5 +148,5 @@ func _on_diff_key(event: InputEvent) -> void:
 
 
 func _apply_theme() -> void:
-	_info.custom_minimum_size.x = float(get_theme_constant(&"files_width", THEME_TYPE))
+	_files_box.custom_minimum_size.y = float(get_theme_constant(&"files_height", THEME_TYPE))
 	_body_scroll.custom_minimum_size.y = float(get_theme_constant(&"body_height", THEME_TYPE))

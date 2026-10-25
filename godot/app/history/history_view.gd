@@ -1,28 +1,35 @@
 class_name HistoryView
-extends VBoxContainer
-## History of one repository: a status line, the commit list and the
-## selected commit's details. Right moves from the list into the details'
-## files, and from there into the diff; Left goes back.
+extends HSplitContainer
+## History of one worktree: the commit list (with a status line) on the left,
+## the selected commit's details and diff on the right. Right moves from the
+## list into the details' files, and from there into the diff; Left goes back.
 
 signal repo_loaded(row_count: int, error: String)
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
 signal commit_menu_requested(at_position: Vector2)
+## Right-click on a ref label: `{name, short, kind, is_head}`, screen position.
+signal label_menu_requested(label: Dictionary, at_position: Vector2)
 
 var session: RepoSession = null:
 	set = set_session
 
 @onready var _commit_list: CommitList = %CommitList
 @onready var _status_label: Label = %StatusLabel
-@onready var _split: VSplitContainer = %Split
 @onready var _details: CommitDetails = %Details
+@onready var _left: VBoxContainer = %Left
+@onready var _switch_slot: Container = %SwitchSlot
 
 
 func _ready() -> void:
 	_details.date_format = _commit_list.date_text
 	_commit_list.selection_changed.connect(_on_commit_selected)
 	_commit_list.gui_input.connect(_on_list_key)
-	_commit_list.context_menu_requested.connect(func(_row: int, at: Vector2) -> void:
-		commit_menu_requested.emit(_commit_list.get_screen_position() + at))
+	_commit_list.context_menu_requested.connect(func(row: int, at: Vector2) -> void:
+		var label: Dictionary = _commit_list.label_at(row, at)
+		if label.is_empty():
+			commit_menu_requested.emit(_commit_list.get_screen_position() + at)
+		else:
+			label_menu_requested.emit(label, _commit_list.get_screen_position() + at))
 	_details.file_list().gui_input.connect(_on_files_key)
 	_apply_theme()
 
@@ -49,6 +56,16 @@ func set_session(value: RepoSession) -> void:
 
 func commit_list() -> CommitList:
 	return _commit_list
+
+
+## Where the Changes/History switch goes while this view shows.
+func switch_slot() -> Container:
+	return _switch_slot
+
+
+## The left column (its width is saved per repository).
+func left_pane() -> Control:
+	return _left
 
 
 func details() -> CommitDetails:
@@ -89,7 +106,7 @@ func _on_files_key(event: InputEvent) -> void:
 
 
 func _apply_theme() -> void:
-	_details.custom_minimum_size.y = float(get_theme_constant(&"details_height", &"CommitDetails"))
+	_left.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
