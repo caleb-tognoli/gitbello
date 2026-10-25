@@ -49,6 +49,20 @@ func run() -> void:
 		expect_eq(chips[0].texts(), {"name": "repo-1", "branch": "main", "badge": "2 ↑1"}, "the main worktree's chip")
 		expect(chips[0].selected and not chips[1].selected, "the opened worktree's chip is selected")
 
+	# + follows the last tab, and New worktree the last chip.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var tabs: TabBar = main.tab_bar()
+	var add: Control = main.get_node("%AddButton") as Control
+	expect(not tabs.get_offset_buttons_visible(), "the five tabs fit without scroll arrows")
+	var tabs_end: float = tabs.global_position.x + tabs.get_tab_rect(tabs.tab_count - 1).end.x
+	expect(absf(add.global_position.x - tabs_end) < 16.0,
+			"+ sits right after the last tab: %s vs %s" % [add.global_position.x, tabs_end])
+	if chips.size() == 2:
+		var chips_end: float = chips[1].get_global_rect().end.x
+		var new_x: float = strip.new_task_button().global_position.x
+		expect(absf(new_x - chips_end) < 16.0, "New worktree sits right after the last chip: %s vs %s" % [new_x, chips_end])
+
 	# A change made outside the app arrives through the watcher.
 	var file: FileAccess = FileAccess.open(repos[0].path_join("from outside.txt"), FileAccess.WRITE)
 	file.store_string("x")

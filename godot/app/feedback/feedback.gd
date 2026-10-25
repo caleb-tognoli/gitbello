@@ -26,7 +26,7 @@ const VERBS: Dictionary[String, String] = {
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
 	"commit": "Committing",
-	"new task": "Creating the task",
+	"new task": "Creating the worktree",
 	"clean up worktrees": "Cleaning up",
 	"add worktree": "Adding the worktree",
 	"remove worktree": "Removing the worktree",

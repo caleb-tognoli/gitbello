@@ -225,7 +225,7 @@ The shell, actions, feedback, Changes and shelves specs below are the M6.5 desig
 ```
 File  Edit  Repository  Branch  View  Help
 [• gitbello  x] [spritesheetbelli  x] [+]                   <- repo tabs
-( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) [+ New task v]
+( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) [+ New worktree v]
 [ Branch: main          v ]  [ Push ↑1        v ]
 [ Merging feature/login into main · 2 conflicts   Continue  Abort ]  <- only during an operation
 +---------------------------+---------------------------------------+
@@ -254,7 +254,7 @@ File  Edit  Repository  Branch  View  Help
 - A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
 - Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Remove….
-- The last chip, **+ New task**, runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
+- Right after the last chip, **+ New worktree** runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
 - When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
@@ -296,7 +296,7 @@ File  Edit  Repository  Branch  View  Help
 - Row highlighting (click, Shift, Ctrl) is separate from the checkboxes. It drives the diff and the context menu: Discard…, Shelve…, Open, Show in file manager, Copy path, Ignore.
 - The diff gutter has hunk and line checkboxes.
 - The commit box sits under the list: summary, description, Amend toggle, and a "Commit 2 files to main" button (Ctrl+Enter), disabled with a reason when nothing is included or the summary is empty.
-- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New task. The welcome screen follows the same pattern (Open repository, recent repos).
+- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New worktree. The welcome screen follows the same pattern (Open repository, recent repos).
 
 **New task (one click).**
 1. Open the dialog: branch name, which is slugified for the folder.
@@ -333,7 +333,7 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+1 … Ctrl+9 | select worktree chip 1–9 |
 | Ctrl+B | branch popover (was the sidebar toggle) |
 | Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
-| Ctrl+T | new task |
+| Ctrl+T | new worktree |
 | Ctrl+Shift+Y | Sync |
 
 The other existing shortcuts stay.

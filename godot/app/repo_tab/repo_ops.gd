@@ -567,7 +567,7 @@ func new_task() -> void:
 	if bases.is_empty():
 		bases.append("HEAD")
 	_folder_edited = false
-	_begin_form("task", "New task", "Create", _create_task)
+	_begin_form("task", "New worktree", "Create", _create_task)
 	_form.add_line("name", "Branch", "", true)
 	_form.add_choice("base", "Start from", bases, 0)
 	_form.add_line("folder", "Folder", "", false, "Follows the branch name")
@@ -597,7 +597,7 @@ func _create_task(values: Dictionary) -> void:
 	var job: int = session.new_task(name, base, folder, remote)
 	if job >= 0:
 		_tasks[job] = {"path": folder, "tab": bool(values["open_tab"]), "editor": bool(values["open_editor"])}
-	_track(job, "Creating the task %s" % name, "Created the task %s" % name)
+	_track(job, "Creating the worktree %s" % name, "Created the worktree %s" % name)
 
 
 ## A worktree for an existing local branch that no worktree has checked out.

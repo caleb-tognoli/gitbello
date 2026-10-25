@@ -22,12 +22,15 @@ var _about: AcceptDialog = AcceptDialog.new()
 ## Spins the busy tabs' icons.
 var _spinner: Timer = Timer.new()
 var _spin_frame: int = 0
+var _fit_queued: bool = false
 
 @onready var _menu_strip: Control = %MenuStrip
 @onready var _menu_bar: AppMenuBar = %MenuBar
 @onready var _tab_strip: Control = %TabStrip
+@onready var _tab_row: HBoxContainer = %TabRow
 @onready var _tabs: TabBar = %Tabs
 @onready var _add_button: Button = %AddButton
+@onready var _tab_spacer: Control = %TabSpacer
 @onready var _content: Control = %Content
 @onready var _welcome: Welcome = %Welcome
 @onready var _git_log: GitLogPanel = %GitLog
@@ -70,6 +73,7 @@ func _ready() -> void:
 	_tabs.tab_changed.connect(_on_tab_changed)
 	_tabs.tab_close_pressed.connect(close_tab)
 	_tabs.active_tab_rearranged.connect(_on_tab_rearranged)
+	_tab_row.resized.connect(_queue_fit_tabs)
 	_add_button.icon = AppTheme.icon(&"Add")
 	_add_button.pressed.connect(func() -> void: Actions.run_action(&"repo.open"))
 	_welcome.open_requested.connect(func() -> void: Actions.run_action(&"repo.open"))
@@ -246,6 +250,29 @@ func _update_view() -> void:
 		_pages[i].visible = i == _tabs.current_tab
 	var view: WorktreeView = current_view()
 	_status_label.text = view.worktree_path() if view != null else "No repository open"
+	_queue_fit_tabs()
+
+
+func _queue_fit_tabs() -> void:
+	if not _fit_queued:
+		_fit_queued = true
+		_fit_tabs.call_deferred()
+
+
+## Keeps + right after the last tab: the tab bar gets the tabs' own width and
+## the spacer the rest, until the tabs overflow and the bar scrolls them.
+func _fit_tabs() -> void:
+	_fit_queued = false
+	# A clipping bar reports no width of its own; ask for it unclipped.
+	_tabs.clip_tabs = false
+	var natural: float = _tabs.get_minimum_size().x + 1.0
+	_tabs.clip_tabs = true
+	var room: float = _tab_row.size.x - _add_button.get_combined_minimum_size().x \
+			- 2.0 * float(_tab_row.get_theme_constant(&"separation"))
+	var fits: bool = natural <= room
+	_tab_spacer.visible = fits
+	_tabs.size_flags_stretch_ratio = natural
+	_tab_spacer.size_flags_stretch_ratio = maxf(room - natural, 1.0)
 
 
 func _on_tab_changed(index: int) -> void:
@@ -333,6 +360,7 @@ func _update_tab_icons() -> void:
 		_spinner.start()
 	elif not spinning and not _spinner.is_stopped():
 		_spinner.stop()
+	_queue_fit_tabs()
 
 
 func _on_files_dropped(files: PackedStringArray) -> void:
@@ -343,6 +371,7 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 func _apply_theme() -> void:
 	_git_log.custom_minimum_size.y = float(get_theme_constant(&"height", &"GitLogPanel"))
 	_tabs.max_tab_width = get_theme_constant(&"max_tab_width", &"Shell")
+	_queue_fit_tabs()
 	_toasts.offset_bottom = -float(get_theme_constant(&"bottom_margin", &"Toasts"))
 
 
@@ -642,7 +671,7 @@ func _register_worktree_actions() -> void:
 			if bool(wt["prunable"]):
 				return true
 		return false
-	Actions.register(&"task.new", "New task…", "Worktrees",
+	Actions.register(&"task.new", "New worktree…", "Worktrees",
 			func() -> void: ops.call().new_task(), PackedStringArray(["Ctrl+T"]),
 			func() -> bool: return is_ready.call() and not current_page().session.main_worktree().is_empty())
 	Actions.register(&"worktree.cleanup", "Clean up merged worktrees…", "Worktrees",
@@ -697,7 +726,7 @@ func _open_settings() -> void:
 	_settings_form.add_note("{path} is replaced by the folder.")
 	_settings_form.add_line("terminal_command", "Terminal", String(settings["terminal_command"]), false,
 			"The platform's terminal")
-	_settings_form.add_line("worktree_template", "New task folders", String(settings["worktree_template"]))
+	_settings_form.add_line("worktree_template", "New worktree folders", String(settings["worktree_template"]))
 	_settings_form.add_note("{repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
 	_settings_form.add_color("accent", "Accent colour", ThemeManager.configured_accent(), AppTheme.ACCENT_PRESETS)
 	_settings_form.validator = func(values: Dictionary) -> String:
