@@ -6,7 +6,7 @@
 [ext_resource type="Script" path="res://app/toasts/toasts.gd" id="4_toasts"]
 [ext_resource type="PackedScene" path="res://app/palette/command_palette.tscn" id="5_palette"]
 [ext_resource type="Script" path="res://app/shortcuts_dialog/shortcuts_dialog.gd" id="6_shortcuts"]
-[ext_resource type="PackedScene" path="res://app/jobs/jobs_bar.tscn" id="7_jobs"]
+[ext_resource type="Script" path="res://app/main/app_menu_bar.gd" id="7_menu"]
 
 [node name="Main" type="PanelContainer"]
 anchors_preset = 15
@@ -19,6 +19,16 @@ script = ExtResource("1_main")
 [node name="Layout" type="VBoxContainer" parent="."]
 layout_mode = 2
 theme_type_variation = &"ShellLayout"
+
+[node name="MenuStrip" type="PanelContainer" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MenuStrip"
+
+[node name="MenuBar" type="MenuBar" parent="Layout/MenuStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+script = ExtResource("7_menu")
 
 [node name="TabStrip" type="PanelContainer" parent="Layout"]
 unique_name_in_owner = true
@@ -39,6 +49,7 @@ drag_to_rearrange_enabled = true
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Open repository"
+focus_mode = 0
 theme_type_variation = &"ToolbarButton"
 
 [node name="Body" type="VSplitContainer" parent="Layout"]
@@ -61,6 +72,7 @@ layout_mode = 2
 script = ExtResource("3_log")
 
 [node name="StatusBar" type="PanelContainer" parent="Layout"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"StatusBar"
 
@@ -73,10 +85,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"DimLabel"
 text_overrun_behavior = 3
-
-[node name="JobsBar" parent="Layout/StatusBar/Row" instance=ExtResource("7_jobs")]
-unique_name_in_owner = true
-layout_mode = 2
 
 [node name="VersionLabel" type="Label" parent="Layout/StatusBar/Row"]
 unique_name_in_owner = true
@@ -91,12 +99,12 @@ mouse_filter = 2
 [node name="Toasts" type="VBoxContainer" parent="Overlay"]
 unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = 3
-anchor_left = 1.0
+anchors_preset = 7
+anchor_left = 0.5
 anchor_top = 1.0
-anchor_right = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
-grow_horizontal = 0
+grow_horizontal = 2
 grow_vertical = 0
 script = ExtResource("4_toasts")
 

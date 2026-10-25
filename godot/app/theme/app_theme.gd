@@ -40,6 +40,8 @@ const LIGHT_ICON_GREY: Color = Color("5a5a5a")
 const ARROW_DOWN: Texture2D = preload("res://themes/icons/GuiTreeArrowDown.svg")
 const ARROW_RIGHT: Texture2D = preload("res://themes/icons/GuiTreeArrowRight.svg")
 const CLOSE: Texture2D = preload("res://themes/icons/Close.svg")
+## Frames of the busy spinner (see `spinner`).
+const SPINNER_FRAMES: int = 8
 ## Monospace fonts tried in order (the first one installed wins).
 const MONO_FONTS: PackedStringArray = [
 	"JetBrains Mono", "Cascadia Mono", "Consolas", "SF Mono", "Menlo",
@@ -50,6 +52,9 @@ const MONO_FONTS: PackedStringArray = [
 static var _icons: Dictionary[String, DPITexture] = {}
 ## The swatches made so far, by colour (see `swatch`).
 static var _swatches: Dictionary[Color, DPITexture] = {}
+## Spinner frames by `(frame, light)` and dots by colour (see `spinner`, `dot`).
+static var _spinners: Dictionary[Vector2i, DPITexture] = {}
+static var _dots: Dictionary[Color, DPITexture] = {}
 
 
 class Palette:
@@ -216,6 +221,7 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT) -> Theme:
 	_add_shell(theme, p)
 	_add_history(theme, p)
 	_add_changes(theme, p)
+	_add_shell_p2(theme, p)
 	return theme
 
 
@@ -255,6 +261,7 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"SectionHeader", &"Label")
 	theme.set_color(&"font_color", &"SectionHeader", p.text_muted)
 	theme.set_font_size(&"font_size", &"SectionHeader", 12)
+	theme.set_stylebox(&"normal", &"SectionHeader", _box(Color.TRANSPARENT, 0, Vector4(8, 4, 8, 2)))
 	_variation(theme, &"ErrorLabel", &"Label")
 	theme.set_color(&"font_color", &"ErrorLabel", p.error)
 	_variation(theme, &"AccentLabel", &"Label")
@@ -602,6 +609,131 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"message_color", &"DiffView", p.text_muted)
 	theme.set_constant(&"row_height", &"DiffView", 20)
 	theme.set_constant(&"padding", &"DiffView", 8)
+
+
+## The shell of M6.5 P2: menu strip, header buttons, worktree chips, the
+## branch list, the operation banner, the busy overlay, toasts and panes.
+static func _add_shell_p2(theme: Theme, p: Palette) -> void:
+	_variation(theme, &"MenuStrip", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"MenuStrip", _box(p.background, 0, Vector4(4, 2, 4, 0)))
+	# The repo tabs' attention dots (PLAN §4 Repo tabs)
+	theme.set_color(&"conflict_color", &"RepoTabs", p.error)
+	theme.set_color(&"changes_color", &"RepoTabs", p.modified)
+	theme.set_color(&"sync_color", &"RepoTabs", p.accent)
+	# The worktree strip under the tabs, joined to the active tab like a toolbar
+	_variation(theme, &"WorktreeStrip", &"PanelContainer")
+	var strip: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 6, 8, 6))
+	strip.border_color = p.border
+	strip.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"WorktreeStrip", strip)
+	_variation(theme, &"ChipRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ChipRow", 6)
+	var chip: Vector4 = Vector4(10, 4, 10, 4)
+	for entry: Array in [[&"WorktreeChip", Color.TRANSPARENT, p.border],
+			[&"WorktreeChipHover", p.hover, p.border],
+			[&"WorktreeChipSelected", Color(p.accent, 0.25), p.accent]]:
+		_variation(theme, entry[0], &"PanelContainer")
+		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 12, chip, entry[2], 1))
+	_variation(theme, &"ChipBadge", &"Label")
+	theme.set_color(&"font_color", &"ChipBadge", p.modified)
+	theme.set_font_size(&"font_size", &"ChipBadge", 12)
+	# Branch and Sync: big raised buttons with room for a ▾ part
+	_variation(theme, &"HeaderRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"HeaderRow", 8)
+	_variation(theme, &"BigButton", &"Button")
+	_variation(theme, &"BigMenuButton", &"BigButton")
+	for entry: Array in [[&"BigButton", Vector4(12, 7, 14, 7)], [&"BigMenuButton", Vector4(12, 7, 40, 7)]]:
+		var margins: Vector4 = entry[1]
+		theme.set_stylebox(&"normal", entry[0], _box(p.raised, 6, margins, p.border, 1))
+		theme.set_stylebox(&"hover", entry[0], _box(p.hover, 6, margins, p.border, 1))
+		theme.set_stylebox(&"pressed", entry[0], _box(Color(p.accent, 0.35), 6, margins, p.accent, 1))
+		theme.set_stylebox(&"hover_pressed", entry[0], _box(Color(p.accent, 0.35), 6, margins, p.accent, 1))
+		theme.set_stylebox(&"disabled", entry[0], _box(Color(p.raised, 0.5), 6, margins, p.border, 1))
+		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 1))
+	theme.set_font_size(&"font_size", &"BigButton", 15)
+	theme.set_constant(&"h_separation", &"BigButton", 8)
+	theme.set_constant(&"arrow_width", &"BigButton", 28)
+	theme.set_color(&"separator_color", &"BigButton", p.border)
+	theme.set_color(&"progress_color", &"BigButton", p.accent)
+	# The Changes | History switch: joined buttons, the shown one in the accent
+	theme.set_constant(&"separation", &"ViewSwitch", 2)
+	_variation(theme, &"SegmentButton", &"Button")
+	var segment: Vector4 = Vector4(10, 4, 10, 4)
+	theme.set_stylebox(&"normal", &"SegmentButton", _box(p.raised, 4, segment))
+	theme.set_stylebox(&"hover", &"SegmentButton", _box(p.hover, 4, segment))
+	theme.set_stylebox(&"pressed", &"SegmentButton", _box(Color(p.accent, 0.35), 4, segment))
+	theme.set_stylebox(&"hover_pressed", &"SegmentButton", _box(Color(p.accent, 0.4), 4, segment))
+	# Panes: a header row over each left column, a status line, details
+	_variation(theme, &"PaneColumn", &"VBoxContainer")
+	theme.set_constant(&"separation", &"PaneColumn", 0)
+	_variation(theme, &"PaneHeader", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"PaneHeader", _box(p.background, 0, Vector4(8, 6, 8, 4)))
+	_variation(theme, &"StatusLine", &"Label")
+	theme.set_color(&"font_color", &"StatusLine", p.text_muted)
+	theme.set_font_size(&"font_size", &"StatusLine", 12)
+	theme.set_stylebox(&"normal", &"StatusLine", _box(Color.TRANSPARENT, 0, Vector4(10, 0, 8, 4)))
+	_variation(theme, &"DetailsHeader", &"PanelContainer")
+	var details: StyleBoxFlat = _box(p.background, 0, Vector4(12, 8, 12, 8))
+	details.border_color = p.border
+	details.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"DetailsHeader", details)
+	theme.set_constant(&"files_height", &"CommitDetails", 120)
+	theme.set_constant(&"min_left_width", &"Panes", 300)
+	theme.set_constant(&"default_left_width", &"Panes", 440)
+	theme.set_constant(&"hide_hash_below", &"CommitList", 640)
+	theme.set_constant(&"hide_author_below", &"CommitList", 520)
+	# An operation in progress: the only red element (PLAN §4)
+	_variation(theme, &"OperationBanner", &"PanelContainer")
+	var banner: StyleBoxFlat = _box(p.background.blend(Color(p.error, 0.18)), 0, Vector4(12, 6, 8, 6))
+	banner.border_color = p.error
+	banner.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"OperationBanner", banner)
+	# The busy overlay dims one worktree's panes
+	_variation(theme, &"BusyOverlay", &"Panel")
+	theme.set_stylebox(&"panel", &"BusyOverlay", _box(Color(p.background, 0.7)))
+	_variation(theme, &"BusyPanel", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"BusyPanel", _box(p.surface, 8, Vector4(24, 16, 24, 16), p.border, 1))
+	# The branch list
+	theme.set_constant(&"width", &"BranchPopover", 380)
+	theme.set_constant(&"height", &"BranchPopover", 440)
+	theme.set_color(&"section_color", &"BranchPopover", p.text_muted)
+	theme.set_color(&"badge_color", &"BranchPopover", p.text_muted)
+	theme.set_color(&"head_color", &"BranchPopover", p.head)
+	# Remotes… and Tags…
+	theme.set_constant(&"width", &"ManageDialog", 620)
+	theme.set_constant(&"height", &"ManageDialog", 380)
+	# Toasts of successes and progress (errors are ToastPanel)
+	for entry: Array in [[&"SuccessToastPanel", p.accent], [&"ProgressToastPanel", p.border]]:
+		_variation(theme, entry[0], &"PanelContainer")
+		var toast: StyleBoxFlat = _box(p.raised, 6, Vector4(14, 8, 8, 8), entry[1], 1)
+		toast.border_width_left = 3
+		toast.shadow_color = Color(0, 0, 0, 0.25 if p.light else 0.4)
+		toast.shadow_size = 6
+		theme.set_stylebox(&"panel", entry[0], toast)
+	theme.set_constant(&"bottom_margin", &"Toasts", 40)
+
+
+## Frame `frame` of the busy spinner, in the icon grey of the light or dark
+## theme.
+static func spinner(frame: int, light: bool) -> Texture2D:
+	var key: Vector2i = Vector2i(frame % SPINNER_FRAMES, 1 if light else 0)
+	if not _spinners.has(key):
+		var grey: String = (LIGHT_ICON_GREY if light else DARK_ICON_GREY).to_html(false)
+		var angle: float = 360.0 * float(key.x) / float(SPINNER_FRAMES)
+		var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="#%s" stroke-width="2" stroke-linecap="round">' % grey
+		svg += '<circle cx="8" cy="8" r="5.5" stroke-opacity=".25"/>'
+		svg += '<path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" transform="rotate(%.1f 8 8)"/></svg>' % angle
+		_spinners[key] = DPITexture.create_from_string(svg)
+	return _spinners[key]
+
+
+## A small dot of `color`, such as a repo tab's attention dot.
+static func dot(color: Color) -> Texture2D:
+	if not _dots.has(color):
+		var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="16">'
+		svg += '<circle cx="6" cy="8" r="3.5" fill="#%s"/></svg>' % color.to_html(false)
+		_dots[color] = DPITexture.create_from_string(svg)
+	return _dots[color]
 
 
 static func mono_font() -> SystemFont:

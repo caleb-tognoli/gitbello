@@ -1,0 +1,144 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://app/repo_tab/worktree_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://ui/big_button/big_button.gd" id="2_big"]
+[ext_resource type="PackedScene" path="res://app/history/history_view.tscn" id="3_history"]
+[ext_resource type="PackedScene" path="res://app/changes/changes_view.tscn" id="4_changes"]
+
+[node name="WorktreeView" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_view")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"ShellLayout"
+
+[node name="HeaderBar" type="PanelContainer" parent="Layout"]
+layout_mode = 2
+theme_type_variation = &"ViewBar"
+
+[node name="Row" type="HBoxContainer" parent="Layout/HeaderBar"]
+layout_mode = 2
+theme_type_variation = &"HeaderRow"
+
+[node name="BranchButton" type="Button" parent="Layout/HeaderBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+script = ExtResource("2_big")
+has_menu = true
+
+[node name="SyncButton" type="Button" parent="Layout/HeaderBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+script = ExtResource("2_big")
+has_menu = true
+
+[node name="Banner" type="PanelContainer" parent="Layout"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"OperationBanner"
+
+[node name="Row" type="HBoxContainer" parent="Layout/Banner"]
+layout_mode = 2
+
+[node name="BannerIcon" type="TextureRect" parent="Layout/Banner/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+stretch_mode = 5
+
+[node name="BannerLabel" type="Label" parent="Layout/Banner/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text_overrun_behavior = 3
+
+[node name="AbortButton" type="Button" parent="Layout/Banner/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Abort"
+
+[node name="Body" type="Control" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="History" parent="Layout/Body" instance=ExtResource("3_history")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="Changes" parent="Layout/Body" instance=ExtResource("4_changes")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+
+[node name="Overlay" type="Panel" parent="Layout/Body"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"BusyOverlay"
+
+[node name="Center" type="CenterContainer" parent="Layout/Body/Overlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Box" type="PanelContainer" parent="Layout/Body/Overlay/Center"]
+layout_mode = 2
+theme_type_variation = &"BusyPanel"
+
+[node name="Column" type="VBoxContainer" parent="Layout/Body/Overlay/Center/Box"]
+layout_mode = 2
+
+[node name="OverlayLabel" type="Label" parent="Layout/Body/Overlay/Center/Box/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="OverlayProgress" type="ProgressBar" parent="Layout/Body/Overlay/Center/Box/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+show_percentage = false
+indeterminate = true
+
+[node name="OverlayCancel" type="Button" parent="Layout/Body/Overlay/Center/Box/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Cancel"
+
+[node name="ErrorPanel" type="CenterContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ErrorLabel" type="Label" parent="ErrorPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
