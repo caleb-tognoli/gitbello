@@ -3,6 +3,7 @@ extends HSplitContainer
 ## History of one worktree: the commit list (with a status line) on the left,
 ## the selected commit's details and diff on the right. Right moves from the
 ## list into the details' files, and from there into the diff; Left goes back.
+## A commit is always selected once there is one: the newest by default.
 
 signal repo_loaded(row_count: int, error: String)
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
@@ -116,6 +117,7 @@ func _apply_theme() -> void:
 
 func _on_graph_changed(_start: int, _count: int) -> void:
 	_status_label.text = "Loading… %s commits" % _thousands(session.graph_row_count())
+	_select_newest_if_none()
 
 
 func _on_graph_reset() -> void:
@@ -127,7 +129,16 @@ func _on_graph_loaded(row_count: int, error: String) -> void:
 		_status_label.text = error
 	else:
 		_status_label.text = "%s commit%s" % [_thousands(row_count), "" if row_count == 1 else "s"]
+	_select_newest_if_none()
+	if row_count == 0:
+		_details.show_placeholder("No commits yet." if error.is_empty() else "")
 	repo_loaded.emit(row_count, error)
+
+
+## Selects the newest commit while none is (on the first rows of a load).
+func _select_newest_if_none() -> void:
+	if _commit_list.cursor < 0 and _commit_list.row_count() > 0:
+		_commit_list.select_only(0)
 
 
 static func _thousands(value: int) -> String:

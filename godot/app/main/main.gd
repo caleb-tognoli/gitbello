@@ -725,11 +725,13 @@ func _save_settings(values: Dictionary) -> void:
 
 
 ## Where a new branch or tag starts: `[commit-ish, label]` from the menu's
-## ref, the history's commit, or HEAD.
+## ref, the history's commit, or HEAD. The history always has a commit
+## selected, so HEAD's own commit counts as HEAD (local changes come along).
 func _start_point(ref: Dictionary, commit: Dictionary) -> Array:
 	if not ref.is_empty():
 		return [String(ref["name"]), String(ref["short"])]
-	if not commit.is_empty():
+	var head_oid: String = String(current_page().session.status().get("oid", ""))
+	if not commit.is_empty() and String(commit["hash"]) != head_oid:
 		var hash: String = String(commit["hash"])
 		return [hash, "%s “%s”" % [hash.left(7), String(commit["subject"])]]
 	var head: String = current_page().session.current_branch()

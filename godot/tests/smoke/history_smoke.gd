@@ -21,11 +21,11 @@ func run() -> void:
 	var list: CommitList = history.commit_list()
 	expect(await wait_until(func() -> bool: return list.row_count() == 3), "three commits")
 	var details: CommitDetails = history.details()
-	list.grab_focus()
-	press("Down")
-	expect_eq(list.cursor, 0, "Down selects the newest commit")
+	expect(await wait_until(func() -> bool: return list.cursor == 0),
+			"the newest commit is selected by default: %d" % list.cursor)
 	expect(await wait_until(func() -> bool: return details.summary_text() == "Improve app"),
 			"details show the newest commit: %s" % details.summary_text())
+	list.grab_focus()
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
 	expect_eq(history.status_text(), "3 commits", "the status line has no load time")
@@ -37,6 +37,9 @@ func run() -> void:
 			"a move shares the file name")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
 	expect(details.collapsed, "without a body the details shrink to fit")
+	expect(details.totals_text().begins_with("+"), "the files section shows the commit's totals: %s" % details.totals_text())
+	expect(details.diff_panel().counts_text().begins_with("+"),
+			"the diff header shows the file's counts: %s" % details.diff_panel().counts_text())
 	await get_tree().process_frame
 	var files_rect: Rect2 = details.file_list().get_global_rect()
 	var diff_rect: Rect2 = diff.get_global_rect()
