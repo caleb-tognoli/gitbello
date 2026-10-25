@@ -33,6 +33,7 @@ func run() -> void:
 	expect(not first_code.is_empty(), "the first file has a status code")
 	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
+	expect(details.collapsed, "without a body the details shrink to fit")
 	await get_tree().process_frame
 	var files_rect: Rect2 = details.file_list().get_global_rect()
 	var diff_rect: Rect2 = diff.get_global_rect()

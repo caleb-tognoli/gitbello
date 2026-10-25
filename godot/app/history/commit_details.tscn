@@ -140,13 +140,6 @@ autowrap_mode = 3
 context_menu_enabled = true
 selection_enabled = true
 
-[node name="NoBody" type="Label" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"DetailsMeta"
-text = "No description."
-
 [node name="Split" type="HSplitContainer" parent="."]
 unique_name_in_owner = true
 layout_mode = 2

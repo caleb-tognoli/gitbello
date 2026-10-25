@@ -32,7 +32,6 @@ var date_format: Callable = Callable()
 @onready var _committer_label: Label = %CommitterLabel
 @onready var _body_separator: Control = %BodySeparator
 @onready var _body: RichTextLabel = %Body
-@onready var _no_body: Label = %NoBody
 @onready var _files_label: Label = %FilesLabel
 @onready var _files: CommitFileList = %Files
 @onready var _diff_panel: DiffPanel = %CommitDiffPanel
@@ -41,6 +40,7 @@ var date_format: Callable = Callable()
 func _ready() -> void:
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(&"commit.copy_hash", _copy_hash))
 	_copy_hash.tooltip_text = "Copy the full hash"
+	dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
 	_apply_theme()
 	_files.current_changed.connect(_on_file_changed)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
@@ -104,8 +104,6 @@ func show_placeholder() -> void:
 	_who.hide()
 	_ids.hide()
 	_show_body("")
-	_no_body.hide()
-	_body_separator.hide()
 	_files_label.text = ""
 	_files.show_files(0)
 	_diff_panel.clear("Select a file to see its changes.")
@@ -144,8 +142,6 @@ func _on_commit_loaded() -> void:
 	_who.show()
 	_ids.show()
 	_show_body(String(info["body"]).strip_edges())
-	_no_body.visible = _body.text.is_empty()
-	_body_separator.show()
 	var count: int = int(info["file_count"])
 	_files_label.text = "%d file%s changed" % [count, "" if count == 1 else "s"]
 	_files.show_files(count)
@@ -183,10 +179,14 @@ func _on_diff_key(event: InputEvent) -> void:
 		view.accept_event()
 
 
+## Without a message body the top part shrinks to the summary and its
+## details, and can't be dragged.
 func _show_body(text: String) -> void:
 	_body.text = text
 	_body.scroll_to_line(0)
 	_body.visible = not text.is_empty()
+	_body_separator.visible = _body.visible
+	collapsed = not _body.visible
 
 
 func _apply_theme() -> void:
