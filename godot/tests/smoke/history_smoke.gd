@@ -35,6 +35,11 @@ func run() -> void:
 	expect_eq(details.diff_panel().path_text(), details.file_list().path_at(0), "the header shows the path")
 	expect_eq(Core.rename_parts("src/util.rs", "lib/util.rs"), PackedStringArray(["", "src", "lib", "/util.rs"]),
 			"a move shares the file name")
+	var painter: FileRowPainter = FileRowPainter.new()
+	expect_eq(painter.path_lead("src/ui/a.rs", ""), PackedStringArray(["src/ui", "/"]), "the folder leads the name")
+	expect_eq(painter.path_lead("a.rs", ""), PackedStringArray(["", ""]), "a top-level file has no folder")
+	expect_eq(painter.path_lead("docs/b.md", "docs/a.md"), PackedStringArray(["docs/a.md", " → "]), "a rename")
+	expect_eq(painter.path_lead("lib/u.rs", "src/u.rs"), PackedStringArray(["{src → lib}", "/"]), "a move")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
 	expect(details.collapsed, "without a body the details shrink to fit")
 	expect(details.totals_text().begins_with("+"), "the files section shows the commit's totals: %s" % details.totals_text())

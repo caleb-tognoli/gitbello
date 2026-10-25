@@ -1,8 +1,9 @@
 class_name FileRowPainter
 extends RefCounted
 ## Draws one file row (`{path, original_path, code}`) the way every file
-## list does: a colored status icon, the file name, then its folder dimmed.
-## A renamed file reads `old.md → new.md`, a moved one's folder `{src → lib}`.
+## list does, like GitHub Desktop: a colored status icon, then the full path
+## with everything but the file name muted. When the row is too narrow the
+## folder is cut first, so the file name stays visible as long as it can.
 ## With `show_picks`, a commit-selection checkbox comes first (from the row's
 ## `pick`; conflicted rows have none). Colors and sizes come from the
 ## `ChangeList` theme type.
@@ -86,27 +87,59 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 				_code_colors.get(code, _dir_color))
 	x += _code_width
 	var path: String = String(data["path"])
-	var file: String = path.get_file()
-	var dir: String = path.get_base_dir()
-	var original: String = String(data.get("original_path", ""))
-	var right: float = rect.end.x - _padding
-	if not original.is_empty() and original != path:
-		# Renamed: `old.md → new.md`, the old name dimmed; a changed folder
-		# reads `src/{a → b}` (see `rename_dir`).
-		if original.get_file() != file:
-			var old_name: String = "%s → " % original.get_file()
-			canvas.draw_string(_font, Vector2(x, baseline), old_name, HORIZONTAL_ALIGNMENT_LEFT,
-					maxf(1.0, right - x), _font_size, _dir_color)
-			x += _font.get_string_size(old_name, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x
-		if original.get_base_dir() != dir:
-			dir = rename_dir(original.get_base_dir(), dir)
-	if x < right:
-		canvas.draw_string(_font, Vector2(x, baseline), file, HORIZONTAL_ALIGNMENT_LEFT, maxf(1.0, right - x),
-				_font_size, _path_color)
-	x += _font.get_string_size(file, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x + _padding
-	if not dir.is_empty() and x < right:
-		canvas.draw_string(_font, Vector2(x, baseline), dir, HORIZONTAL_ALIGNMENT_LEFT, right - x,
+	var name: String = path.get_file()
+	var lead: PackedStringArray = path_lead(path, String(data.get("original_path", "")))
+	var room: float = rect.end.x - _padding - x
+	var name_width: float = _text_width(name)
+	var lead_width: float = _text_width(lead[0] + lead[1])
+	var text_top: float = rect.position.y + (rect.size.y - _font.get_height(_font_size)) / 2.0
+	var canvas_item: RID = canvas.get_canvas_item()
+	if lead_width + name_width <= room:
+		canvas.draw_string(_font, Vector2(x, baseline), lead[0] + lead[1], HORIZONTAL_ALIGNMENT_LEFT, -1,
 				_font_size, _dir_color)
+		canvas.draw_string(_font, Vector2(x + lead_width, baseline), name, HORIZONTAL_ALIGNMENT_LEFT, -1,
+				_font_size, _path_color)
+		return
+	# Too narrow: the folder gives way first (`src/compo…/file.rs`), then the name.
+	var separator_width: float = _text_width(lead[1])
+	var folder_room: float = room - name_width - separator_width
+	if lead[0].is_empty() or folder_room < _text_width("…") * 3.0:
+		_trimmed(name, room).draw(canvas_item, Vector2(x, text_top), _path_color)
+		return
+	var folder: TextLine = _trimmed(lead[0], folder_room)
+	folder.draw(canvas_item, Vector2(x, text_top), _dir_color)
+	x += minf(folder.get_line_width(), folder_room)
+	canvas.draw_string(_font, Vector2(x, baseline), lead[1], HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, _dir_color)
+	canvas.draw_string(_font, Vector2(x + separator_width, baseline), name, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			_font_size, _path_color)
+
+
+## What goes before a row's file name, muted: `[folder, separator]`, such as
+## `["src/ui", "/"]`. A renamed file reads `docs/old.md → new.md`, a moved
+## one `{src → lib}/util.rs` (see `rename_dir`), both `{src → lib}/a.rs → b.rs`.
+func path_lead(path: String, original: String) -> PackedStringArray:
+	var dir: String = path.get_base_dir()
+	if original.is_empty() or original == path:
+		return PackedStringArray([dir, "/" if not dir.is_empty() else ""])
+	var old_dir: String = original.get_base_dir()
+	var folder: String = dir if old_dir == dir else rename_dir(old_dir, dir)
+	if original.get_file() == path.get_file():
+		return PackedStringArray([folder, "/" if not folder.is_empty() else ""])
+	var old_name: String = original.get_file()
+	return PackedStringArray([folder.path_join(old_name) if not folder.is_empty() else old_name, " → "])
+
+
+func _text_width(text: String) -> float:
+	return _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x
+
+
+## `text` on one line of `width`, cut with an ellipsis when it doesn't fit.
+func _trimmed(text: String, width: float) -> TextLine:
+	var line: TextLine = TextLine.new()
+	line.add_string(text, _font, _font_size)
+	line.width = maxf(1.0, width)
+	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return line
 
 
 ## A folder that changed in a rename, `prefix{old → new}suffix` (cached:
