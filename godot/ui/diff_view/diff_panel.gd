@@ -2,10 +2,11 @@ class_name DiffPanel
 extends VBoxContainer
 ## A file diff with its header (status icon, path, notes, +/− counts,
 ## unified or side by side) and the messages shown instead of lines
-## (loading, binary, too large, no changes, errors). A renamed or copied
-## file's path reads `docs/{old.md → new.md}`, the old part dimmed. Callers pass `RepoSession.diff_info()`-style
-## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
-## the layout can change everywhere at once.
+## (loading, binary, too large, no changes, errors). The path reads like the
+## file lists': its folder muted, a renamed file `docs/old.md → new.md`.
+## Callers pass `RepoSession.diff_info()`-style dictionaries to `show_info`.
+## Every panel is in the `diff_panels` group so the layout can change
+## everywhere at once.
 
 const GROUP: StringName = &"diff_panels"
 ## What an empty diff says, by status code.
@@ -187,33 +188,25 @@ func counts_text() -> String:
 	return "%s %s" % [_added.text, _removed.text] if _counts.visible else ""
 
 
-## The header's path as shown, such as `docs/{a.md → b.md}`.
+## The header's path as shown, such as `docs/a.md → b.md`.
 func path_text() -> String:
 	return _path.get_parsed_text()
 
 
-## `path`, or for a rename or copy `prefix{old → new}suffix` with the old
-## part dimmed (`old → new` when the paths share nothing); the tooltip says
-## where it came from and how similar it is.
+## `path` like the file lists show it: everything before the file name
+## muted (`FileRowPainter.path_lead`, so a rename reads `docs/old.md → new.md`);
+## the tooltip says where a renamed or copied file came from and how similar it is.
 func _show_path(path: String, original: String, similarity: int) -> void:
 	_path_shown = [path, original, similarity]
 	_path.clear()
 	_path.tooltip_text = path
+	var lead: PackedStringArray = FileRowPainter.path_lead(path, original)
+	_path.push_color(FileRowPainter.dir_color(self))
+	_path.add_text(lead[0] + lead[1])
+	_path.pop()
+	_path.add_text(path.get_file())
 	if original.is_empty() or original == path:
-		_path.add_text(path)
 		return
-	var parts: PackedStringArray = Core.rename_parts(original, path)
-	var braces: bool = not parts[0].is_empty() or not parts[3].is_empty()
-	var dim: Color = get_theme_color(&"font_color", &"DimLabel")
-	_path.add_text(parts[0])
-	_path.push_color(dim)
-	_path.add_text("%s%s → " % ["{" if braces else "", parts[1]])
-	_path.pop()
-	_path.add_text(parts[2])
-	_path.push_color(dim)
-	_path.add_text("}" if braces else "")
-	_path.pop()
-	_path.add_text(parts[3])
 	_path.tooltip_text = "%s from %s" % ["Copied" if _code == "C" else "Renamed", original]
 	if similarity >= 0:
 		_path.tooltip_text += " · %d%% similar" % similarity

@@ -52,7 +52,8 @@ var _code_colors: Dictionary[String, Color] = {}
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
 var _picks: PickPainter = PickPainter.new()
-var _renamed_dirs: Dictionary[String, String] = {}
+## `path_lead` of renamed rows, by original and path.
+var _rename_leads: Dictionary[String, PackedStringArray] = {}
 
 
 ## Reads the theme values from `control` (call again on theme changes).
@@ -88,7 +89,7 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	x += _code_width
 	var path: String = String(data["path"])
 	var name: String = path.get_file()
-	var lead: PackedStringArray = path_lead(path, String(data.get("original_path", "")))
+	var lead: PackedStringArray = _lead(path, String(data.get("original_path", "")))
 	var room: float = rect.end.x - _padding - x
 	var name_width: float = _text_width(name)
 	var lead_width: float = _text_width(lead[0] + lead[1])
@@ -117,7 +118,7 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 ## What goes before a row's file name, muted: `[folder, separator]`, such as
 ## `["src/ui", "/"]`. A renamed file reads `docs/old.md → new.md`, a moved
 ## one `{src → lib}/util.rs` (see `rename_dir`), both `{src → lib}/a.rs → b.rs`.
-func path_lead(path: String, original: String) -> PackedStringArray:
+static func path_lead(path: String, original: String) -> PackedStringArray:
 	var dir: String = path.get_base_dir()
 	if original.is_empty() or original == path:
 		return PackedStringArray([dir, "/" if not dir.is_empty() else ""])
@@ -142,16 +143,22 @@ func _trimmed(text: String, width: float) -> TextLine:
 	return line
 
 
-## A folder that changed in a rename, `prefix{old → new}suffix` (cached:
-## rows are drawn every frame).
-func rename_dir(old_dir: String, new_dir: String) -> String:
-	var key: String = old_dir + "\n" + new_dir
-	if not _renamed_dirs.has(key):
-		if _renamed_dirs.size() > 256:
-			_renamed_dirs.clear()
-		var parts: PackedStringArray = Core.rename_parts(old_dir, new_dir)
-		_renamed_dirs[key] = "%s{%s → %s}%s" % [parts[0], parts[1], parts[2], parts[3]]
-	return _renamed_dirs[key]
+## A folder that changed in a rename, `prefix{old → new}suffix`.
+static func rename_dir(old_dir: String, new_dir: String) -> String:
+	var parts: PackedStringArray = Core.rename_parts(old_dir, new_dir)
+	return "%s{%s → %s}%s" % [parts[0], parts[1], parts[2], parts[3]]
+
+
+## `path_lead`, cached for renamed rows (rows are drawn every frame).
+func _lead(path: String, original: String) -> PackedStringArray:
+	if original.is_empty() or original == path:
+		return path_lead(path, original)
+	var key: String = original + "\n" + path
+	if not _rename_leads.has(key):
+		if _rename_leads.size() > 256:
+			_rename_leads.clear()
+		_rename_leads[key] = path_lead(path, original)
+	return _rename_leads[key]
 
 
 ## The status icon of `code` (white, to tint with `code_color`), or null.
@@ -162,6 +169,11 @@ static func code_icon(code: String) -> Texture2D:
 ## The colour of `code`'s icon in `control`'s theme.
 static func code_color(control: Control, code: String) -> Color:
 	return control.get_theme_color(CODE_COLORS.get(code, &"dir_color"), THEME_TYPE)
+
+
+## The muted colour of a path's folder in `control`'s theme.
+static func dir_color(control: Control) -> Color:
+	return control.get_theme_color(&"dir_color", THEME_TYPE)
 
 
 ## "Added", "Modified", ... for `code`.
