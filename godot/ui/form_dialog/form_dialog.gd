@@ -11,29 +11,21 @@ signal field_changed(key: String)
 
 const THEME_TYPE: StringName = &"FormDialog"
 
-## `func(values: Dictionary) -> String`: an error to show, or "" when valid.
-## Errors show once the user changed something, but not while the first text
-## field is still empty and untouched (a choice made before typing a name);
-## OK is disabled before that too.
+## `func(values: Dictionary) -> String`: what is wrong, or "" when valid.
+## While something is wrong OK is disabled, with the reason as its tooltip.
 var validator: Callable = Callable()
-## A text field errors wait for until the user types in it, even when it
-## starts filled in (a branch prefix); "" for the rule above.
-var waits_for: String = ""
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
 ## Folder fields' `on_pick` (see `add_folder`).
 var _pickers: Dictionary[String, Callable] = {}
-## Fields the user changed.
-var _touched: Dictionary[String, bool] = {}
-## The user tried to submit: every error shows.
-var _attempted: bool = false
+## What is wrong with the values, or "" (see `validator`).
+var _error: String = ""
 ## `func(values: Dictionary) -> void`, called with the submitted values.
 var _on_submit: Callable = Callable()
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
-@onready var _error: Label = %Error
 
 
 func _ready() -> void:
@@ -53,7 +45,6 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	ok_button_text = ok_text
 	_on_submit = on_submit
 	validator = Callable()
-	waits_for = ""
 	for parent: Node in [_intro, _box]:
 		for child: Node in parent.get_children():
 			parent.remove_child(child)
@@ -62,9 +53,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_fields.clear()
 	_ref_names.clear()
 	_pickers.clear()
-	_touched.clear()
-	_attempted = false
-	_error.text = ""
+	_error = ""
 
 
 ## A one-line text field. `ref_name` turns typed spaces into dashes.
@@ -127,7 +116,6 @@ func pick_folder(key: String, dir: String) -> void:
 		return
 	line.text = String(_pickers[key].call(dir)) if _pickers.has(key) else dir
 	line.caret_column = line.text.length()
-	_touched[key] = true
 	_validate()
 
 
@@ -271,7 +259,7 @@ func values() -> Dictionary:
 
 
 func error_text() -> String:
-	return _error.text
+	return _error
 
 
 func open() -> void:
@@ -291,7 +279,6 @@ func open() -> void:
 
 ## Submits like the OK button, if the form is valid. Returns whether it did.
 func submit() -> bool:
-	_attempted = true
 	if not _validate():
 		return false
 	hide()
@@ -305,28 +292,13 @@ func _submit() -> void:
 
 
 func _validate() -> bool:
-	var error: String = String(validator.call(values())) if validator.is_valid() else ""
-	var shown: bool = _attempted or (not _touched.is_empty() and not _waiting())
-	_error.text = error if shown else ""
-	_error.visible = not _error.text.is_empty()
-	get_ok_button().disabled = not error.is_empty()
-	return error.is_empty()
-
-
-## Whether errors still wait for the user to type (see `validator`).
-func _waiting() -> bool:
-	if not waits_for.is_empty():
-		return not _touched.has(waits_for)
-	for key: String in _fields:
-		var control: Control = _fields[key]
-		if control is LineEdit or control is TextEdit:
-			var text: String = (control as LineEdit).text if control is LineEdit else (control as TextEdit).text
-			return text.strip_edges().is_empty() and not _touched.has(key)
-	return false
+	_error = String(validator.call(values())) if validator.is_valid() else ""
+	get_ok_button().disabled = not _error.is_empty()
+	get_ok_button().tooltip_text = _error
+	return _error.is_empty()
 
 
 func _touch(key: String) -> void:
-	_touched[key] = true
 	field_changed.emit(key)
 	_validate()
 

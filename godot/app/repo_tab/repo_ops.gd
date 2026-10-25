@@ -581,7 +581,6 @@ func new_task() -> void:
 	_form.add_check("track", "", true)
 	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
 	_form.validator = _check_task
-	_form.waits_for = "name"
 	_show_remote_match()
 	_form.open()
 	# Typing goes after the prefix instead of replacing it.

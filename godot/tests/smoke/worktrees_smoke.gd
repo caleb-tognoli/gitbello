@@ -54,8 +54,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks for the task")
 	var base: OptionButton = form.field("base") as OptionButton
 	base.item_selected.emit(base.selected)
-	expect_eq(form.error_text(), "", "choosing a base before the name shows no error")
 	expect(form.get_ok_button().disabled, "Create waits for a name")
+	expect(not form.get_ok_button().tooltip_text.is_empty(), "its tooltip says why")
 	type_text("task one")
 	var folder: LineEdit = form.field("folder") as LineEdit
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
@@ -120,7 +120,7 @@ func run() -> void:
 	expect_eq(name_line.text, "me/", "the name starts with the prefix")
 	start = form.field("base") as OptionButton
 	start.item_selected.emit(start.selected)
-	expect_eq(form.error_text(), "", "the bare prefix shows no error before typing")
+	expect(form.get_ok_button().disabled, "the bare prefix is not a name yet")
 	type_text("idea")
 	expect(await wait_until(func() -> bool: return name_line.text == "me/idea"), "typing goes after the prefix: %s" % name_line.text)
 	var shown: LineEdit = form.field("folder") as LineEdit
