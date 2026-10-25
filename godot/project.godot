@@ -35,7 +35,7 @@ window/subwindows/embed_subwindows=false
 
 [gui]
 
-theme/custom="res://themes/dark.tres"
+theme/custom="res://themes/app_theme.tres"
 
 [rendering]
 

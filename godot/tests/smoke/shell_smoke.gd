@@ -83,11 +83,11 @@ func run() -> void:
 	main.close_tab(main.tab_count() - 1)
 
 	expect(Actions.run_action(&"view.theme_light"), "light theme action runs")
-	expect(main.theme == ThemeManager.LIGHT, "light theme applied")
+	expect(ThemeManager.light, "light theme applied")
 	var tree_bg: StyleBoxFlat = main.page_at(0).sidebar().get_theme_stylebox(&"panel", &"Tree") as StyleBoxFlat
 	expect(tree_bg != null and tree_bg.bg_color.get_luminance() > 0.5, "light theme reaches the sidebar")
 	Actions.run_action(&"view.theme_dark")
-	expect(main.theme == ThemeManager.DARK, "dark theme applied")
+	expect(not ThemeManager.light, "dark theme applied")
 	Actions.run_action(&"view.theme_system")
 
 	# Restore on launch: a fresh shell reopens the saved tabs.
