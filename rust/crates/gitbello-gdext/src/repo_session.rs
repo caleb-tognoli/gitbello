@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use gitbello_core::changes::{commit_message, PickState};
+use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
 use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
@@ -708,13 +708,37 @@ impl RepoSession {
 
     // --- Changes view ---------------------------------------------------------
 
-    /// Changed files: conflicted first, then the rest by path.
+    /// Changed files, shown by the filter or not.
     #[func]
     fn change_count(&self) -> i64 {
+        self.read(|s| to_i64(s.changes().total())).unwrap_or(0)
+    }
+
+    /// Changed files the filter shows: conflicted first, then the rest by
+    /// path. The `change_*` rows below are these.
+    #[func]
+    fn shown_change_count(&self) -> i64 {
         self.read(|s| to_i64(s.changes().len())).unwrap_or(0)
     }
 
-    /// Rows `start..start + count` of the changed files:
+    /// Shows only the changed files whose path contains `text` (any case),
+    /// narrowed by `options`: any of `included`, `excluded`, `new`,
+    /// `modified`, `deleted`. Rows change at once (no signal).
+    #[func]
+    fn set_change_filter(&self, text: GString, options: PackedStringArray) {
+        let has = |id: &str| options.as_slice().iter().any(|o| *o == id);
+        let filter = ChangeFilter {
+            text: text.to_string(),
+            included: has("included"),
+            excluded: has("excluded"),
+            new: has("new"),
+            modified: has("modified"),
+            deleted: has("deleted"),
+        };
+        runtime_cell::with(|rt| rt.set_change_filter(&self.key, filter));
+    }
+
+    /// Rows `start..start + count` of the changed files shown:
     /// `{path, original_path, code, pick, conflicted, as_staged}` (code is
     /// `M`, `A`, `D`, `R`, `?`, `U`, ...; pick is `all`, `none` or `partial`).
     #[func]
@@ -789,14 +813,14 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.pick_files(&self.key, &paths, include)).unwrap_or(false)
     }
 
-    /// The check-all box: `all`, `none` or `partial`.
+    /// The check-all box over the files shown: `all`, `none` or `partial`.
     #[func]
     fn selection_state(&self) -> GString {
-        self.read(|s| GString::from(s.selection().overall_state().id()))
+        self.read(|s| GString::from(s.shown_selection_state().id()))
             .unwrap_or_else(|| GString::from("none"))
     }
 
-    /// Includes or excludes every file.
+    /// Includes or excludes every file shown.
     #[func]
     fn pick_all(&self, include: bool) {
         runtime_cell::with(|rt| rt.pick_all(&self.key, include));
