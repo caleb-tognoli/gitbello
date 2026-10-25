@@ -37,6 +37,7 @@ var _showing_shelf: bool = false
 @onready var _switch_slot: Container = %SwitchSlot
 @onready var _check_all: PickBox = %CheckAll
 @onready var _count_label: Label = %CountLabel
+@onready var _list_header: Control = %ListHeader
 @onready var _list: ChangeList = %List
 @onready var _commit_box: CommitBox = %CommitBox
 @onready var _diff_panel: DiffPanel = %DiffPanel
@@ -388,11 +389,12 @@ static func _describe(paths: PackedStringArray) -> String:
 	return paths[0].get_file() if paths.size() == 1 else "%d files" % paths.size()
 
 
-## "N changed files" and the check-all box.
+## "N changed files" and the check-all box; hidden without changes (the
+## empty state beside the list says so).
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
-	_count_label.text = "No changed files" if count == 0 \
-			else ("1 changed file" if count == 1 else "%d changed files" % count)
+	_list_header.visible = count > 0
+	_count_label.text = "1 changed file" if count == 1 else "%d changed files" % count
 	_check_all.state = session.selection_state() if session != null else "none"
 	_check_all.visible = count > 0
 	_check_all.tooltip_text = "Leave out every file" if _check_all.state == "all" else "Include every file"
@@ -418,10 +420,7 @@ func _update_empty() -> void:
 	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New task", "icon": &"GitWorktree"})
-	var branch: String = session.current_branch()
-	_empty.show_state("No local changes",
-			"Everything is committed on %s." % branch if not branch.is_empty() else "Everything is committed.",
-			actions)
+	_empty.show_state("No local changes", "", actions)
 
 
 func _on_selection_changed() -> void:
