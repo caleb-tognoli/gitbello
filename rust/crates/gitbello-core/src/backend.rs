@@ -13,7 +13,9 @@ use crate::changes::IndexEntry;
 use crate::diff::{
     parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
 };
-use crate::git::{CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, Progress};
+use crate::git::{
+    CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, GitStream, Progress,
+};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
@@ -52,6 +54,15 @@ pub trait GitBackend: Send + Sync {
         limit: Option<usize>,
         cancel: &CancelToken,
     ) -> Result<FileDiff, GitError>;
+    /// The content of blob `oid`, or `None` when it is larger than `limit`
+    /// bytes (the old side of a diff, for showing the lines between hunks).
+    fn blob(
+        &self,
+        repo: &Path,
+        oid: &str,
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, GitError>;
     /// Full message of the HEAD commit (for amending).
     fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError>;
 
@@ -307,6 +318,7 @@ const DIFF_ARGS: &[&str] = &[
     "--no-relative",
     "--no-color",
     "--full-index",
+    "--unified=3",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
@@ -339,6 +351,7 @@ const DIFF_TREE_ARGS: &[&str] = &[
     "--no-textconv",
     "--no-color",
     "--full-index",
+    "--unified=3",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
@@ -465,34 +478,36 @@ impl GitBackend for CliBackend {
         if let Some(original) = &target.original_path {
             cmd = cmd.arg(original);
         }
-        let mut stream = cmd.arg(&target.path).stream()?;
-        let limit = limit.unwrap_or(usize::MAX);
-        let mut output = Vec::new();
-        let mut chunk = vec![0u8; 64 * 1024];
-        loop {
-            if cancel.is_cancelled() {
-                stream.kill();
-                return stream.finish().map(|()| FileDiff::default());
-            }
-            let n = stream.read(&mut chunk).map_err(|err| {
-                GitError::new(stream.command(), GitErrorKind::Io, err.to_string())
-            })?;
-            if n == 0 {
-                break;
-            }
-            output.extend_from_slice(&chunk[..n]);
-            if output.len() > limit {
-                // Dropping the stream stops git; the log records it as cancelled.
-                return Ok(FileDiff::too_large(output.len()));
-            }
-        }
+        let stream = cmd.arg(&target.path).stream()?;
         let command = stream.command().to_owned();
-        stream.finish()?;
+        let output = match read_limited(stream, limit.unwrap_or(usize::MAX), cancel)? {
+            Limited::Read(output) => output,
+            Limited::TooLarge(bytes) => return Ok(FileDiff::too_large(bytes)),
+            Limited::Cancelled => return Ok(FileDiff::default()),
+        };
         let mut diff = parse_diff(&output).map_err(|e| unexpected(&[command.as_str()], e))?;
         if let DiffContent::Binary { .. } = diff.content {
             diff.content = self.binary_sizes(toplevel, target, cancel);
         }
         Ok(diff)
+    }
+
+    fn blob(
+        &self,
+        repo: &Path,
+        oid: &str,
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        let stream = self
+            .runner
+            .read(repo)
+            .args(["cat-file", "blob", oid])
+            .stream()?;
+        Ok(match read_limited(stream, limit, cancel)? {
+            Limited::Read(text) => Some(text),
+            Limited::TooLarge(_) | Limited::Cancelled => None,
+        })
     }
 
     fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError> {
@@ -1329,6 +1344,43 @@ impl CliBackend {
 }
 
 /// The diff of an untracked file, read from disk.
+/// What [`read_limited`] read.
+enum Limited {
+    Read(Vec<u8>),
+    /// Stopped past the limit, after this many bytes.
+    TooLarge(usize),
+    Cancelled,
+}
+
+/// Reads `stream` to the end, or stops once it passes `limit` bytes or is
+/// cancelled (git is stopped; the log records it as cancelled).
+fn read_limited(
+    mut stream: GitStream,
+    limit: usize,
+    cancel: &CancelToken,
+) -> Result<Limited, GitError> {
+    let mut output = Vec::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        if cancel.is_cancelled() {
+            stream.kill();
+            return stream.finish().map(|()| Limited::Cancelled);
+        }
+        let n = stream
+            .read(&mut chunk)
+            .map_err(|err| GitError::new(stream.command(), GitErrorKind::Io, err.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        output.extend_from_slice(&chunk[..n]);
+        if output.len() > limit {
+            return Ok(Limited::TooLarge(output.len()));
+        }
+    }
+    stream.finish()?;
+    Ok(Limited::Read(output))
+}
+
 fn read_untracked(path: &Path, limit: Option<usize>) -> Result<FileDiff, GitError> {
     let io_error = |err: std::io::Error| {
         GitError::new(

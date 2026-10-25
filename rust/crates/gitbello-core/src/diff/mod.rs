@@ -6,8 +6,13 @@ use std::path::PathBuf;
 
 use crate::repo::{Change, ParseError};
 
+mod layout;
 mod patch;
 
+pub use layout::{
+    DiffLayout, Expand, Expanders, Expansion, HeaderRow, LayoutRow, OldFile, CONTEXT_LINES,
+    EXPAND_STEP,
+};
 pub use patch::{build_patch, PatchMode};
 
 /// Diffs whose git output exceeds this many bytes are not loaded until the

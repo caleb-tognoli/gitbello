@@ -62,6 +62,15 @@ impl GitBackend for FakeBackend {
     ) -> Result<FileDiff, GitError> {
         Ok(FileDiff::default())
     }
+    fn blob(
+        &self,
+        _: &Path,
+        _: &str,
+        _: usize,
+        _: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        Ok(None)
+    }
     fn head_message(&self, _: &Path, _: &CancelToken) -> Result<String, GitError> {
         Ok(String::new())
     }
