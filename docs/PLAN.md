@@ -431,12 +431,14 @@ Split after the M3 review into M4a (file-level flow) and M4b (hunk and line work
 Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D12) and a new information hierarchy, action layout and feedback model. The design is in §4; D6, D7, D10 and D11 record the changed decisions. Four phases, each ending with a review stop. The milestone numbers after it are unchanged.
 
 #### P1 — Theme and icons (≈1.5 weeks)
-- [ ] `AppTheme` (§3.7): palettes, accent colour setting, type variations, contrast check, live rebuild on OS theme, override or accent changes
-- [ ] Remove `cargo xtask themes` and the generated `.tres` files; update AGENTS.md (commands, theming convention, layout)
-- [ ] Icon set: Godot editor icons plus git icons in the editor style, recoloured per theme; license notice
-- [ ] Restyle the existing screens without changing flows: lists, graph labels, diff, toasts, dialogs in the labels-left form layout
+- [x] `AppTheme` (§3.7): palettes, accent colour setting, type variations, contrast check, live rebuild on OS theme, override or accent changes
+- [x] Remove `cargo xtask themes` and the generated `.tres` files; update AGENTS.md (commands, theming convention, layout)
+- [x] Icon set: Godot editor icons plus git icons in the editor style, recoloured per theme; license notice
+- [x] Restyle the existing screens without changing flows: lists, graph labels, diff, toasts, dialogs in the labels-left form layout
 
 **Accept when** screenshots of every screen in dark, light and two accent colours are reviewed, a test checks the contrast of selected-row text, and smoke tests are green.
+
+*Result:* `godot/app/theme/app_theme.gd` builds the theme into the project theme (`themes/app_theme.tres`, empty on disk) like spritesheetbelli, so dialogs under plain nodes get it too. The accent is a core config key (`accent = "#rrggbb"`, normalised, empty for the default) edited in Settings with seven swatches and a picker. Ref labels are darkened until their text reads, and diff backgrounds are the git colours blended into the background. `theme_smoke.gd` checks WCAG AA contrast for selected rows with 11 accents in both themes, text and muted text on every surface, ref labels, icon recolouring and the accent setting. 26 Godot editor icons plus 12 drawn ones (`Git*`, `Terminal`), licenses in `themes/icons/LICENSES.md`. Forms use a label column with intro notes and hints, and the main button of each form is the accent colour. Screenshots: `shell_screenshots.tscn` now also saves `accent_teal_light` and `accent_pink_dark`.
 
 #### P2 — Shell (≈2.5 weeks)
 - [ ] Menu bar from the registry (global menu on macOS where Godot supports it), disabled reasons in tooltips
