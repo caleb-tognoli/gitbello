@@ -714,7 +714,7 @@ func _register_worktree_actions() -> void:
 
 
 ## The Settings dialog: pull mode, auto-fetch, editor, terminal, the
-## worktree folder template and the accent colour.
+## worktree folder template, the branch prefix and the accent colour.
 func _open_settings() -> void:
 	var settings: Dictionary = Core.settings()
 	var modes: PackedStringArray = PackedStringArray(["ff-only", "merge", "rebase"])
@@ -728,10 +728,14 @@ func _open_settings() -> void:
 			"The platform's terminal")
 	_settings_form.add_line("worktree_template", "New worktree folders", String(settings["worktree_template"]))
 	_settings_form.add_note("{repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
+	_settings_form.add_line("branch_prefix", "Branch prefix", String(settings["branch_prefix"]), false, "None")
+	_settings_form.add_note("Starts the name of new worktrees' branches, for example caleb/.")
 	_settings_form.add_color("accent", "Accent colour", ThemeManager.configured_accent(), AppTheme.ACCENT_PRESETS)
 	_settings_form.validator = func(values: Dictionary) -> String:
 		var minutes: String = String(values["auto_fetch_minutes"])
-		return "" if minutes.is_valid_int() and int(minutes) >= 0 else "Enter a whole number of minutes."
+		if not minutes.is_valid_int() or int(minutes) < 0:
+			return "Enter a whole number of minutes."
+		return Core.branch_prefix_error(String(values["branch_prefix"]))
 	_settings_form.open()
 
 

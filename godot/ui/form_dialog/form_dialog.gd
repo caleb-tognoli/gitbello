@@ -16,6 +16,9 @@ const THEME_TYPE: StringName = &"FormDialog"
 ## field is still empty and untouched (a choice made before typing a name);
 ## OK is disabled before that too.
 var validator: Callable = Callable()
+## A text field errors wait for until the user types in it, even when it
+## starts filled in (a branch prefix); "" for the rule above.
+var waits_for: String = ""
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
@@ -50,6 +53,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	ok_button_text = ok_text
 	_on_submit = on_submit
 	validator = Callable()
+	waits_for = ""
 	for parent: Node in [_intro, _box]:
 		for child: Node in parent.get_children():
 			parent.remove_child(child)
@@ -302,15 +306,17 @@ func _submit() -> void:
 
 func _validate() -> bool:
 	var error: String = String(validator.call(values())) if validator.is_valid() else ""
-	var shown: bool = _attempted or (not _touched.is_empty() and not _first_line_unfilled())
+	var shown: bool = _attempted or (not _touched.is_empty() and not _waiting())
 	_error.text = error if shown else ""
 	_error.visible = not _error.text.is_empty()
 	get_ok_button().disabled = not error.is_empty()
 	return error.is_empty()
 
 
-## Whether the first text field is empty and the user has not typed in it.
-func _first_line_unfilled() -> bool:
+## Whether errors still wait for the user to type (see `validator`).
+func _waiting() -> bool:
+	if not waits_for.is_empty():
+		return not _touched.has(waits_for)
 	for key: String in _fields:
 		var control: Control = _fields[key]
 		if control is LineEdit or control is TextEdit:

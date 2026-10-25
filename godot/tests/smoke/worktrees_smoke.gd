@@ -60,16 +60,17 @@ func run() -> void:
 	var folder: LineEdit = form.field("folder") as LineEdit
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
 			"the folder follows the branch: %s" % folder.text)
-	expect(folder.text.contains("repo-10.worktrees"), "the default template is used: %s" % folder.text)
-	var task_path: String = folder.text
+	expect(folder.text.begins_with("repo-10.worktrees/"),
+			"the default template is used, shown from the repository's folder: %s" % folder.text)
+	var task_path: String = fixtures.path_join(folder.text)
 	# Browse: a folder with things in it is where the worktree goes; an empty
 	# one is the worktree's folder.
 	form.pick_folder("folder", fixtures)
-	expect_eq(folder.text, fixtures.path_join("task-one"), "a picked folder holds the worktree")
+	expect_eq(folder.text, "task-one", "a picked folder holds the worktree")
 	var empty: String = fixtures.path_join("picked empty")
 	DirAccess.make_dir_absolute(empty)
 	form.pick_folder("folder", empty)
-	expect_eq(folder.text, empty, "a picked empty folder is the worktree's")
+	expect_eq(folder.text, "picked empty", "a picked empty folder is the worktree's")
 	folder.text = task_path
 	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
 	expect(form.field("open_tab") == null, "the new worktree always shows; no switch to ask about")
@@ -109,6 +110,24 @@ func run() -> void:
 	type_text("x")
 	expect(await wait_until(func() -> bool: return not track.is_visible_in_tree()), "another name drops the offer")
 	form.hide()
+
+	# A branch prefix from the settings starts the name; typing goes after it.
+	expect(not Core.set_settings({"branch_prefix": "a b/"}).is_empty(), "a prefix git refuses is refused")
+	expect_eq(Core.set_settings({"branch_prefix": "me/"}), "", "the prefix is saved")
+	press("Ctrl+T")
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks once more")
+	var name_line: LineEdit = form.field("name") as LineEdit
+	expect_eq(name_line.text, "me/", "the name starts with the prefix")
+	start = form.field("base") as OptionButton
+	start.item_selected.emit(start.selected)
+	expect_eq(form.error_text(), "", "the bare prefix shows no error before typing")
+	type_text("idea")
+	expect(await wait_until(func() -> bool: return name_line.text == "me/idea"), "typing goes after the prefix: %s" % name_line.text)
+	var shown: LineEdit = form.field("folder") as LineEdit
+	expect(await wait_until(func() -> bool: return shown.text.ends_with("me-idea")), "the folder follows: %s" % shown.text)
+	expect(not shown.text.is_absolute_path(), "shown from the repository's folder: %s" % shown.text)
+	form.hide()
+	Core.set_settings({"branch_prefix": ""})
 
 	# Lock, unlock and remove a worktree from its chip's menu.
 	var spare: String = fixtures.path_join("repo-10-spare")

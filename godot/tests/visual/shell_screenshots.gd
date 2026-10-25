@@ -141,8 +141,9 @@ func _ready() -> void:
 	page.select_chip(0)
 	page.ops().new_task()
 	var form: FormDialog = page.ops().form()
-	(form.field("name") as LineEdit).text = "fix-login"
-	(form.field("folder") as LineEdit).text = page.session.worktree_path_for("fix-login")
+	var name_line: LineEdit = form.field("name") as LineEdit
+	name_line.text = name_line.text + "fix-login"
+	name_line.text_changed.emit(name_line.text)
 	await _shot_window(form, out, "new_task")
 	form.hide()
 	page.ops().cleanup_worktrees()

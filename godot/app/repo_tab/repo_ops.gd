@@ -575,13 +575,50 @@ func new_task() -> void:
 	_folder_parent = ""
 	_remote_match = ""
 	_begin_form("task", "New worktree", "Create", _create_task)
-	_form.add_line("name", "Branch", "", true)
+	var prefix: String = String(Core.settings()["branch_prefix"])
+	var name_line: LineEdit = _form.add_line("name", "Branch", prefix, true)
 	_form.add_choice("base", "Start from", bases, 0)
 	_form.add_check("track", "", true)
 	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
+	_add_folder_note()
 	_form.validator = _check_task
+	_form.waits_for = "name"
 	_show_remote_match()
 	_form.open()
+	# Typing goes after the prefix instead of replacing it.
+	name_line.deselect()
+	name_line.caret_column = name_line.text.length()
+
+
+## The folder field shows paths relative to the main worktree's parent;
+## this note says which folder that is.
+func _add_folder_note() -> void:
+	_form.add_note("In %s" % Paths.shown(_folder_base()))
+
+
+## Where the folder field's relative paths start: the main worktree's parent.
+func _folder_base() -> String:
+	for wt: Dictionary in session.worktrees():
+		if bool(wt["is_main"]):
+			return String(wt["path"]).get_base_dir()
+	return session.toplevel().get_base_dir()
+
+
+## `path` as the folder field shows it: relative when inside `_folder_base()`.
+func _shown_folder(path: String) -> String:
+	var inside: String = Paths.relative(path, _folder_base())
+	return inside if not inside.is_empty() else path
+
+
+## The folder field's `text` as a full path.
+func _folder_path(text: String) -> String:
+	return text if text.is_empty() or text.is_absolute_path() else _folder_base().path_join(text)
+
+
+## The typed branch name, or "" while it is just the branch prefix.
+func _typed_name(values: Dictionary) -> String:
+	var name: String = String(values["name"])
+	return "" if name == String(Core.settings()["branch_prefix"]) else name
 
 
 ## The remote branch named `name` (`origin/<name>` first), when no local
@@ -611,10 +648,10 @@ func _show_remote_match() -> void:
 func _pick_task_folder(dir: String) -> String:
 	if Core.new_worktree_path_error(dir).is_empty():
 		_folder_edited = true
-		return dir
+		return _shown_folder(dir)
 	_folder_edited = false
 	_folder_parent = dir
-	return _task_folder(String(_form.values()["name"]))
+	return _shown_folder(_task_folder(_typed_name(_form.values())))
 
 
 ## The new-task folder for branch `name` (just the picked folder, or "",
@@ -630,8 +667,7 @@ func _check_task(values: Dictionary) -> String:
 	var error: String = _check_branch_name(values, "")
 	if not error.is_empty():
 		return error
-	var folder: String = String(values.get("folder", ""))
-	return Core.new_worktree_path_error(folder)
+	return Core.new_worktree_path_error(_folder_path(String(values.get("folder", ""))))
 
 
 func _create_task(values: Dictionary) -> void:
@@ -641,7 +677,7 @@ func _create_task(values: Dictionary) -> void:
 	for name: String in session.remotes():
 		if base.begins_with(name + "/") and name.length() > remote.length():
 			remote = name
-	var folder: String = String(values["folder"])
+	var folder: String = _folder_path(String(values["folder"]))
 	var name: String = String(values["name"])
 	var job: int = session.new_task(name, base, folder, remote, track)
 	if job >= 0:
@@ -663,32 +699,33 @@ func add_existing_worktree() -> void:
 		return
 	_begin_form("existing", "Add worktree", "Add", func(values: Dictionary) -> void:
 		var branch: String = String(values["branch"])
-		var path: String = String(values["folder"])
+		var path: String = _folder_path(String(values["folder"]))
 		var job: int = session.add_worktree(path, branch, "")
 		if job >= 0:
 			_tasks[job] = path
 		_track(job, "Adding a worktree for %s" % branch, "Added a worktree for %s" % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
-	_form.add_folder("folder", "Folder", session.worktree_path_for(branches[0]))
+	_form.add_folder("folder", "Folder", _shown_folder(session.worktree_path_for(branches[0])), "", _shown_folder)
+	_add_folder_note()
 	_form.validator = func(values: Dictionary) -> String:
-		return Core.new_worktree_path_error(String(values.get("folder", "")))
+		return Core.new_worktree_path_error(_folder_path(String(values.get("folder", ""))))
 	_form.open()
 
 
 func _on_form_field(key: String) -> void:
 	if _form_kind == "existing" and key == "branch":
-		(_form.field("folder") as LineEdit).text = session.worktree_path_for(String(_form.values()["branch"]))
+		(_form.field("folder") as LineEdit).text = _shown_folder(session.worktree_path_for(String(_form.values()["branch"])))
 		return
 	if _form_kind != "task":
 		return
 	if key == "folder":
 		_folder_edited = true
 	elif key == "name":
-		var name: String = String(_form.values()["name"])
+		var name: String = _typed_name(_form.values())
 		_remote_match = _remote_branch_named(name)
 		_show_remote_match()
 		if not _folder_edited:
-			(_form.field("folder") as LineEdit).text = _task_folder(name)
+			(_form.field("folder") as LineEdit).text = _shown_folder(_task_folder(name))
 	elif key == "track":
 		_show_remote_match()
 
