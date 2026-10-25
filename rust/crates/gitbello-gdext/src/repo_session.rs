@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use gitbello_core::changes::{commit_message, PickState};
-use gitbello_core::diff::PatchMode;
+use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
-use gitbello_core::runtime::RepoState;
+use gitbello_core::runtime::{DiffSlot, RepoState};
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
@@ -849,17 +849,17 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Visible slice of the selected diff: `{kind, old, new, text, no_newline,
-    /// picked}` (kind 0 = hunk header, 1 = context, 2 = added, 3 = removed;
-    /// picked is `all`, `none`, `partial` or empty when lines cannot be picked).
+    /// Visible slice of the selected diff: `{index, kind, old, new, text,
+    /// no_newline, picked}` (kind 0 = hunk header, 1 = context, 2 = added,
+    /// 3 = removed; picked is `all`, `none`, `partial` or empty when lines
+    /// cannot be picked). See `convert::diff_rows` for headers' expanders
+    /// and the unchanged lines of open gaps (`index` -1).
     #[func]
     fn diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
-            let state = s.diff()?;
-            let language = convert::diff_language(&state.target().path);
-            let lines = convert::diff_lines(state.diff()?, start, count, language);
+            let lines = convert::diff_rows(s.diff()?, false, start, count);
             for mut line in lines.iter_shared() {
                 mark_picked(&mut line, s.diff_picks());
             }
@@ -879,8 +879,7 @@ impl RepoSession {
         let commit = slot == "commit";
         self.read(|s| {
             let state = if commit { s.commit_diff() } else { s.diff() }?;
-            let language = convert::diff_language(&state.target().path);
-            let rows = convert::split_rows(state.diff()?, start, count, language);
+            let rows = convert::diff_rows(state, true, start, count);
             if !commit {
                 for row in rows.iter_shared() {
                     for side in ["left", "right"] {
@@ -956,15 +955,28 @@ impl RepoSession {
     fn commit_diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
-        self.read(|s| {
-            let state = s.commit_diff()?;
-            let language = convert::diff_language(&state.target().path);
-            state
-                .diff()
-                .map(|diff| convert::diff_lines(diff, start, count, language))
-        })
-        .flatten()
-        .unwrap_or_default()
+        self.read(|s| Some(convert::diff_rows(s.commit_diff()?, false, start, count)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Opens part of gap `gap` of a diff (`slot` is `changes` or `commit`;
+    /// `how` is `up`, `down` or `all`, from a row's `expand`). The diff's
+    /// changed signal follows, once the old file is read if needed.
+    #[func]
+    fn expand_diff(&self, slot: GString, gap: i64, how: GString) {
+        let (Some(how), Ok(gap)) = (Expand::from_id(&how.to_string()), usize::try_from(gap)) else {
+            return;
+        };
+        let slot = parse_slot(&slot);
+        runtime_cell::with(|rt| rt.expand_diff(&self.key, slot, gap, how));
+    }
+
+    /// Shows every line of the file in a diff, or only its hunks again.
+    #[func]
+    fn show_whole_diff(&self, slot: GString, whole: bool) {
+        let slot = parse_slot(&slot);
+        runtime_cell::with(|rt| rt.show_whole_diff(&self.key, slot, whole));
     }
 
     /// Whether the selected diff's lines can be discarded (`mode` is
@@ -1126,6 +1138,15 @@ impl RepoSession {
             }
         })
         .unwrap_or_default()
+    }
+}
+
+/// `commit` is the commit file diff; anything else the Changes diff.
+fn parse_slot(id: &GString) -> DiffSlot {
+    if *id == "commit" {
+        DiffSlot::Commit
+    } else {
+        DiffSlot::Changes
     }
 }
 
