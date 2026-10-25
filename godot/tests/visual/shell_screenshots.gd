@@ -84,6 +84,21 @@ func _ready() -> void:
 	Actions.run_action(&"changes.focus_message")
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
+	# The filter over the changed files and its options.
+	var filter: ChangeFilterBar = changes.filter_bar()
+	await _shot(out, "changes_filter_empty")
+	filter.focus_text()
+	filter.set_text("src")
+	filter.set_option("modified", true)
+	await _shot(out, "changes_filter")
+	Actions.run_action(&"view.theme_light")
+	await _shot(out, "changes_filter_light")
+	Actions.run_action(&"view.theme_dark")
+	filter.options_button().pressed.emit()
+	await _shot_window(filter.menu(), out, "changes_filter_menu")
+	filter.menu().hide()
+	filter.set_option("modified", false)
+	filter.set_text("")
 	page.show_view(WorktreeView.View.HISTORY)
 
 	# M6.5 P2: the branch list and a branch's menu, the new-branch form, a

@@ -2,7 +2,9 @@ class_name ChangesView
 extends HSplitContainer
 ## Working-copy changes of one worktree (PLAN §4 Changes view): one list of
 ## changed files with commit checkboxes, the commit box under it, and the diff
-## of the highlighted file with line checkboxes. The checkboxes are the commit
+## of the highlighted file with line checkboxes. Above the list, a filter
+## (text and options, like GitHub Desktop's) narrows the files shown; the
+## check-all box then covers the files shown only. The checkboxes are the commit
 ## selection kept in core (PLAN §3.10). With no changes, suggested actions
 ## take the diff's place. Under the list, the Shelved section; above it, the
 ## offer to restore changes left on this branch (PLAN §4 Shelves).
@@ -35,7 +37,9 @@ var _showing_shelf: bool = false
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
+@onready var _filter_bar: ChangeFilterBar = %FilterBar
 @onready var _list_header: ListHeader = %ListHeader
+@onready var _no_match: Control = %NoMatch
 @onready var _list: ChangeList = %List
 @onready var _commit_box: CommitBox = %CommitBox
 @onready var _diff_panel: DiffPanel = %DiffPanel
@@ -54,6 +58,8 @@ func _ready() -> void:
 	_list.context_menu_requested.connect(_show_menu.bind(_list))
 	_list.gui_input.connect(_on_list_key)
 	_list_header.check_toggled.connect(pick_all)
+	_filter_bar.changed.connect(_apply_filter)
+	_filter_bar.done.connect(focus_files)
 	_commit_box.feedback = feedback
 	_diff_panel.load_full_requested.connect(_load_full_diff)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
@@ -95,6 +101,8 @@ func set_session(value: RepoSession) -> void:
 		session.shelf_files_loaded.connect(_on_shelf_files_loaded)
 	_list.session = session
 	_commit_box.session = session
+	if session != null and is_node_ready():
+		session.set_change_filter(_filter_bar.text(), _filter_bar.options())
 	reload()
 	reload_shelves()
 
@@ -135,6 +143,15 @@ func check_all() -> PickBox:
 
 func list_header() -> ListHeader:
 	return _list_header
+
+
+func filter_bar() -> ChangeFilterBar:
+	return _filter_bar
+
+
+## Focuses the filter's text box.
+func focus_filter() -> void:
+	_filter_bar.focus_text()
 
 
 func shelf_list() -> ShelfList:
@@ -251,12 +268,14 @@ func reload() -> void:
 	reload_shelves()
 
 
-## Focuses the list (cursor on its first row if none), or the summary when
-## there is nothing to list.
+## Focuses the list (cursor on its first row if none), the filter when it
+## hides every file, or the summary when there is nothing to list.
 func focus_files() -> void:
 	if _list.row_count() > 0:
 		_list.grab_focus()
 		_list.ensure_cursor()
+	elif has_changes():
+		_filter_bar.focus_text()
 	else:
 		_commit_box.focus_summary()
 
@@ -362,7 +381,7 @@ func toggle_amend() -> void:
 
 
 func has_changes() -> bool:
-	return session != null and _list.row_count() > 0
+	return session != null and session.change_count() > 0
 
 
 func _discard_lines() -> void:
@@ -391,14 +410,30 @@ static func _describe(paths: PackedStringArray) -> String:
 	return paths[0].get_file() if paths.size() == 1 else "%d files" % paths.size()
 
 
-## "N changed files" and the check-all box; hidden without changes (the
-## empty state beside the list says so).
+## "N changed files" ("2 of N" while filtered) and the check-all box, under
+## the filter; hidden without changes (the empty state beside the list says so).
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
+	var shown: int = _list.row_count()
+	var filtered: bool = _filter_bar.is_active()
+	_filter_bar.visible = count > 0
 	_list_header.visible = count > 0
-	_list_header.set_text(ListHeader.count_text(count, "changed file"))
+	var text: String = ListHeader.count_text(count, "changed file")
+	_list_header.set_text("%d of %s" % [shown, text] if filtered else text)
+	_no_match.visible = count > 0 and shown == 0
 	var state: String = session.selection_state() if session != null else "none"
-	_list_header.show_check(state, "Leave out every file" if state == "all" else "Include every file")
+	var what: String = "every shown file" if filtered else "every file"
+	_list_header.show_check(state, ("Leave out " if state == "all" else "Include ") + what)
+
+
+func _apply_filter() -> void:
+	if session == null:
+		return
+	session.set_change_filter(_filter_bar.text(), _filter_bar.options())
+	_list.reload()
+	_update_header()
+	if _list.cursor < 0 and not _showing_shelf:
+		_clear_diff()
 
 
 ## With no changes, suggested actions replace the diff (PLAN §4 empty state).
@@ -425,7 +460,11 @@ func _update_empty() -> void:
 
 
 func _on_selection_changed() -> void:
-	_list.reload_picks()
+	# With "Included" or "Excluded" on, a toggled file may leave the list.
+	if _filter_bar.uses_picks():
+		_list.reload()
+	else:
+		_list.reload_picks()
 	_diff_view.invalidate()
 	_update_header()
 	_commit_box.update_state()

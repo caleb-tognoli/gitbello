@@ -293,6 +293,7 @@ File  Edit  Repository  Branch  View  Help
 
 **Changes view.** One list of changed files with checkboxes: [x] included in the commit, [ ] left out, [-] partly included (some hunks or lines). The selection is gitbello's own (D10, §3.10).
 - The header reads "N changed files" with a check-all box. Space toggles the checkboxes of the highlighted rows.
+- A filter above the header (Ctrl+F), like GitHub Desktop's: a text box matching paths in any case, and options for files included in or excluded from the commit and for new, modified or deleted files. While it hides files the header reads "2 of N changed files" and the check-all box covers the files shown. The filter lives in core (`ChangeFilter`), so rows stay in Rust.
 - Row highlighting (click, Shift, Ctrl) is separate from the checkboxes. It drives the diff and the context menu: Discard…, Shelve…, Open, Show in file manager, Copy path, Ignore.
 - The diff gutter has hunk and line checkboxes.
 - The commit box sits under the list: summary, description, Amend toggle, and a "Commit 2 files to main" button (Ctrl+Enter), disabled with a reason when nothing is included or the summary is empty.

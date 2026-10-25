@@ -797,6 +797,38 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	for entry: Array in [[&"ListHeaderAdded", &"StatAdded"], [&"ListHeaderRemoved", &"StatRemoved"]]:
 		_variation(theme, entry[0], entry[1])
 		theme.set_font_size(&"font_size", entry[0], 13)
+	# The filter over the changed files: one field (outlined like a text box,
+	# in the accent colour while focused) with a search icon, a flat text box,
+	# a divider and the options button
+	_variation(theme, &"FilterBar", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"FilterBar", _box(p.background, 0, Vector4(8, 2, 8, 6)))
+	var filter_margins: Vector4 = Vector4(8, 0, 2, 0)
+	_variation(theme, &"FilterField", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"FilterField", _box(p.raised, 4, filter_margins, p.border, 1))
+	_variation(theme, &"FilterFieldFocus", &"FilterField")
+	theme.set_stylebox(&"panel", &"FilterFieldFocus", _box(p.raised, 4, filter_margins, p.accent, 1))
+	theme.set_color(&"icon_color", &"FilterField", p.text_muted)
+	theme.set_constant(&"icon_size", &"FilterField", 14)
+	_variation(theme, &"FilterFieldRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"FilterFieldRow", 2)
+	_variation(theme, &"FilterFieldText", &"LineEdit")
+	var flat_text: StyleBoxFlat = _box(Color.TRANSPARENT, 0, Vector4(4, 5, 4, 5))
+	for state: StringName in [&"normal", &"focus", &"read_only"]:
+		theme.set_stylebox(state, &"FilterFieldText", flat_text)
+	_variation(theme, &"FilterFieldDivider", &"VSeparator")
+	theme.set_constant(&"separation", &"FilterFieldDivider", 5)
+	var divider: StyleBoxLine = StyleBoxLine.new()
+	divider.color = p.border
+	divider.vertical = true
+	divider.grow_begin = -5.0
+	divider.grow_end = -5.0
+	theme.set_stylebox(&"separator", &"FilterFieldDivider", divider)
+	_variation(theme, &"FilterFieldButton", &"ToolbarButton")
+	var tool_small: Vector4 = Vector4(5, 3, 5, 3)
+	theme.set_stylebox(&"normal", &"FilterFieldButton", _box(Color.TRANSPARENT, 3, tool_small))
+	theme.set_stylebox(&"hover", &"FilterFieldButton", _box(p.hover, 3, tool_small))
+	theme.set_stylebox(&"pressed", &"FilterFieldButton", _box(Color(p.accent, 0.25), 3, tool_small))
+	theme.set_stylebox(&"hover_pressed", &"FilterFieldButton", _box(Color(p.accent, 0.35), 3, tool_small))
 	_variation(theme, &"CommitPanel", &"PanelContainer")
 	var commit: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 8, 8, 8))
 	commit.border_color = p.border

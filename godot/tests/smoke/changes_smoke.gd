@@ -43,6 +43,46 @@ func run() -> void:
 	expect(badge.position.x + badge.size.x <= button.size.x and badge.position.x > 0.0,
 			"the button makes room for its badge: %s in %s" % [badge.get_rect(), button.size])
 
+	# The filter narrows the list; the check-all box then covers the files shown.
+	var filter: ChangeFilterBar = view.filter_bar()
+	press("Ctrl+F")
+	expect(filter.text_box().has_focus(), "Ctrl+F focuses the filter")
+	type_text("NOTES")
+	await get_tree().process_frame  # LineEdit reports text changes deferred
+	expect_eq(list.row_count(), 1, "the filter ignores case")
+	expect_eq(list.path_at(0), "notes.txt", "only notes.txt matches")
+	expect_eq(view.list_header().text(), "1 of 2 changed files", "the header says how many are shown")
+	view.pick_all(false)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 1),
+			"check-all leaves out the shown file only: %d" % session.picked_count())
+	expect(await wait_until(func() -> bool: return view.check_all().state == "none"),
+			"check-all shows the shown files' state: %s" % view.check_all().state)
+	view.pick_all(true)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "check-all includes it again")
+	type_text("zzz")
+	await get_tree().process_frame
+	expect_eq(view.list_header().text(), "0 of 2 changed files", "nothing matches")
+	press("Escape")
+	expect_eq(filter.text(), "", "Escape clears the filter")
+	expect_eq(list.row_count(), 2, "every file is back")
+	filter.set_option("new", true)
+	expect(filter.options_button().button_pressed, "the options button shows options are on")
+	expect_eq(list.row_count(), 1, "New files: only the untracked file")
+	expect_eq(list.path_at(0), "notes.txt", "the new file is notes.txt")
+	filter.set_option("new", false)
+	filter.set_option("included", true)
+	expect_eq(list.row_count(), 2, "both files are included")
+	session.pick_files(PackedStringArray(["notes.txt"]), false)
+	expect(await wait_until(func() -> bool: return list.row_count() == 1),
+			"a file left out leaves the Included list at once")
+	session.pick_files(PackedStringArray(["notes.txt"]), true)
+	expect(await wait_until(func() -> bool: return list.row_count() == 2), "and comes back when included")
+	filter.set_option("included", false)
+	expect(not filter.is_active(), "no filter left")
+	expect_eq(view.list_header().text(), "2 changed files", "the header counts every file again")
+	list.grab_focus()
+	list.select_only(0)
+
 	# The highlighted file's diff loads.
 	var diff: DiffView = view.diff_view()
 	expect(await wait_until(func() -> bool: return _diff_has(diff, "local edit")), "diff of app.txt shows the local edit")

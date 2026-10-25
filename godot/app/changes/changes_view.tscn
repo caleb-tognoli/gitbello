@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="6_empty"]
 [ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="7_shelves"]
 [ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="8_header"]
+[ext_resource type="PackedScene" path="res://app/changes/change_filter_bar.tscn" id="9_filter"]
 
 [node name="ChangesView" type="HSplitContainer"]
 anchors_preset = 15
@@ -48,6 +49,10 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "Restore"
 
+[node name="FilterBar" parent="Files" instance=ExtResource("9_filter")]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="ListHeader" parent="Files" instance=ExtResource("8_header")]
 unique_name_in_owner = true
 layout_mode = 2
@@ -57,6 +62,22 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("2_list")
+
+[node name="NoMatch" type="Label" parent="Files/List"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"DimLabel"
+text = "No changed files match the filter."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
 
 [node name="Shelves" type="VBoxContainer" parent="Files"]
 unique_name_in_owner = true

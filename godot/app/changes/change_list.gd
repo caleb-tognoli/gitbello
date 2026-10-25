@@ -2,7 +2,8 @@ class_name ChangeList
 extends VirtualList
 ## The changed files of a worktree, one list with commit checkboxes (PLAN §4
 ## Changes view): conflicted files first, then the rest by path. Rows come
-## from `RepoSession.change_rows()` for a window around the visible range only.
+## from `RepoSession.change_rows()` (the files the filter shows) for a window
+## around the visible range only.
 ## Highlighting rows (click, Shift, Ctrl) drives the diff and the context menu;
 ## the checkboxes are separate: clicking one toggles its file, Space, Enter or
 ## a double-click toggles the highlighted files.
@@ -51,7 +52,7 @@ func reload() -> void:
 	var old_cursor: int = cursor
 	_reloading = true
 	_cache.clear()
-	_count = session.change_count() if session != null else 0
+	_count = session.shown_change_count() if session != null else 0
 	refresh()
 	_selected.clear()
 	var new_cursor: int = _find(cursor_path)

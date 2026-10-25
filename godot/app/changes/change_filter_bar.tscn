@@ -1,0 +1,44 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/changes/change_filter_bar.gd" id="1_filter"]
+
+[node name="ChangeFilterBar" type="PanelContainer"]
+theme_type_variation = &"FilterBar"
+script = ExtResource("1_filter")
+
+[node name="Field" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"FilterField"
+
+[node name="Row" type="HBoxContainer" parent="Field"]
+layout_mode = 2
+theme_type_variation = &"FilterFieldRow"
+
+[node name="SearchIcon" type="TextureRect" parent="Field/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="FilterText" type="LineEdit" parent="Field/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"FilterFieldText"
+placeholder_text = "Filter changed files"
+clear_button_enabled = true
+
+[node name="Divider" type="VSeparator" parent="Field/Row"]
+layout_mode = 2
+theme_type_variation = &"FilterFieldDivider"
+
+[node name="OptionsButton" type="Button" parent="Field/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+focus_mode = 0
+theme_type_variation = &"FilterFieldButton"
+toggle_mode = true

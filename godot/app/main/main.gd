@@ -423,6 +423,11 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().pick_all(true), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
 	Actions.register(&"changes.exclude_all", "Leave out all changes", "Changes",
 			func() -> void: changes.call().pick_all(false), PackedStringArray(["Ctrl+Shift+U"]), repo_ready)
+	Actions.register(&"changes.filter", "Filter changed files", "Changes",
+			func() -> void:
+				current_page().show_view(WorktreeView.View.CHANGES)
+				changes.call().focus_filter(),
+			PackedStringArray(["Ctrl+F"]), repo_ready)
 	Actions.register(&"changes.open_file", "Open file", "Changes",
 			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
