@@ -569,8 +569,8 @@ fn plain_line(
 /// `{left, right}` with a line or an empty dictionary on each side; headers
 /// and unchanged lines are the same line on both. Unchanged lines outside
 /// the hunks have `index` -1. Hunk headers and the end row (a header with
-/// no text) carry `gap` and `expand`, their expanders: `up`, `down`, `both`,
-/// `all` or empty.
+/// no text) carry `gap`, `expand` (their expanders: `up`, `down`, `both`,
+/// `all` or empty) and `hidden`, the lines the gap hides (-1 when unknown).
 pub fn diff_rows(
     state: &DiffState,
     split: bool,
@@ -586,6 +586,7 @@ pub fn diff_rows(
     let with_expanders = |mut line: VarDictionary, gap: usize| {
         line.set("gap", to_i64(gap));
         line.set("expand", layout.expanders(gap).id());
+        line.set("hidden", layout.hidden_lines(gap).map_or(-1, i64::from));
         line
     };
     for row in layout.rows(split, start, count) {
