@@ -18,6 +18,8 @@ var _scroll: ScrollContainer = ScrollContainer.new()
 var _chips: HBoxContainer = HBoxContainer.new()
 ## Takes the room right of the buttons while the chips fit.
 var _spacer: Control = Control.new()
+## New worktree and its ▾, joined into one split chip.
+var _actions: HBoxContainer = HBoxContainer.new()
 var _new_task: Button = Button.new()
 var _task_menu_button: Button = Button.new()
 var _task_menu: PopupMenu = PopupMenu.new()
@@ -41,22 +43,30 @@ func _ready() -> void:
 	_row.add_child(_scroll)
 	_all_button.icon = AppTheme.ARROW_DOWN
 	_all_button.tooltip_text = "All worktrees"
-	_all_button.theme_type_variation = &"ToolbarButton"
+	_all_button.theme_type_variation = &"ChipIconButton"
 	_all_button.focus_mode = Control.FOCUS_NONE
+	_all_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_all_button.pressed.connect(_open_all_menu)
 	_row.add_child(_all_button)
+	_actions.theme_type_variation = &"ChipSplit"
+	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_row.add_child(_actions)
 	_new_task.text = "New worktree"
 	_new_task.icon = AppTheme.icon(&"Add")
-	_new_task.theme_type_variation = &"ToolbarButton"
+	var shortcut: String = Actions.shortcut_label(&"task.new")
+	_new_task.tooltip_text = "Create a branch in a new worktree" + (" (%s)" % shortcut if not shortcut.is_empty() else "")
+	_new_task.theme_type_variation = &"ChipAction"
 	_new_task.focus_mode = Control.FOCUS_NONE
+	_new_task.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_new_task.pressed.connect(func() -> void: Actions.run_action(&"task.new", _new_task))
-	_row.add_child(_new_task)
+	_actions.add_child(_new_task)
 	_task_menu_button.icon = AppTheme.ARROW_DOWN
 	_task_menu_button.tooltip_text = "More worktree actions"
-	_task_menu_button.theme_type_variation = &"ToolbarButton"
+	_task_menu_button.theme_type_variation = &"ChipActionMenu"
 	_task_menu_button.focus_mode = Control.FOCUS_NONE
+	_task_menu_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_task_menu_button.pressed.connect(_open_task_menu)
-	_row.add_child(_task_menu_button)
+	_actions.add_child(_task_menu_button)
 	_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_row.add_child(_spacer)
@@ -124,8 +134,8 @@ static func _ordered(worktrees: Array[Dictionary]) -> Array[Dictionary]:
 ## all and ▾ lists every worktree.
 func _update_overflow() -> void:
 	var natural: float = _chips.get_combined_minimum_size().x + _scroll.get_combined_minimum_size().x + 1.0
-	var room: float = _row.size.x - _new_task.get_combined_minimum_size().x \
-			- _task_menu_button.get_combined_minimum_size().x - 3.0 * float(_row.get_theme_constant(&"separation"))
+	var room: float = _row.size.x - _actions.get_combined_minimum_size().x \
+			- 2.0 * float(_row.get_theme_constant(&"separation"))
 	var fits: bool = natural <= room
 	_all_button.visible = not fits
 	_spacer.visible = fits

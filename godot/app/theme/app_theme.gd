@@ -689,6 +689,29 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"ChipBadge", &"Label")
 	theme.set_color(&"font_color", &"ChipBadge", p.modified)
 	theme.set_font_size(&"font_size", &"ChipBadge", 12)
+	# New worktree │ ▾ after the chips: one chip-shaped outline split in two,
+	# quieter than a chip until hovered; the all-worktrees ▾ as a round chip
+	_variation(theme, &"ChipSplit", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ChipSplit", 0)
+	for entry: Array in [[&"ChipAction", Vector4(9, 4, 10, 4), 1], [&"ChipActionMenu", Vector4(5, 4, 7, 4), 2],
+			[&"ChipIconButton", Vector4(5, 4, 5, 4), 0]]:
+		_variation(theme, entry[0], &"Button")
+		for state: Array in [[&"normal", Color.TRANSPARENT, p.border], [&"hover", p.hover, p.border],
+				[&"pressed", Color(p.accent, 0.25), p.accent], [&"hover_pressed", Color(p.accent, 0.35), p.accent],
+				[&"disabled", Color.TRANSPARENT, p.border]]:
+			var box: StyleBoxFlat = _box(state[1], 12, entry[1], state[2], 1)
+			if entry[2] == 1:
+				box.corner_radius_top_right = 0
+				box.corner_radius_bottom_right = 0
+			elif entry[2] == 2:
+				box.corner_radius_top_left = 0
+				box.corner_radius_bottom_left = 0
+				box.border_width_left = 0
+			theme.set_stylebox(state[0], entry[0], box)
+		theme.set_stylebox(&"focus", entry[0], StyleBoxEmpty.new())
+		theme.set_color(&"font_color", entry[0], p.text_muted)
+		theme.set_color(&"icon_normal_color", entry[0], Color(1, 1, 1, 0.7))
+		theme.set_constant(&"h_separation", entry[0], 4)
 	# Branch and Sync: big raised buttons with room for a ▾ part
 	_variation(theme, &"HeaderRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"HeaderRow", 8)
