@@ -51,6 +51,10 @@ func _ready() -> void:
 		return session.diff_split_rows("commit", start, count) if session != null else [])
 	_diff_panel.load_full_requested.connect(func() -> void:
 		session.select_commit_file(String(session.commit_diff_info().get("path", "")), true))
+	_diff_panel.expand_requested.connect(func(gap: int, how: String) -> void:
+		session.expand_diff("commit", gap, how))
+	_diff_panel.whole_file_requested.connect(func(whole: bool) -> void:
+		session.show_whole_diff("commit", whole))
 	_files.gui_input.connect(_on_files_key)
 	_diff_panel.view().gui_input.connect(_on_diff_key)
 	show_placeholder()

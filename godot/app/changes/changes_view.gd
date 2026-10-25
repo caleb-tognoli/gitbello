@@ -58,6 +58,10 @@ func _ready() -> void:
 	_check_all.toggled_to.connect(pick_all)
 	_commit_box.feedback = feedback
 	_diff_panel.load_full_requested.connect(_load_full_diff)
+	_diff_panel.expand_requested.connect(func(gap: int, how: String) -> void:
+		session.expand_diff("changes", gap, how))
+	_diff_panel.whole_file_requested.connect(func(whole: bool) -> void:
+		session.show_whole_diff("changes", whole))
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.diff_lines(start, count) if session != null else [])
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:

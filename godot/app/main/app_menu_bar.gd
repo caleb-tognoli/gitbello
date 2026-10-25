@@ -16,7 +16,7 @@ const MENUS: Array[Array] = [
 		&"repo.remotes", &"repo.tags", &"", &"repo.refresh"]],
 	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.rename", &"branch.set_upstream", &"",
 		&"changes.shelve", &"shelf.restore_left"]],
-	["View", [&"view.changes", &"view.history", &"", &"diff.toggle_side_by_side", &"", &"view.theme_system",
+	["View", [&"view.changes", &"view.history", &"", &"diff.toggle_side_by_side", &"diff.toggle_whole_file", &"", &"view.theme_system",
 		&"view.theme_light", &"view.theme_dark", &"", &"view.toggle_git_log"]],
 	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
 ]

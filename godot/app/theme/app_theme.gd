@@ -659,6 +659,11 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"syntax_number", &"DiffView", p.syntax_number)
 	theme.set_color(&"syntax_comment", &"DiffView", p.text_muted)
 	theme.set_color(&"message_color", &"DiffView", p.text_muted)
+	theme.set_color(&"selection_bg", &"DiffView", Color(p.accent, 0.35))
+	theme.set_color(&"caret_color", &"DiffView", p.text)
+	theme.set_color(&"expander_color", &"DiffView", p.text_muted)
+	theme.set_color(&"expander_hover_color", &"DiffView", p.text)
+	theme.set_color(&"expander_hover_bg", &"DiffView", p.hover)
 	theme.set_constant(&"row_height", &"DiffView", 20)
 	theme.set_constant(&"padding", &"DiffView", 8)
 
@@ -715,19 +720,20 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"hover", &"SegmentButton", _box(p.hover, 4, segment))
 	theme.set_stylebox(&"pressed", &"SegmentButton", _box(Color(p.accent, 0.35), 4, segment))
 	theme.set_stylebox(&"hover_pressed", &"SegmentButton", _box(Color(p.accent, 0.4), 4, segment))
-	# Icon-only joined buttons (the diff layout): one outline, rounded outside
+	# Icon-only joined buttons (the diff layout): one outline, rounded
+	# outside; IconToggle is one on its own (the diff's whole-file switch).
 	_variation(theme, &"IconSwitch", &"HBoxContainer")
 	theme.set_constant(&"separation", &"IconSwitch", 0)
 	var icon_segment: Vector4 = Vector4(7, 4, 7, 4)
-	for entry: Array in [[&"IconSegmentFirst", true], [&"IconSegmentLast", false]]:
+	for entry: Array in [[&"IconSegmentFirst", "first"], [&"IconSegmentLast", "last"], [&"IconToggle", "alone"]]:
 		_variation(theme, entry[0], &"SegmentButton")
 		for state: Array in [[&"normal", p.raised], [&"hover", p.hover],
 				[&"pressed", Color(p.accent, 0.35)], [&"hover_pressed", Color(p.accent, 0.4)]]:
 			var box: StyleBoxFlat = _box(state[1], 4, icon_segment, p.border, 1)
-			if entry[1]:
+			if entry[1] == "first":
 				box.corner_radius_top_right = 0
 				box.corner_radius_bottom_right = 0
-			else:
+			elif entry[1] == "last":
 				box.corner_radius_top_left = 0
 				box.corner_radius_bottom_left = 0
 				box.border_width_left = 0

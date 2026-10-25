@@ -394,6 +394,9 @@ func _register_actions() -> void:
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings)
 	Actions.register(&"diff.toggle_side_by_side", "Side-by-side diff", "View",
 			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
+	Actions.register(&"diff.toggle_whole_file", "Show whole file", "View",
+			func() -> void: _shown_diff_panel().toggle_whole_file(), PackedStringArray(),
+			func() -> bool: return _shown_diff_panel() != null)
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
@@ -772,6 +775,15 @@ func _error_handled_elsewhere(repo_path: String, error: Dictionary) -> bool:
 	var page: RepoTab = page_for(repo_path)
 	var view: WorktreeView = page.view_for(repo_path) if page != null else null
 	return view != null and view.ops().handles_error(error)
+
+
+## The diff panel on screen that can show its whole file, or null.
+func _shown_diff_panel() -> DiffPanel:
+	for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
+		var panel: DiffPanel = node as DiffPanel
+		if panel != null and panel.can_toggle_whole_file():
+			return panel
+	return null
 
 
 func _toggle_side_by_side() -> void:

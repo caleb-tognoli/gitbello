@@ -1,7 +1,7 @@
 class_name DiffPanel
 extends VBoxContainer
 ## A file diff with its header (status icon, path, notes, +/− counts,
-## unified or side by side) and the messages shown instead of lines
+## whole file, unified or side by side) and the messages shown instead of lines
 ## (loading, binary, too large, no changes, errors). A renamed or copied
 ## file's path reads `docs/{old.md → new.md}`, the old part dimmed. Callers pass `RepoSession.diff_info()`-style
 ## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
@@ -18,6 +18,10 @@ const EMPTY_MESSAGES: Dictionary[String, String] = {
 
 ## The user asked to load a diff past the size limit.
 signal load_full_requested()
+## The user asked for more of gap `gap` (`up`, `down` or `all`).
+signal expand_requested(gap: int, how: String)
+## The user asked for the whole file (`true`) or only the changes.
+signal whole_file_requested(whole: bool)
 
 @onready var _status_icon: TextureRect = %StatusIcon
 @onready var _path: RichTextLabel = %DiffPath
@@ -32,6 +36,7 @@ signal load_full_requested()
 @onready var _load_anyway: Button = %LoadAnywayButton
 @onready var _unified_button: Button = %UnifiedButton
 @onready var _split_button: Button = %SplitButton
+@onready var _whole_button: Button = %WholeFileButton
 
 ## `kind:path` of the diff shown, to keep the scroll position on reloads.
 var _shown: String = ""
@@ -58,6 +63,9 @@ func _ready() -> void:
 			if bool(entry[2]) != _view.side_by_side:
 				Actions.run_action(&"diff.toggle_side_by_side"))
 	set_side_by_side(Core.diff_side_by_side())
+	_view.expand_requested.connect(func(gap: int, how: String) -> void: expand_requested.emit(gap, how))
+	_whole_button.icon = AppTheme.icon(&"ExpandAll")
+	_whole_button.toggled.connect(func(on: bool) -> void: whole_file_requested.emit(on))
 	_apply_theme()
 
 
@@ -73,6 +81,22 @@ func view() -> DiffView:
 ## The Unified or the Side by side button.
 func layout_button(side_by_side: bool) -> Button:
 	return _split_button if side_by_side else _unified_button
+
+
+## The Show whole file button.
+func whole_file_button() -> Button:
+	return _whole_button
+
+
+## Whether the diff shown can switch between its changes and the whole file.
+func can_toggle_whole_file() -> bool:
+	return is_visible_in_tree() and _whole_button.visible
+
+
+## Shows the whole file, or only the changes again.
+func toggle_whole_file() -> void:
+	if can_toggle_whole_file():
+		_whole_button.button_pressed = not _whole_button.button_pressed
 
 
 ## Where lines come from: `func(start, count) -> Array` (see DiffView).
@@ -101,12 +125,13 @@ func clear(placeholder: String = "") -> void:
 	_show_path("", "", -1)
 	_stats.text = ""
 	show_counts(_added, _removed, 0, 0)
+	_show_whole_button(false, false)
 	show_message(_placeholder)
 
 
 ## Shows a diff described by `info` (`state`, `path`, `kind`, `content`,
 ## `code`, `original_path`, `similarity`, `notes`, `additions`, `deletions`,
-## `line_count`, `max_line`, sizes, `error`).
+## `line_count`, `max_line`, `can_expand`, `whole`, sizes, `error`).
 func show_info(info: Dictionary) -> void:
 	var state: String = String(info.get("state", "none"))
 	if state == "none":
@@ -134,6 +159,8 @@ func show_info(info: Dictionary) -> void:
 			return
 	var keep: bool = key == _shown
 	_shown = key
+	var whole: bool = bool(info.get("whole", false))
+	_show_whole_button(bool(info.get("can_expand", false)) or whole, whole)
 	match String(info.get("content", "text")):
 		"text", "combined":
 			_message.hide()
@@ -149,6 +176,14 @@ func show_info(info: Dictionary) -> void:
 		"empty":
 			_view.show_lines(0, 0, false)
 			show_message("\n".join(notes) if not notes.is_empty() else EMPTY_MESSAGES.get(code, "No changes to show."))
+
+
+func _show_whole_button(shown: bool, pressed: bool) -> void:
+	_whole_button.visible = shown
+	_whole_button.set_pressed_no_signal(pressed)
+	var shortcut: String = Actions.shortcut_label(&"diff.toggle_whole_file")
+	var tip: String = "Show only the changes" if pressed else "Show the whole file"
+	_whole_button.tooltip_text = tip if shortcut.is_empty() else "%s (%s)" % [tip, shortcut]
 
 
 func show_message(text: String, offer_full: bool = false) -> void:
