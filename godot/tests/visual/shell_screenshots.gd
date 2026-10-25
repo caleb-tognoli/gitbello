@@ -81,6 +81,29 @@ func _ready() -> void:
 			changes.toggle_diff_lines()
 			break
 	await _shot(out, "changes_picks")
+	# Text selected in the diff, and a long file's gaps (when the first repo
+	# has a changed `long.txt`): one opened upwards.
+	var diff: DiffView = changes.diff_view()
+	diff.grab_focus()
+	diff._sel_from = Vector2i(1, 2)
+	diff._sel_to = Vector2i(mini(3, diff.row_count() - 1), 4)
+	diff.queue_redraw()
+	await _shot(out, "diff_selection")
+	for row: int in changes.list().row_count():
+		if changes.list().path_at(row) == "long.txt":
+			changes.list().select_only(row)
+			deadline = Time.get_ticks_msec() + WAIT_MS
+			while Time.get_ticks_msec() < deadline and diff.row_expanders(0).is_empty():
+				await get_tree().process_frame
+			await _shot(out, "diff_expanders")
+			for header: int in diff.row_count():
+				if diff.row_expanders(header) == "both":
+					var rows: int = diff.row_count()
+					diff.press_expander(header, "up")
+					while Time.get_ticks_msec() < deadline and diff.row_count() == rows:
+						await get_tree().process_frame
+					break
+			await _shot(out, "diff_expanded")
 	Actions.run_action(&"changes.focus_message")
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
