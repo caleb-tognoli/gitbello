@@ -612,6 +612,19 @@ static func _add_commit_details(theme: Theme, p: Palette) -> void:
 static func _add_changes(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"DiffHeader", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"DiffHeader", _box(p.background, 0, Vector4(8, 4, 8, 4)))
+	_variation(theme, &"DiffHeaderRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"DiffHeaderRow", 6)
+	theme.set_constant(&"layout_gap", &"DiffHeader", 10)
+	# Line counts in the git colours: `+12 −3`
+	for entry: Array in [[&"StatAdded", p.added], [&"StatRemoved", p.removed]]:
+		_variation(theme, entry[0], &"Label")
+		theme.set_color(&"font_color", entry[0], entry[1])
+		var section: StringName = StringName("Section" + entry[0])
+		_variation(theme, section, entry[0])
+		theme.set_font_size(&"font_size", section, 12)
+		theme.set_stylebox(&"normal", section, _box(Color.TRANSPARENT, 0, Vector4(0, 4, 0, 2)))
+	_variation(theme, &"StatRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"StatRow", 4)
 	theme.set_constant(&"files_width", &"ChangesView", 360)
 	theme.set_constant(&"separation", &"ChangesView", 6)
 	theme.set_constant(&"body_height", &"CommitBox", 96)

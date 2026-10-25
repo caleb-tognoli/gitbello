@@ -18,6 +18,7 @@ theme_type_variation = &"DiffHeader"
 
 [node name="DiffHeader" type="HBoxContainer" parent="DiffHeaderPanel"]
 layout_mode = 2
+theme_type_variation = &"DiffHeaderRow"
 
 [node name="StatusIcon" type="TextureRect" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
@@ -39,6 +40,26 @@ vertical_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DimLabel"
+
+[node name="Counts" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"StatRow"
+
+[node name="DiffAdded" type="Label" parent="DiffHeaderPanel/DiffHeader/Counts"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"StatAdded"
+
+[node name="DiffRemoved" type="Label" parent="DiffHeaderPanel/DiffHeader/Counts"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"StatRemoved"
+
+[node name="LayoutGap" type="Control" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
 
 [node name="LayoutSwitch" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true

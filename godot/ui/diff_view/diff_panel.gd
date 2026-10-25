@@ -22,6 +22,10 @@ signal load_full_requested()
 @onready var _status_icon: TextureRect = %StatusIcon
 @onready var _path: RichTextLabel = %DiffPath
 @onready var _stats: Label = %DiffStats
+@onready var _counts: Control = %Counts
+@onready var _added: Label = %DiffAdded
+@onready var _removed: Label = %DiffRemoved
+@onready var _layout_gap: Control = %LayoutGap
 @onready var _view: DiffView = %DiffView
 @onready var _message: Control = %DiffMessage
 @onready var _message_label: Label = %DiffMessageLabel
@@ -96,6 +100,7 @@ func clear(placeholder: String = "") -> void:
 	_show_code("")
 	_show_path("", "", -1)
 	_stats.text = ""
+	show_counts(_added, _removed, 0, 0)
 	show_message(_placeholder)
 
 
@@ -113,10 +118,8 @@ func show_info(info: Dictionary) -> void:
 	_show_code(code)
 	_show_path(path, String(info.get("original_path", "")), int(info.get("similarity", -1)))
 	var notes: PackedStringArray = info.get("notes", PackedStringArray())
-	var stats: PackedStringArray = PackedStringArray(notes)
-	if int(info.get("additions", 0)) > 0 or int(info.get("deletions", 0)) > 0:
-		stats.append("+%d −%d" % [int(info["additions"]), int(info["deletions"])])
-	_stats.text = "  ·  ".join(stats)
+	_stats.text = "  ·  ".join(notes)
+	show_counts(_added, _removed, int(info.get("additions", 0)), int(info.get("deletions", 0)))
 	match state:
 		"loading":
 			if key != _shown:
@@ -172,6 +175,18 @@ func status_code() -> String:
 	return _code
 
 
+## `+12` and `−3` in `added` and `removed` (hidden while both are zero).
+static func show_counts(added: Label, removed: Label, additions: int, deletions: int) -> void:
+	added.text = "+%d" % additions
+	removed.text = "−%d" % deletions
+	added.get_parent().visible = additions > 0 or deletions > 0
+
+
+## The `+` and `−` counts shown, as `+12 −3`, or "".
+func counts_text() -> String:
+	return "%s %s" % [_added.text, _removed.text] if _counts.visible else ""
+
+
 ## The header's path as shown, such as `docs/{a.md → b.md}`.
 func path_text() -> String:
 	return _path.get_parsed_text()
@@ -207,6 +222,7 @@ func _show_path(path: String, original: String, similarity: int) -> void:
 func _apply_theme() -> void:
 	var icon_size: float = float(get_theme_constant(&"icon_size", FileRowPainter.THEME_TYPE))
 	_status_icon.custom_minimum_size = Vector2(icon_size, icon_size)
+	_layout_gap.custom_minimum_size.x = float(get_theme_constant(&"layout_gap", &"DiffHeader"))
 	_show_code(_code)
 	# Not sized to its text, so a long path can't widen the panel: one line.
 	var font: Font = get_theme_font(&"normal_font", &"RichTextLabel")
