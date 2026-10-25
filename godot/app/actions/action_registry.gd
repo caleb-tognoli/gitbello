@@ -6,6 +6,9 @@ extends Node
 ##
 ## Shortcuts: each action has default shortcuts; a user override from the
 ## config (`Core.keybindings()`) replaces them.
+##
+## A run may say which control started it (`run_action(id, origin)`): the job
+## it starts then shows its progress there (see `Feedback`).
 
 signal actions_changed()
 ## An action ran (for tests and status messages).
@@ -26,12 +29,23 @@ class Action:
 	## Whether the shortcut also works while a text field has focus (text
 	## fields otherwise keep keys like Ctrl+Enter for themselves).
 	var in_text_fields: bool = false
+	## Returns why the action is disabled (shown in tooltips), or "".
+	var reason: Callable = Callable()
 
 	func is_enabled() -> bool:
 		return not enabled.is_valid() or bool(enabled.call())
 
+	## Why the action cannot run now, or "" when it can (or nobody said).
+	func disabled_reason() -> String:
+		if is_enabled():
+			return ""
+		return String(reason.call()) if reason.is_valid() else ""
+
 
 var _actions: Dictionary[StringName, Action] = {}
+## The control that started the action running now (null between runs, or
+## when it came from a shortcut or the palette).
+var _origin: Control = null
 var _overrides: Dictionary[StringName, String] = {}
 var _parsed: Dictionary[StringName, Array] = {}
 
@@ -43,10 +57,12 @@ func _ready() -> void:
 
 
 ## Registers (or replaces) an action. `shortcuts` are defaults like "Ctrl+K".
+## `reason` returns why it is disabled (see `Action.reason`).
 func register(id: StringName, label: String, category: String, run: Callable,
 		shortcuts: PackedStringArray = PackedStringArray(),
-		enabled: Callable = Callable()) -> Action:
+		enabled: Callable = Callable(), reason: Callable = Callable()) -> Action:
 	var action: Action = Action.new()
+	action.reason = reason
 	action.id = id
 	action.label = label
 	action.category = category
@@ -85,14 +101,40 @@ func is_enabled(id: StringName) -> bool:
 	return action != null and action.is_enabled()
 
 
-## Runs `id` if it exists and is enabled. Returns whether it ran.
-func run_action(id: StringName) -> bool:
+## Runs `id` if it exists and is enabled. Returns whether it ran. `origin` is
+## the control that started it, if any (see `origin()`).
+func run_action(id: StringName, origin: Control = null) -> bool:
 	var action: Action = _actions.get(id)
 	if action == null or not action.is_enabled():
 		return false
+	var outer: Control = _origin
+	_origin = origin
 	action.run.call()
+	_origin = outer
 	action_ran.emit(id)
 	return true
+
+
+## The control that started the action running now, or null.
+func origin() -> Control:
+	return _origin if is_instance_valid(_origin) else null
+
+
+## Why `id` cannot run now, or "".
+func disabled_reason(id: StringName) -> String:
+	var action: Action = _actions.get(id)
+	return action.disabled_reason() if action != null else ""
+
+
+## `Label (Shortcut)`, plus why it is disabled when it is: for tooltips.
+func tooltip(id: StringName) -> String:
+	var action: Action = _actions.get(id)
+	if action == null:
+		return ""
+	var shortcut: String = shortcut_label(id)
+	var text: String = action.label if shortcut.is_empty() else "%s (%s)" % [action.label, shortcut]
+	var why: String = action.disabled_reason()
+	return text if why.is_empty() else "%s\n%s" % [text, why]
 
 
 ## Effective shortcuts: the user's override, else the defaults.
