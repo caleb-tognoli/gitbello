@@ -59,6 +59,7 @@ func run() -> void:
 	expect(folder.text.contains("repo-10.worktrees"), "the default template is used: %s" % folder.text)
 	var task_path: String = folder.text
 	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
+	expect(form.field("open_tab") == null, "the new worktree always shows; no switch to ask about")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return page.views().size() == 3), "the new task shows as a chip")
 	expect_eq(main.tab_count(), 1, "no new tab")

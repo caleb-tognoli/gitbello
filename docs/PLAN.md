@@ -225,7 +225,7 @@ The shell, actions, feedback, Changes and shelves specs below are the M6.5 desig
 ```
 File  Edit  Repository  Branch  View  Help
 [• gitbello  x] [spritesheetbelli  x] [+]                   <- repo tabs
-( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) [+ New worktree v]
+( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) (+|v)
 [ Branch: main          v ]  [ Push ↑1        v ]
 [ Merging feature/login into main · 2 conflicts   Continue  Abort ]  <- only during an operation
 +---------------------------+---------------------------------------+
@@ -254,7 +254,7 @@ File  Edit  Repository  Branch  View  Help
 - A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
 - Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Remove….
-- Right after the last chip, **+ New worktree** runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
+- Right after the last chip, **+** (New worktree) runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
 - When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
@@ -303,7 +303,7 @@ File  Edit  Repository  Branch  View  Help
 2. Choose the base. It defaults to the upstream default branch and is fetched first.
 3. Confirm the target path, previewed from the template.
 4. Optionally pick a setup action.
-5. Optionally open in the editor, or open as a tab (on by default).
+5. Optionally open in the editor. The new worktree always shows once created.
 
 This runs as a single job with rollback if any step fails.
 

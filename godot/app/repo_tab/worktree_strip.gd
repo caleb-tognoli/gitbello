@@ -1,8 +1,8 @@
 class_name WorktreeStrip
 extends PanelContainer
 ## The row of worktree chips at the top of a repository tab (PLAN §4): the
-## main worktree first, then the linked ones by folder name, then "New
-## worktree" right after the last chip, with a ▾ for cleanup, adding a
+## main worktree first, then the linked ones by folder name, then + (new
+## worktree) right after the last chip, with a ▾ for cleanup, adding a
 ## worktree for a branch and pruning. When the chips do not fit, the row
 ## scrolls and a ▾ at its end lists them all.
 
@@ -51,10 +51,9 @@ func _ready() -> void:
 	_actions.theme_type_variation = &"ChipSplit"
 	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_row.add_child(_actions)
-	_new_task.text = "New worktree"
 	_new_task.icon = AppTheme.icon(&"Add")
 	var shortcut: String = Actions.shortcut_label(&"task.new")
-	_new_task.tooltip_text = "Create a branch in a new worktree" + (" (%s)" % shortcut if not shortcut.is_empty() else "")
+	_new_task.tooltip_text = "New worktree" + (" (%s)" % shortcut if not shortcut.is_empty() else "")
 	_new_task.theme_type_variation = &"ChipAction"
 	_new_task.focus_mode = Control.FOCUS_NONE
 	_new_task.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND

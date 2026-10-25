@@ -693,7 +693,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	# quieter than a chip until hovered; the all-worktrees ▾ as a round chip
 	_variation(theme, &"ChipSplit", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ChipSplit", 0)
-	for entry: Array in [[&"ChipAction", Vector4(9, 4, 10, 4), 1], [&"ChipActionMenu", Vector4(5, 4, 7, 4), 2],
+	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1], [&"ChipActionMenu", Vector4(5, 4, 7, 4), 2],
 			[&"ChipIconButton", Vector4(5, 4, 5, 4), 0]]:
 		_variation(theme, entry[0], &"Button")
 		for state: Array in [[&"normal", Color.TRANSPARENT, p.border], [&"hover", p.hover, p.border],
