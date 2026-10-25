@@ -170,6 +170,11 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal("missing", &[]);
             }
         }
+        RuntimeEvent::ShelfLoaded { repo, oid } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("shelf_files_loaded", &[gstr(&oid).to_variant()]);
+            }
+        }
         RuntimeEvent::CleanupLoaded { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("cleanup_loaded", &[]);

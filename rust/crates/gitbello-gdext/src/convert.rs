@@ -10,7 +10,7 @@ use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
 use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
-    RefKind, RepoStatus, StashEntry, Worktree,
+    RefKind, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
 use gitbello_core::runtime::DiffState;
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
@@ -265,6 +265,48 @@ pub fn stashes(entries: &[StashEntry]) -> Array<VarDictionary> {
             "branch" => &gstr(s.branch.as_deref().unwrap_or_default()),
             "time" => s.time,
             "oid" => &gstr(&s.oid),
+        });
+    }
+    out
+}
+
+/// Shelf rows: `{oid, branch, name, auto, made_here, time}`.
+pub fn shelves(list: &[Shelf]) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    for s in list {
+        out.push(&vdict! {
+            "oid" => &gstr(&s.oid),
+            "branch" => &gstr(s.branch.as_deref().unwrap_or_default()),
+            "name" => &gstr(&s.name),
+            "auto" => s.auto,
+            "made_here" => s.made_here,
+            "time" => s.time,
+        });
+    }
+    out
+}
+
+/// A shelf's files: `{path, original_path, code, untracked}`.
+pub fn shelf_files(files: &[ShelfFile]) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    for f in files {
+        let code = if f.untracked {
+            "?"
+        } else {
+            match f.change {
+                Change::Added => "A",
+                Change::Deleted => "D",
+                Change::Renamed => "R",
+                Change::Copied => "C",
+                Change::TypeChanged => "T",
+                Change::Modified | Change::Unmodified => "M",
+            }
+        };
+        out.push(&vdict! {
+            "path" => &path_str(&f.path),
+            "original_path" => &f.original_path.as_deref().map_or_else(GString::new, path_str),
+            "code" => code,
+            "untracked" => f.untracked,
         });
     }
     out

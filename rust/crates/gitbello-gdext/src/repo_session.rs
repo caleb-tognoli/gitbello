@@ -4,7 +4,7 @@ use gitbello_core::changes::{commit_message, PickState};
 use gitbello_core::diff::PatchMode;
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
-use gitbello_core::ops::{CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
+use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
 use gitbello_core::runtime::RepoState;
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
@@ -99,6 +99,9 @@ impl RepoSession {
     /// `load_cleanup` finished (`cleanup_candidates`).
     #[signal]
     fn cleanup_loaded();
+    /// The files of shelf `oid` arrived (`shelf_files`).
+    #[signal]
+    fn shelf_files_loaded(oid: GString);
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -358,27 +361,110 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.push_tag(&self.key, &name.to_string())).flatten())
     }
 
-    /// Checks out local branch `name`; with `stash`, local changes are
-    /// stashed and re-applied afterwards. Label `checkout`.
+    /// Checks out local branch `name`. `changes` says what happens to local
+    /// changes: `keep` (git decides), `bring` (stashed and re-applied on the
+    /// branch) or `leave` (an automatic shelf on the current branch). Label
+    /// `checkout`.
     #[func]
-    fn checkout_branch(&self, name: GString, stash: bool) -> i64 {
-        self.checkout(Some(CheckoutTarget::Branch(name.to_string())), stash)
+    fn checkout_branch(&self, name: GString, changes: GString) -> i64 {
+        self.checkout(Some(CheckoutTarget::Branch(name.to_string())), &changes)
     }
 
     /// Checks out remote-tracking branch `remote_ref` (`refs/remotes/...`):
     /// the local branch tracking it, or a new one. Label `checkout`.
     #[func]
-    fn checkout_remote(&self, remote_ref: GString, stash: bool) -> i64 {
+    fn checkout_remote(&self, remote_ref: GString, changes: GString) -> i64 {
         let target = self
             .read(|s| s.remote_checkout_target(&remote_ref.to_string()))
             .flatten();
-        self.checkout(target, stash)
+        self.checkout(target, &changes)
     }
 
     /// Checks out a commit, detaching HEAD. Label `checkout`.
     #[func]
-    fn checkout_commit(&self, oid: GString, stash: bool) -> i64 {
-        self.checkout(Some(CheckoutTarget::Detach(oid.to_string())), stash)
+    fn checkout_commit(&self, oid: GString, changes: GString) -> i64 {
+        self.checkout(Some(CheckoutTarget::Detach(oid.to_string())), &changes)
+    }
+
+    // --- Shelves (PLAN §4 Shelves) ---------------------------------------------
+
+    /// Every shelf, newest first: `{oid, branch, name, auto, made_here, time}`
+    /// (stashes made elsewhere included, `made_here` false; `branch` empty
+    /// when unknown).
+    #[func]
+    fn shelves(&self) -> Array<VarDictionary> {
+        self.read(|s| convert::shelves(s.shelves()))
+            .unwrap_or_default()
+    }
+
+    /// Reads the files of shelf `oid`; `shelf_files_loaded` follows.
+    #[func]
+    fn load_shelf_files(&self, oid: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.load_shelf_files(&self.key, &oid.to_string())).flatten())
+    }
+
+    /// Files of shelf `oid` once loaded: `{path, original_path, code, untracked}`.
+    #[func]
+    fn shelf_files(&self, oid: GString) -> Array<VarDictionary> {
+        self.read(|s| s.shelf_files(&oid.to_string()).map(convert::shelf_files))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Shows the diff of `path` in shelf `oid` in the Changes view (its files
+    /// must be loaded); `diff_changed` follows.
+    #[func]
+    fn select_shelf_file(&self, oid: GString, path: GString, full: bool) {
+        let path = PathBuf::from(path.to_string());
+        runtime_cell::with(|rt| rt.select_shelf_file(&self.key, &oid.to_string(), &path, full));
+    }
+
+    /// Shelves `paths` (every change when empty) on the current branch as
+    /// `name`. Label `shelve`.
+    #[func]
+    fn shelve(&self, paths: PackedStringArray, name: GString) -> i64 {
+        let paths: Vec<PathBuf> = paths
+            .as_slice()
+            .iter()
+            .map(|p| PathBuf::from(p.to_string()))
+            .collect();
+        job_id(runtime_cell::with(|rt| rt.shelve(&self.key, paths, &name.to_string())).flatten())
+    }
+
+    /// Applies shelf `oid`, dropping it when that worked. Label `restore shelf`.
+    #[func]
+    fn restore_shelf(&self, oid: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.restore_shelf(&self.key, &oid.to_string())).flatten())
+    }
+
+    /// Label `rename shelf`.
+    #[func]
+    fn rename_shelf(&self, oid: GString, name: GString) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.rename_shelf(&self.key, &oid.to_string(), &name.to_string())
+            })
+            .flatten(),
+        )
+    }
+
+    /// Drops shelf `oid` (`undo_shelf_discard` brings it back). Label
+    /// `discard shelf`.
+    #[func]
+    fn discard_shelf(&self, oid: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.discard_shelf(&self.key, &oid.to_string())).flatten())
+    }
+
+    #[func]
+    fn can_undo_shelf_discard(&self) -> bool {
+        self.read(RepoState::can_undo_shelf_discard)
+            .unwrap_or(false)
+    }
+
+    /// Stores the last discarded shelf again. Label `undo shelf discard`.
+    #[func]
+    fn undo_shelf_discard(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_shelf_discard(&self.key)).flatten())
     }
 
     /// Creates branch `name` at `start` (a branch, ref or hash), optionally
@@ -1075,11 +1161,13 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.repo(&self.key).map(f)).flatten()
     }
 
-    fn checkout(&self, target: Option<CheckoutTarget>, stash: bool) -> i64 {
-        let Some(target) = target else {
+    fn checkout(&self, target: Option<CheckoutTarget>, changes: &GString) -> i64 {
+        let (Some(target), Some(changes)) =
+            (target, CheckoutChanges::from_id(&changes.to_string()))
+        else {
             return -1;
         };
-        job_id(runtime_cell::with(|rt| rt.checkout(&self.key, target, stash)).flatten())
+        job_id(runtime_cell::with(|rt| rt.checkout(&self.key, target, changes)).flatten())
     }
 
     fn ref_op(&self, op: RefOp) -> i64 {
