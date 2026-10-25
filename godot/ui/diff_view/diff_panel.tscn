@@ -25,11 +25,15 @@ layout_mode = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="DiffPath" type="Label" parent="DiffHeaderPanel/DiffHeader"]
+[node name="DiffPath" type="RichTextLabel" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
+clip_contents = true
 layout_mode = 2
 size_flags_horizontal = 3
-text_overrun_behavior = 3
+size_flags_vertical = 4
+scroll_active = false
+autowrap_mode = 0
+vertical_alignment = 1
 
 [node name="DiffStats" type="Label" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true

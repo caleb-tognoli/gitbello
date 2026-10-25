@@ -32,6 +32,9 @@ func run() -> void:
 	var first_code: String = String(details.file_list().row(0).get("code", ""))
 	expect(not first_code.is_empty(), "the first file has a status code")
 	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")
+	expect_eq(details.diff_panel().path_text(), details.file_list().path_at(0), "the header shows the path")
+	expect_eq(Core.rename_parts("src/util.rs", "lib/util.rs"), PackedStringArray(["", "src", "lib", "/util.rs"]),
+			"a move shares the file name")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
 	expect(details.collapsed, "without a body the details shrink to fit")
 	await get_tree().process_frame

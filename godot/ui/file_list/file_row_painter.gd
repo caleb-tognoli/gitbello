@@ -2,6 +2,7 @@ class_name FileRowPainter
 extends RefCounted
 ## Draws one file row (`{path, original_path, code}`) the way every file
 ## list does: a colored status icon, the file name, then its folder dimmed.
+## A renamed file reads `old.md → new.md`, a moved one's folder `{src → lib}`.
 ## With `show_picks`, a commit-selection checkbox comes first (from the row's
 ## `pick`; conflicted rows have none). Colors and sizes come from the
 ## `ChangeList` theme type.
@@ -50,6 +51,7 @@ var _code_colors: Dictionary[String, Color] = {}
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
 var _picks: PickPainter = PickPainter.new()
+var _renamed_dirs: Dictionary[String, String] = {}
 
 
 ## Reads the theme values from `control` (call again on theme changes).
@@ -85,17 +87,38 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	x += _code_width
 	var path: String = String(data["path"])
 	var file: String = path.get_file()
-	var original: String = String(data.get("original_path", ""))
-	if not original.is_empty():
-		file = "%s ← %s" % [file, original.get_file()]
-	var right: float = rect.end.x - _padding
-	canvas.draw_string(_font, Vector2(x, baseline), file, HORIZONTAL_ALIGNMENT_LEFT, maxf(1.0, right - x),
-			_font_size, _path_color)
-	x += _font.get_string_size(file, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x + _padding
 	var dir: String = path.get_base_dir()
+	var original: String = String(data.get("original_path", ""))
+	var right: float = rect.end.x - _padding
+	if not original.is_empty() and original != path:
+		# Renamed: `old.md → new.md`, the old name dimmed; a changed folder
+		# reads `src/{a → b}` (see `rename_dir`).
+		if original.get_file() != file:
+			var old_name: String = "%s → " % original.get_file()
+			canvas.draw_string(_font, Vector2(x, baseline), old_name, HORIZONTAL_ALIGNMENT_LEFT,
+					maxf(1.0, right - x), _font_size, _dir_color)
+			x += _font.get_string_size(old_name, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x
+		if original.get_base_dir() != dir:
+			dir = rename_dir(original.get_base_dir(), dir)
+	if x < right:
+		canvas.draw_string(_font, Vector2(x, baseline), file, HORIZONTAL_ALIGNMENT_LEFT, maxf(1.0, right - x),
+				_font_size, _path_color)
+	x += _font.get_string_size(file, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size).x + _padding
 	if not dir.is_empty() and x < right:
 		canvas.draw_string(_font, Vector2(x, baseline), dir, HORIZONTAL_ALIGNMENT_LEFT, right - x,
 				_font_size, _dir_color)
+
+
+## A folder that changed in a rename, `prefix{old → new}suffix` (cached:
+## rows are drawn every frame).
+func rename_dir(old_dir: String, new_dir: String) -> String:
+	var key: String = old_dir + "\n" + new_dir
+	if not _renamed_dirs.has(key):
+		if _renamed_dirs.size() > 256:
+			_renamed_dirs.clear()
+		var parts: PackedStringArray = Core.rename_parts(old_dir, new_dir)
+		_renamed_dirs[key] = "%s{%s → %s}%s" % [parts[0], parts[1], parts[2], parts[3]]
+	return _renamed_dirs[key]
 
 
 ## The status icon of `code` (white, to tint with `code_color`), or null.

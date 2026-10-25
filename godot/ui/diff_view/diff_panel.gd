@@ -2,7 +2,8 @@ class_name DiffPanel
 extends VBoxContainer
 ## A file diff with its header (status icon, path, notes, +/− counts,
 ## unified or side by side) and the messages shown instead of lines
-## (loading, binary, too large, no changes, errors). Callers pass `RepoSession.diff_info()`-style
+## (loading, binary, too large, no changes, errors). A renamed or copied
+## file's path reads `docs/{old.md → new.md}`, the old part dimmed. Callers pass `RepoSession.diff_info()`-style
 ## dictionaries to `show_info`. Every panel is in the `diff_panels` group so
 ## the layout can change everywhere at once.
 
@@ -11,13 +12,15 @@ const GROUP: StringName = &"diff_panels"
 const EMPTY_MESSAGES: Dictionary[String, String] = {
 	"A": "New empty file.",
 	"D": "Deleted an empty file.",
+	"R": "Renamed without changes.",
+	"C": "Copied without changes.",
 }
 
 ## The user asked to load a diff past the size limit.
 signal load_full_requested()
 
 @onready var _status_icon: TextureRect = %StatusIcon
-@onready var _path: Label = %DiffPath
+@onready var _path: RichTextLabel = %DiffPath
 @onready var _stats: Label = %DiffStats
 @onready var _view: DiffView = %DiffView
 @onready var _message: Control = %DiffMessage
@@ -31,6 +34,8 @@ var _shown: String = ""
 var _placeholder: String = ""
 ## Status code of the diff shown ("A", "M", ...), or "".
 var _code: String = ""
+## `[path, original_path, similarity]` of the header, redrawn on theme changes.
+var _path_shown: Array = ["", "", -1]
 
 
 func _ready() -> void:
@@ -89,13 +94,14 @@ func clear(placeholder: String = "") -> void:
 	_shown = ""
 	_view.show_lines(0, 0, false)
 	_show_code("")
-	_path.text = ""
+	_show_path("", "", -1)
 	_stats.text = ""
 	show_message(_placeholder)
 
 
 ## Shows a diff described by `info` (`state`, `path`, `kind`, `content`,
-## `notes`, `additions`, `deletions`, `line_count`, `max_line`, sizes, `error`).
+## `code`, `original_path`, `similarity`, `notes`, `additions`, `deletions`,
+## `line_count`, `max_line`, sizes, `error`).
 func show_info(info: Dictionary) -> void:
 	var state: String = String(info.get("state", "none"))
 	if state == "none":
@@ -105,7 +111,7 @@ func show_info(info: Dictionary) -> void:
 	var key: String = String(info["kind"]) + ":" + path
 	var code: String = String(info.get("code", ""))
 	_show_code(code)
-	_path.text = path
+	_show_path(path, String(info.get("original_path", "")), int(info.get("similarity", -1)))
 	var notes: PackedStringArray = info.get("notes", PackedStringArray())
 	var stats: PackedStringArray = PackedStringArray(notes)
 	if int(info.get("additions", 0)) > 0 or int(info.get("deletions", 0)) > 0:
@@ -166,10 +172,46 @@ func status_code() -> String:
 	return _code
 
 
+## The header's path as shown, such as `docs/{a.md → b.md}`.
+func path_text() -> String:
+	return _path.get_parsed_text()
+
+
+## `path`, or for a rename or copy `prefix{old → new}suffix` with the old
+## part dimmed (`old → new` when the paths share nothing); the tooltip says
+## where it came from and how similar it is.
+func _show_path(path: String, original: String, similarity: int) -> void:
+	_path_shown = [path, original, similarity]
+	_path.clear()
+	_path.tooltip_text = path
+	if original.is_empty() or original == path:
+		_path.add_text(path)
+		return
+	var parts: PackedStringArray = Core.rename_parts(original, path)
+	var braces: bool = not parts[0].is_empty() or not parts[3].is_empty()
+	var dim: Color = get_theme_color(&"font_color", &"DimLabel")
+	_path.add_text(parts[0])
+	_path.push_color(dim)
+	_path.add_text("%s%s → " % ["{" if braces else "", parts[1]])
+	_path.pop()
+	_path.add_text(parts[2])
+	_path.push_color(dim)
+	_path.add_text("}" if braces else "")
+	_path.pop()
+	_path.add_text(parts[3])
+	_path.tooltip_text = "%s from %s" % ["Copied" if _code == "C" else "Renamed", original]
+	if similarity >= 0:
+		_path.tooltip_text += " · %d%% similar" % similarity
+
+
 func _apply_theme() -> void:
 	var icon_size: float = float(get_theme_constant(&"icon_size", FileRowPainter.THEME_TYPE))
 	_status_icon.custom_minimum_size = Vector2(icon_size, icon_size)
 	_show_code(_code)
+	# Not sized to its text, so a long path can't widen the panel: one line.
+	var font: Font = get_theme_font(&"normal_font", &"RichTextLabel")
+	_path.custom_minimum_size.y = font.get_height(get_theme_font_size(&"normal_font_size", &"RichTextLabel"))
+	_show_path(_path_shown[0], _path_shown[1], _path_shown[2])
 
 
 static func _size_text(bytes: int) -> String:
