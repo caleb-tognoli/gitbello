@@ -124,6 +124,19 @@ fn change_id(change: Change) -> &'static str {
     }
 }
 
+/// The status letter the file lists show: `M`, `A`, `D`, `R`, `C`, `T`.
+fn change_letter(change: Change) -> &'static str {
+    match change {
+        Change::Modified => "M",
+        Change::Added => "A",
+        Change::Deleted => "D",
+        Change::Renamed => "R",
+        Change::Copied => "C",
+        Change::TypeChanged => "T",
+        Change::Unmodified => "",
+    }
+}
+
 fn conflict_id(conflict: Conflict) -> &'static str {
     match conflict {
         Conflict::BothDeleted => "both_deleted",
@@ -290,17 +303,10 @@ pub fn shelves(list: &[Shelf]) -> Array<VarDictionary> {
 pub fn shelf_files(files: &[ShelfFile]) -> Array<VarDictionary> {
     let mut out = Array::new();
     for f in files {
-        let code = if f.untracked {
-            "?"
-        } else {
-            match f.change {
-                Change::Added => "A",
-                Change::Deleted => "D",
-                Change::Renamed => "R",
-                Change::Copied => "C",
-                Change::TypeChanged => "T",
-                Change::Modified | Change::Unmodified => "M",
-            }
+        let code = match f.change {
+            _ if f.untracked => "?",
+            Change::Unmodified => "M",
+            change => change_letter(change),
         };
         out.push(&vdict! {
             "path" => &path_str(&f.path),
@@ -367,19 +373,10 @@ pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
 
 /// A commit file row: `{path, original_path, code}`.
 pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
-    let code = match file.change {
-        Change::Modified => "M",
-        Change::Added => "A",
-        Change::Deleted => "D",
-        Change::Renamed => "R",
-        Change::Copied => "C",
-        Change::TypeChanged => "T",
-        Change::Unmodified => "",
-    };
     vdict! {
         "path" => &path_str(&file.path),
         "original_path" => &file.original_path.as_deref().map_or_else(GString::new, path_str),
-        "code" => code,
+        "code" => change_letter(file.change),
     }
 }
 
@@ -404,7 +401,7 @@ fn diff_content_id(content: DiffContent) -> &'static str {
     }
 }
 
-/// `{state, path, kind, content, notes, additions, deletions, line_count,
+/// `{state, path, kind, content, code, notes, additions, deletions, line_count,
 /// max_line, old_size, new_size, bytes, error}`; `state` is `none`,
 /// `loading`, `error` or `ready`. Sizes are -1 when unknown.
 pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
@@ -451,6 +448,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             };
             let notes: PackedStringArray = diff.header.notes().iter().map(|n| gstr(n)).collect();
             info.set("content", content);
+            info.set("code", change_letter(diff.header.change()));
             info.set("notes", &notes);
             info.set("additions", i64::from(diff.additions));
             info.set("deletions", i64::from(diff.deletions));

@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use crate::repo::ParseError;
+use crate::repo::{Change, ParseError};
 
 mod patch;
 
@@ -119,24 +119,34 @@ pub struct DiffHeader {
 }
 
 impl DiffHeader {
-    /// Short human-readable notes ("New file", "Mode 100644 → 100755", ...).
+    /// How the file changed, as the file lists show it.
+    pub fn change(&self) -> Change {
+        if self.new_file {
+            Change::Added
+        } else if self.deleted_file {
+            Change::Deleted
+        } else if self.renamed_from.is_some() {
+            Change::Renamed
+        } else if self.copied_from.is_some() {
+            Change::Copied
+        } else {
+            Change::Modified
+        }
+    }
+
+    /// Short human-readable notes on what `change()` doesn't say: where a
+    /// rename or copy came from, a mode change ("Mode 100644 → 100755").
     pub fn notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
-        if self.new_file {
-            notes.push("New file".to_owned());
-        }
-        if self.deleted_file {
-            notes.push("Deleted file".to_owned());
-        }
         let similarity = self
             .similarity
             .map(|s| format!(" ({s}% similar)"))
             .unwrap_or_default();
         if let Some(from) = &self.renamed_from {
-            notes.push(format!("Renamed from {from}{similarity}"));
+            notes.push(format!("From {from}{similarity}"));
         }
         if let Some(from) = &self.copied_from {
-            notes.push(format!("Copied from {from}{similarity}"));
+            notes.push(format!("Copy of {from}{similarity}"));
         }
         if let (Some(old), Some(new)) = (&self.old_mode, &self.new_mode) {
             if !self.new_file && !self.deleted_file && old != new {
@@ -702,7 +712,8 @@ index 1111111..2222222 100644
         )
         .unwrap();
         assert!(new.header.new_file);
-        assert_eq!(new.header.notes(), ["New file"]);
+        assert_eq!(new.header.change(), Change::Added);
+        assert!(new.header.notes().is_empty());
         assert_eq!(texts(&new)[1].2, Some(1));
 
         let deleted = parse_diff(
@@ -710,16 +721,19 @@ index 1111111..2222222 100644
         )
         .unwrap();
         assert!(deleted.header.deleted_file);
+        assert_eq!(deleted.header.change(), Change::Deleted);
         assert_eq!(deleted.deletions, 1);
 
         let renamed = parse_diff(
             b"diff --git a/old b/new\nsimilarity index 90%\nrename from old\nrename to new\n",
         )
         .unwrap();
-        assert_eq!(renamed.header.notes(), ["Renamed from old (90% similar)"]);
+        assert_eq!(renamed.header.change(), Change::Renamed);
+        assert_eq!(renamed.header.notes(), ["From old (90% similar)"]);
         assert!(!renamed.is_empty());
 
         let mode = parse_diff(b"diff --git a/s b/s\nold mode 100644\nnew mode 100755\n").unwrap();
+        assert_eq!(mode.header.change(), Change::Modified);
         assert_eq!(mode.header.notes(), ["Mode 100644 → 100755"]);
     }
 

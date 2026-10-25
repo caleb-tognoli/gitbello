@@ -263,6 +263,7 @@ pub fn diff(args: &[String]) -> Result<()> {
     let started = std::time::Instant::now();
     let diff = backend.diff(Path::new(root), &target, limit, &CancelToken::new())?;
     let elapsed = started.elapsed();
+    println!("# {:?}", diff.header.change());
     for note in diff.header.notes() {
         println!("# {note}");
     }
