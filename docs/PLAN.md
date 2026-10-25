@@ -303,7 +303,7 @@ File  Edit  Repository  Branch  View  Help
 2. Choose the base. It defaults to the upstream default branch and is fetched first.
 3. Confirm the target path, previewed from the template.
 4. Optionally pick a setup action.
-5. Optionally open in the editor. The new worktree always shows once created.
+5. The new worktree shows once created.
 
 This runs as a single job with rollback if any step fails.
 

@@ -35,8 +35,8 @@ var _checkouts: Dictionary[int, Dictionary] = {}
 var _deletes: Dictionary[int, String] = {}
 ## Tags to push once created: job id -> tag name.
 var _tag_pushes: Dictionary[int, String] = {}
-## New tasks and added worktrees started here: job id -> `{path, editor}`.
-var _tasks: Dictionary[int, Dictionary] = {}
+## New tasks and added worktrees started here, shown once created: job id -> path.
+var _tasks: Dictionary[int, String] = {}
 ## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
 var _form_kind: String = ""
 ## The new-task folder was edited by hand: stop following the branch name.
@@ -554,7 +554,7 @@ func show_in_file_manager(path: String = "") -> void:
 
 ## The new-task flow (PLAN §4): a branch from a base (the default one
 ## first, a remote one fetched first) in a new worktree whose folder follows
-## the branch name, shown (and optionally opened in the editor) once created.
+## the branch name, shown once created.
 func new_task() -> void:
 	var bases: PackedStringArray = PackedStringArray()
 	var base: String = session.default_base()
@@ -571,7 +571,6 @@ func new_task() -> void:
 	_form.add_line("name", "Branch", "", true)
 	_form.add_choice("base", "Start from", bases, 0)
 	_form.add_line("folder", "Folder", "", false, "Follows the branch name")
-	_form.add_check("open_editor", "Open it in the editor", false)
 	_form.validator = _check_task
 	_form.open()
 
@@ -594,7 +593,7 @@ func _create_task(values: Dictionary) -> void:
 	var name: String = String(values["name"])
 	var job: int = session.new_task(name, base, folder, remote)
 	if job >= 0:
-		_tasks[job] = {"path": folder, "editor": bool(values["open_editor"])}
+		_tasks[job] = folder
 	_track(job, "Creating the worktree %s" % name, "Created the worktree %s" % name)
 
 
@@ -612,7 +611,7 @@ func add_existing_worktree() -> void:
 		var path: String = String(values["folder"])
 		var job: int = session.add_worktree(path, branch, "")
 		if job >= 0:
-			_tasks[job] = {"path": path, "editor": false}
+			_tasks[job] = path
 		_track(job, "Adding a worktree for %s" % branch, "Added a worktree for %s" % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
 	_form.add_line("folder", "Folder", session.worktree_path_for(branches[0]))
@@ -756,12 +755,10 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		if ok:
 			push_tag(tag)
 	elif _tasks.has(job):
-		var task: Dictionary = _tasks[job]
+		var path: String = _tasks[job]
 		_tasks.erase(job)
 		if ok:
-			open_requested.emit(String(task["path"]))
-		if ok and bool(task["editor"]):
-			open_in_editor(String(task["path"]))
+			open_requested.emit(path)
 
 
 ## Reports `job` to `feedback` (see `Feedback.track`) and returns it.
