@@ -108,3 +108,20 @@ Line staging round trip (core test `random_selections_stage_exactly_what_was_pic
 30 rounds of diff + patch + `git apply --check` + apply + unstage): 11 s in total,
 about 0.35 s per round including fixture commits.
 
+
+## M6.5 P5 — history search
+
+`gitbello-cli graph-bench <repo>` (read-only) searches the loaded index the way
+one search job does. git/git, 85,790 commits, git 2.53.0, release build (the
+debug build is within 15%, its longest chunk 0.53 ms):
+
+```text
+search fix       10381 matches in 4.7 ms
+search Junio     31564 matches in 4.2 ms
+search zzzqqqxx  0 matches in 3.6 ms
+search ed47fdf7  1 matches in 6.8 ms     (hash prefix, plus subjects and authors)
+search chunk    max 0.30 ms per 4096 rows (read lock held)
+```
+
+A whole search fits in a frame, and loading or the UI's slice reads wait at
+most one chunk for the read lock.

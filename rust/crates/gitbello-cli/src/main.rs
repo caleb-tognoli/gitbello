@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use gitbello_core::graph::{GraphIndex, GraphLoader, LoadState, RowLayout, SegmentKind};
+use gitbello_core::graph::{
+    CommitMatcher, CommitSearch, GraphIndex, GraphLoader, LoadState, RowLayout, SegmentKind,
+    SEARCH_CHUNK_ROWS,
+};
 
 const USAGE: &str = "usage: gitbello-cli <command>
 
@@ -187,7 +190,52 @@ fn graph_bench(args: &[String]) -> Result<()> {
         "50-row slice    avg {:.1} us, max {:.1} us ({} samples)",
         slice.avg_us, slice.max_us, slice.samples
     );
+    let hash = index
+        .commit(rows / 2)
+        .map(|c| c.hash_hex())
+        .unwrap_or_default();
+    let max_chunk = max_chunk_us(&index, "fix");
+    drop(index);
+    for query in ["fix", "Junio", "zzzqqqxx", &hash[..hash.len().min(8)]] {
+        let (matches, took) = time_search(&loader, query);
+        println!(
+            "search {query:<9} {matches} matches in {:.1} ms",
+            took.as_secs_f64() * 1e3
+        );
+    }
+    println!(
+        "search chunk    max {:.1} us per {SEARCH_CHUNK_ROWS} rows (read lock held)",
+        max_chunk
+    );
     Ok(())
+}
+
+/// A whole search of the loaded graph, as one job runs it.
+fn time_search(loader: &GraphLoader, query: &str) -> (usize, Duration) {
+    let Some(search) = CommitSearch::new(query, loader.reader()) else {
+        return (0, Duration::ZERO);
+    };
+    let began = Instant::now();
+    search.run_now();
+    (search.match_count(), began.elapsed())
+}
+
+/// The longest single chunk of a search for `query`: how long the read lock
+/// is held at most.
+fn max_chunk_us(index: &GraphIndex, query: &str) -> f64 {
+    let Some(mut matcher) = CommitMatcher::new(query) else {
+        return 0.0;
+    };
+    let mut max = Duration::ZERO;
+    let mut found = Vec::new();
+    for start in (0..index.row_count()).step_by(SEARCH_CHUNK_ROWS) {
+        found.clear();
+        let began = Instant::now();
+        matcher.scan(index, start..start + SEARCH_CHUNK_ROWS, &mut found);
+        max = max.max(began.elapsed());
+    }
+    std::hint::black_box(found);
+    max.as_secs_f64() * 1e6
 }
 
 const MIB: f64 = 1024.0 * 1024.0;
