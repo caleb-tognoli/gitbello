@@ -23,7 +23,7 @@ use crate::backend::GitBackend;
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::repo::{
-    CommitDetails, Operation, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree,
+    CommitDetails, Operation, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
 };
 use crate::sidebar::Badge;
 use crate::worktrees::CleanupCandidate;
@@ -158,6 +158,13 @@ pub enum JobOutput {
     Cleanup(Vec<CleanupCandidate>),
     /// A discard finished; these `(path, blob id)` backups can undo it.
     Discarded(Vec<(PathBuf, String)>),
+    /// The files of shelf `oid`.
+    ShelfFiles(String, Vec<ShelfFile>),
+    /// Shelf `oid` was dropped; storing it again with `subject` undoes it.
+    ShelfDropped {
+        oid: String,
+        subject: String,
+    },
     /// A repository was opened: its worktree root and git directories.
     Opened {
         toplevel: PathBuf,

@@ -18,8 +18,8 @@ use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
     parse_repo_paths, parse_stash_list, parse_status, parse_worktrees, CommitDetails, Operation,
-    ParseError, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree, COMMIT_SHOW_FORMAT,
-    REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
+    ParseError, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
+    COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
 };
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
@@ -163,6 +163,49 @@ pub trait GitBackend: Send + Sync {
         index: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    /// Shelves `paths` (untracked files included) as a stash with `message`.
+    /// Returns its commit, or `None` when there was nothing to shelve.
+    fn shelve(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError>;
+    /// Applies shelf `oid` (with what was staged when that applies), then
+    /// drops it. A failed or conflicting apply keeps the shelf.
+    fn restore_shelf(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Drops the stash entry of commit `oid`.
+    fn drop_shelf(&self, repo: &Path, oid: &str, cancel: &CancelToken) -> Result<(), GitError>;
+    /// Stores commit `oid` as the newest stash with `message`.
+    fn store_shelf(
+        &self,
+        repo: &Path,
+        oid: &str,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Stores shelf `oid` again with `message`, then drops the old entry.
+    fn rename_shelf(
+        &self,
+        repo: &Path,
+        oid: &str,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// The files of shelf `oid`, tracked then untracked.
+    fn shelf_files(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<Vec<ShelfFile>, GitError>;
 
     fn worktree_op(
         &self,
@@ -881,6 +924,144 @@ impl GitBackend for CliBackend {
         cmd.cancel_token(cancel).run().map(drop)
     }
 
+    fn shelve(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        let before = self.stash_top(toplevel, cancel)?;
+        let cmd = self.runner.write(toplevel).args([
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            message,
+        ]);
+        let paths = (!paths.is_empty()).then_some(paths);
+        run_with_paths(cmd, paths, cancel)?;
+        let after = self.stash_top(toplevel, cancel)?;
+        Ok(after.filter(|top| Some(top) != before.as_ref()))
+    }
+
+    fn restore_shelf(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.stash_index(toplevel, oid, cancel)?;
+        let apply = |index: bool| {
+            let mut cmd = self.runner.write(toplevel).args(["stash", "apply"]);
+            if index {
+                cmd = cmd.arg("--index");
+            }
+            cmd.arg(oid).cancel_token(cancel).run().map(drop)
+        };
+        match apply(true) {
+            Ok(()) => {}
+            // `--index` refuses, touching nothing, when the staged part does
+            // not apply: the changes come back unstaged instead.
+            Err(err) if err.stderr.contains("--index") => apply(false)?,
+            Err(err) => return Err(err),
+        }
+        // Applied: dropping must not be cut short by a cancel.
+        self.drop_shelf(toplevel, oid, &CancelToken::new())
+    }
+
+    fn drop_shelf(&self, repo: &Path, oid: &str, cancel: &CancelToken) -> Result<(), GitError> {
+        let index = self.stash_index(repo, oid, cancel)?;
+        let selector = format!("stash@{{{index}}}");
+        self.runner
+            .write(repo)
+            .args(["stash", "drop", "-q", &selector])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn store_shelf(
+        &self,
+        repo: &Path,
+        oid: &str,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.runner
+            .write(repo)
+            .args(["stash", "store", "-q", "-m", message, oid])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn rename_shelf(
+        &self,
+        repo: &Path,
+        oid: &str,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let index = self.stash_index(repo, oid, cancel)?;
+        self.store_shelf(repo, oid, message, cancel)?;
+        // The old entry moved one down; check it is still this shelf.
+        let old = index + 1;
+        let restore = CancelToken::new();
+        let list = self.stashes(repo, &restore)?;
+        if list.get(old).map(|e| e.oid.as_str()) != Some(oid) {
+            return Err(stale_shelf(oid));
+        }
+        let selector = format!("stash@{{{old}}}");
+        self.runner
+            .write(repo)
+            .args(["stash", "drop", "-q", &selector])
+            .cancel_token(&restore)
+            .run()
+            .map(drop)
+    }
+
+    fn shelf_files(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<Vec<ShelfFile>, GitError> {
+        let tracked_args = ["stash", "show", "-z", "-M", "--name-status", oid];
+        let out = self.read(repo, &tracked_args, cancel)?;
+        let mut files: Vec<ShelfFile> = parse_name_status(&out.stdout)
+            .map_err(|e| unexpected(&tracked_args, e))?
+            .into_iter()
+            .map(|f| ShelfFile {
+                change: f.change,
+                path: f.path,
+                original_path: f.original_path,
+                untracked: false,
+            })
+            .collect();
+        let untracked_args = [
+            "stash",
+            "show",
+            "-z",
+            "--name-only",
+            "--only-untracked",
+            oid,
+        ];
+        let out = self.read(repo, &untracked_args, cancel)?;
+        files.extend(
+            out.stdout
+                .split(|&b| b == 0)
+                .filter(|p| !p.is_empty())
+                .map(|p| ShelfFile {
+                    change: crate::repo::Change::Added,
+                    path: crate::repo::git_path(p),
+                    original_path: None,
+                    untracked: true,
+                }),
+        );
+        Ok(files)
+    }
+
     fn worktree_op(
         &self,
         repo: &Path,
@@ -993,7 +1174,29 @@ fn run_with_paths(
     cmd.run().map(drop)
 }
 
+/// The error of a shelf that is no longer in the stash list.
+fn stale_shelf(oid: &str) -> GitError {
+    GitError::new(
+        "stash",
+        GitErrorKind::Stale,
+        format!(
+            "the shelf {} is no longer in the stash list",
+            oid.get(..7).unwrap_or(oid)
+        ),
+    )
+}
+
 impl CliBackend {
+    /// `n` in `stash@{n}` of the stash whose commit is `oid` (indices shift
+    /// as stashes are pushed and dropped, from any worktree).
+    fn stash_index(&self, repo: &Path, oid: &str, cancel: &CancelToken) -> Result<usize, GitError> {
+        self.stashes(repo, cancel)?
+            .iter()
+            .find(|e| e.oid == oid)
+            .map(|e| e.index)
+            .ok_or_else(|| stale_shelf(oid))
+    }
+
     /// The steps of [`GitBackend::commit_selection`] that use the temporary
     /// index at `index`.
     fn commit_with_index(

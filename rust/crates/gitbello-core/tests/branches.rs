@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use gitbello_core::git::GitErrorKind;
-use gitbello_core::ops::{CheckoutTarget, RefOp};
+use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, RefOp};
 use gitbello_core::repo::{Operation, RefKind};
 use gitbello_core::runtime::Runtime;
 use support::rt::{finish, ok, open, outcome};
@@ -85,7 +85,9 @@ fn create_rename_and_delete_branches() {
     });
     assert!(!has_ref(&rt, &key, "refs/heads/old/start"));
     repo.commit("u.txt", "u\n", "unmerged work");
-    ok(&mut rt, &key, |rt| rt.checkout(&key, branch("main"), false));
+    ok(&mut rt, &key, |rt| {
+        rt.checkout(&key, branch("main"), CheckoutChanges::Keep)
+    });
     let err = outcome(&mut rt, &key, |rt| {
         rt.ref_op(&key, delete("renamed", false))
     })
@@ -119,7 +121,9 @@ fn checkout_remote_branches_detached_commits_and_upstreams() {
             .remote_checkout_target("refs/remotes/origin/shared")
     };
     assert_eq!(target(&rt), Some(track.clone()));
-    ok(&mut rt, &key, |rt| rt.checkout(&key, track, false));
+    ok(&mut rt, &key, |rt| {
+        rt.checkout(&key, track, CheckoutChanges::Keep)
+    });
     // Now a local branch tracks it: checking out the remote reuses it.
     assert_eq!(target(&rt), Some(branch("shared")));
     assert_eq!(head_branch(&rt, &key).as_deref(), Some("shared"));
@@ -147,7 +151,11 @@ fn checkout_remote_branches_detached_commits_and_upstreams() {
     );
 
     ok(&mut rt, &key, |rt| {
-        rt.checkout(&key, CheckoutTarget::Detach(first.clone()), false)
+        rt.checkout(
+            &key,
+            CheckoutTarget::Detach(first.clone()),
+            CheckoutChanges::Keep,
+        )
     });
     assert_eq!(head_branch(&rt, &key), None);
     assert_eq!(repo.head(), first);
@@ -175,13 +183,15 @@ fn dirty_checkout_is_refused_then_stashes_and_reapplies() {
     let (mut rt, key) = open(&repo);
 
     let err = outcome(&mut rt, &key, |rt| {
-        rt.checkout(&key, branch("topic"), false)
+        rt.checkout(&key, branch("topic"), CheckoutChanges::Keep)
     })
     .expect("dirty");
     assert_eq!(err.kind, GitErrorKind::LocalChanges, "{err}");
     assert_eq!(head_branch(&rt, &key).as_deref(), Some("main"));
 
-    ok(&mut rt, &key, |rt| rt.checkout(&key, branch("topic"), true));
+    ok(&mut rt, &key, |rt| {
+        rt.checkout(&key, branch("topic"), CheckoutChanges::Bring)
+    });
     assert_eq!(head_branch(&rt, &key).as_deref(), Some("topic"));
     let f = fs::read_to_string(repo.path().join("f.txt")).unwrap();
     assert!(
@@ -208,8 +218,10 @@ fn stash_flow_keeps_the_stash_when_reapplying_conflicts() {
     repo.write("f.txt", "local\n");
     let (mut rt, key) = open(&repo);
 
-    let err =
-        outcome(&mut rt, &key, |rt| rt.checkout(&key, branch("topic"), true)).expect("conflict");
+    let err = outcome(&mut rt, &key, |rt| {
+        rt.checkout(&key, branch("topic"), CheckoutChanges::Bring)
+    })
+    .expect("conflict");
     assert_eq!(err.kind, GitErrorKind::Conflict, "{err}");
     assert_eq!(head_branch(&rt, &key).as_deref(), Some("topic"));
     assert!(
@@ -226,7 +238,7 @@ fn stash_flow_puts_changes_back_when_the_switch_fails() {
     repo.write("f.txt", "local\n");
     let (mut rt, key) = open(&repo);
     let err = outcome(&mut rt, &key, |rt| {
-        rt.checkout(&key, branch("no-such-branch"), true)
+        rt.checkout(&key, branch("no-such-branch"), CheckoutChanges::Bring)
     })
     .expect("fails");
     assert_ne!(err.kind, GitErrorKind::Conflict, "{err}");
@@ -244,7 +256,7 @@ fn checkout_of_a_branch_used_by_another_worktree_is_classified() {
     repo.add_worktree("elsewhere", "wörktree");
     let (mut rt, key) = open(&repo);
     let err = outcome(&mut rt, &key, |rt| {
-        rt.checkout(&key, branch("elsewhere"), false)
+        rt.checkout(&key, branch("elsewhere"), CheckoutChanges::Keep)
     })
     .expect("busy");
     assert_eq!(err.kind, GitErrorKind::CheckedOutElsewhere, "{err}");

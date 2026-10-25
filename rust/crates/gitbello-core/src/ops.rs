@@ -116,6 +116,28 @@ impl CheckoutTarget {
     }
 }
 
+/// What a checkout does with local changes (PLAN §4 Shelves).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckoutChanges {
+    /// Nothing: git switches if the changes do not get in the way.
+    Keep,
+    /// Stash them, switch, and re-apply them on the new branch.
+    Bring,
+    /// Leave them on the current branch as an automatic shelf, then switch.
+    Leave,
+}
+
+impl CheckoutChanges {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "keep" => Some(Self::Keep),
+            "bring" => Some(Self::Bring),
+            "leave" => Some(Self::Leave),
+            _ => None,
+        }
+    }
+}
+
 /// Local ref and history changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefOp {

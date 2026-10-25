@@ -19,7 +19,10 @@ pub use operation::{detect_operation, parse_repo_paths, Operation, RepoPaths, RE
 pub use refs::{
     parse_refs, parse_remote_urls, parse_remotes, Ref, RefKind, Remote, Tracking, REFS_ARGS,
 };
-pub use stash::{parse_stash_list, StashEntry, STASH_LIST_ARGS};
+pub use stash::{
+    parse_stash_list, shelf_message, shelves, Shelf, ShelfFile, StashEntry, AUTO_SHELF_PREFIX,
+    SHELF_PREFIX, STASH_LIST_ARGS,
+};
 pub use status::{
     parse_status, Change, Conflict, FileChange, FileState, Head, RepoStatus, STATUS_ARGS,
 };

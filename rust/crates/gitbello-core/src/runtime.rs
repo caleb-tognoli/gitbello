@@ -27,13 +27,13 @@ use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
 use crate::ops::{
-    CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp, AUTO_FETCH_JOB_LABEL,
-    CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL, NEW_TASK_JOB_LABEL, PULL_JOB_LABEL,
-    PUSH_JOB_LABEL,
+    CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp,
+    AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
+    NEW_TASK_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
 };
 use crate::repo::{
-    CommitDetails, FileState, Head, Operation, Ref, RefKind, Remote, RepoPaths, RepoStatus,
-    StashEntry, Worktree,
+    shelf_message, shelves, CommitDetails, FileState, Head, Operation, Ref, RefKind, Remote,
+    RepoPaths, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
@@ -53,6 +53,17 @@ pub const COMMIT_JOB_LABEL: &str = "commit";
 pub const DISCARD_JOB_LABEL: &str = "discard";
 pub const UNDO_DISCARD_JOB_LABEL: &str = "undo discard";
 
+/// Labels of the shelf jobs (PLAN §4 Shelves).
+pub const SHELVE_JOB_LABEL: &str = "shelve";
+pub const RESTORE_SHELF_JOB_LABEL: &str = "restore shelf";
+pub const RENAME_SHELF_JOB_LABEL: &str = "rename shelf";
+pub const DISCARD_SHELF_JOB_LABEL: &str = "discard shelf";
+pub const UNDO_SHELF_DISCARD_JOB_LABEL: &str = "undo shelf discard";
+pub const SHELF_FILES_JOB_LABEL: &str = "read shelf";
+
+/// Shelf discards remembered for undo, per repository.
+pub const MAX_SHELF_UNDO: usize = 20;
+
 /// Discards remembered for undo, per repository.
 pub const MAX_DISCARD_UNDO: usize = 20;
 
@@ -71,7 +82,13 @@ const AUTO_FETCH_FIRST_DELAY: Duration = Duration::from_secs(5);
 
 /// Jobs that can leave the repository changed even when they fail (a
 /// conflicted pull, a checkout whose stashed changes did not re-apply).
-const REFRESH_ON_FAILURE: &[&str] = &[CHECKOUT_JOB_LABEL, PULL_JOB_LABEL, "cherry-pick", "abort"];
+const REFRESH_ON_FAILURE: &[&str] = &[
+    CHECKOUT_JOB_LABEL,
+    PULL_JOB_LABEL,
+    "cherry-pick",
+    "abort",
+    RESTORE_SHELF_JOB_LABEL,
+];
 
 /// A graph reload waits this long after the last ref or HEAD change, so a
 /// commit (which changes both) reloads once.
@@ -129,6 +146,11 @@ pub enum RuntimeEvent {
     CleanupLoaded {
         repo: PathBuf,
     },
+    /// The files of a shelf, requested with [`Runtime::load_shelf_files`].
+    ShelfLoaded {
+        repo: PathBuf,
+        oid: String,
+    },
     /// The HEAD commit's message, requested with [`Runtime::load_head_message`].
     HeadMessage {
         repo: PathBuf,
@@ -156,6 +178,11 @@ pub struct RepoState {
     remote_list: Option<Vec<Remote>>,
     worktrees: Option<Vec<Worktree>>,
     stashes: Option<Vec<StashEntry>>,
+    shelves: Vec<Shelf>,
+    /// Files of shelves, by commit (a shelf's content never changes).
+    shelf_files: HashMap<String, Vec<ShelfFile>>,
+    /// Discarded shelves `(commit, subject)`, newest last, for undo.
+    dropped_shelves: Vec<(String, String)>,
     operation: Option<Operation>,
     labels: HashMap<String, Vec<RefLabel>>,
     changes: ChangeList,
@@ -194,6 +221,9 @@ impl RepoState {
             remote_list: None,
             worktrees: None,
             stashes: None,
+            shelves: Vec::new(),
+            shelf_files: HashMap::new(),
+            dropped_shelves: Vec::new(),
             operation: None,
             labels: HashMap::new(),
             changes: ChangeList::default(),
@@ -303,6 +333,21 @@ impl RepoState {
 
     pub fn stashes(&self) -> Option<&[StashEntry]> {
         self.stashes.as_deref()
+    }
+
+    /// The stash list as shelves, newest first (PLAN §4 Shelves).
+    pub fn shelves(&self) -> &[Shelf] {
+        &self.shelves
+    }
+
+    /// Files of shelf `oid`, once [`Runtime::load_shelf_files`] answered.
+    pub fn shelf_files(&self, oid: &str) -> Option<&[ShelfFile]> {
+        self.shelf_files.get(oid).map(Vec::as_slice)
+    }
+
+    /// Whether there is a shelf discard to undo.
+    pub fn can_undo_shelf_discard(&self) -> bool {
+        !self.dropped_shelves.is_empty()
     }
 
     pub fn operation(&self) -> Option<Operation> {
@@ -1159,26 +1204,179 @@ impl Runtime {
         )
     }
 
-    /// Checks out `target`. With `stash`, local changes are stashed first
-    /// and re-applied after switching (the dirty-tree flow of PLAN §4).
-    pub fn checkout(&self, key: &Path, target: CheckoutTarget, stash: bool) -> Option<JobId> {
+    /// Checks out `target`, doing `changes` with local changes: keep them,
+    /// bring them along (stash, switch, re-apply) or leave them on the
+    /// current branch as an automatic shelf (PLAN §4 Shelves).
+    pub fn checkout(
+        &self,
+        key: &Path,
+        target: CheckoutTarget,
+        changes: CheckoutChanges,
+    ) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
+        let branch = self
+            .repos
+            .get(key)
+            .and_then(RepoState::current_branch)
+            .unwrap_or("HEAD")
+            .to_owned();
         Some(self.scheduler.submit(JobSpec::write(
             key,
             CHECKOUT_JOB_LABEL,
             RefreshSet::all(),
             move |ctx| {
-                checkout_job(ctx.backend(), &toplevel, &target, stash, ctx.cancel_token())
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                checkout_job(backend, &toplevel, &target, changes, &branch, cancel)
                     .map(|()| JobOutput::Done)
             },
         )))
+    }
+
+    /// Shelves `paths` (all changes when empty) on the current branch as
+    /// `name`. Label [`SHELVE_JOB_LABEL`].
+    pub fn shelve(&self, key: &Path, paths: Vec<PathBuf>, name: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let branch = self.repos.get(key)?.current_branch().unwrap_or("HEAD");
+        let message = shelf_message(branch, name, false);
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            SHELVE_JOB_LABEL,
+            shelf_refresh(),
+            move |ctx| {
+                let shelved =
+                    ctx.backend()
+                        .shelve(&toplevel, &paths, &message, ctx.cancel_token())?;
+                match shelved {
+                    Some(_) => Ok(JobOutput::Done),
+                    None => Err(GitError::new(
+                        "stash push",
+                        GitErrorKind::Other,
+                        "there was nothing to shelve",
+                    )),
+                }
+            },
+        )))
+    }
+
+    /// Applies shelf `oid` and drops it on success. Label [`RESTORE_SHELF_JOB_LABEL`].
+    pub fn restore_shelf(&self, key: &Path, oid: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let oid = oid.to_owned();
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            RESTORE_SHELF_JOB_LABEL,
+            shelf_refresh(),
+            move |ctx| {
+                ctx.backend()
+                    .restore_shelf(&toplevel, &oid, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Renames shelf `oid` (it keeps its commit and branch).
+    pub fn rename_shelf(&self, key: &Path, oid: &str, name: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let shelf = self.repos.get(key)?.shelves.iter().find(|s| s.oid == oid)?;
+        let branch = shelf.branch.clone().unwrap_or_else(|| "HEAD".to_owned());
+        let message = shelf_message(&branch, name, shelf.auto);
+        let oid = oid.to_owned();
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            RENAME_SHELF_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Stashes),
+            move |ctx| {
+                ctx.backend()
+                    .rename_shelf(&toplevel, &oid, &message, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Drops shelf `oid`; [`Runtime::undo_shelf_discard`] stores it again.
+    pub fn discard_shelf(&self, key: &Path, oid: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let shelf = self.repos.get(key)?.shelves.iter().find(|s| s.oid == oid)?;
+        let (oid, subject) = (shelf.oid.clone(), shelf.subject.clone());
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            DISCARD_SHELF_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Stashes),
+            move |ctx| {
+                ctx.backend()
+                    .drop_shelf(&toplevel, &oid, ctx.cancel_token())
+                    .map(|()| JobOutput::ShelfDropped { oid, subject })
+            },
+        )))
+    }
+
+    /// Stores the most recently discarded shelf again.
+    pub fn undo_shelf_discard(&mut self, key: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let (oid, subject) = self.repos.get_mut(key)?.dropped_shelves.pop()?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNDO_SHELF_DISCARD_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Stashes),
+            move |ctx| {
+                ctx.backend()
+                    .store_shelf(&toplevel, &oid, &subject, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Reads the files of shelf `oid`; they arrive as [`RuntimeEvent::ShelfLoaded`].
+    pub fn load_shelf_files(&self, key: &Path, oid: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let oid = oid.to_owned();
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, SHELF_FILES_JOB_LABEL, move |ctx| {
+                    let files = ctx
+                        .backend()
+                        .shelf_files(&toplevel, &oid, ctx.cancel_token())?;
+                    Ok(JobOutput::ShelfFiles(oid, files))
+                })),
+        )
+    }
+
+    /// Shows the diff of `path` in shelf `oid` in the Changes view (needs
+    /// its files loaded): tracked files against the shelf's base, untracked
+    /// ones in full. Lines cannot be picked.
+    pub fn select_shelf_file(&mut self, key: &Path, oid: &str, path: &Path, full: bool) {
+        let target = self.repos.get(key).and_then(|s| {
+            let file = s.shelf_files(oid)?.iter().find(|f| f.path == path)?;
+            let commit = if file.untracked {
+                CommitSide {
+                    oid: format!("{oid}^3"),
+                    parent: None,
+                }
+            } else {
+                CommitSide {
+                    oid: oid.to_owned(),
+                    parent: Some(format!("{oid}^1")),
+                }
+            };
+            Some(DiffTarget {
+                kind: DiffKind::Commit,
+                path: file.path.clone(),
+                original_path: file.original_path.clone(),
+                commit: Some(commit),
+            })
+        });
+        if target.is_some() {
+            self.select_diff(key, target, full);
+        }
     }
 
     /// Runs a branch, tag, cherry-pick or abort operation (job label
     /// [`RefOp::label`]). Checkouts go through [`Runtime::checkout`].
     pub fn ref_op(&self, key: &Path, op: RefOp) -> Option<JobId> {
         let refresh = match &op {
-            RefOp::Checkout(target) => return self.checkout(key, target.clone(), false),
+            RefOp::Checkout(target) => {
+                return self.checkout(key, target.clone(), CheckoutChanges::Keep)
+            }
             RefOp::CreateBranch {
                 checkout: false, ..
             }
@@ -1464,6 +1662,13 @@ impl Runtime {
                 return;
             }
         }
+        if label == SHELF_FILES_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::ShelfFiles(oid, files))) = kind {
+                state.shelf_files.insert(oid.clone(), files);
+                out.push(RuntimeEvent::ShelfLoaded { repo, oid });
+                return;
+            }
+        }
         if label == HEAD_MESSAGE_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::HeadMessage(message))) = kind {
                 out.push(RuntimeEvent::HeadMessage { repo, message });
@@ -1552,6 +1757,35 @@ impl Runtime {
         {
             self.scheduler.request_refresh(&repo, RefreshSet::all());
         }
+        if let EventKind::Finished(Ok(JobOutput::ShelfDropped { oid, subject })) = &kind {
+            state.dropped_shelves.push((oid.clone(), subject.clone()));
+            let excess = state.dropped_shelves.len().saturating_sub(MAX_SHELF_UNDO);
+            state.dropped_shelves.drain(..excess);
+        }
+        // The stash list is shared by every worktree of the repository.
+        let shelf_job = [
+            SHELVE_JOB_LABEL,
+            RESTORE_SHELF_JOB_LABEL,
+            RENAME_SHELF_JOB_LABEL,
+            DISCARD_SHELF_JOB_LABEL,
+            UNDO_SHELF_DISCARD_JOB_LABEL,
+            CHECKOUT_JOB_LABEL,
+        ]
+        .contains(&label.as_str());
+        if shelf_job && matches!(kind, EventKind::Finished(_)) {
+            let common = state.paths.as_ref().map(|p| p.common_dir.clone());
+            for (other, sibling) in &self.repos {
+                if *other != repo
+                    && sibling.paths.as_ref().map(|p| &p.common_dir) == common.as_ref()
+                {
+                    let stashes = RefreshSet::EMPTY.with(RefreshKind::Stashes);
+                    self.scheduler.request_refresh(other, stashes);
+                }
+            }
+        }
+        let Some(state) = self.repos.get_mut(&repo) else {
+            return;
+        };
         if let EventKind::Finished(Ok(JobOutput::Discarded(backups))) = &kind {
             if !backups.is_empty() {
                 state.discards.push(backups.clone());
@@ -1628,7 +1862,15 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         }
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
         JobOutput::Operation(operation) => state.operation = operation,
-        JobOutput::Stashes(stashes) => state.stashes = Some(stashes),
+        JobOutput::Stashes(stashes) => {
+            state.shelves = shelves(&stashes);
+            let live: std::collections::HashSet<&str> =
+                state.shelves.iter().map(|s| s.oid.as_str()).collect();
+            state
+                .shelf_files
+                .retain(|oid, _| live.contains(oid.as_str()));
+            state.stashes = Some(stashes);
+        }
         JobOutput::WorktreeBadges(badges) => {
             state.worktree_badges = badges.into_iter().collect();
         }
@@ -1638,7 +1880,9 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Diff { .. }
         | JobOutput::HeadMessage(_)
         | JobOutput::Commit(_)
-        | JobOutput::Discarded(_) => {}
+        | JobOutput::Discarded(_)
+        | JobOutput::ShelfFiles(..)
+        | JobOutput::ShelfDropped { .. } => {}
     }
 }
 
@@ -1713,20 +1957,35 @@ fn new_task_job(
     Err(err)
 }
 
-/// Checks out `target`; with `stash`, stashes every local change first and
-/// re-applies it after switching (or after a failed switch).
+/// What the shelve and restore jobs refresh: the files and the stash list.
+fn shelf_refresh() -> RefreshSet {
+    RefreshSet::EMPTY
+        .with(RefreshKind::Status)
+        .with(RefreshKind::Stashes)
+}
+
+/// Checks out `target` from `branch`. `Bring` stashes every local change
+/// first and re-applies it after switching; `Leave` shelves it on `branch`
+/// (an automatic shelf) and switches. Either way a failed switch puts the
+/// changes back.
 fn checkout_job(
     backend: &dyn GitBackend,
     toplevel: &Path,
     target: &CheckoutTarget,
-    stash: bool,
+    changes: CheckoutChanges,
+    branch: &str,
     cancel: &CancelToken,
 ) -> Result<(), GitError> {
     let op = RefOp::Checkout(target.clone());
-    if !stash {
-        return backend.ref_op(toplevel, &op, cancel);
-    }
-    let message = format!("gitbello: switching to {}", target.display_name());
+    let message = match changes {
+        CheckoutChanges::Keep => return backend.ref_op(toplevel, &op, cancel),
+        CheckoutChanges::Bring => format!("gitbello: switching to {}", target.display_name()),
+        CheckoutChanges::Leave => shelf_message(
+            branch,
+            &format!("Left when switching to {}", target.display_name()),
+            true,
+        ),
+    };
     let stashed = backend.stash_push(toplevel, &message, cancel)?;
     // Putting the changes back must not be cut short by a cancel.
     let restore = CancelToken::new();
@@ -1736,9 +1995,9 @@ fn checkout_job(
         }
         return Err(err);
     }
-    match &stashed {
-        Some(oid) => pop_stash(backend, toplevel, oid, &restore),
-        None => Ok(()),
+    match (&stashed, changes) {
+        (Some(oid), CheckoutChanges::Bring) => pop_stash(backend, toplevel, oid, &restore),
+        _ => Ok(()),
     }
 }
 

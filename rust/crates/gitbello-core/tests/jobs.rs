@@ -142,6 +142,35 @@ impl GitBackend for FakeBackend {
     fn stash_pop(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
+    fn shelve(
+        &self,
+        _: &Path,
+        _: &[PathBuf],
+        _: &str,
+        _: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        Ok(None)
+    }
+    fn restore_shelf(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn drop_shelf(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn store_shelf(&self, _: &Path, _: &str, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn rename_shelf(&self, _: &Path, _: &str, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn shelf_files(
+        &self,
+        _: &Path,
+        _: &str,
+        _: &CancelToken,
+    ) -> Result<Vec<gitbello_core::repo::ShelfFile>, GitError> {
+        Ok(Vec::new())
+    }
     fn worktree_op(&self, _: &Path, _: &WorktreeOp, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
