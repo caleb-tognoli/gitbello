@@ -181,6 +181,14 @@ impl GraphLoader {
         self.shared.cancel.cancel();
     }
 
+    /// A handle on the index for other threads (searches). It does not keep
+    /// the load alive: dropping the loader still cancels it.
+    pub fn reader(&self) -> GraphReader {
+        GraphReader {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
     /// Blocks until loading ends. For the CLI and tests, never the UI thread.
     pub fn wait(mut self) -> LoadProgress {
         if let Some(handle) = self.handle.take() {
@@ -193,6 +201,37 @@ impl GraphLoader {
             }
             thread::sleep(Duration::from_millis(2));
         }
+    }
+}
+
+/// Read access to a loader's index from another thread; see [`GraphLoader::reader`].
+#[derive(Debug, Clone)]
+pub struct GraphReader {
+    shared: Arc<Shared>,
+}
+
+impl GraphReader {
+    /// Rows indexed so far.
+    pub fn row_count(&self) -> usize {
+        self.shared.rows.load(Ordering::Acquire)
+    }
+
+    /// Whether loading ended (done, cancelled or failed): no more rows come.
+    pub fn is_finished(&self) -> bool {
+        self.shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .state
+            != LoadState::Loading
+    }
+
+    /// Read access to the index. Keep the guard short-lived: loading waits on it.
+    pub fn index(&self) -> RwLockReadGuard<'_, GraphIndex> {
+        self.shared
+            .index
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 

@@ -482,7 +482,7 @@ Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D1
 
 #### P5 — History search (≈1 week, pulled forward from M8 on 2026-10-25)
 Find and highlight, not a filter: hiding rows would break the graph's lanes. Searches what the graph index already holds (subject, author name and email, hash), so no git call.
-- [ ] Core `CommitSearch` (`graph/search.rs`): case-insensitive substring of subject, author name or email; 4+ hex characters also match hash prefixes. Runs as a job over the index in chunks under its read lock, follows rows as the graph loads, cancels on a new query, reruns on a graph reload. Results are sorted match rows plus progress (rows searched, done)
+- [x] Core `CommitSearch` (`graph/search.rs`): case-insensitive substring of subject, author name or email; 4+ hex characters also match hash prefixes. Runs as a job over the index in chunks under its read lock, follows rows as the graph loads, cancels on a new query, reruns on a graph reload. Results are sorted match rows plus progress (rows searched, done)
 - [ ] `RepoSession`: `search_commits(query)`, `search_info()` (`{matches, searched, done}`), `next_match(row, forward)` (wraps), a `match` flag in `graph_rows`, and a `search_changed` signal
 - [ ] Shared `ui/filter_field` (the Changes filter field with an optional options button); in History it sits above the list header, which reads "3 of 41 matches" while searching. Enter / Shift+Enter and ↑ ↓ buttons move between matches and select the commit; Escape clears; Ctrl+F focuses the current view's field. Non-matching rows are dimmed and matched text highlighted (dimming to be confirmed in review)
 - [ ] Smoke test (search, step, count, clear) and the search time on git/git in `docs/perf.md`

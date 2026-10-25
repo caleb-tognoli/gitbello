@@ -209,12 +209,11 @@ impl GraphIndex {
         let (author_name, author_email) = self.identities.get(self.author[row]);
         Some(CommitRow {
             row,
-            hash: &self.hashes[row * self.hash_len..(row + 1) * self.hash_len],
+            hash: self.hash(row),
             author_name,
             author_email,
             author_time: self.author_time[row],
-            subject: &self.subjects
-                [self.subject_start[row] as usize..self.subject_start[row + 1] as usize],
+            subject: self.subject(row),
             parent_rows: self
                 .parent_nodes(row)
                 .iter()
@@ -224,6 +223,26 @@ impl GraphIndex {
                 })
                 .collect(),
         })
+    }
+
+    /// Object id bytes of `row` (which must be loaded).
+    pub fn hash(&self, row: usize) -> &[u8] {
+        &self.hashes[row * self.hash_len..(row + 1) * self.hash_len]
+    }
+
+    /// Subject of `row` (which must be loaded).
+    pub fn subject(&self, row: usize) -> &str {
+        &self.subjects[self.subject_start[row] as usize..self.subject_start[row + 1] as usize]
+    }
+
+    /// Author identity of `row` (which must be loaded), for [`GraphIndex::identity`].
+    pub fn author_id(&self, row: usize) -> u32 {
+        self.author[row]
+    }
+
+    /// Name and email of an author identity.
+    pub fn identity(&self, id: u32) -> (&str, &str) {
+        self.identities.get(id)
     }
 
     /// Lane layouts for `start..start + count`, clamped to the loaded rows.

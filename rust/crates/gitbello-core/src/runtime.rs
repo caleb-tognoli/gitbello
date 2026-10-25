@@ -22,7 +22,7 @@ use crate::diff::{
 use crate::git::{
     CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
 };
-use crate::graph::{GraphLoader, GRAPH_JOB_LABEL};
+use crate::graph::{CommitSearch, GraphLoader, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
@@ -125,6 +125,11 @@ pub enum RuntimeEvent {
     GraphReset {
         repo: PathBuf,
     },
+    /// The history search found more matches, progressed, finished, or
+    /// was replaced (a new query or a graph reload).
+    SearchChanged {
+        repo: PathBuf,
+    },
     /// The commit selection changed (picks, or reseeding after a status).
     SelectionChanged {
         repo: PathBuf,
@@ -199,6 +204,11 @@ pub struct RepoState {
     discards: Vec<Vec<(PathBuf, String)>>,
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
+    /// The history search's query ("" for none) and its search of `graph`.
+    search_query: String,
+    search: Option<CommitSearch>,
+    /// `(version, done)` of the search when last reported.
+    search_reported: (u64, bool),
     open_error: Option<GitError>,
     /// The fetch running or queued (manual or automatic), if any.
     fetch_job: Option<JobId>,
@@ -239,6 +249,9 @@ impl RepoState {
             discards: Vec::new(),
             graph: None,
             graph_dirty_since: None,
+            search_query: String::new(),
+            search: None,
+            search_reported: (0, false),
             open_error: None,
             fetch_job: None,
             next_auto_fetch: None,
@@ -367,6 +380,26 @@ impl RepoState {
 
     pub fn graph(&self) -> Option<&GraphLoader> {
         self.graph.as_ref()
+    }
+
+    /// The history search of the current graph, if there is a query.
+    pub fn search(&self) -> Option<&CommitSearch> {
+        self.search.as_ref()
+    }
+
+    /// The history search's query, or "".
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Starts the search over (new query or new graph); the next poll
+    /// submits its first job and reports it.
+    fn restart_search(&mut self) {
+        self.search = self
+            .graph
+            .as_ref()
+            .and_then(|graph| CommitSearch::new(&self.search_query, graph.reader()));
+        self.search_reported = (u64::MAX, false);
     }
 
     /// The Changes view's list (indices into the status's changes), as
@@ -1622,6 +1655,17 @@ impl Runtime {
         self.repos.values()
     }
 
+    /// Finds the loaded commits matching `query` (subject, author, hash
+    /// prefix; see [`crate::graph::CommitMatcher`]) in the background;
+    /// `SearchChanged` reports progress. A blank query ends the search. The
+    /// search follows the graph as it loads and reruns when it reloads.
+    pub fn search_commits(&mut self, key: &Path, query: &str) {
+        if let Some(state) = self.repos.get_mut(key) {
+            state.search_query = query.to_owned();
+            state.restart_search();
+        }
+    }
+
     /// Applies finished jobs and returns what changed. Call once per frame.
     pub fn poll(&mut self) -> Vec<RuntimeEvent> {
         let mut out = std::mem::take(&mut self.pending);
@@ -1629,6 +1673,7 @@ impl Runtime {
             self.apply(event, &mut out);
         }
         self.reload_dirty_graphs(&mut out);
+        self.advance_searches(&mut out);
         self.run_auto_fetch();
         let latest = self.runner.log().latest_seq();
         if latest != self.log_seq {
@@ -1649,6 +1694,10 @@ impl Runtime {
         let Some(state) = self.repos.get_mut(&repo) else {
             return; // closed meanwhile
         };
+        // Searches report through `SearchChanged`, not as jobs.
+        if label == SEARCH_JOB_LABEL {
+            return;
+        }
         if label == OPEN_JOB_LABEL {
             match kind {
                 EventKind::Finished(Ok(JobOutput::Opened { toplevel, paths })) => {
@@ -1664,6 +1713,7 @@ impl Runtime {
                     state.graph = Some(
                         GraphLoader::submit(&self.scheduler, self.runner.clone(), repo.clone()).0,
                     );
+                    state.restart_search();
                     out.push(RuntimeEvent::Opened { repo });
                 }
                 EventKind::Finished(Err(error)) => {
@@ -1864,6 +1914,26 @@ impl Runtime {
         });
     }
 
+    /// Searches rows that loaded since the last job, and reports searches
+    /// that changed.
+    fn advance_searches(&mut self, out: &mut Vec<RuntimeEvent>) {
+        for state in self.repos.values_mut() {
+            let reported = match &state.search {
+                Some(search) => {
+                    search.submit_if_behind(&self.scheduler, state.key.clone());
+                    (search.version(), search.is_done())
+                }
+                None => (0, false),
+            };
+            if reported != state.search_reported {
+                state.search_reported = reported;
+                out.push(RuntimeEvent::SearchChanged {
+                    repo: state.key.clone(),
+                });
+            }
+        }
+    }
+
     fn reload_dirty_graphs(&mut self, out: &mut Vec<RuntimeEvent>) {
         for state in self.repos.values_mut() {
             let due = state
@@ -1877,6 +1947,7 @@ impl Runtime {
             state.graph = Some(
                 GraphLoader::submit(&self.scheduler, self.runner.clone(), state.key.clone()).0,
             );
+            state.restart_search();
             out.push(RuntimeEvent::GraphReset {
                 repo: state.key.clone(),
             });
