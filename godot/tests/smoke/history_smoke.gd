@@ -29,6 +29,10 @@ func run() -> void:
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
 	expect_eq(history.status_text(), "3 commits", "the status line has no load time")
+	expect_eq(details.files_header().text(), "1 changed file", "the files header counts the files")
+	expect_eq(ListHeader.count_text(12345, "commit"), "12,345 commits", "counts have thousands separators")
+	expect_eq(details.files_header().size.y, history.list_header().size.y,
+			"the files header is as tall as the commits header")
 	var first_code: String = String(details.file_list().row(0).get("code", ""))
 	expect(not first_code.is_empty(), "the first file has a status code")
 	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")

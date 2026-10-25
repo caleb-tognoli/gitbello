@@ -33,6 +33,7 @@ func run() -> void:
 	expect_eq(list.cursor, 0, "cursor on the first file")
 	expect_eq(session.picked_count(), 2, "nothing staged: every file is included")
 	expect_eq(view.check_all().state, "all", "the check-all box is checked")
+	expect_eq(view.list_header().text(), "2 changed files", "the list header counts the files")
 	var badge: CountBadge = page.active_view().changes_badge()
 	expect(await wait_until(func() -> bool: return badge.visible and badge.count == 2),
 			"the Changes button shows the count in a badge: %d" % badge.count)

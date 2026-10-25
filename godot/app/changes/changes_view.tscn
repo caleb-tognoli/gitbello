@@ -3,10 +3,10 @@
 [ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
 [ext_resource type="Script" path="res://app/changes/commit_box.gd" id="3_commit"]
-[ext_resource type="Script" path="res://ui/pick_box/pick_box.gd" id="4_pick"]
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="5_panel"]
 [ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="6_empty"]
 [ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="7_shelves"]
+[ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="8_header"]
 
 [node name="ChangesView" type="HSplitContainer"]
 anchors_preset = 15
@@ -48,26 +48,9 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "Restore"
 
-[node name="ListHeader" type="PanelContainer" parent="Files"]
+[node name="ListHeader" parent="Files" instance=ExtResource("8_header")]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"ListHeader"
-
-[node name="Row" type="HBoxContainer" parent="Files/ListHeader"]
-layout_mode = 2
-theme_type_variation = &"ListHeaderRow"
-
-[node name="CheckAll" type="Control" parent="Files/ListHeader/Row"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 4
-script = ExtResource("4_pick")
-
-[node name="CountLabel" type="Label" parent="Files/ListHeader/Row"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text_overrun_behavior = 3
 
 [node name="List" type="Control" parent="Files"]
 unique_name_in_owner = true

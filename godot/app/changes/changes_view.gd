@@ -35,9 +35,7 @@ var _showing_shelf: bool = false
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
-@onready var _check_all: PickBox = %CheckAll
-@onready var _count_label: Label = %CountLabel
-@onready var _list_header: Control = %ListHeader
+@onready var _list_header: ListHeader = %ListHeader
 @onready var _list: ChangeList = %List
 @onready var _commit_box: CommitBox = %CommitBox
 @onready var _diff_panel: DiffPanel = %DiffPanel
@@ -55,7 +53,7 @@ func _ready() -> void:
 	_list.current_changed.connect(_on_current_changed)
 	_list.context_menu_requested.connect(_show_menu.bind(_list))
 	_list.gui_input.connect(_on_list_key)
-	_check_all.toggled_to.connect(pick_all)
+	_list_header.check_toggled.connect(pick_all)
 	_commit_box.feedback = feedback
 	_diff_panel.load_full_requested.connect(_load_full_diff)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
@@ -132,7 +130,11 @@ func empty_state() -> EmptyState:
 
 
 func check_all() -> PickBox:
-	return _check_all
+	return _list_header.check()
+
+
+func list_header() -> ListHeader:
+	return _list_header
 
 
 func shelf_list() -> ShelfList:
@@ -394,10 +396,9 @@ static func _describe(paths: PackedStringArray) -> String:
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
 	_list_header.visible = count > 0
-	_count_label.text = "1 changed file" if count == 1 else "%d changed files" % count
-	_check_all.state = session.selection_state() if session != null else "none"
-	_check_all.visible = count > 0
-	_check_all.tooltip_text = "Leave out every file" if _check_all.state == "all" else "Include every file"
+	_list_header.set_text(ListHeader.count_text(count, "changed file"))
+	var state: String = session.selection_state() if session != null else "none"
+	_list_header.show_check(state, "Leave out every file" if state == "all" else "Include every file")
 
 
 ## With no changes, suggested actions replace the diff (PLAN §4 empty state).

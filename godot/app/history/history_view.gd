@@ -15,7 +15,7 @@ var session: RepoSession = null:
 	set = set_session
 
 @onready var _commit_list: CommitList = %CommitList
-@onready var _status_label: Label = %StatusLabel
+@onready var _list_header: ListHeader = %ListHeader
 @onready var _details: CommitDetails = %Details
 @onready var _left: VBoxContainer = %Left
 @onready var _switch_slot: Container = %SwitchSlot
@@ -52,7 +52,7 @@ func set_session(value: RepoSession) -> void:
 		session.graph_reset.connect(_on_graph_reset)
 	_commit_list.session = session
 	_details.session = session
-	_status_label.text = "Loading…" if session != null else ""
+	_list_header.set_text("Loading…" if session != null else "")
 
 
 func commit_list() -> CommitList:
@@ -75,7 +75,11 @@ func details() -> CommitDetails:
 
 ## The line above the list: the commit count, progress or an error.
 func status_text() -> String:
-	return _status_label.text
+	return _list_header.text()
+
+
+func list_header() -> ListHeader:
+	return _list_header
 
 
 ## The commit under the cursor: `{hash, subject}`, or empty.
@@ -116,19 +120,19 @@ func _apply_theme() -> void:
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
-	_status_label.text = "Loading… %s commits" % _thousands(session.graph_row_count())
+	_list_header.set_text("Loading… %s" % ListHeader.count_text(session.graph_row_count(), "commit"))
 	_select_newest_if_none()
 
 
 func _on_graph_reset() -> void:
-	_status_label.text = "Reloading…"
+	_list_header.set_text("Reloading…")
 
 
 func _on_graph_loaded(row_count: int, error: String) -> void:
 	if not error.is_empty():
-		_status_label.text = error
+		_list_header.set_text(error)
 	else:
-		_status_label.text = "%s commit%s" % [_thousands(row_count), "" if row_count == 1 else "s"]
+		_list_header.set_text(ListHeader.count_text(row_count, "commit"))
 	_select_newest_if_none()
 	if row_count == 0:
 		_details.show_placeholder("No commits yet." if error.is_empty() else "")
@@ -140,11 +144,3 @@ func _select_newest_if_none() -> void:
 	if _commit_list.cursor < 0 and _commit_list.row_count() > 0:
 		_commit_list.select_only(0)
 
-
-static func _thousands(value: int) -> String:
-	var digits: String = str(value)
-	var out: String = ""
-	while digits.length() > 3:
-		out = "," + digits.right(3) + out
-		digits = digits.left(digits.length() - 3)
-	return digits + out

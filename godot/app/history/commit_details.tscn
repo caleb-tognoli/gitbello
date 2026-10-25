@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://app/history/commit_details.gd" id="1_details"]
 [ext_resource type="Script" path="res://app/history/commit_file_list.gd" id="2_files"]
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="3_panel"]
+[ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="4_header"]
 
 [node name="CommitDetails" type="VSplitContainer"]
 anchors_preset = 15
@@ -152,28 +153,9 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"PaneColumn"
 
-[node name="FilesHeader" type="HBoxContainer" parent="Split/FilesBox"]
-layout_mode = 2
-
-[node name="FilesLabel" type="Label" parent="Split/FilesBox/FilesHeader"]
+[node name="FilesHeader" parent="Split/FilesBox" instance=ExtResource("4_header")]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"SectionHeader"
-
-[node name="Totals" type="HBoxContainer" parent="Split/FilesBox/FilesHeader"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"StatRow"
-
-[node name="TotalAdded" type="Label" parent="Split/FilesBox/FilesHeader/Totals"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"SectionStatAdded"
-
-[node name="TotalRemoved" type="Label" parent="Split/FilesBox/FilesHeader/Totals"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"SectionStatRemoved"
 
 [node name="Files" type="Control" parent="Split/FilesBox"]
 unique_name_in_owner = true

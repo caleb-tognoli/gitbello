@@ -1,0 +1,43 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/list_header/list_header.gd" id="1_header"]
+[ext_resource type="Script" path="res://ui/pick_box/pick_box.gd" id="2_pick"]
+
+[node name="ListHeader" type="PanelContainer"]
+theme_type_variation = &"ListHeader"
+script = ExtResource("1_header")
+
+[node name="Row" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"ListHeaderRow"
+
+[node name="Check" type="Control" parent="Row"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("2_pick")
+
+[node name="Label" type="Label" parent="Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"ListHeaderLabel"
+text_overrun_behavior = 3
+
+[node name="Counts" type="HBoxContainer" parent="Row"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"StatRow"
+
+[node name="Added" type="Label" parent="Row/Counts"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ListHeaderAdded"
+
+[node name="Removed" type="Label" parent="Row/Counts"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ListHeaderRemoved"

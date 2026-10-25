@@ -32,9 +32,7 @@ var date_format: Callable = Callable()
 @onready var _committer_label: Label = %CommitterLabel
 @onready var _body_separator: Control = %BodySeparator
 @onready var _body: RichTextLabel = %Body
-@onready var _files_label: Label = %FilesLabel
-@onready var _total_added: Label = %TotalAdded
-@onready var _total_removed: Label = %TotalRemoved
+@onready var _files_header: ListHeader = %FilesHeader
 @onready var _files: CommitFileList = %Files
 @onready var _diff_panel: DiffPanel = %CommitDiffPanel
 
@@ -95,7 +93,12 @@ func body_text() -> String:
 
 ## The commit's line totals as shown, `+12 −3`, or "" when hidden.
 func totals_text() -> String:
-	return "%s %s" % [_total_added.text, _total_removed.text] if _total_added.get_parent().visible else ""
+	return _files_header.counts_text()
+
+
+## The line above the files: their count and the commit's totals.
+func files_header() -> ListHeader:
+	return _files_header
 
 
 ## Asks for commit `oid`; the panel fills in when it arrives.
@@ -113,8 +116,8 @@ func show_placeholder(text: String = "") -> void:
 	_who.hide()
 	_ids.hide()
 	_show_body("")
-	_files_label.text = ""
-	DiffPanel.show_counts(_total_added, _total_removed, 0, 0)
+	_files_header.set_text("")
+	_files_header.show_counts(0, 0)
 	_files.show_files(0)
 	_diff_panel.clear("Select a file to see its changes.")
 
@@ -153,9 +156,8 @@ func _on_commit_loaded() -> void:
 	_ids.show()
 	_show_body(String(info["body"]).strip_edges())
 	var count: int = int(info["file_count"])
-	_files_label.text = "%d file%s changed" % [count, "" if count == 1 else "s"]
-	DiffPanel.show_counts(_total_added, _total_removed,
-			int(info.get("additions", 0)), int(info.get("deletions", 0)))
+	_files_header.set_text(ListHeader.count_text(count, "changed file"))
+	_files_header.show_counts(int(info.get("additions", 0)), int(info.get("deletions", 0)))
 	_files.show_files(count)
 	if count > 0:
 		_files.select_only(0)

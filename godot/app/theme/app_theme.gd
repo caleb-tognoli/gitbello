@@ -263,10 +263,6 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"DimLabel", p.text_muted)
 	_variation(theme, &"HeaderLabel", &"Label")
 	theme.set_font_size(&"font_size", &"HeaderLabel", 28)
-	_variation(theme, &"SectionHeader", &"Label")
-	theme.set_color(&"font_color", &"SectionHeader", p.text_muted)
-	theme.set_font_size(&"font_size", &"SectionHeader", 12)
-	theme.set_stylebox(&"normal", &"SectionHeader", _box(Color.TRANSPARENT, 0, Vector4(8, 4, 8, 2)))
 	_variation(theme, &"ErrorLabel", &"Label")
 	theme.set_color(&"font_color", &"ErrorLabel", p.error)
 	_variation(theme, &"AccentLabel", &"Label")
@@ -619,10 +615,6 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	for entry: Array in [[&"StatAdded", p.added], [&"StatRemoved", p.removed]]:
 		_variation(theme, entry[0], &"Label")
 		theme.set_color(&"font_color", entry[0], entry[1])
-		var section: StringName = StringName("Section" + entry[0])
-		_variation(theme, section, entry[0])
-		theme.set_font_size(&"font_size", section, 12)
-		theme.set_stylebox(&"normal", section, _box(Color.TRANSPARENT, 0, Vector4(0, 4, 0, 2)))
 	_variation(theme, &"StatRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"StatRow", 4)
 	theme.set_constant(&"files_width", &"ChangesView", 360)
@@ -743,10 +735,6 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"separation", &"PaneColumn", 0)
 	_variation(theme, &"PaneHeader", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"PaneHeader", _box(p.background, 0, Vector4(8, 6, 8, 4)))
-	_variation(theme, &"StatusLine", &"Label")
-	theme.set_color(&"font_color", &"StatusLine", p.text_muted)
-	theme.set_font_size(&"font_size", &"StatusLine", 12)
-	theme.set_stylebox(&"normal", &"StatusLine", _box(Color.TRANSPARENT, 0, Vector4(10, 0, 8, 4)))
 	_variation(theme, &"DetailsHeader", &"PanelContainer")
 	var details: StyleBoxFlat = _box(p.background, 0, Vector4(14, 12, 14, 10))
 	details.border_color = p.border
@@ -792,13 +780,23 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"border_color", &"PickBox", p.text_muted)
 	theme.set_color(&"fill_color", &"PickBox", p.accent)
 	theme.set_color(&"mark_color", &"PickBox", readable_text([p.accent], DARK_TEXT))
+	# The line above every list (changed files, commits, a commit's files):
+	# one height and one text style, with or without the check-all box. A
+	# tinted band with a divider, so it stays apart from a selected first row.
 	_variation(theme, &"ListHeader", &"PanelContainer")
-	var header: StyleBoxFlat = _box(p.background, 0, Vector4(8, 4, 8, 4))
+	var header: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 0, 10, 0))
 	header.border_color = p.border
 	header.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"ListHeader", header)
+	theme.set_constant(&"height", &"ListHeader", 30)
 	_variation(theme, &"ListHeaderRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ListHeaderRow", 8)
+	_variation(theme, &"ListHeaderLabel", &"Label")
+	theme.set_color(&"font_color", &"ListHeaderLabel", p.text_muted)
+	theme.set_font_size(&"font_size", &"ListHeaderLabel", 13)
+	for entry: Array in [[&"ListHeaderAdded", &"StatAdded"], [&"ListHeaderRemoved", &"StatRemoved"]]:
+		_variation(theme, entry[0], entry[1])
+		theme.set_font_size(&"font_size", entry[0], 13)
 	_variation(theme, &"CommitPanel", &"PanelContainer")
 	var commit: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 8, 8, 8))
 	commit.border_color = p.border
