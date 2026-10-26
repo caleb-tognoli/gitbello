@@ -71,7 +71,7 @@ func run() -> void:
 	var empty: EmptyState = view.empty_state()
 	expect(await wait_until(func() -> bool: return empty.visible), "the empty state shows")
 	expect_eq(empty.title(), "No local changes", "it says there is nothing to commit")
-	expect("New task" in empty.button_labels(), "it suggests a new task: %s" % [empty.button_labels()])
+	expect("New worktree" in empty.button_labels(), "it suggests a new worktree: %s" % [empty.button_labels()])
 
 	# Amend: Ctrl+Shift+A loads HEAD's message; edit the summary and commit.
 	press("Ctrl+Shift+A")

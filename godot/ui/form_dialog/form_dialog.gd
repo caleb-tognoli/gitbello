@@ -11,19 +11,21 @@ signal field_changed(key: String)
 
 const THEME_TYPE: StringName = &"FormDialog"
 
-## `func(values: Dictionary) -> String`: an error to show, or "" when valid.
-## Errors show once the user changed something; OK is disabled before that too.
+## `func(values: Dictionary) -> String`: what is wrong, or "" when valid.
+## While something is wrong OK is disabled, with the reason as its tooltip.
 var validator: Callable = Callable()
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
-var _touched: bool = false
+## Folder fields' `on_pick` (see `add_folder`).
+var _pickers: Dictionary[String, Callable] = {}
+## What is wrong with the values, or "" (see `validator`).
+var _error: String = ""
 ## `func(values: Dictionary) -> void`, called with the submitted values.
 var _on_submit: Callable = Callable()
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
-@onready var _error: Label = %Error
 
 
 func _ready() -> void:
@@ -41,6 +43,7 @@ func _notification(what: int) -> void:
 func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	title = title_text
 	ok_button_text = ok_text
+	get_ok_button().theme_type_variation = &"PrimaryButton"
 	_on_submit = on_submit
 	validator = Callable()
 	for parent: Node in [_intro, _box]:
@@ -50,8 +53,8 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_intro.hide()
 	_fields.clear()
 	_ref_names.clear()
-	_touched = false
-	_error.text = ""
+	_pickers.clear()
+	_error = ""
 
 
 ## A one-line text field. `ref_name` turns typed spaces into dashes.
@@ -69,6 +72,78 @@ func add_line(key: String, label: String, value: String = "", ref_name: bool = f
 	if ref_name:
 		_ref_names.append(key)
 	return line
+
+
+## A folder path: a line with a button that picks a folder in the system's
+## dialog. `on_pick` (`func(dir: String) -> String`) turns the picked folder
+## into the line's text; without it the line takes the folder itself.
+func add_folder(key: String, label: String, value: String = "", placeholder: String = "",
+		on_pick: Callable = Callable()) -> LineEdit:
+	var line: LineEdit = add_line(key, label, value, false, placeholder)
+	_box.remove_child(line)
+	var row: HBoxContainer = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(line)
+	var browse: Button = Button.new()
+	browse.icon = AppTheme.icon(&"Folder")
+	browse.tooltip_text = "Choose a folder"
+	browse.focus_mode = Control.FOCUS_NONE
+	browse.pressed.connect(_browse.bind(key))
+	row.add_child(browse)
+	_box.add_child(row)
+	if on_pick.is_valid():
+		_pickers[key] = on_pick
+	return line
+
+
+## Makes OK the red button of a delete or discard (until the next `begin`).
+func make_destructive() -> void:
+	get_ok_button().theme_type_variation = &"DangerButton"
+
+
+## Shows or hides field `key` with its label. The dialog keeps its width;
+## only its height follows.
+func set_field_visible(key: String, shown: bool) -> void:
+	var node: Control = _fields.get(key)
+	while node != null and node.get_parent() != _box:
+		node = node.get_parent() as Control
+	if node == null or node.visible == shown:
+		return
+	node.visible = shown
+	var index: int = node.get_index()
+	if index > 0 and _box.columns == 2:
+		(_box.get_child(index - 1) as Control).visible = shown
+	_shrink_to_content()
+
+
+## Sets folder field `key` from `dir`, as if picked in the dialog.
+func pick_folder(key: String, dir: String) -> void:
+	var line: LineEdit = _fields.get(key) as LineEdit
+	if line == null:
+		return
+	line.text = String(_pickers[key].call(dir)) if _pickers.has(key) else dir
+	line.caret_column = line.text.length()
+	_validate()
+
+
+func _browse(key: String) -> void:
+	var dialog: FileDialog = FileDialog.new()
+	dialog.use_native_dialog = true
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dialog.title = "Choose a folder"
+	# Start at the nearest folder of the path typed so far that exists.
+	var dir: String = (_fields[key] as LineEdit).text.strip_edges()
+	while not dir.is_empty() and not DirAccess.dir_exists_absolute(dir) and dir.get_base_dir() != dir:
+		dir = dir.get_base_dir()
+	if not dir.is_empty() and DirAccess.dir_exists_absolute(dir):
+		dialog.current_dir = dir
+	dialog.dir_selected.connect(func(path: String) -> void: pick_folder(key, path))
+	dialog.visibility_changed.connect(func() -> void:
+		if not dialog.visible:
+			dialog.queue_free())
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
 
 
 func add_check(key: String, label: String, value: bool = false) -> CheckBox:
@@ -191,14 +266,17 @@ func values() -> Dictionary:
 
 
 func error_text() -> String:
-	return _error.text
+	return _error
 
 
 func open() -> void:
 	_validate()
+	_fit_label_column()
 	# Shrink to this form's fields (an earlier, larger form set the size).
 	reset_size()
 	popup_centered(Vector2i(get_theme_constant(&"width", THEME_TYPE), 0))
+	# Wrapped notes measure themselves tall until laid out at full width.
+	_shrink_to_content.call_deferred()
 	for key: String in _fields:
 		var control: Control = _fields[key]
 		if control is LineEdit or control is TextEdit:
@@ -211,7 +289,6 @@ func open() -> void:
 
 ## Submits like the OK button, if the form is valid. Returns whether it did.
 func submit() -> bool:
-	_touched = true
 	if not _validate():
 		return false
 	hide()
@@ -225,17 +302,14 @@ func _submit() -> void:
 
 
 func _validate() -> bool:
-	var error: String = String(validator.call(values())) if validator.is_valid() else ""
-	_error.text = error if _touched else ""
-	_error.visible = not _error.text.is_empty()
-	get_ok_button().disabled = not error.is_empty()
-	return error.is_empty()
+	_error = String(validator.call(values())) if validator.is_valid() else ""
+	get_ok_button().disabled = not _error.is_empty()
+	get_ok_button().tooltip_text = _error
+	return _error.is_empty()
 
 
-func _touch(key: String = "") -> void:
-	_touched = true
-	if not key.is_empty():
-		field_changed.emit(key)
+func _touch(key: String) -> void:
+	field_changed.emit(key)
 	_validate()
 
 
@@ -250,6 +324,24 @@ func _on_line_changed(text: String, line: LineEdit) -> void:
 
 ## The label column's cell for the next field: `text`, or empty space.
 ## `top` keeps it at the top of a tall field.
+## A form without labelled fields (only check boxes and notes) drops the
+## label column, so its fields line up with the intro.
+func _fit_label_column() -> void:
+	var labelled: bool = false
+	for i: int in range(0, _box.get_child_count(), 2):
+		labelled = labelled or not (_box.get_child(i) as Label).text.is_empty()
+	_box.columns = 2 if labelled else 1
+	if not labelled:
+		for i: int in range(0, _box.get_child_count(), 2):
+			(_box.get_child(i) as Control).hide()
+
+
+func _shrink_to_content() -> void:
+	if visible:
+		# The dialog wraps its contents: a zero height becomes the least that fits.
+		size = Vector2i(maxi(size.x, get_theme_constant(&"width", THEME_TYPE)), 0)
+
+
 func _add_label(text: String, top: bool = false) -> void:
 	var label: Label = Label.new()
 	label.text = text

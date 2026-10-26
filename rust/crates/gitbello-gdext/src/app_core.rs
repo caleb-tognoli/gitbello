@@ -8,7 +8,7 @@ use gitbello_core::diff::rename_parts;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
-use gitbello_core::ops::{ref_name_error, PullMode};
+use gitbello_core::ops::{branch_prefix_error, ref_name_error, PullMode};
 use gitbello_core::paths;
 use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
 use gitbello_core::ui_state::{self, UiState};
@@ -478,6 +478,13 @@ impl AppCore {
         gstr(ref_name_error(&name.to_string()).unwrap_or_default())
     }
 
+    /// Why `prefix` cannot start branch names, or "" (see the
+    /// `branch_prefix` setting).
+    #[func]
+    fn branch_prefix_error(&self, prefix: GString) -> GString {
+        gstr(branch_prefix_error(&prefix.to_string()).unwrap_or_default())
+    }
+
     /// Why a new worktree cannot go at `path` (it must be missing or an empty
     /// folder), or an empty string.
     #[func]
@@ -487,7 +494,7 @@ impl AppCore {
 
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
-    /// worktree_template, accent}`; an empty terminal command means the
+    /// worktree_template, branch_prefix, accent}`; an empty terminal command means the
     /// platform's, an empty accent the app's default (else `#rrggbb`).
     #[func]
     fn settings(&self) -> VarDictionary {
@@ -499,6 +506,7 @@ impl AppCore {
                 "editor_command" => &gstr(&c.editor_command),
                 "terminal_command" => &gstr(c.terminal_command.as_deref().unwrap_or_default()),
                 "worktree_template" => &gstr(&c.worktree_template),
+                "branch_prefix" => &gstr(&c.branch_prefix),
                 "accent" => &gstr(c.accent.as_deref().unwrap_or_default()),
             }
         })
@@ -536,6 +544,10 @@ impl AppCore {
         if template.as_deref().is_some_and(|t| t.trim().is_empty()) {
             return gstr("Enter a worktree folder template.");
         }
+        let prefix = text("branch_prefix").map(|p| p.trim().to_owned());
+        if let Some(error) = prefix.as_deref().and_then(branch_prefix_error) {
+            return gstr(error);
+        }
         let accent = match text("accent") {
             None => None,
             Some(a) if a.trim().is_empty() => Some(None),
@@ -561,6 +573,9 @@ impl AppCore {
             }
             if let Some(template) = template {
                 config.worktree_template = template.trim().to_owned();
+            }
+            if let Some(prefix) = prefix {
+                config.branch_prefix = prefix;
             }
             if let Some(accent) = accent {
                 config.accent = accent;

@@ -423,7 +423,7 @@ func _update_empty() -> void:
 		actions.append({"id": &"sync.sync", "label": "Push ↑%d" % ahead, "icon": &"GitPush"})
 	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
-	actions.append({"id": &"task.new", "label": "New task", "icon": &"GitWorktree"})
+	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
 	_empty.show_state("No local changes", "", actions)
 
 

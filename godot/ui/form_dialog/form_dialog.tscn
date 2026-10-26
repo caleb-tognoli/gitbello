@@ -16,10 +16,3 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 columns = 2
-
-[node name="Error" type="Label" parent="Box"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-theme_type_variation = &"ErrorLabel"
-autowrap_mode = 3

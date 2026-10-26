@@ -595,7 +595,9 @@ impl RepoSession {
     }
 
     /// The new-task flow: creates `branch` from `base` in a new worktree at
-    /// `path`, fetching `fetch_remote` first (empty: no fetch). Label `new task`.
+    /// `path`, fetching `fetch_remote` first (empty: no fetch); with
+    /// `track_base`, `branch` tracks `base` (a remote branch of the same
+    /// name). Label `new task`.
     #[func]
     fn new_task(
         &self,
@@ -603,6 +605,7 @@ impl RepoSession {
         base: GString,
         path: GString,
         fetch_remote: GString,
+        track_base: bool,
     ) -> i64 {
         let remote = fetch_remote.to_string();
         let task = NewTask {
@@ -610,6 +613,7 @@ impl RepoSession {
             base: base.to_string(),
             path: PathBuf::from(path.to_string()),
             fetch_remote: (!remote.is_empty()).then_some(remote),
+            track_base,
         };
         job_id(runtime_cell::with(|rt| rt.new_task(&self.key, task)).flatten())
     }

@@ -37,6 +37,8 @@ func _ready() -> void:
 	_tree.columns = 2
 	_tree.set_column_expand(1, false)
 	_tree.select_mode = Tree.SELECT_ROW
+	# A right-click selects its row first, so its menu is for that branch.
+	_tree.allow_rmb_select = true
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_activated.connect(func() -> void: _choose(_tree.get_selected()))
 	_tree.item_mouse_selected.connect(_on_mouse_selected)

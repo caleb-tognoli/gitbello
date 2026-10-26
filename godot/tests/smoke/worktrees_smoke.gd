@@ -52,13 +52,31 @@ func run() -> void:
 	press("Ctrl+T")
 	var form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks for the task")
+	await get_tree().process_frame
+	var form_width: int = form.size.x
+	var base: OptionButton = form.field("base") as OptionButton
+	base.item_selected.emit(base.selected)
+	expect(form.get_ok_button().disabled, "Create waits for a name")
+	expect(not form.get_ok_button().tooltip_text.is_empty(), "its tooltip says why")
 	type_text("task one")
 	var folder: LineEdit = form.field("folder") as LineEdit
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
 			"the folder follows the branch: %s" % folder.text)
-	expect(folder.text.contains("repo-10.worktrees"), "the default template is used: %s" % folder.text)
-	var task_path: String = folder.text
+	expect_eq(form.size.x, form_width, "typing the name does not resize the form")
+	expect(folder.text.begins_with("repo-10.worktrees/"),
+			"the default template is used, shown from the repository's folder: %s" % folder.text)
+	var task_path: String = fixtures.path_join(folder.text)
+	# Browse: a folder with things in it is where the worktree goes; an empty
+	# one is the worktree's folder.
+	form.pick_folder("folder", fixtures)
+	expect_eq(folder.text, "task-one", "a picked folder holds the worktree")
+	var empty: String = fixtures.path_join("picked empty")
+	DirAccess.make_dir_absolute(empty)
+	form.pick_folder("folder", empty)
+	expect_eq(folder.text, "picked empty", "a picked empty folder is the worktree's")
+	folder.text = task_path
 	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
+	expect(form.field("open_tab") == null, "the new worktree always shows; no switch to ask about")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return page.views().size() == 3), "the new task shows as a chip")
 	expect_eq(main.tab_count(), 1, "no new tab")
@@ -67,6 +85,52 @@ func run() -> void:
 			"the task's worktree shows, on task-one")
 	expect(await wait_until(func() -> bool: return strip.chips().size() == 3), "three chips")
 	strip.chips()[0].chosen.emit()
+
+	# A name that matches a remote branch offers to check it out instead; a
+	# loose ref stands in for a branch someone pushed.
+	var main_commit: String = ""
+	for ref: Dictionary in session.branch_refs():
+		if String(ref["short_name"]) == "main":
+			main_commit = String(ref["commit"])
+	DirAccess.make_dir_recursive_absolute(repo.path_join(".git/refs/remotes/origin"))
+	write_file(repo.path_join(".git/refs/remotes/origin/remote-only"), main_commit + "\n")
+	Core.focus_in(session)
+	expect(await wait_until(func() -> bool:
+		return session.branch_refs().any(func(r: Dictionary) -> bool: return String(r["short_name"]) == "origin/remote-only")),
+			"the remote branch is listed")
+	press("Ctrl+T")
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks again")
+	var track: CheckBox = form.field("track") as CheckBox
+	var start: OptionButton = form.field("base") as OptionButton
+	expect(not track.is_visible_in_tree(), "no offer before a name")
+	type_text("remote-only")
+	expect(await wait_until(func() -> bool: return track.is_visible_in_tree()), "the remote branch is offered")
+	expect(track.button_pressed, "checking it out is on")
+	expect(track.text.contains("origin/remote-only"), "it names the remote branch: %s" % track.text)
+	expect(start.disabled, "the base does not apply while tracking")
+	track.button_pressed = false
+	expect(not start.disabled, "unticked, the base applies again")
+	type_text("x")
+	expect(await wait_until(func() -> bool: return not track.is_visible_in_tree()), "another name drops the offer")
+	form.hide()
+
+	# A branch prefix from the settings starts the name; typing goes after it.
+	expect(not Core.set_settings({"branch_prefix": "a b/"}).is_empty(), "a prefix git refuses is refused")
+	expect_eq(Core.set_settings({"branch_prefix": "me/"}), "", "the prefix is saved")
+	press("Ctrl+T")
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks once more")
+	var name_line: LineEdit = form.field("name") as LineEdit
+	expect_eq(name_line.text, "me/", "the name starts with the prefix")
+	start = form.field("base") as OptionButton
+	start.item_selected.emit(start.selected)
+	expect(form.get_ok_button().disabled, "the bare prefix is not a name yet")
+	type_text("idea")
+	expect(await wait_until(func() -> bool: return name_line.text == "me/idea"), "typing goes after the prefix: %s" % name_line.text)
+	var shown: LineEdit = form.field("folder") as LineEdit
+	expect(await wait_until(func() -> bool: return shown.text.ends_with("me-idea")), "the folder follows: %s" % shown.text)
+	expect(not shown.text.is_absolute_path(), "shown from the repository's folder: %s" % shown.text)
+	form.hide()
+	Core.set_settings({"branch_prefix": ""})
 
 	# Lock, unlock and remove a worktree from its chip's menu.
 	var spare: String = fixtures.path_join("repo-10-spare")
@@ -81,12 +145,21 @@ func run() -> void:
 	expect(await _menu_for(page, session, "repo-10-spare", "Unlock"), "the menu offers unlock")
 	expect(await wait_until(func() -> bool: return not bool(_worktree(session, "repo-10-spare").get("locked", true))),
 			"unlocked")
-	expect(await _menu_for(page, session, "repo-10-spare", "Remove…"), "the menu offers remove")
-	var confirm: ConfirmationDialog = page.ops().confirm_dialog()
-	expect(await wait_until(func() -> bool: return confirm.visible), "remove asks first")
+	# Deleting the shown worktree moves to the main one; its branch goes too.
+	expect(page.show_worktree(spare), "the spare worktree shows")
+	expect(await wait_until(func() -> bool: return page.session.is_ready()), "and loads")
+	expect(await _menu_for(page, session, "repo-10-spare", "Delete…"), "the menu offers delete for the shown worktree")
+	var delete_form: FormDialog = page.ops().form()
+	expect(await wait_until(func() -> bool: return delete_form.visible), "delete asks first")
+	var with_branch: CheckBox = delete_form.field("delete_branch") as CheckBox
+	expect(with_branch != null and with_branch.button_pressed and with_branch.text.contains("spare"),
+			"deleting the branch too is offered, on")
+	expect_eq(delete_form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
 	press("Enter")
-	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "the spare worktree was removed")
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "the spare worktree was deleted")
 	expect(not DirAccess.dir_exists_absolute(spare), "its folder is gone")
+	expect(Paths.same(page.active_view().worktree_path(), repo), "the main worktree shows")
+	expect(await wait_until(func() -> bool: return not _has_branch(session, "spare")), "its branch was deleted")
 
 	# Cleanup: feature/login and task-one are both merged into origin/main.
 	expect(Actions.run_action(&"worktree.cleanup"), "cleanup runs")

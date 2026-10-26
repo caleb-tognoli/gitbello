@@ -52,6 +52,8 @@ pub struct Config {
     pub open_tabs: Vec<PathBuf>,
     pub active_tab: Option<usize>,
     pub worktree_template: String,
+    /// Put in front of new branch names (`caleb/`); may be empty.
+    pub branch_prefix: String,
     /// 0 disables auto-fetch.
     pub auto_fetch_minutes: u32,
     /// How `pull` integrates the upstream.
@@ -109,6 +111,7 @@ impl Default for Config {
             open_tabs: Vec::new(),
             active_tab: None,
             worktree_template: DEFAULT_WORKTREE_TEMPLATE.to_owned(),
+            branch_prefix: String::new(),
             auto_fetch_minutes: DEFAULT_AUTO_FETCH_MINUTES,
             pull_mode: PullMode::FastForwardOnly,
             editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
@@ -148,6 +151,7 @@ const KEYS: &[&str] = &[
     "open_tabs",
     "active_tab",
     "worktree_template",
+    "branch_prefix",
     "auto_fetch_minutes",
     "pull_mode",
     "editor_command",
@@ -197,6 +201,7 @@ impl Config {
             active_tab: take_index(&mut table, "active_tab")?,
             worktree_template: take_string(&mut table, "worktree_template")?
                 .unwrap_or(defaults.worktree_template),
+            branch_prefix: take_string(&mut table, "branch_prefix")?.unwrap_or_default(),
             auto_fetch_minutes: take_u32(&mut table, "auto_fetch_minutes")?
                 .unwrap_or(defaults.auto_fetch_minutes),
             pull_mode: match take_string(&mut table, "pull_mode")? {
@@ -240,6 +245,12 @@ impl Config {
             "worktree_template".into(),
             Value::String(self.worktree_template.clone()),
         );
+        if !self.branch_prefix.is_empty() {
+            table.insert(
+                "branch_prefix".into(),
+                Value::String(self.branch_prefix.clone()),
+            );
+        }
         table.insert(
             "auto_fetch_minutes".into(),
             Value::Integer(i64::from(self.auto_fetch_minutes)),
@@ -410,6 +421,7 @@ mod tests {
             open_tabs: vec![PathBuf::from("/home/ädä/my repo")],
             active_tab: Some(0),
             worktree_template: "{repo_parent}/wt/{branch_slug}".into(),
+            branch_prefix: "ädä/".into(),
             auto_fetch_minutes: 0,
             pull_mode: PullMode::Rebase,
             editor_command: "subl -n {path}".into(),
