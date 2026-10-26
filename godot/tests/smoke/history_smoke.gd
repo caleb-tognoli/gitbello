@@ -103,10 +103,51 @@ func run() -> void:
 	press("Left")
 	expect(list.has_focus(), "Left again goes back to the commits")
 
+	await _check_search(page.session, list)
+
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## The history search bindings (P5): "app" matches the two newest of
+## "Improve app", "Add app", "Initial commit".
+func _check_search(session: RepoSession, list: CommitList) -> void:
+	var signals: Array[int] = [0]
+	var count: Callable = func() -> void: signals[0] += 1
+	session.search_changed.connect(count)
+	expect(session.search_info().is_empty(), "no search to start with")
+	session.search_commits("APP")
+	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
+			"the search finishes: %s" % [session.search_info()])
+	expect(signals[0] > 0, "search_changed is emitted")
+	var info: Dictionary = session.search_info()
+	expect_eq(int(info["matches"]), 2, "two subjects contain app")
+	expect_eq(int(info["searched"]), 3, "every row is searched")
+	expect_eq(String(info["query"]), "APP", "the query is kept as typed")
+	var flags: Array[bool] = []
+	for row: Dictionary in session.graph_rows(0, 3):
+		flags.append(bool(row["match"]))
+	expect_eq(flags, [true, true, false] as Array[bool], "graph rows carry the match flag")
+	expect_eq(session.next_match(0, true), 1, "next match")
+	expect_eq(session.next_match(1, true), 0, "the next match wraps to the top")
+	expect_eq(session.next_match(0, false), 1, "the previous match wraps to the bottom")
+	expect_eq(session.next_match(2, false), 1, "from a row that is not a match")
+	expect_eq(session.search_match_index(1), 1, "row 1 is the second match")
+	expect_eq(session.search_match_index(2), -1, "row 2 is no match")
+	var hash: String = list.hash_at(2)
+	session.search_commits(hash.left(7))
+	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
+			"the hash search finishes")
+	expect_eq(session.next_match(0, true), 2, "a hash prefix finds its commit")
+	session.search_commits("zzz-none")
+	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
+			"a search without matches finishes")
+	expect_eq(session.next_match(0, true), -1, "no match to go to")
+	session.search_commits("")
+	expect(await wait_until(func() -> bool: return session.search_info().is_empty()), "a blank query ends the search")
+	session.search_changed.disconnect(count)
 
 
 func _diff_has(diff: DiffView, needle: String) -> bool:

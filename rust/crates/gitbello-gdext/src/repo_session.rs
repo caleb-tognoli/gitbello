@@ -102,6 +102,10 @@ impl RepoSession {
     /// The files of shelf `oid` arrived (`shelf_files`).
     #[signal]
     fn shelf_files_loaded(oid: GString);
+    /// The history search found more, progressed, finished or was replaced
+    /// (`search_info`, `match` in `graph_rows`).
+    #[signal]
+    fn search_changed();
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -1083,8 +1087,9 @@ impl RepoSession {
     /// Visible slice of the graph. Each row is a Dictionary with `row`, `hash`,
     /// `subject`, `author`, `email`, `time` (unix seconds), `column`, `color`,
     /// `width` (columns used), `segments` (PackedInt32Array of
-    /// `kind, from, to, color` quadruples; kind 0 = pass, 1 = in, 2 = out) and
-    /// `refs` (`{name, kind, is_head}` labels; kind is branch, remote or tag).
+    /// `kind, from, to, color` quadruples; kind 0 = pass, 1 = in, 2 = out),
+    /// `refs` (`{name, kind, is_head}` labels; kind is branch, remote or tag)
+    /// and `match` (whether the history search matches it; false without one).
     #[func]
     fn graph_rows(&self, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
@@ -1096,6 +1101,7 @@ impl RepoSession {
             let Some(loader) = state.graph() else {
                 return rows;
             };
+            let search = state.search();
             let index = loader.index();
             for (offset, layout) in index.layouts(start, count).iter().enumerate() {
                 let row = start + offset;
@@ -1122,11 +1128,75 @@ impl RepoSession {
                     "width" => i64::from(layout.width()),
                     "segments" => &segments,
                     "refs" => &convert::labels(state.labels(&hash)),
+                    "match" => search.is_some_and(|s| s.is_match(row)),
                 });
             }
             rows
         })
         .unwrap_or_default()
+    }
+
+    /// Finds the commits whose subject, author name or email contains `query`
+    /// (any case), or whose hash starts with it (4+ hex digits). Results
+    /// arrive with `search_changed`; the search follows the graph as it loads
+    /// and reruns when it reloads. A blank query ends it.
+    #[func]
+    fn search_commits(&self, query: GString) {
+        runtime_cell::with(|rt| rt.search_commits(&self.key, &query.to_string()));
+    }
+
+    /// The history search: `{query, matches, searched, done}` (match count,
+    /// rows searched from the top); `{}` without a search.
+    #[func]
+    fn search_info(&self) -> VarDictionary {
+        self.read(|state| {
+            let Some(search) = state.search() else {
+                return VarDictionary::new();
+            };
+            vdict! {
+                "query" => &gstr(search.query()),
+                "matches" => to_i64(search.match_count()),
+                "searched" => to_i64(search.searched()),
+                "done" => search.is_done(),
+            }
+        })
+        .unwrap_or_default()
+    }
+
+    /// Position of graph row `row` among the matches (0-based), or -1.
+    #[func]
+    fn search_match_index(&self, row: i64) -> i64 {
+        let Ok(row) = usize::try_from(row) else {
+            return -1;
+        };
+        self.read(|state| state.search().and_then(|s| s.match_index(row)))
+            .flatten()
+            .map_or(-1, to_i64)
+    }
+
+    /// The next match after graph row `row` (before it when not `forward`),
+    /// wrapping around, among the rows reported so far; -1 without matches.
+    #[func]
+    fn next_match(&self, row: i64, forward: bool) -> i64 {
+        let row = usize::try_from(row).unwrap_or(0);
+        let limit = self.reported_rows;
+        self.read(|state| {
+            let search = state.search()?;
+            // Matches past the reported rows are not in the list yet.
+            search
+                .next_match(row, forward)
+                .filter(|&found| found < limit)
+                .or_else(|| {
+                    let wrapped = if forward {
+                        search.matches(0, 1).first().copied()
+                    } else {
+                        search.next_match(limit, false)
+                    };
+                    wrapped.filter(|&found| found < limit)
+                })
+        })
+        .flatten()
+        .map_or(-1, to_i64)
     }
 
     /// Load timings and index size, for the status bar and benchmarks.

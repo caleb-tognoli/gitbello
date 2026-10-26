@@ -147,8 +147,11 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 ],
             );
         }
-        // Nothing searches the history from the UI yet.
-        RuntimeEvent::SearchChanged { .. } => {}
+        RuntimeEvent::SearchChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("search_changed", &[]);
+            }
+        }
         RuntimeEvent::GraphReset { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.bind_mut().reset_graph();
