@@ -7,7 +7,7 @@
 [ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="6_empty"]
 [ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="7_shelves"]
 [ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="8_header"]
-[ext_resource type="PackedScene" path="res://app/changes/change_filter_bar.tscn" id="9_filter"]
+[ext_resource type="PackedScene" path="res://ui/filter_field/filter_field.tscn" id="9_filter"]
 
 [node name="ChangesView" type="HSplitContainer"]
 anchors_preset = 15
@@ -49,9 +49,15 @@ layout_mode = 2
 size_flags_vertical = 4
 text = "Restore"
 
-[node name="FilterBar" parent="Files" instance=ExtResource("9_filter")]
+[node name="FilterBar" type="PanelContainer" parent="Files"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_type_variation = &"FilterBar"
+
+[node name="FilterField" parent="Files/FilterBar" instance=ExtResource("9_filter")]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder = "Filter changed files"
 
 [node name="ListHeader" parent="Files" instance=ExtResource("8_header")]
 unique_name_in_owner = true

@@ -44,7 +44,7 @@ func run() -> void:
 			"the button makes room for its badge: %s in %s" % [badge.get_rect(), button.size])
 
 	# The filter narrows the list; the check-all box then covers the files shown.
-	var filter: ChangeFilterBar = view.filter_bar()
+	var filter: FilterField = view.filter_field()
 	press("Ctrl+F")
 	expect(filter.text_box().has_focus(), "Ctrl+F focuses the filter")
 	type_text("NOTES")

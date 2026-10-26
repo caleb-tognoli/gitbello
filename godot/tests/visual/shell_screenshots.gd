@@ -85,7 +85,7 @@ func _ready() -> void:
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
 	# The filter over the changed files and its options.
-	var filter: ChangeFilterBar = changes.filter_bar()
+	var filter: FilterField = changes.filter_field()
 	await _shot(out, "changes_filter_empty")
 	filter.focus_text()
 	filter.set_text("src")

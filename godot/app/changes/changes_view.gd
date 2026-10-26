@@ -14,6 +14,15 @@ extends HSplitContainer
 ## last discard; see the `changes.*` actions for the rest.
 
 const THEME_TYPE: StringName = &"ChangesView"
+## The filter's options (`RepoSession.set_change_filter`), like GitHub Desktop's.
+const FILTER_OPTIONS: Array[Array] = [
+	["included", "Included in commit"],
+	["excluded", "Excluded from commit"],
+	["", ""],
+	["new", "New files"],
+	["modified", "Modified files"],
+	["deleted", "Deleted files"],
+]
 
 var session: RepoSession = null:
 	set = set_session
@@ -37,7 +46,8 @@ var _showing_shelf: bool = false
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
-@onready var _filter_bar: ChangeFilterBar = %FilterBar
+@onready var _filter_bar: Control = %FilterBar
+@onready var _filter: FilterField = %FilterField
 @onready var _list_header: ListHeader = %ListHeader
 @onready var _no_match: Control = %NoMatch
 @onready var _list: ChangeList = %List
@@ -58,8 +68,9 @@ func _ready() -> void:
 	_list.context_menu_requested.connect(_show_menu.bind(_list))
 	_list.gui_input.connect(_on_list_key)
 	_list_header.check_toggled.connect(pick_all)
-	_filter_bar.changed.connect(_apply_filter)
-	_filter_bar.done.connect(focus_files)
+	_filter.set_options(FILTER_OPTIONS)
+	_filter.changed.connect(_apply_filter)
+	_filter.done.connect(focus_files)
 	_commit_box.feedback = feedback
 	_diff_panel.load_full_requested.connect(_load_full_diff)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
@@ -102,7 +113,7 @@ func set_session(value: RepoSession) -> void:
 	_list.session = session
 	_commit_box.session = session
 	if session != null and is_node_ready():
-		session.set_change_filter(_filter_bar.text(), _filter_bar.options())
+		session.set_change_filter(_filter.text(), _filter.options())
 	reload()
 	reload_shelves()
 
@@ -145,13 +156,13 @@ func list_header() -> ListHeader:
 	return _list_header
 
 
-func filter_bar() -> ChangeFilterBar:
-	return _filter_bar
+func filter_field() -> FilterField:
+	return _filter
 
 
 ## Focuses the filter's text box.
 func focus_filter() -> void:
-	_filter_bar.focus_text()
+	_filter.focus_text()
 
 
 func shelf_list() -> ShelfList:
@@ -275,7 +286,7 @@ func focus_files() -> void:
 		_list.grab_focus()
 		_list.ensure_cursor()
 	elif has_changes():
-		_filter_bar.focus_text()
+		_filter.focus_text()
 	else:
 		_commit_box.focus_summary()
 
@@ -415,7 +426,7 @@ static func _describe(paths: PackedStringArray) -> String:
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
 	var shown: int = _list.row_count()
-	var filtered: bool = _filter_bar.is_active()
+	var filtered: bool = _filter.is_active()
 	_filter_bar.visible = count > 0
 	_list_header.visible = count > 0
 	var text: String = ListHeader.count_text(count, "changed file")
@@ -426,10 +437,16 @@ func _update_header() -> void:
 	_list_header.show_check(state, ("Leave out " if state == "all" else "Include ") + what)
 
 
+## Whether including or leaving out a file can change what the filter shows.
+func _filter_uses_picks() -> bool:
+	var ids: PackedStringArray = _filter.options()
+	return ("included" in ids) != ("excluded" in ids)
+
+
 func _apply_filter() -> void:
 	if session == null:
 		return
-	session.set_change_filter(_filter_bar.text(), _filter_bar.options())
+	session.set_change_filter(_filter.text(), _filter.options())
 	_list.reload()
 	_update_header()
 	if _list.cursor < 0 and not _showing_shelf:
@@ -461,7 +478,7 @@ func _update_empty() -> void:
 
 func _on_selection_changed() -> void:
 	# With "Included" or "Excluded" on, a toggled file may leave the list.
-	if _filter_bar.uses_picks():
+	if _filter_uses_picks():
 		_list.reload()
 	else:
 		_list.reload_picks()
