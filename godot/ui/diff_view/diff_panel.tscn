@@ -61,6 +61,14 @@ unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 
+[node name="WholeFileButton" type="Button" parent="DiffHeaderPanel/DiffHeader"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"IconToggle"
+toggle_mode = true
+
 [node name="LayoutSwitch" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
 layout_mode = 2

@@ -150,6 +150,11 @@ pub enum JobOutput {
         /// The staged diff loaded alongside (see `Selection::resolve_as_staged`).
         staged: Option<Box<FileDiff>>,
     },
+    /// The old side of a diff (blob `oid`); `None` when it was too large.
+    OldFile {
+        oid: String,
+        text: Option<Vec<u8>>,
+    },
     /// The HEAD commit's message.
     HeadMessage(String),
     /// One commit's details.

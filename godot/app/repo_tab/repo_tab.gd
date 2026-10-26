@@ -27,6 +27,9 @@ var feedback: Feedback = null
 
 var _views: Array[WorktreeView] = []
 var _active: WorktreeView = null
+## A worktree delete waiting for the shown worktree to load: `{path, force,
+## branch}`, or empty.
+var _pending_delete: Dictionary = {}
 
 @onready var _strip: WorktreeStrip = %Strip
 @onready var _pages: Control = %Pages
@@ -280,10 +283,12 @@ func _connect(v: WorktreeView) -> void:
 	v.notice.connect(_forward_notice)
 	v.worktree_open_requested.connect(_on_open_requested)
 	v.worktree_close_requested.connect(close_worktree)
+	v.worktree_delete_requested.connect(_delete_worktree)
 
 
 func _disconnect(v: WorktreeView) -> void:
-	for sig: Signal in [v.state_changed, v.notice, v.worktree_open_requested, v.worktree_close_requested]:
+	for sig: Signal in [v.state_changed, v.notice, v.worktree_open_requested, v.worktree_close_requested,
+			v.worktree_delete_requested]:
 		for connection: Dictionary in sig.get_connections():
 			var callable: Callable = connection["callable"]
 			if callable.get_object() == self:
@@ -310,7 +315,26 @@ func _activate(v: WorktreeView) -> void:
 func _on_view_state(v: WorktreeView) -> void:
 	if v == _active:
 		_refresh_strip()
+		_run_pending_delete()
 	state_changed.emit()
+
+
+## Deletes worktree `path` (then `branch` unless empty) from another
+## worktree: its own view closes first, showing the main worktree if it was
+## the one shown.
+func _delete_worktree(path: String, force: bool, branch: String) -> void:
+	close_worktree(path)
+	_pending_delete = {"path": path, "force": force, "branch": branch}
+	_run_pending_delete()
+
+
+## Runs the pending delete once the shown worktree has loaded.
+func _run_pending_delete() -> void:
+	if _pending_delete.is_empty() or _active == null or not _active.session.is_ready():
+		return
+	var pending: Dictionary = _pending_delete
+	_pending_delete = {}
+	_active.ops().delete_worktree(String(pending["path"]), bool(pending["force"]), String(pending["branch"]))
 
 
 func _refresh_strip() -> void:
@@ -338,6 +362,8 @@ func _on_chip_menu(wt: Dictionary, at_position: Vector2) -> void:
 		"is_main": bool(wt["is_main"]),
 		"locked": bool(wt["locked"]),
 		"prunable": bool(wt["prunable"]),
+		"branch": String(wt["branch"]),
+		"detached": bool(wt["detached"]),
 		"changed": maxi(0, int(wt["changed"])),
 		"upstream": "",
 	}, at_position)

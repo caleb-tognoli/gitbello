@@ -16,8 +16,8 @@ use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard};
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::{
-    build_patch, CommitSide, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
-    LARGE_DIFF_BYTES,
+    build_patch, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand, Expansion,
+    FileDiff, OldFile, PatchMode, LARGE_DIFF_BYTES,
 };
 use crate::git::{
     CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
@@ -45,6 +45,10 @@ pub const OPEN_JOB_LABEL: &str = "open repository";
 /// Labels of the jobs the changes panel runs.
 pub const DIFF_JOB_LABEL: &str = "load diff";
 pub const COMMIT_DIFF_JOB_LABEL: &str = "load commit diff";
+/// Reads the old side of a diff to show the lines between its hunks.
+pub const OLD_FILE_JOB_LABEL: &str = "read old file";
+/// Old files larger than this are not read: their gaps stay closed.
+pub const OLD_FILE_LIMIT: usize = 16 * 1024 * 1024;
 pub const COMMIT_DETAILS_JOB_LABEL: &str = "read commit";
 pub const HEAD_MESSAGE_JOB_LABEL: &str = "read HEAD message";
 pub const STAGE_JOB_LABEL: &str = "stage";
@@ -681,11 +685,90 @@ pub struct DiffState {
     loading: bool,
     diff: Option<FileDiff>,
     error: Option<GitError>,
+    /// Which gaps between hunks the user opened.
+    expansion: Expansion,
+    /// The old side, read once a gap is opened or to learn what follows
+    /// the last hunk.
+    old: Option<Arc<OldFile>>,
+    old_loading: bool,
+    /// Blob whose read failed (or was too large): not read again.
+    old_failed: Option<String>,
+    /// Rows to show: the diff and the open gaps.
+    layout: DiffLayout,
 }
 
 impl DiffState {
+    fn new(target: DiffTarget, full: bool) -> Self {
+        Self {
+            target,
+            full,
+            generation: 0,
+            loading: false,
+            diff: None,
+            error: None,
+            expansion: Expansion::default(),
+            old: None,
+            old_loading: false,
+            old_failed: None,
+            layout: DiffLayout::default(),
+        }
+    }
+
     pub fn target(&self) -> &DiffTarget {
         &self.target
+    }
+
+    /// The rows to show (empty until the diff loaded).
+    pub fn layout(&self) -> &DiffLayout {
+        &self.layout
+    }
+
+    pub fn expansion(&self) -> &Expansion {
+        &self.expansion
+    }
+
+    /// The old side, once read (see [`Runtime::expand_diff`]).
+    pub fn old_file(&self) -> Option<&OldFile> {
+        self.old.as_deref()
+    }
+
+    /// Blob id of the diff's old side, when it has one.
+    fn old_oid(&self) -> Option<&str> {
+        let diff = self.diff.as_ref()?;
+        if diff.content != DiffContent::Text || diff.hunks.is_empty() {
+            return None;
+        }
+        diff.header
+            .old_oid
+            .as_deref()
+            .filter(|oid| !oid.chars().all(|c| c == '0'))
+    }
+
+    /// The old file has to be read: gaps are open, or the end of the file
+    /// is unknown.
+    fn needs_old_file(&self) -> bool {
+        let Some(oid) = self.old_oid() else {
+            return false;
+        };
+        (!self.expansion.is_empty() || !self.layout.end_known())
+            && self.old.is_none()
+            && !self.old_loading
+            && self.old_failed.as_deref() != Some(oid)
+    }
+
+    /// Drops an old file of another blob, then rebuilds the layout.
+    fn relayout(&mut self) {
+        let stale = self
+            .old
+            .as_ref()
+            .is_some_and(|old| self.old_oid() != Some(old.oid()));
+        if stale {
+            self.old = None;
+        }
+        self.layout = match &self.diff {
+            Some(diff) => DiffLayout::build(diff, &self.expansion, self.old.as_deref()),
+            None => DiffLayout::default(),
+        };
     }
 
     pub fn is_loading(&self) -> bool {
@@ -906,16 +989,54 @@ impl Runtime {
             return;
         }
         let keep = current.take().filter(|_| same);
-        *current = Some(DiffState {
-            target,
-            full,
-            generation: 0,
-            loading: false,
-            diff: keep.and_then(|d| d.diff),
-            error: None,
-        });
+        let mut next = DiffState::new(target, full);
+        if let Some(keep) = keep {
+            next.diff = keep.diff;
+            next.expansion = keep.expansion;
+            next.old = keep.old;
+            next.old_failed = keep.old_failed;
+            next.layout = keep.layout;
+        }
+        *current = Some(next);
         self.diff_generation += 1;
         submit_diff(&self.scheduler, state, slot, self.diff_generation);
+    }
+
+    /// Opens part of a gap between the hunks of a diff (see
+    /// [`DiffLayout::expanders`]). The old file is read first if needed;
+    /// [`RuntimeEvent::DiffChanged`] follows either way.
+    pub fn expand_diff(&mut self, key: &Path, slot: DiffSlot, gap: usize, how: Expand) {
+        self.change_expansion(key, slot, |e| e.expand(gap, how));
+    }
+
+    /// Shows every line of the file in a diff, or only the hunks again.
+    pub fn show_whole_diff(&mut self, key: &Path, slot: DiffSlot, whole: bool) {
+        self.change_expansion(key, slot, |e| e.set_whole(whole));
+    }
+
+    fn change_expansion(
+        &mut self,
+        key: &Path,
+        slot: DiffSlot,
+        change: impl FnOnce(&mut Expansion),
+    ) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        let Some(diff) = state.slot_mut(slot).as_mut() else {
+            return;
+        };
+        change(&mut diff.expansion);
+        if submit_old_file(&self.scheduler, state, slot) {
+            return;
+        }
+        if let Some(diff) = state.slot_mut(slot).as_mut() {
+            diff.relayout();
+        }
+        self.pending.push(RuntimeEvent::DiffChanged {
+            repo: key.to_path_buf(),
+            slot,
+        });
     }
 
     /// Shows the Changes view's diff of `path` (see [`changes::diff_target`]).
@@ -1728,10 +1849,18 @@ impl Runtime {
         if label == DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
             refresh_diff_picks(state);
+            submit_old_file(&self.scheduler, state, DiffSlot::Changes);
             return;
         }
         if label == COMMIT_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Commit, kind, &repo, out);
+            submit_old_file(&self.scheduler, state, DiffSlot::Commit);
+            return;
+        }
+        if label == OLD_FILE_JOB_LABEL {
+            if let EventKind::Finished(result) = kind {
+                apply_old_file(state, result.ok(), &repo, out);
+            }
             return;
         }
         if label == COMMIT_DETAILS_JOB_LABEL {
@@ -2002,6 +2131,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Cleanup(_)
         | JobOutput::Done
         | JobOutput::Diff { .. }
+        | JobOutput::OldFile { .. }
         | JobOutput::HeadMessage(_)
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_)
@@ -2051,7 +2181,17 @@ fn new_task_job(
         branch: task.branch.clone(),
         start: Some(task.base.clone()),
     };
-    let Err(err) = backend.worktree_op(repo, &add, cancel) else {
+    let added = backend.worktree_op(repo, &add, cancel).and_then(|()| {
+        if !task.track_base {
+            return Ok(());
+        }
+        let track = RefOp::SetUpstream {
+            branch: task.branch.clone(),
+            upstream: Some(task.base.clone()),
+        };
+        backend.ref_op(repo, &track, cancel)
+    });
+    let Err(err) = added else {
         return Ok(());
     };
     // Rolling back must not be cut short by a cancel.
@@ -2183,6 +2323,63 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
     }));
 }
 
+/// Reads the old side of the diff in `slot` when its open gaps need it.
+/// Returns whether a read started.
+fn submit_old_file(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot) -> bool {
+    let key = state.key.clone();
+    let Some(diff) = state.slot_mut(slot).as_mut() else {
+        return false;
+    };
+    let oid = match diff.old_oid() {
+        Some(oid) if diff.needs_old_file() => oid.to_owned(),
+        _ => return false,
+    };
+    diff.old_loading = true;
+    scheduler.submit(JobSpec::read(&key, OLD_FILE_JOB_LABEL, move |ctx| {
+        let text = ctx
+            .backend()
+            .blob(ctx.repo(), &oid, OLD_FILE_LIMIT, ctx.cancel_token())?;
+        Ok(JobOutput::OldFile { oid, text })
+    }));
+    true
+}
+
+/// Stores a read old file in the diffs waiting for it. When the read failed
+/// or the file was too large, their gaps close again.
+fn apply_old_file(
+    state: &mut RepoState,
+    result: Option<JobOutput>,
+    repo: &Path,
+    out: &mut Vec<RuntimeEvent>,
+) {
+    let (old, failed) = match result {
+        Some(JobOutput::OldFile {
+            oid,
+            text: Some(text),
+        }) => (Some(Arc::new(OldFile::new(oid, text))), None),
+        Some(JobOutput::OldFile { oid, text: None }) => (None, Some(oid)),
+        _ => (None, None),
+    };
+    for slot in [DiffSlot::Changes, DiffSlot::Commit] {
+        let Some(diff) = state.slot_mut(slot).as_mut().filter(|d| d.old_loading) else {
+            continue;
+        };
+        diff.old_loading = false;
+        match &old {
+            Some(old) if diff.old_oid() == Some(old.oid()) => diff.old = Some(Arc::clone(old)),
+            _ => {
+                diff.expansion = Expansion::default();
+                diff.old_failed = failed.clone().or_else(|| diff.old_oid().map(str::to_owned));
+            }
+        }
+        diff.relayout();
+        out.push(RuntimeEvent::DiffChanged {
+            repo: repo.to_path_buf(),
+            slot,
+        });
+    }
+}
+
 /// Recomputes [`RepoState::diff_picks`] after the diff or the selection changed.
 fn refresh_diff_picks(state: &mut RepoState) {
     state.diff_picks = if state.can_pick_lines() {
@@ -2232,6 +2429,7 @@ fn apply_diff(
             current.loading = false;
             current.diff = Some(*diff);
             current.error = None;
+            current.relayout();
             resolve = staged;
         }
         EventKind::Finished(Err(error))

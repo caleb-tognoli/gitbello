@@ -16,6 +16,9 @@ const WHEEL_ROWS: float = 3.0
 
 ## Row with keyboard focus, or -1.
 var cursor: int = -1
+## Draw the selected rows' background and the cursor's outline (off for a
+## subclass that shows its own selection).
+var draws_selection: bool = true
 
 var _row_count: int = 0
 var _selected: Dictionary[int, bool] = {}
@@ -142,11 +145,11 @@ func _draw() -> void:
 	var cursor_color: Color = get_theme_color(&"cursor_color", THEME_TYPE)
 	for row: int in range(first, first + count):
 		var rect: Rect2 = Rect2(0.0, y, width, height)
-		var selected: bool = _selected.has(row)
+		var selected: bool = draws_selection and _selected.has(row)
 		if selected:
 			draw_rect(rect, selection_color)
 		_draw_row(row, rect, selected)
-		if row == cursor and has_focus():
+		if draws_selection and row == cursor and has_focus():
 			draw_rect(rect.grow(-0.5), cursor_color, false, 1.0)
 		y += height
 

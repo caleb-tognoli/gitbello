@@ -4,7 +4,7 @@ use std::path::Path;
 
 use gitbello_core::changes::{change_code, is_conflicted, FilePick, Selection};
 use gitbello_core::diff::{
-    changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LineKind,
+    changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LayoutRow, LineKind,
 };
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
@@ -404,9 +404,12 @@ fn diff_content_id(content: DiffContent) -> &'static str {
 }
 
 /// `{state, path, kind, content, code, original_path, similarity, notes,
-/// additions, deletions, line_count, max_line, old_size, new_size, bytes,
-/// error}`; `state` is `none`, `loading`, `error` or `ready`. Sizes and
-/// `similarity` are -1 when unknown.
+/// additions, deletions, line_count, split_count, max_line, can_expand,
+/// whole, old_size, new_size, bytes, error}`; `state` is `none`, `loading`,
+/// `error` or `ready`. `line_count` and `split_count` count the rows shown
+/// (see [`diff_rows`]); `can_expand` says some lines of the file are hidden
+/// and `whole` that the whole file is shown. Sizes and `similarity` are -1
+/// when unknown.
 pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
     let Some(state) = state else {
         return vdict! { "state" => "none" };
@@ -460,9 +463,12 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             info.set("notes", &notes);
             info.set("additions", i64::from(diff.additions));
             info.set("deletions", i64::from(diff.deletions));
-            info.set("line_count", to_i64(diff.line_count()));
-            info.set("split_count", to_i64(diff.split_row_count()));
-            info.set("max_line", i64::from(diff.max_line_number()));
+            let layout = state.layout();
+            info.set("line_count", to_i64(layout.row_count(false)));
+            info.set("split_count", to_i64(layout.row_count(true)));
+            info.set("max_line", i64::from(layout.max_line_number()));
+            info.set("can_expand", layout.has_hidden());
+            info.set("whole", state.expansion().is_whole());
             info.set("old_size", old_size);
             info.set("new_size", new_size);
             info.set("bytes", bytes);
@@ -507,14 +513,11 @@ pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> V
             hl.push(i32::try_from(end).unwrap_or(i32::MAX));
         }
     }
-    let mut syntax = PackedInt32Array::new();
-    if let (Some(language), false) = (language, line.kind == LineKind::Hunk) {
-        for token in highlight(language, &text) {
-            syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
-            syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
-            syntax.push(token.kind.id());
-        }
-    }
+    let syntax = if line.kind == LineKind::Hunk {
+        PackedInt32Array::new()
+    } else {
+        syntax_of(language, &text)
+    };
     vdict! {
         "index" => to_i64(index),
         "kind" => kind,
@@ -527,43 +530,103 @@ pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> V
     }
 }
 
-/// Diff lines `start..start + count` (see [`diff_line`]).
-pub fn diff_lines(
-    diff: &FileDiff,
-    start: usize,
-    count: usize,
-    language: Option<Language>,
-) -> Array<VarDictionary> {
-    let end = start.saturating_add(count).min(diff.line_count());
-    let mut out = Array::new();
-    for index in start.min(end)..end {
-        out.push(&diff_line(diff, index, language));
+/// `start, end, token kind` triples of `text`'s syntax tokens.
+fn syntax_of(language: Option<Language>, text: &str) -> PackedInt32Array {
+    let mut syntax = PackedInt32Array::new();
+    if let Some(language) = language {
+        for token in highlight(language, text) {
+            syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
+            syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
+            syntax.push(token.kind.id());
+        }
     }
-    out
+    syntax
 }
 
-/// Side-by-side rows `start..start + count` as `{left, right}`, each a line
-/// (see [`diff_line`]) or empty; a hunk header is the same line on both sides.
-pub fn split_rows(
-    diff: &FileDiff,
+/// A line without a place in the diff (`index` -1): an unchanged line
+/// outside the hunks (`kind` 1), or the end row (`kind` 0, no text).
+fn plain_line(
+    kind: i64,
+    old: u32,
+    new: u32,
+    text: &str,
+    language: Option<Language>,
+) -> VarDictionary {
+    vdict! {
+        "index" => -1,
+        "kind" => kind,
+        "old" => i64::from(old),
+        "new" => i64::from(new),
+        "text" => &gstr(text),
+        "no_newline" => false,
+        "hl" => &PackedInt32Array::new(),
+        "syntax" => &syntax_of(language, text),
+    }
+}
+
+/// Rows `start..start + count` of a diff as shown, with its open gaps (see
+/// `DiffLayout`). Unified: a line per row (see [`diff_line`]). Side by side:
+/// `{left, right}` with a line or an empty dictionary on each side; headers
+/// and unchanged lines are the same line on both. Unchanged lines outside
+/// the hunks have `index` -1. Hunk headers and the end row (a header with
+/// no text) carry `gap`, `expand` (their expanders: `up`, `down`, `both`,
+/// `all` or empty) and `hidden`, the lines the gap hides (-1 when unknown).
+pub fn diff_rows(
+    state: &DiffState,
+    split: bool,
     start: usize,
     count: usize,
-    language: Option<Language>,
 ) -> Array<VarDictionary> {
-    let end = start.saturating_add(count).min(diff.split_row_count());
     let mut out = Array::new();
-    for row in start.min(end)..end {
-        let Some((left, right)) = diff.split_row(row) else {
-            break;
+    let Some(diff) = state.diff() else {
+        return out;
+    };
+    let language = diff_language(&state.target().path);
+    let layout = state.layout();
+    let with_expanders = |mut line: VarDictionary, gap: usize| {
+        line.set("gap", to_i64(gap));
+        line.set("expand", layout.expanders(gap).id());
+        line.set("hidden", layout.hidden_lines(gap).map_or(-1, i64::from));
+        line
+    };
+    for row in layout.rows(split, start, count) {
+        let line = match row {
+            LayoutRow::Diff(row) if split => {
+                let (left, right) = diff.split_row(row).unwrap_or((None, None));
+                let side = |line: Option<usize>| {
+                    line.map(|l| diff_line(diff, l, language))
+                        .unwrap_or_default()
+                };
+                out.push(&vdict! {
+                    "left" => &side(left),
+                    "right" => &side(right),
+                });
+                continue;
+            }
+            LayoutRow::Diff(index) => diff_line(diff, index, language),
+            LayoutRow::Header(header) => {
+                let index = diff.hunks.get(header.hunk).map_or(0, |h| h.line);
+                let mut line = diff_line(diff, index, None);
+                line.set("text", &gstr(&header.text(diff)));
+                with_expanders(line, header.hunk)
+            }
+            LayoutRow::Hidden { old, new } => {
+                let text = state
+                    .old_file()
+                    .and_then(|f| f.line(old))
+                    .unwrap_or_default();
+                plain_line(1, old, new, &display_text(text), language)
+            }
+            LayoutRow::End => with_expanders(
+                plain_line(0, 0, 0, "", None),
+                layout.gap_count().saturating_sub(1),
+            ),
         };
-        let side = |line: Option<usize>| {
-            line.map(|l| diff_line(diff, l, language))
-                .unwrap_or_default()
-        };
-        out.push(&vdict! {
-            "left" => &side(left),
-            "right" => &side(right),
-        });
+        if split {
+            out.push(&vdict! { "left" => &line, "right" => &line });
+        } else {
+            out.push(&line);
+        }
     }
     out
 }

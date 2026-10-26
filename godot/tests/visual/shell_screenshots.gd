@@ -81,6 +81,32 @@ func _ready() -> void:
 			changes.toggle_diff_lines()
 			break
 	await _shot(out, "changes_picks")
+	# Text selected in the diff, and a long file's gaps (when the first repo
+	# has a changed `long.txt`): one opened upwards.
+	var diff: DiffView = changes.diff_view()
+	diff.grab_focus()
+	diff._sel_from = Vector2i(1, 2)
+	diff._sel_to = Vector2i(mini(3, diff.row_count() - 1), 4)
+	diff.queue_redraw()
+	await _shot(out, "diff_selection")
+	for row: int in changes.list().row_count():
+		if changes.list().path_at(row) == "long.txt":
+			changes.list().select_only(row)
+			deadline = Time.get_ticks_msec() + WAIT_MS
+			while Time.get_ticks_msec() < deadline and diff.row_expanders(0).is_empty():
+				await get_tree().process_frame
+			await _shot(out, "diff_expanders")
+			diff.grab_focus()
+			diff._select_span(Vector2i(3, 4), Vector2i(5, 12))
+			await _shot(out, "diff_selection_colors")
+			for header: int in diff.row_count():
+				if diff.row_expanders(header) == "both":
+					var rows: int = diff.row_count()
+					diff.press_expander(header, "up")
+					while Time.get_ticks_msec() < deadline and diff.row_count() == rows:
+						await get_tree().process_frame
+					break
+			await _shot(out, "diff_expanded")
 	Actions.run_action(&"changes.focus_message")
 	page.changes().commit_box().set_message("Add a summary", "And a longer description.")
 	await _shot(out, "changes_message")
@@ -165,14 +191,23 @@ func _ready() -> void:
 			page.strip().get_screen_position() + Vector2(160.0, 30.0))
 	await _shot_window(page.context_menu(), out, "worktree_menu")
 	page.close_menu()
+	var linked: Dictionary = page.session.worktrees()[1]
+	page.ops().remove_worktree({"path": String(linked["path"]), "short": String(linked["name"]),
+			"branch": String(linked["branch"]), "detached": false, "changed": 2, "locked": false})
+	await _shot_window(page.ops().form(), out, "delete_worktree")
+	page.ops().form().hide()
+	page.ops().delete_branch("feature/login")
+	await _shot_window(page.ops().confirm_dialog(), out, "delete_branch")
+	page.ops().confirm_dialog().hide()
 	page.select_chip(1)
 	await _settle()
 	await _shot(out, "second_worktree")
 	page.select_chip(0)
 	page.ops().new_task()
 	var form: FormDialog = page.ops().form()
-	(form.field("name") as LineEdit).text = "fix-login"
-	(form.field("folder") as LineEdit).text = page.session.worktree_path_for("fix-login")
+	var name_line: LineEdit = form.field("name") as LineEdit
+	name_line.text = name_line.text + "fix-login"
+	name_line.text_changed.emit(name_line.text)
 	await _shot_window(form, out, "new_task")
 	form.hide()
 	page.ops().cleanup_worktrees()

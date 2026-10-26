@@ -73,6 +73,10 @@ func _ready() -> void:
 	_filter.done.connect(focus_files)
 	_commit_box.feedback = feedback
 	_diff_panel.load_full_requested.connect(_load_full_diff)
+	_diff_panel.expand_requested.connect(func(gap: int, how: String) -> void:
+		session.expand_diff("changes", gap, how))
+	_diff_panel.whole_file_requested.connect(func(whole: bool) -> void:
+		session.show_whole_diff("changes", whole))
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.diff_lines(start, count) if session != null else [])
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
@@ -472,7 +476,7 @@ func _update_empty() -> void:
 		actions.append({"id": &"sync.sync", "label": "Push ↑%d" % ahead, "icon": &"GitPush"})
 	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
-	actions.append({"id": &"task.new", "label": "New task", "icon": &"GitWorktree"})
+	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
 	_empty.show_state("No local changes", "", actions)
 
 
@@ -492,6 +496,8 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu.clear()
 	_menu_actions.clear()
 	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
+	if source == _diff_view:
+		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard"]
 	if source == _list:
 		ids.append_array([&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
 	ids.append_array([&"", &"changes.undo_discard"])

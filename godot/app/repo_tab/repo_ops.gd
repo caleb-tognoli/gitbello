@@ -14,6 +14,10 @@ signal notice(title: String, message: String)
 signal open_requested(path: String)
 ## A worktree is about to be removed: close its view, if open.
 signal close_requested(path: String)
+## The user confirmed deleting worktree `path` (`force` for changes or a
+## lock), then `branch` unless empty: run it from another worktree (see
+## `delete_worktree`).
+signal delete_requested(path: String, force: bool, branch: String)
 
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 ## Choice in the upstream dialog that removes the upstream.
@@ -35,12 +39,19 @@ var _checkouts: Dictionary[int, Dictionary] = {}
 var _deletes: Dictionary[int, String] = {}
 ## Tags to push once created: job id -> tag name.
 var _tag_pushes: Dictionary[int, String] = {}
-## New tasks and added worktrees started here: job id -> `{path, tab, editor}`.
-var _tasks: Dictionary[int, Dictionary] = {}
+## Branches to delete once their worktree is deleted: job id -> branch.
+var _worktree_branches: Dictionary[int, String] = {}
+## New tasks and added worktrees started here, shown once created: job id -> path.
+var _tasks: Dictionary[int, String] = {}
 ## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
 var _form_kind: String = ""
 ## The new-task folder was edited by hand: stop following the branch name.
 var _folder_edited: bool = false
+## A folder picked for new tasks to go in (its name still follows the
+## branch), or "" for the template's.
+var _folder_parent: String = ""
+## The remote branch the typed new-task name matches (`origin/<name>`), or "".
+var _remote_match: String = ""
 var _cleanup_requested: bool = false
 var _cleanup_list: Array[Dictionary] = []
 ## Switching with local changes: bring them (OK) or leave them (a button).
@@ -299,7 +310,7 @@ func discard_shelf(shelf: Dictionary) -> void:
 	_ask("Discard shelf", "Discard the shelf “%s”? Its changes are lost unless you undo right away." % name, "Discard",
 			func() -> void:
 				_track(session.discard_shelf(String(shelf["oid"])), "Discarding the shelf",
-						"Discarded the shelf “%s”" % name, Callable(), null, undo_shelf_discard))
+						"Discarded the shelf “%s”" % name, Callable(), null, undo_shelf_discard), true)
 
 
 func undo_shelf_discard() -> void:
@@ -356,7 +367,7 @@ func _rename_branch(values: Dictionary, old: String) -> void:
 
 
 func delete_branch(name: String) -> void:
-	_ask("Delete branch", "Delete branch %s?" % name, "Delete", _delete_branch.bind(name))
+	_ask("Delete branch", "Delete branch %s?" % name, "Delete", _delete_branch.bind(name), true)
 
 
 func _delete_branch(name: String) -> void:
@@ -443,7 +454,7 @@ func _check_tag_name(values: Dictionary) -> String:
 
 func delete_tag(name: String) -> void:
 	_ask("Delete tag", "Delete tag %s? Copies already pushed to a remote stay there." % name, "Delete",
-			func() -> void: _track(session.delete_tag(name), "Deleting tag %s" % name, "Deleted tag %s" % name))
+			func() -> void: _track(session.delete_tag(name), "Deleting tag %s" % name, "Deleted tag %s" % name), true)
 
 
 func push_tag(name: String) -> int:
@@ -491,7 +502,8 @@ func rename_remote(name: String) -> void:
 
 func remove_remote(name: String) -> void:
 	_ask("Remove remote", "Remove %s? Its remote-tracking branches go too, and local branches stop following it. Nothing changes on the remote itself." % name,
-			"Remove", func() -> void: _track(session.remove_remote(name), "Removing %s" % name, "Removed remote %s" % name))
+			"Remove", func() -> void: _track(session.remove_remote(name), "Removing %s" % name, "Removed remote %s" % name),
+			true)
 
 
 func _check_remote(values: Dictionary, current: String, needs_url: bool) -> String:
@@ -553,8 +565,8 @@ func show_in_file_manager(path: String = "") -> void:
 # --- Worktrees ------------------------------------------------------------------
 
 ## The new-task flow (PLAN §4): a branch from a base (the default one
-## first) in a new worktree whose folder follows the branch name, shown
-## (and optionally opened in the editor) once created.
+## first, a remote one fetched first) in a new worktree whose folder follows
+## the branch name, shown once created.
 func new_task() -> void:
 	var bases: PackedStringArray = PackedStringArray()
 	var base: String = session.default_base()
@@ -567,37 +579,116 @@ func new_task() -> void:
 	if bases.is_empty():
 		bases.append("HEAD")
 	_folder_edited = false
-	_begin_form("task", "New task", "Create", _create_task)
-	_form.add_line("name", "Branch", "", true)
+	_folder_parent = ""
+	_remote_match = ""
+	_begin_form("task", "New worktree", "Create", _create_task)
+	var prefix: String = String(Core.settings()["branch_prefix"])
+	var name_line: LineEdit = _form.add_line("name", "Branch", prefix, true)
 	_form.add_choice("base", "Start from", bases, 0)
-	_form.add_line("folder", "Folder", "", false, "Follows the branch name")
-	_form.add_check("open_tab", "Switch to it", true)
-	_form.add_check("open_editor", "Open it in the editor", false)
-	_form.add_note("A remote branch is fetched first.")
+	_form.add_check("track", "", true)
+	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
 	_form.validator = _check_task
+	_show_remote_match()
 	_form.open()
+	# Typing goes after the prefix instead of replacing it.
+	name_line.deselect()
+	name_line.caret_column = name_line.text.length()
+
+
+## Where the folder field's relative paths start: the main worktree's parent.
+func _folder_base() -> String:
+	for wt: Dictionary in session.worktrees():
+		if bool(wt["is_main"]):
+			return String(wt["path"]).get_base_dir()
+	return session.toplevel().get_base_dir()
+
+
+## `path` as the folder field shows it: relative when inside `_folder_base()`.
+func _shown_folder(path: String) -> String:
+	var inside: String = Paths.relative(path, _folder_base())
+	return inside if not inside.is_empty() else path
+
+
+## The folder field's `text` as a full path.
+func _folder_path(text: String) -> String:
+	return text if text.is_empty() or text.is_absolute_path() else _folder_base().path_join(text)
+
+
+## The typed branch name, or "" while it is just the branch prefix.
+func _typed_name(values: Dictionary) -> String:
+	var name: String = String(values["name"])
+	return "" if name == String(Core.settings()["branch_prefix"]) else name
+
+
+## The remote branch named `name` (`origin/<name>` first), when no local
+## branch has that name; else "".
+func _remote_branch_named(name: String) -> String:
+	if name.is_empty() or not _branch_ref("branch", name).is_empty():
+		return ""
+	var found: String = ""
+	for remote: String in session.remotes():
+		var short_name: String = remote + "/" + name
+		if not _branch_ref("remote", short_name).is_empty() and (found.is_empty() or remote == "origin"):
+			found = short_name
+	return found
+
+
+## Offers to check out the remote branch the typed name matches; while that
+## is on, the base does not apply.
+func _show_remote_match() -> void:
+	var check: CheckBox = _form.field("track") as CheckBox
+	check.text = "Check out %s and track it" % _remote_match
+	check.tooltip_text = check.text
+	# A long branch name is cut short instead of widening the dialog.
+	check.clip_text = true
+	check.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_form.set_field_visible("track", not _remote_match.is_empty())
+	(_form.field("base") as OptionButton).disabled = not _remote_match.is_empty() and check.button_pressed
+
+
+## A picked empty folder is the worktree's folder; any other is where it
+## goes, in a folder named after the branch.
+func _pick_task_folder(dir: String) -> String:
+	if Core.new_worktree_path_error(dir).is_empty():
+		_folder_edited = true
+		return _shown_folder(dir)
+	_folder_edited = false
+	_folder_parent = dir
+	return _shown_folder(_task_folder(_typed_name(_form.values())))
+
+
+## The new-task folder for branch `name` (just the picked folder, or "",
+## without a name).
+func _task_folder(name: String) -> String:
+	if name.is_empty():
+		return _folder_parent.path_join("") if not _folder_parent.is_empty() else ""
+	var path: String = session.worktree_path_for(name)
+	return _folder_parent.path_join(path.get_file()) if not _folder_parent.is_empty() else path
 
 
 func _check_task(values: Dictionary) -> String:
 	var error: String = _check_branch_name(values, "")
 	if not error.is_empty():
 		return error
-	var folder: String = String(values.get("folder", ""))
-	return Core.new_worktree_path_error(folder)
+	return Core.new_worktree_path_error(_folder_path(String(values.get("folder", ""))))
 
 
 func _create_task(values: Dictionary) -> void:
-	var base: String = String(values["base"])
+	var track: bool = not _remote_match.is_empty() and bool(values["track"])
+	var base: String = _remote_match if track else String(values["base"])
 	var remote: String = ""
 	for name: String in session.remotes():
 		if base.begins_with(name + "/") and name.length() > remote.length():
 			remote = name
-	var folder: String = String(values["folder"])
+	var folder: String = _folder_path(String(values["folder"]))
 	var name: String = String(values["name"])
-	var job: int = session.new_task(name, base, folder, remote)
+	var job: int = session.new_task(name, base, folder, remote, track)
 	if job >= 0:
-		_tasks[job] = {"path": folder, "tab": bool(values["open_tab"]), "editor": bool(values["open_editor"])}
-	_track(job, "Creating the task %s" % name, "Created the task %s" % name)
+		_tasks[job] = folder
+	if track:
+		_track(job, "Checking out %s" % base, "Checked out %s in a new worktree" % base)
+	else:
+		_track(job, "Creating the worktree %s" % name, "Created the worktree %s" % name)
 
 
 ## A worktree for an existing local branch that no worktree has checked out.
@@ -611,29 +702,34 @@ func add_existing_worktree() -> void:
 		return
 	_begin_form("existing", "Add worktree", "Add", func(values: Dictionary) -> void:
 		var branch: String = String(values["branch"])
-		var path: String = String(values["folder"])
+		var path: String = _folder_path(String(values["folder"]))
 		var job: int = session.add_worktree(path, branch, "")
 		if job >= 0:
-			_tasks[job] = {"path": path, "tab": true, "editor": false}
+			_tasks[job] = path
 		_track(job, "Adding a worktree for %s" % branch, "Added a worktree for %s" % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
-	_form.add_line("folder", "Folder", session.worktree_path_for(branches[0]))
+	_form.add_folder("folder", "Folder", _shown_folder(session.worktree_path_for(branches[0])), "", _shown_folder)
 	_form.validator = func(values: Dictionary) -> String:
-		return Core.new_worktree_path_error(String(values.get("folder", "")))
+		return Core.new_worktree_path_error(_folder_path(String(values.get("folder", ""))))
 	_form.open()
 
 
 func _on_form_field(key: String) -> void:
 	if _form_kind == "existing" and key == "branch":
-		(_form.field("folder") as LineEdit).text = session.worktree_path_for(String(_form.values()["branch"]))
+		(_form.field("folder") as LineEdit).text = _shown_folder(session.worktree_path_for(String(_form.values()["branch"])))
 		return
 	if _form_kind != "task":
 		return
 	if key == "folder":
 		_folder_edited = true
-	elif key == "name" and not _folder_edited:
-		var name: String = String(_form.values()["name"])
-		(_form.field("folder") as LineEdit).text = session.worktree_path_for(name) if not name.is_empty() else ""
+	elif key == "name":
+		var name: String = _typed_name(_form.values())
+		_remote_match = _remote_branch_named(name)
+		_show_remote_match()
+		if not _folder_edited:
+			(_form.field("folder") as LineEdit).text = _shown_folder(_task_folder(name))
+	elif key == "track":
+		_show_remote_match()
 
 
 func open_worktree(path: String) -> void:
@@ -652,21 +748,34 @@ func unlock_worktree(path: String) -> void:
 	_track(session.unlock_worktree(path), "Unlocking", "Unlocked %s" % path.get_file())
 
 
-## Asks, then removes the worktree described by `worktree` (`path`,
-## `changed`, `locked`), closing its view first. Its branch stays.
+## Asks before deleting `worktree` (a chip's ref: `path`, `short`, `branch`,
+## `detached`, `changed`, `locked`), offering to delete its branch too.
 func remove_worktree(worktree: Dictionary) -> void:
 	var path: String = String(worktree["path"])
 	var changed: int = int(worktree.get("changed", 0))
 	var locked: bool = bool(worktree.get("locked", false))
-	var text: String = "Remove the worktree at %s? Its branch stays." % path
+	var branch: String = "" if bool(worktree.get("detached", false)) else String(worktree.get("branch", ""))
+	_begin_form("delete_worktree", "Delete worktree", "Delete", func(values: Dictionary) -> void:
+		delete_requested.emit(path, changed > 0 or locked, branch if bool(values.get("delete_branch", false)) else ""))
+	var text: String = "Delete %s and its folder?" % String(worktree.get("short", path.get_file()))
 	if changed > 0:
-		text += "\n\nIts %d changed files are lost." % changed
+		text += " Its %d changed file%s will be lost." % [changed, "" if changed == 1 else "s"]
 	if locked:
-		text += "\n\nIt is locked."
-	_ask("Remove worktree", text, "Remove", func() -> void:
-		close_requested.emit(path)
-		_track(session.remove_worktree(path, changed > 0 or locked), "Removing %s" % path.get_file(),
-				"Removed the worktree %s" % path.get_file()))
+		text += " It is locked."
+	_form.add_note(text)
+	if not branch.is_empty():
+		_form.add_check("delete_branch", "Also delete the branch %s" % branch, true)
+	_form.make_destructive()
+	_form.open()
+
+
+## Deletes worktree `path` from this worktree, then `branch` unless empty
+## (asking again if it has commits merged nowhere else).
+func delete_worktree(path: String, force: bool, branch: String) -> void:
+	var job: int = _track(session.remove_worktree(path, force), "Deleting %s" % path.get_file(),
+			"Deleted the worktree %s" % path.get_file())
+	if job >= 0 and not branch.is_empty():
+		_worktree_branches[job] = branch
 
 
 func prune_worktrees() -> int:
@@ -691,7 +800,7 @@ func _on_cleanup_loaded() -> void:
 	if _cleanup_list.is_empty():
 		notice.emit("Nothing to clean up", "No worktree's branch is merged into %s or has lost its upstream." % base)
 		return
-	_begin_form("cleanup", "Clean up worktrees", "Remove", _run_cleanup)
+	_begin_form("cleanup", "Clean up worktrees", "Delete", _run_cleanup)
 	_form.add_note("Merged into %s, or their upstream is gone:" % base)
 	for i: int in _cleanup_list.size():
 		var item: Dictionary = _cleanup_list[i]
@@ -709,6 +818,7 @@ func _on_cleanup_loaded() -> void:
 		_form.add_check("wt%d" % i, label, warnings.is_empty())
 	_form.add_check("delete_branches", "Also delete their branches", true)
 	_form.validator = _check_cleanup
+	_form.make_destructive()
 	_form.open()
 
 
@@ -732,7 +842,7 @@ func _run_cleanup(values: Dictionary) -> void:
 			"force": int(item["changed"]) > 0 or bool(item["locked"]),
 		})
 	_track(session.cleanup(items, bool(values["delete_branches"])), "Cleaning up",
-			"Removed %d worktree%s" % [items.size(), "" if items.size() == 1 else "s"])
+			"Deleted %d worktree%s" % [items.size(), "" if items.size() == 1 else "s"])
 
 
 # --- Follow-ups ---------------------------------------------------------------
@@ -751,19 +861,22 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		if not ok and kind == "not_fully_merged":
 			_ask("Delete branch", "%s has commits that are not merged anywhere else. Delete it anyway?" % name,
 					"Delete anyway", func() -> void:
-						_track(session.delete_branch(name, true), "Deleting %s" % name, "Deleted branch %s" % name))
+						_track(session.delete_branch(name, true), "Deleting %s" % name, "Deleted branch %s" % name), true)
+	elif _worktree_branches.has(job):
+		var branch: String = _worktree_branches[job]
+		_worktree_branches.erase(job)
+		if ok:
+			_delete_branch(branch)
 	elif _tag_pushes.has(job):
 		var tag: String = _tag_pushes[job]
 		_tag_pushes.erase(job)
 		if ok:
 			push_tag(tag)
 	elif _tasks.has(job):
-		var task: Dictionary = _tasks[job]
+		var path: String = _tasks[job]
 		_tasks.erase(job)
-		if ok and bool(task["tab"]):
-			open_requested.emit(String(task["path"]))
-		if ok and bool(task["editor"]):
-			open_in_editor(String(task["path"]))
+		if ok:
+			open_requested.emit(path)
 
 
 ## Reports `job` to `feedback` (see `Feedback.track`) and returns it.
@@ -781,10 +894,13 @@ func _begin_form(kind: String, title_text: String, ok_text: String, on_submit: C
 	_form.begin(title_text, ok_text, on_submit)
 
 
-func _ask(title_text: String, text: String, ok_text: String, run: Callable) -> void:
+## Asks `text` with OK `ok_text`, then calls `run`; `danger` makes OK red
+## (deletes and discards).
+func _ask(title_text: String, text: String, ok_text: String, run: Callable, danger: bool = false) -> void:
 	_confirm.title = title_text
 	_confirm.dialog_text = text
 	_confirm.ok_button_text = ok_text
+	_confirm.get_ok_button().theme_type_variation = &"DangerButton" if danger else &"PrimaryButton"
 	_on_confirm = run
 	_confirm.popup_centered(Vector2i(_form.get_theme_constant(&"width", FormDialog.THEME_TYPE), 0))
 	_confirm.get_ok_button().grab_focus()

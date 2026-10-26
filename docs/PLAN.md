@@ -180,6 +180,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 ### 3.10 Diff, staging and editing
 
 - Diffs come from git (`git diff`, `git diff --cached`, `git show`), parsed into hunks and lines in core.
+- **Viewing:** the diff text is selected like plain text (drag, double and triple click, Shift, Ctrl+A, Ctrl+C; one side at a time side by side), not as highlighted rows; drags after a double or triple click go by words or lines, Shift+Left/Right extend it (Ctrl by words); Copy and Select all are actions in the diff's context menu and the Edit menu; the arrow keys move a line at a time and only they show a caret, and the lines a selection touches are what Space picks and Delete discards. Diffs load with `-U3`. The lines between hunks open GitHub Desktop-style: a hunk header's expanders show 20 more lines above it or below the previous hunk (all of a gap of 20 or fewer), each says how many lines it hides, an end row ("Show 47 more lines") opens the rest of the file, and **Show whole file** (`diff.toggle_whole_file`, the header's toggle) opens every gap. Core keeps the open gaps per diff (`Expansion`, kept across reloads of the same file) and builds a `DiffLayout` of runs (diff lines, a recounted header, unchanged lines, the end row); the unchanged lines come from the old side's blob (`git cat-file blob`, read in a job once a gap opens or when the last hunk may not reach the end of the file, up to 16 MB, a failed read not retried), since git's context lines come from that side too. `RepoSession.expand_diff(slot, gap, how)` and `show_whole_diff(slot, whole)`; diff rows of headers carry `gap`, `expand` and `hidden`, and unchanged lines have `index` -1; `diff_info` carries `can_expand` and `whole`.
 - **Hunk and line patches:** build a minimal patch from the selected lines (recomputing hunk headers) and apply it with `git apply --cached --recount`. Unstaging uses `-R`. Discarding a selection applies the reverse patch to the working tree, after a confirmation, and stays immediate.
 - **Commit selection** (M6.5 P3, D10): the file checkboxes and the hunk and line picks are a selection kept in core, one per worktree.
   - **Model** (`changes.rs`): each changed file has a pick: `Included`, `Excluded`, `AsStaged` (committed exactly as the index has it) or `Lines` (line keys). The checkbox shows all, none or partial. Line picks are keys, not rows, so they survive a reload of the diff: a removed line by its old line number, an added line by the old line it follows plus a hash of its text and its ordinal. Status keeps each file's index blob and mode (porcelain v2 `hI`/`mI`) for this.
@@ -225,7 +226,7 @@ The shell, actions, feedback, Changes and shelves specs below are the M6.5 desig
 ```
 File  Edit  Repository  Branch  View  Help
 [• gitbello  x] [spritesheetbelli  x] [+]                   <- repo tabs
-( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) [+ New task v]
+( gitbello  main  2 ↑1 ) ( fix-login  1 ) ( docs-pass ) (+|v)
 [ Branch: main          v ]  [ Push ↑1        v ]
 [ Merging feature/login into main · 2 conflicts   Continue  Abort ]  <- only during an operation
 +---------------------------+---------------------------------------+
@@ -253,8 +254,8 @@ File  Edit  Repository  Branch  View  Help
 **Worktree strip.** One row of chips: the main worktree first, then the linked ones by folder name.
 - A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
-- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Remove….
-- The last chip, **+ New task**, runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
+- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Delete… (also for the shown worktree, which moves to the main one; offers to delete its branch too, on by default).
+- Right after the last chip, **+** (New worktree) runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
 - When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
@@ -297,14 +298,14 @@ File  Edit  Repository  Branch  View  Help
 - Row highlighting (click, Shift, Ctrl) is separate from the checkboxes. It drives the diff and the context menu: Discard…, Shelve…, Open, Show in file manager, Copy path, Ignore.
 - The diff gutter has hunk and line checkboxes.
 - The commit box sits under the list: summary, description, Amend toggle, and a "Commit 2 files to main" button (Ctrl+Enter), disabled with a reason when nothing is included or the summary is empty.
-- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New task. The welcome screen follows the same pattern (Open repository, recent repos).
+- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New worktree. The welcome screen follows the same pattern (Open repository, recent repos).
 
 **New task (one click).**
 1. Open the dialog: branch name, which is slugified for the folder.
 2. Choose the base. It defaults to the upstream default branch and is fetched first.
 3. Confirm the target path, previewed from the template.
 4. Optionally pick a setup action.
-5. Optionally open in the editor, or open as a tab (on by default).
+5. The new worktree shows once created.
 
 This runs as a single job with rollback if any step fails.
 
@@ -334,7 +335,7 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+1 … Ctrl+9 | select worktree chip 1–9 |
 | Ctrl+B | branch popover (was the sidebar toggle) |
 | Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
-| Ctrl+T | new task |
+| Ctrl+T | new worktree |
 | Ctrl+Shift+Y | Sync |
 
 The other existing shortcuts stay.

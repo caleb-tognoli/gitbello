@@ -263,6 +263,9 @@ pub struct NewTask {
     pub path: PathBuf,
     /// Fetched first so the base is current.
     pub fetch_remote: Option<String>,
+    /// The branch tracks `base`, a remote-tracking branch of the same name
+    /// (checking out a remote branch), instead of starting from it.
+    pub track_base: bool,
 }
 
 pub const NEW_TASK_JOB_LABEL: &str = "new task";
@@ -311,6 +314,15 @@ pub fn ref_name_error(name: &str) -> Option<&'static str> {
     None
 }
 
+/// Why `prefix` cannot start branch names (`caleb/`, `fix-`), or `None`
+/// when it can; empty means no prefix.
+pub fn branch_prefix_error(prefix: &str) -> Option<&'static str> {
+    if prefix.is_empty() {
+        return None;
+    }
+    ref_name_error(&format!("{prefix}x")).map(|_| "Branch names cannot start with that prefix.")
+}
+
 /// What the user typed, made closer to a valid name: trimmed, with runs of
 /// whitespace turned into `-`.
 pub fn ref_name_from_input(text: &str) -> String {
@@ -320,6 +332,16 @@ pub fn ref_name_from_input(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_prefixes_must_start_a_valid_name() {
+        for prefix in ["", "caleb/", "fix-", "wörk/team/"] {
+            assert_eq!(branch_prefix_error(prefix), None, "{prefix}");
+        }
+        for prefix in ["/", "a//", "a b/", "-", ".x/", "a..", "a.lock/"] {
+            assert!(branch_prefix_error(prefix).is_some(), "{prefix}");
+        }
+    }
 
     #[test]
     fn accepts_usual_branch_names() {

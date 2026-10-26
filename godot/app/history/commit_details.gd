@@ -9,11 +9,15 @@ const THEME_TYPE: StringName = &"CommitDetails"
 ## Characters shown of the commit's and its parents' hashes.
 const HASH_LENGTH: int = 10
 const PARENT_LENGTH: int = 7
+## The diff's context menu: its actions, by item id.
+const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all"]
 
 var session: RepoSession = null:
 	set = set_session
 ## Formats unix times (the commit list's local-time format).
 var date_format: Callable = Callable()
+
+var _menu: PopupMenu = PopupMenu.new()
 
 @onready var _files_box: VBoxContainer = %FilesBox
 @onready var _split: HSplitContainer = %Split
@@ -49,8 +53,15 @@ func _ready() -> void:
 		return session.diff_split_rows("commit", start, count) if session != null else [])
 	_diff_panel.load_full_requested.connect(func() -> void:
 		session.select_commit_file(String(session.commit_diff_info().get("path", "")), true))
+	_diff_panel.expand_requested.connect(func(gap: int, how: String) -> void:
+		session.expand_diff("commit", gap, how))
+	_diff_panel.whole_file_requested.connect(func(whole: bool) -> void:
+		session.show_whole_diff("commit", whole))
 	_files.gui_input.connect(_on_files_key)
 	_diff_panel.view().gui_input.connect(_on_diff_key)
+	_diff_panel.view().context_menu_requested.connect(_show_diff_menu)
+	add_child(_menu)
+	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(DIFF_MENU_ACTIONS[id]))
 	show_placeholder()
 
 
@@ -174,6 +185,22 @@ func _on_file_changed(path: String) -> void:
 
 func _on_diff_changed() -> void:
 	_diff_panel.show_info(session.commit_diff_info())
+
+
+## The diff's context menu: Copy (when text is selected) and Select all.
+func _show_diff_menu(_row: int, at_position: Vector2) -> void:
+	_menu.clear()
+	for i: int in DIFF_MENU_ACTIONS.size():
+		_menu.add_item(Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
+		_menu.set_item_disabled(i, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
+	_menu.position = Vector2i(_diff_panel.view().get_screen_position() + at_position)
+	_menu.reset_size()
+	_menu.popup()
+
+
+## The diff's context menu, for tests.
+func diff_menu() -> PopupMenu:
+	return _menu
 
 
 ## Right in the file list moves into the diff.

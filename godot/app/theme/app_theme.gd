@@ -337,6 +337,17 @@ static func _add_buttons(theme: Theme, p: Palette, focus: StyleBox) -> void:
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
 			&"font_pressed_color", &"font_hover_pressed_color"]:
 		theme.set_color(color, &"PrimaryButton", accent_text)
+	# The main button of a dialog that deletes or discards, in the error colour
+	_variation(theme, &"DangerButton", &"PrimaryButton")
+	var danger_text: Color = readable_text([p.error, p.error.lightened(0.08), p.error.darkened(0.1)], p.text)
+	theme.set_stylebox(&"normal", &"DangerButton", _box(p.error, 4, margins))
+	theme.set_stylebox(&"hover", &"DangerButton", _box(p.error.lightened(0.08), 4, margins))
+	theme.set_stylebox(&"pressed", &"DangerButton", _box(p.error.darkened(0.1), 4, margins))
+	theme.set_stylebox(&"hover_pressed", &"DangerButton", _box(p.error.darkened(0.1), 4, margins))
+	theme.set_stylebox(&"focus", &"DangerButton", _box(Color.TRANSPARENT, 4, Vector4.ZERO, danger_text, 1))
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
+			&"font_pressed_color", &"font_hover_pressed_color"]:
+		theme.set_color(color, &"DangerButton", danger_text)
 
 
 ## Text fields: raised, outlined, in the accent colour while focused.
@@ -655,6 +666,11 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"syntax_number", &"DiffView", p.syntax_number)
 	theme.set_color(&"syntax_comment", &"DiffView", p.text_muted)
 	theme.set_color(&"message_color", &"DiffView", p.text_muted)
+	theme.set_color(&"selection_bg", &"DiffView", Color(p.accent, 0.35))
+	theme.set_color(&"caret_color", &"DiffView", p.text)
+	theme.set_color(&"expander_color", &"DiffView", p.text_muted)
+	theme.set_color(&"expander_hover_color", &"DiffView", p.text)
+	theme.set_color(&"expander_hover_bg", &"DiffView", p.hover)
 	theme.set_constant(&"row_height", &"DiffView", 20)
 	theme.set_constant(&"padding", &"DiffView", 8)
 
@@ -685,6 +701,29 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"ChipBadge", &"Label")
 	theme.set_color(&"font_color", &"ChipBadge", p.modified)
 	theme.set_font_size(&"font_size", &"ChipBadge", 12)
+	# New worktree │ ▾ after the chips: one chip-shaped outline split in two,
+	# quieter than a chip until hovered; the all-worktrees ▾ as a round chip
+	_variation(theme, &"ChipSplit", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ChipSplit", 0)
+	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1], [&"ChipActionMenu", Vector4(5, 4, 7, 4), 2],
+			[&"ChipIconButton", Vector4(5, 4, 5, 4), 0]]:
+		_variation(theme, entry[0], &"Button")
+		for state: Array in [[&"normal", Color.TRANSPARENT, p.border], [&"hover", p.hover, p.border],
+				[&"pressed", Color(p.accent, 0.25), p.accent], [&"hover_pressed", Color(p.accent, 0.35), p.accent],
+				[&"disabled", Color.TRANSPARENT, p.border]]:
+			var box: StyleBoxFlat = _box(state[1], 12, entry[1], state[2], 1)
+			if entry[2] == 1:
+				box.corner_radius_top_right = 0
+				box.corner_radius_bottom_right = 0
+			elif entry[2] == 2:
+				box.corner_radius_top_left = 0
+				box.corner_radius_bottom_left = 0
+				box.border_width_left = 0
+			theme.set_stylebox(state[0], entry[0], box)
+		theme.set_stylebox(&"focus", entry[0], StyleBoxEmpty.new())
+		theme.set_color(&"font_color", entry[0], p.text_muted)
+		theme.set_color(&"icon_normal_color", entry[0], Color(1, 1, 1, 0.7))
+		theme.set_constant(&"h_separation", entry[0], 4)
 	# Branch and Sync: big raised buttons with room for a ▾ part
 	_variation(theme, &"HeaderRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"HeaderRow", 8)
@@ -717,19 +756,20 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"CountBadge", p.text)
 	theme.set_font_size(&"font_size", &"CountBadge", 11)
 	theme.set_constant(&"gap", &"CountBadge", 6)
-	# Icon-only joined buttons (the diff layout): one outline, rounded outside
+	# Icon-only joined buttons (the diff layout): one outline, rounded
+	# outside; IconToggle is one on its own (the diff's whole-file switch).
 	_variation(theme, &"IconSwitch", &"HBoxContainer")
 	theme.set_constant(&"separation", &"IconSwitch", 0)
 	var icon_segment: Vector4 = Vector4(7, 4, 7, 4)
-	for entry: Array in [[&"IconSegmentFirst", true], [&"IconSegmentLast", false]]:
+	for entry: Array in [[&"IconSegmentFirst", "first"], [&"IconSegmentLast", "last"], [&"IconToggle", "alone"]]:
 		_variation(theme, entry[0], &"SegmentButton")
 		for state: Array in [[&"normal", p.raised], [&"hover", p.hover],
 				[&"pressed", Color(p.accent, 0.35)], [&"hover_pressed", Color(p.accent, 0.4)]]:
 			var box: StyleBoxFlat = _box(state[1], 4, icon_segment, p.border, 1)
-			if entry[1]:
+			if entry[1] == "first":
 				box.corner_radius_top_right = 0
 				box.corner_radius_bottom_right = 0
-			else:
+			elif entry[1] == "last":
 				box.corner_radius_top_left = 0
 				box.corner_radius_bottom_left = 0
 				box.border_width_left = 0
