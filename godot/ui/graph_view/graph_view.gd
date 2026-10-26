@@ -74,12 +74,14 @@ func build(row: Dictionary, height: float) -> RowGeometry:
 	return geometry
 
 
-func draw(canvas: CanvasItem, geometry: RowGeometry, origin: Vector2) -> void:
+## Draws a row; `node_alpha` fades its dot (a row a search does not match).
+func draw(canvas: CanvasItem, geometry: RowGeometry, origin: Vector2, node_alpha: float = 1.0) -> void:
 	canvas.draw_set_transform(origin)
 	if not geometry.points.is_empty():
 		canvas.draw_multiline_colors(geometry.points, geometry.colors, line_width, true)
 	canvas.draw_circle(geometry.node, node_radius + 1.0, _node_outline, true, -1.0, true)
-	canvas.draw_circle(geometry.node, node_radius, geometry.node_color, true, -1.0, true)
+	canvas.draw_circle(geometry.node, node_radius, Color(geometry.node_color, geometry.node_color.a * node_alpha),
+			true, -1.0, true)
 	canvas.draw_set_transform(Vector2.ZERO)
 
 

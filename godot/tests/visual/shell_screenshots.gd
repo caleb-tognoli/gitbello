@@ -99,6 +99,21 @@ func _ready() -> void:
 	filter.menu().hide()
 	filter.set_option("modified", false)
 	filter.set_text("")
+	# The history search: matches highlighted, other rows dimmed.
+	page.show_view(WorktreeView.View.HISTORY)
+	var search: FilterField = page.history().search_field()
+	search.focus_text()
+	search.set_text("app")
+	deadline = Time.get_ticks_msec() + WAIT_MS
+	while Time.get_ticks_msec() < deadline and not page.history().status_text().contains(" of "):
+		await get_tree().process_frame
+	await _shot(out, "history_search")
+	Actions.run_action(&"view.theme_light")
+	await _shot(out, "history_search_light")
+	Actions.run_action(&"view.theme_dark")
+	search.set_text("")
+	page.history().commit_list().grab_focus()
+	await _settle()
 	page.show_view(WorktreeView.View.HISTORY)
 
 	# M6.5 P2: the branch list and a branch's menu, the new-branch form, a

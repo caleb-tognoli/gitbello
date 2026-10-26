@@ -552,6 +552,10 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"max_lanes", &"GraphView", 24)
 	theme.set_constant(&"node_radius", &"GraphView", 4)
 	theme.set_color(&"subject_color", &"CommitList", p.text)
+	# History search: rows it does not match fade, the query is highlighted
+	theme.set_color(&"dim_subject_color", &"CommitList", Color(p.text, 0.4))
+	theme.set_color(&"dim_node_color", &"CommitList", Color(1, 1, 1, 0.35))
+	theme.set_color(&"match_color", &"CommitList", Color(p.modified, 0.4))
 	theme.set_constant(&"padding", &"CommitList", 8)
 	theme.set_constant(&"label_gap", &"CommitList", 4)
 	theme.set_font_size(&"label_font_size", &"CommitList", 12)

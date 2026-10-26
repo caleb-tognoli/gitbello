@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://app/history/history_view.gd" id="1_history"]
 [ext_resource type="Script" path="res://app/history/commit_list.gd" id="2_list"]
 [ext_resource type="PackedScene" path="res://app/history/commit_details.tscn" id="3_details"]
 [ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="4_header"]
+[ext_resource type="PackedScene" path="res://ui/filter_field/filter_field.tscn" id="5_search"]
 
 [node name="HistoryView" type="HSplitContainer"]
 anchors_preset = 15
@@ -22,6 +23,15 @@ theme_type_variation = &"PaneColumn"
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"PaneHeader"
+
+[node name="SearchBar" type="PanelContainer" parent="Left"]
+layout_mode = 2
+theme_type_variation = &"FilterBar"
+
+[node name="SearchField" parent="Left/SearchBar" instance=ExtResource("5_search")]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder = "Search commits"
 
 [node name="ListHeader" parent="Left" instance=ExtResource("4_header")]
 unique_name_in_owner = true

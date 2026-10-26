@@ -104,6 +104,7 @@ func run() -> void:
 	expect(list.has_focus(), "Left again goes back to the commits")
 
 	await _check_search(page.session, list)
+	await _check_search_ui(history, list, details)
 
 	while main.tab_count() > 0:
 		main.close_tab(0)
@@ -148,6 +149,52 @@ func _check_search(session: RepoSession, list: CommitList) -> void:
 	session.search_commits("")
 	expect(await wait_until(func() -> bool: return session.search_info().is_empty()), "a blank query ends the search")
 	session.search_changed.disconnect(count)
+
+
+## The search field over the list: the first match is selected, Enter,
+## Shift+Enter and F3 step, the header counts, other rows are dimmed.
+## The cursor starts on "Add app" (row 1).
+func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDetails) -> void:
+	var field: FilterField = history.search_field()
+	expect(history.match_buttons().all(func(b: Button) -> bool: return not b.visible),
+			"no match buttons without a search")
+	list.grab_focus()
+	press("Ctrl+F")
+	expect(field.text_box().has_focus(), "Ctrl+F in History focuses the search")
+	type_text("app")
+	await get_tree().process_frame  # LineEdit reports text changes deferred
+	expect(await wait_until(func() -> bool: return history.status_text() == "2 of 2 matches"),
+			"the selected commit is the second match: %s" % history.status_text())
+	expect(history.match_buttons().all(func(b: Button) -> bool: return b.visible), "the match buttons show while searching")
+	press("Enter")
+	expect(await wait_until(func() -> bool: return list.cursor == 0), "Enter wraps to the first match")
+	expect_eq(history.status_text(), "1 of 2 matches", "the header follows")
+	expect(await wait_until(func() -> bool: return details.summary_text() == "Improve app"),
+			"the details show the match: %s" % details.summary_text())
+	press("Shift+Enter")
+	expect(await wait_until(func() -> bool: return list.cursor == 1), "Shift+Enter wraps back to the last match")
+	press("F3")
+	expect(await wait_until(func() -> bool: return list.cursor == 0), "F3 steps to the next match")
+	field.set_text("initial")
+	expect(await wait_until(func() -> bool: return list.cursor == 2),
+			"the first match from the selected commit down is selected: %d" % list.cursor)
+	expect(await wait_until(func() -> bool: return history.status_text() == "1 of 1 match"),
+			"one match: %s" % history.status_text())
+	expect(not bool(list.row_data(0).get("match", true)), "the other rows are not matches")
+	expect(bool(list.row_data(2).get("match", false)), "the matching row is flagged")
+	expect_eq(list.search_query(), "initial", "the list dims and highlights for the query")
+	field.set_text("zzz-none")
+	expect(await wait_until(func() -> bool: return history.status_text() == "No matches"),
+			"no matches: %s" % history.status_text())
+	field.focus_text()
+	press("Escape")
+	expect_eq(field.text(), "", "Escape clears the search")
+	expect(history.match_buttons().all(func(b: Button) -> bool: return not b.visible), "and they hide again")
+	expect(await wait_until(func() -> bool: return history.status_text() == "3 commits"),
+			"the header counts commits again: %s" % history.status_text())
+	expect_eq(list.search_query(), "", "nothing is dimmed")
+	press("Escape")
+	expect(list.has_focus(), "a second Escape goes back to the list")
 
 
 func _diff_has(diff: DiffView, needle: String) -> bool:

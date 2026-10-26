@@ -70,14 +70,15 @@ func counts_text() -> String:
 	return "%s %s" % [_added.text, _removed.text] if _added.get_parent().visible else ""
 
 
-## `count` and `noun`, plural past one, with thousands separators: "1,204 commits".
-static func count_text(count: int, noun: String) -> String:
+## `count` and `noun`, plural (`plural`, or `noun` + "s") unless one, with
+## thousands separators: "1,204 commits".
+static func count_text(count: int, noun: String, plural: String = "") -> String:
 	var digits: String = str(count)
 	var out: String = ""
 	while digits.length() > 3:
 		out = "," + digits.right(3) + out
 		digits = digits.left(digits.length() - 3)
-	return "%s%s %s%s" % [digits, out, noun, "" if count == 1 else "s"]
+	return "%s%s %s" % [digits, out, noun if count == 1 else (plural if not plural.is_empty() else noun + "s")]
 
 
 func _on_label_input(event: InputEvent) -> void:

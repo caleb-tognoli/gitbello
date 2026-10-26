@@ -2,7 +2,9 @@ class_name CommitList
 extends VirtualList
 ## History rows (graph, ref labels and subject) driven by
 ## `RepoSession.graph_rows()`. Only a window around the visible rows is fetched.
-## Hash, author and date are in the commit details.
+## Hash, author and date are in the commit details. While a search is on
+## (`set_search`), rows it does not match are dimmed (subject and graph dot)
+## and the query is highlighted in the subjects of the rows it matches.
 
 const LIST_THEME_TYPE: StringName = &"CommitList"
 ## Rows fetched beyond each edge of the visible range.
@@ -23,6 +25,9 @@ var last_draw_usec: int = 0
 var last_fetch_usec: int = 0
 ## Number of rows drawn since creation, for smoke tests.
 var rows_drawn: int = 0
+
+## The search's query as typed, or "" without a search.
+var _query: String = ""
 
 
 ## Shaped text of one row, rebuilt when the subject width changes.
@@ -53,6 +58,9 @@ var _label_font_size: int = 0
 var _padding: float = 0.0
 var _label_gap: float = 0.0
 var _subject_color: Color = Color.WHITE
+var _dim_subject_color: Color = Color.WHITE
+var _dim_node_alpha: float = 1.0
+var _match_color: Color = Color.WHITE
 var _label_color: Color = Color.WHITE
 var _label_boxes: Dictionary[StringName, StyleBox] = {}
 ## Ref label pills drawn last frame: row -> `[[Rect2, label dict], ...]`.
@@ -80,6 +88,9 @@ func _update_theme() -> void:
 	_padding = float(get_theme_constant(&"padding", LIST_THEME_TYPE))
 	_label_gap = float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
 	_subject_color = get_theme_color(&"subject_color", LIST_THEME_TYPE)
+	_dim_subject_color = get_theme_color(&"dim_subject_color", LIST_THEME_TYPE)
+	_dim_node_alpha = get_theme_color(&"dim_node_color", LIST_THEME_TYPE).a
+	_match_color = get_theme_color(&"match_color", LIST_THEME_TYPE)
 	_label_color = get_theme_color(&"label_color", LIST_THEME_TYPE)
 	for style: StringName in LABEL_STYLES.values():
 		_label_boxes[style] = get_theme_stylebox(style, LIST_THEME_TYPE)
@@ -129,6 +140,23 @@ func label_at(row: int, at: Vector2) -> Dictionary:
 	return {}
 
 
+## Dims the rows `query` does not match ("" ends it). The match flags
+## come with the rows: call `reload_matches` when the search reports.
+func set_search(query: String) -> void:
+	_query = query.strip_edges()
+	queue_redraw()
+
+
+func search_query() -> String:
+	return _query
+
+
+## Fetches the rows again for their new match flags.
+func reload_matches() -> void:
+	_clear_window()
+	queue_redraw()
+
+
 ## Local date and time (`YYYY-MM-DD HH:MM`) of a unix time.
 func date_text(unix_time: int) -> String:
 	return _date(unix_time)
@@ -171,7 +199,8 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	if geometry == null:
 		geometry = _graph.build(data, rect.size.y)
 		_geometry[row] = geometry
-	_graph.draw(self, geometry, rect.position)
+	var dimmed: bool = not _query.is_empty() and not bool(data.get("match", false))
+	_graph.draw(self, geometry, rect.position, _dim_node_alpha if dimmed else 1.0)
 
 	var subject_x: float = rect.position.x + _graph.width_for(_graph_lanes) + _padding
 	var subject_width: float = rect.end.x - _padding - subject_x
@@ -195,7 +224,25 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 		x += width + _label_gap
 	_label_rects[row] = hits
 	if subject_width - text.labels_width > 0.0:
-		text.subject.draw(canvas, Vector2(subject_x + text.labels_width, top), _subject_color)
+		var origin: Vector2 = Vector2(subject_x + text.labels_width, top)
+		if not _query.is_empty() and not dimmed:
+			_draw_match(text.subject, String(data["subject"]), origin, subject_width - text.labels_width)
+		text.subject.draw(canvas, origin, _dim_subject_color if dimmed else _subject_color)
+
+
+## Highlights where the query appears in a subject (none when the row
+## matched by author or hash).
+func _draw_match(line: TextLine, subject: String, origin: Vector2, width: float) -> void:
+	var at: int = subject.findn(_query)
+	if at < 0:
+		return
+	var server: TextServer = TextServerManager.get_primary_interface()
+	var height: float = line.get_size().y
+	for span: Vector2 in server.shaped_text_get_selection(line.get_rid(), at, at + _query.length()):
+		var left: float = clampf(span.x, 0.0, width)
+		var right: float = clampf(span.y, 0.0, width)
+		if right > left:
+			draw_rect(Rect2(origin.x + left, origin.y, right - left, height), _match_color)
 
 
 ## Draws one ref label pill at `x`; returns its width.

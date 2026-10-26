@@ -423,11 +423,28 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().pick_all(true), PackedStringArray(["Ctrl+Shift+S"]), repo_ready)
 	Actions.register(&"changes.exclude_all", "Leave out all changes", "Changes",
 			func() -> void: changes.call().pick_all(false), PackedStringArray(["Ctrl+Shift+U"]), repo_ready)
-	Actions.register(&"changes.filter", "Filter changed files", "Changes",
+	# Ctrl+F: the changed files' filter, or the history search in History.
+	Actions.register(&"view.find", "Find (filter changes, search history)", "View",
 			func() -> void:
-				current_page().show_view(WorktreeView.View.CHANGES)
-				changes.call().focus_filter(),
+				var page: RepoTab = current_page()
+				if page.view == WorktreeView.View.HISTORY:
+					page.history().focus_search()
+				else:
+					changes.call().focus_filter(),
 			PackedStringArray(["Ctrl+F"]), repo_ready)
+	var in_history: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session != null and page.view == WorktreeView.View.HISTORY \
+				and page.history().has_matches()
+	var no_matches: Callable = _says("Search the history first.")
+	var next: ActionRegistry.Action = Actions.register(&"history.next_match", "Next search match", "History",
+			func() -> void: current_page().history().step_match(true), PackedStringArray(["F3"]), in_history,
+			no_matches)
+	next.in_text_fields = true
+	var previous: ActionRegistry.Action = Actions.register(&"history.previous_match", "Previous search match",
+			"History", func() -> void: current_page().history().step_match(false), PackedStringArray(["Shift+F3"]),
+			in_history, no_matches)
+	previous.in_text_fields = true
 	Actions.register(&"changes.open_file", "Open file", "Changes",
 			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
