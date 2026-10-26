@@ -10,7 +10,10 @@ use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
 use gitbello_core::ops::{branch_prefix_error, ref_name_error, PullMode};
 use gitbello_core::paths;
-use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent};
+use gitbello_core::runtime::{
+    DiffSlot, JobState, Runtime, RuntimeEvent, CLONE_REPOSITORY_JOB_LABEL,
+    CREATE_REPOSITORY_JOB_LABEL,
+};
 use gitbello_core::ui_state::{self, UiState};
 use gitbello_core::worktrees::new_worktree_path_error;
 use godot::prelude::*;
@@ -206,10 +209,44 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
             label,
             state,
         } => {
+            let job = i64::try_from(job).unwrap_or(i64::MAX).to_variant();
+            if [CREATE_REPOSITORY_JOB_LABEL, CLONE_REPOSITORY_JOB_LABEL].contains(&label.as_str()) {
+                let path = path_str(&repo).to_variant();
+                let label = gstr(&label).to_variant();
+                match state {
+                    JobState::Started => {
+                        core.emit_signal("repository_job_started", &[job, path, label]);
+                    }
+                    JobState::Progress(p) => {
+                        let percent = p.percent.map_or(-1, i64::from);
+                        core.emit_signal(
+                            "repository_job_progress",
+                            &[
+                                job,
+                                path,
+                                label,
+                                percent.to_variant(),
+                                gstr(&p.text).to_variant(),
+                            ],
+                        );
+                    }
+                    JobState::Finished(error) => {
+                        let ok = error.is_none();
+                        let error = error.as_ref().map(convert::error_dict).unwrap_or_default();
+                        core.emit_signal(
+                            "repository_job_finished",
+                            &[job, path, label, ok.to_variant(), error.to_variant()],
+                        );
+                    }
+                    JobState::Cancelled => {
+                        core.emit_signal("repository_job_cancelled", &[job, path, label]);
+                    }
+                }
+                return;
+            }
             let Some(mut session) = find(sessions, &repo) else {
                 return;
             };
-            let job = i64::try_from(job).unwrap_or(i64::MAX).to_variant();
             let label = gstr(&label).to_variant();
             match state {
                 JobState::Started => {
@@ -251,6 +288,28 @@ impl AppCore {
     #[signal]
     fn git_error(repo_path: GString, error: VarDictionary);
 
+    /// Lifecycle of a create or clone job, which has no RepoSession yet.
+    #[signal]
+    fn repository_job_started(job: i64, path: GString, label: GString);
+    #[signal]
+    fn repository_job_progress(
+        job: i64,
+        path: GString,
+        label: GString,
+        percent: i64,
+        text: GString,
+    );
+    #[signal]
+    fn repository_job_finished(
+        job: i64,
+        path: GString,
+        label: GString,
+        ok: bool,
+        error: VarDictionary,
+    );
+    #[signal]
+    fn repository_job_cancelled(job: i64, path: GString, label: GString);
+
     /// New entries are in the git command log (`command_log`).
     #[signal]
     fn commands_logged();
@@ -287,6 +346,37 @@ impl AppCore {
     #[func]
     fn git_version(&self) -> GString {
         runtime_cell::with(|rt| gstr(&rt.git_version().to_string())).unwrap_or_default()
+    }
+
+    /// Initializes a repository on a worker thread; returns its job id.
+    #[func]
+    fn create_repository(&mut self, path: GString, initial_branch: GString) -> i64 {
+        runtime_cell::with(|rt| {
+            i64::try_from(
+                rt.create_repository(Path::new(&path.to_string()), &initial_branch.to_string()),
+            )
+            .unwrap_or(i64::MAX)
+        })
+        .unwrap_or(-1)
+    }
+
+    /// Clones a repository on a worker thread; returns its job id.
+    #[func]
+    fn clone_repository(&mut self, url: GString, path: GString) -> i64 {
+        runtime_cell::with(|rt| {
+            i64::try_from(rt.clone_repository(&url.to_string(), Path::new(&path.to_string())))
+                .unwrap_or(i64::MAX)
+        })
+        .unwrap_or(-1)
+    }
+
+    /// Cancels a create or clone job.
+    #[func]
+    fn cancel_repository_job(&self, job: i64) -> bool {
+        u64::try_from(job)
+            .ok()
+            .and_then(|job| runtime_cell::with(|rt| rt.cancel_job(job)))
+            .unwrap_or(false)
     }
 
     /// Opens a repository (or returns the existing session for it). Add the
@@ -488,6 +578,13 @@ impl AppCore {
     #[func]
     fn branch_prefix_error(&self, prefix: GString) -> GString {
         gstr(branch_prefix_error(&prefix.to_string()).unwrap_or_default())
+    }
+
+    /// Why a repository cannot be created or cloned at `path` (it must be
+    /// missing or an empty folder), or an empty string.
+    #[func]
+    fn new_repository_path_error(&self, path: GString) -> GString {
+        gstr(new_worktree_path_error(Path::new(&path.to_string())).unwrap_or_default())
     }
 
     /// Why a new worktree cannot go at `path` (it must be missing or an empty

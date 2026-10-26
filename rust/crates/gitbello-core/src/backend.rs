@@ -24,6 +24,7 @@ use crate::repo::{
     StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS,
     STATUS_ARGS, WORKTREES_ARGS,
 };
+use crate::worktrees::new_worktree_path_error;
 
 /// Read access to a repository. `repo` is any directory inside a worktree (or
 /// a bare repository). Implementations must be usable from worker threads.
@@ -143,6 +144,18 @@ pub trait GitBackend: Send + Sync {
         &self,
         toplevel: &Path,
         files: &[(PathBuf, String)],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+
+    /// Initializes a repository at `path`, which must be missing or empty.
+    fn init(&self, path: &Path, initial_branch: &str, cancel: &CancelToken)
+        -> Result<(), GitError>;
+    /// Clones `url` to `path`, which must be missing or empty.
+    fn clone(
+        &self,
+        url: &str,
+        path: &Path,
+        progress: ProgressSink,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
 
@@ -784,6 +797,60 @@ impl GitBackend for CliBackend {
             fs::write(&target, &out.stdout).map_err(io)?;
         }
         Ok(())
+    }
+
+    fn init(
+        &self,
+        path: &Path,
+        initial_branch: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        if let Some(error) = new_worktree_path_error(path) {
+            return Err(GitError::new("init", GitErrorKind::AlreadyExists, error));
+        }
+        fs::create_dir_all(path).map_err(|err| {
+            GitError::new(
+                format!("create {}", path.display()),
+                GitErrorKind::Io,
+                err.to_string(),
+            )
+        })?;
+        self.runner
+            .write(path)
+            .args(["init", "--initial-branch"])
+            .arg(initial_branch)
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn clone(
+        &self,
+        url: &str,
+        path: &Path,
+        progress: ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        if let Some(error) = new_worktree_path_error(path) {
+            return Err(GitError::new("clone", GitErrorKind::AlreadyExists, error));
+        }
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|err| {
+            GitError::new(
+                format!("create {}", parent.display()),
+                GitErrorKind::Io,
+                err.to_string(),
+            )
+        })?;
+        self.runner
+            .write(parent)
+            .args(["clone", "--progress", "--no-local", "--"])
+            .arg(url)
+            .arg(path)
+            .on_progress(progress)
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
     }
 
     fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Remote>, GitError> {

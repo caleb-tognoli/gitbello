@@ -14,6 +14,8 @@ const THEME_TYPE: StringName = &"FormDialog"
 ## `func(values: Dictionary) -> String`: what is wrong, or "" when valid.
 ## While something is wrong OK is disabled, with the reason as its tooltip.
 var validator: Callable = Callable()
+## Async forms keep the window open to show progress and errors.
+var hide_on_submit: bool = true
 
 var _fields: Dictionary[String, Control] = {}
 var _ref_names: Array[String] = []
@@ -291,7 +293,8 @@ func open() -> void:
 func submit() -> bool:
 	if not _validate():
 		return false
-	hide()
+	if hide_on_submit:
+		hide()
 	_submit()
 	return true
 

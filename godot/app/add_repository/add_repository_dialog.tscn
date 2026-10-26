@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/add_repository/add_repository_dialog.gd" id="1_dialog"]
+
+[node name="AddRepositoryDialog" type="ConfirmationDialog"]
+script = ExtResource("1_dialog")
+
+[node name="Box" type="VBoxContainer" parent="."]
+
+[node name="Intro" type="VBoxContainer" parent="Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="Fields" type="GridContainer" parent="Box"]
+unique_name_in_owner = true
+layout_mode = 2
+columns = 2

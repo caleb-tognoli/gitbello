@@ -136,6 +136,12 @@ impl GitBackend for FakeBackend {
     ) -> Result<(), GitError> {
         Ok(())
     }
+    fn init(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn clone(&self, _: &str, _: &Path, _: ProgressSink, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
     fn remotes(&self, _: &Path, _: &CancelToken) -> Result<Vec<Remote>, GitError> {
         Ok(Vec::new())
     }

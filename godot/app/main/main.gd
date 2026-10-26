@@ -9,6 +9,7 @@ const MIN_WINDOW_SIZE: Vector2i = Vector2i(960, 600)
 const REPO_ARG: String = "--repo="
 const REPO_TAB: PackedScene = preload("res://app/repo_tab/repo_tab.tscn")
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
+const ADD_REPOSITORY: PackedScene = preload("res://app/add_repository/add_repository_dialog.tscn")
 ## Worktree chips Ctrl+1 … Ctrl+9 select.
 const CHIP_SHORTCUTS: int = 9
 
@@ -16,6 +17,7 @@ var _pages: Array[RepoTab] = []
 var _current: int = -1
 var _feedback: Feedback = Feedback.new()
 var _settings_form: FormDialog = null
+var _add_dialog: AddRepositoryDialog = ADD_REPOSITORY.instantiate() as AddRepositoryDialog
 var _remotes_dialog: RemotesDialog = RemotesDialog.new()
 var _tags_dialog: TagsDialog = TagsDialog.new()
 var _about: AcceptDialog = AcceptDialog.new()
@@ -57,8 +59,9 @@ func _ready() -> void:
 	_feedback.toasts = _toasts
 	_feedback.busy_changed.connect(func(_session: RepoSession) -> void: _update_tab_icons())
 	add_child(_feedback)
-	for dialog: Window in [_remotes_dialog, _tags_dialog, _about]:
+	for dialog: Window in [_add_dialog, _remotes_dialog, _tags_dialog, _about]:
 		add_child(dialog)
+	_add_dialog.repository_selected.connect(open_repo)
 	_spinner.wait_time = BigButton.SPIN_SECONDS
 	_spinner.timeout.connect(func() -> void:
 		_spin_frame = (_spin_frame + 1) % AppTheme.SPINNER_FRAMES
@@ -76,7 +79,7 @@ func _ready() -> void:
 	_tabs.active_tab_rearranged.connect(_on_tab_rearranged)
 	_tab_row.resized.connect(_queue_fit_tabs)
 	_add_button.icon = AppTheme.icon(&"Add")
-	_add_button.pressed.connect(func() -> void: Actions.run_action(&"repo.open"))
+	_add_button.pressed.connect(func() -> void: Actions.run_action(&"repo.add"))
 	_welcome.open_requested.connect(func() -> void: Actions.run_action(&"repo.open"))
 	_welcome.recent_chosen.connect(open_repo)
 	_register_actions()
@@ -390,6 +393,7 @@ func _register_actions() -> void:
 	Actions.register(&"app.quit", "Quit", "App",
 			func() -> void: get_tree().quit(), PackedStringArray(["Ctrl+Q"]))
 	Actions.register(&"app.about", "About gitbello", "App", _show_about)
+	Actions.register(&"repo.add", "Add repository…", "Repository", _add_dialog.open)
 	Actions.register(&"repo.open", "Open repository…", "Repository",
 			_show_open_dialog, PackedStringArray(["Ctrl+O"]))
 	Actions.register(&"repo.refresh", "Refresh", "Repository",
@@ -774,6 +778,10 @@ func _open_settings() -> void:
 
 func settings_form() -> FormDialog:
 	return _settings_form
+
+
+func add_repository_dialog() -> AddRepositoryDialog:
+	return _add_dialog
 
 
 func _save_settings(values: Dictionary) -> void:

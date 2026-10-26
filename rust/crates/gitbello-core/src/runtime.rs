@@ -41,6 +41,8 @@ use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
+pub const CREATE_REPOSITORY_JOB_LABEL: &str = "create repository";
+pub const CLONE_REPOSITORY_JOB_LABEL: &str = "clone repository";
 
 /// Labels of the jobs the changes panel runs.
 pub const DIFF_JOB_LABEL: &str = "load diff";
@@ -882,6 +884,39 @@ impl Runtime {
             Some(path) => self.config.save(path),
             None => Ok(()),
         }
+    }
+
+    /// Initializes a repository in the background. Open it after the job ends.
+    pub fn create_repository(&mut self, path: &Path, initial_branch: &str) -> JobId {
+        let path = normalize(path);
+        let branch = initial_branch.to_owned();
+        self.scheduler.submit(JobSpec::write(
+            path,
+            CREATE_REPOSITORY_JOB_LABEL,
+            RefreshSet::EMPTY,
+            move |ctx| {
+                ctx.backend()
+                    .init(ctx.repo(), &branch, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        ))
+    }
+
+    /// Clones a repository in the background. Open it after the job ends.
+    pub fn clone_repository(&mut self, url: &str, path: &Path) -> JobId {
+        let path = normalize(path);
+        let url = url.to_owned();
+        self.scheduler.submit(JobSpec::write(
+            path,
+            CLONE_REPOSITORY_JOB_LABEL,
+            RefreshSet::EMPTY,
+            move |ctx| {
+                let progress = Box::new(ctx.progress_sink());
+                ctx.backend()
+                    .clone(&url, ctx.repo(), progress, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        ))
     }
 
     /// Opens `path` (any folder inside a worktree). Returns the key used for
@@ -1811,6 +1846,21 @@ impl Runtime {
             label,
             kind,
         } = event;
+        if [CREATE_REPOSITORY_JOB_LABEL, CLONE_REPOSITORY_JOB_LABEL].contains(&label.as_str()) {
+            let state = match kind {
+                EventKind::Started => JobState::Started,
+                EventKind::Progress(progress) => JobState::Progress(progress),
+                EventKind::Finished(result) => JobState::Finished(result.err()),
+                EventKind::Cancelled => JobState::Cancelled,
+            };
+            out.push(RuntimeEvent::Job {
+                repo,
+                job,
+                label,
+                state,
+            });
+            return;
+        }
         let auto_fetch_interval = self.auto_fetch_interval();
         let Some(state) = self.repos.get_mut(&repo) else {
             return; // closed meanwhile

@@ -249,6 +249,7 @@ File  Edit  Repository  Branch  View  Help
 **Repo tabs.** One tab per repo, never per worktree; the title is the repo name.
 - An attention dot shows the most important state across the repo's worktrees: conflict or operation in progress (error colour), then changed files (modified colour), then ahead/behind (accent). Its tooltip lists each worktree with its state.
 - A small spinner shows while any job of the repo runs.
+- The tab-strip **+** opens one Add repository window: create a repository (name, location and initial branch), open an existing folder, or clone a URL/path. Create and clone run in the background with progress, cancellation and inline errors, then open the new tab.
 - Opening a linked worktree's path (open dialog, recent list, command line, drag and drop, restored tabs) focuses its repo's tab and selects that worktree's chip.
 
 **Worktree strip.** One row of chips: the main worktree first, then the linked ones by folder name.
@@ -450,6 +451,7 @@ Decided on 2026-10-25, after M6: a restyle in the spirit of spritesheetbelli (D1
 #### P2 — Shell (≈2.5 weeks)
 - [x] Menu bar from the registry (global menu on macOS where Godot supports it), disabled reasons in tooltips
 - [x] Repo-only tabs with the attention dot and job spinner; worktree paths open their repo's tab with the chip selected; migrate saved worktree tabs
+- [x] Tab-strip + Add repository window: create, open existing or clone, with background jobs, progress, cancellation and inline errors
 - [x] Worktree strip: chips, chip menu, + New task with its menu, Ctrl+1…9; one `RepoSession` per worktree, created on first selection
 - [x] Branch button and popover; Repository → Remotes… and Tags… dialogs; the reduced graph menus
 - [x] Sync button with its state table and ▾
