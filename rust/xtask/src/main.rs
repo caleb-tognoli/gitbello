@@ -231,6 +231,18 @@ fn smoke(args: &[String]) -> Result<()> {
     // Throwaway repositories and config; the tests never touch real ones.
     let fixtures = env::temp_dir().join(format!("gitbello-smoke-{}", std::process::id()));
     remove_tree(&fixtures);
+    fs::create_dir_all(&fixtures)?;
+    // Windows runners can use an 8.3 TEMP path (RUNNER~1). Match the long
+    // paths returned by git and the core before passing paths to Godot.
+    let fixtures = fs::canonicalize(&fixtures)?;
+    #[cfg(windows)]
+    let fixtures = {
+        let text = fixtures.to_string_lossy();
+        match text.strip_prefix(r"\\?\") {
+            Some(path) if path.as_bytes().get(1) == Some(&b':') => PathBuf::from(path),
+            _ => fixtures,
+        }
+    };
     let mut cli_build = cargo();
     cli_build.args(["build", "--package", "gitbello-cli"]);
     run_status(cli_build)?;

@@ -62,6 +62,8 @@ func _append(record: Dictionary) -> void:
 		result += " · " + outcome
 		item.set_custom_color(3, get_theme_color(&"error_color", THEME_TYPE))
 	item.set_text(3, result)
+	item.set_icon(3, AppTheme.icon(&"StatusSuccess" if outcome == "ok" else &"StatusWarning"))
+	item.set_tooltip_text(3, "%s · %s" % [result, outcome])
 
 
 func _utc_offset() -> int:

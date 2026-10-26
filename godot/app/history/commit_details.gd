@@ -25,7 +25,6 @@ var _menu: PopupMenu = PopupMenu.new()
 @onready var _who: Control = %Who
 @onready var _ids: Control = %Ids
 @onready var _author_name: Label = %AuthorName
-@onready var _author_email: Label = %AuthorEmail
 @onready var _date: Label = %DateLabel
 @onready var _hash: Label = %HashLabel
 @onready var _copy_hash: Button = %CopyHash
@@ -146,8 +145,8 @@ func _on_commit_loaded() -> void:
 		return
 	_summary.text = String(info["summary"])
 	_author_name.text = String(info["author"])
-	_author_email.text = String(info["email"])
-	_author_email.visible = not _author_email.text.is_empty()
+	var email: String = String(info["email"])
+	_author_name.tooltip_text = _author_name.text if email.is_empty() else "%s <%s>" % [_author_name.text, email]
 	_date.text = date_format.call(int(info["time"])) if date_format.is_valid() else str(info["time"])
 	var oid: String = String(info["oid"])
 	_hash.text = oid.left(HASH_LENGTH)
@@ -162,7 +161,8 @@ func _on_commit_loaded() -> void:
 	_parents_label.text = " ".join(short_parents)
 	_parents_label.tooltip_text = "\n".join(parents)
 	_committer.visible = String(info["committer"]) != String(info["author"])
-	_committer_label.text = "committed by %s" % String(info["committer"])
+	_committer_label.text = String(info["committer"])
+	_committer_label.tooltip_text = "Committed by %s" % String(info["committer"])
 	_who.show()
 	_ids.show()
 	_show_body(String(info["body"]).strip_edges())
@@ -191,7 +191,7 @@ func _on_diff_changed() -> void:
 func _show_diff_menu(_row: int, at_position: Vector2) -> void:
 	_menu.clear()
 	for i: int in DIFF_MENU_ACTIONS.size():
-		_menu.add_item(Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
+		_menu.add_icon_item(Actions.icon(DIFF_MENU_ACTIONS[i]), Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
 		_menu.set_item_disabled(i, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
 	_menu.position = Vector2i(_diff_panel.view().get_screen_position() + at_position)
 	_menu.reset_size()

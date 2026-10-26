@@ -34,6 +34,8 @@ var _draft_body: String = ""
 
 func _ready() -> void:
 	_apply_theme()
+	_commit_button.icon = Actions.icon(&"changes.commit")
+	_amend.tooltip_text = "Amend the last commit"
 	_summary.text_changed.connect(func(_t: String) -> void: update_state())
 	_summary.text_submitted.connect(func(_t: String) -> void: _body.grab_focus())
 	_body.text_changed.connect(update_state)

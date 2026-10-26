@@ -79,6 +79,7 @@ func _collect() -> void:
 		_entries.append({
 			"label": "%s: %s" % [action.category, action.label],
 			"detail": Actions.shortcut_label(id),
+			"icon": Actions.icon(id),
 			"run": func() -> void: Actions.run_action(id),
 		})
 	if dynamic_entries.is_valid():
@@ -99,6 +100,7 @@ func _filter() -> void:
 		_visible.append(entry)
 		var item: TreeItem = root.create_child()
 		item.set_text(0, String(entry["label"]))
+		item.set_icon(0, entry.get("icon") as Texture2D)
 		item.set_text(1, String(entry.get("detail", "")))
 	var first: TreeItem = root.get_first_child()
 	if first != null:

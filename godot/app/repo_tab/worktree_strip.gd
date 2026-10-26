@@ -161,7 +161,7 @@ func _open_task_menu() -> void:
 		var action: ActionRegistry.Action = Actions.get_action(id)
 		if action == null:
 			continue
-		_task_menu.add_item(action.label, _task_ids.size())
+		_task_menu.add_icon_item(Actions.icon(id), action.label, _task_ids.size())
 		_task_menu.set_item_disabled(_task_menu.item_count - 1, not action.is_enabled())
 		_task_ids.append(id)
 	_popup_under(_task_menu, _task_menu_button)

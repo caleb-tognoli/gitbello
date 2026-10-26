@@ -268,7 +268,7 @@ func show_menu(ids: Array, at_position: Vector2) -> void:
 			if _menu.item_count > 0 and not _menu.is_item_separator(_menu.item_count - 1):
 				_menu.add_separator()
 		elif Actions.is_enabled(id):
-			_menu.add_item(Actions.get_action(id).label, _menu_actions.size())
+			_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
 			_menu_actions.append(id)
 	_menu_active = false
 	while _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
@@ -360,7 +360,7 @@ func _open_sync_menu() -> void:
 		var action: ActionRegistry.Action = Actions.get_action(id)
 		if action == null:
 			continue
-		_sync_menu.add_item(action.label, _sync_ids.size())
+		_sync_menu.add_icon_item(Actions.icon(id), action.label, _sync_ids.size())
 		_sync_menu.set_item_disabled(_sync_menu.item_count - 1, not action.is_enabled())
 		_sync_ids.append(id)
 	var rect: Rect2 = _sync_button.get_global_rect()

@@ -97,6 +97,7 @@ func _ready() -> void:
 	_shelves.files_wanted.connect(func(oid: String) -> void: session.load_shelf_files(oid))
 	_shelves.file_chosen.connect(_show_shelf_file)
 	_shelves.menu_requested.connect(_show_shelf_menu)
+	_offer_button.icon = Actions.icon(&"shelf.restore_left")
 	_offer_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.restore_left", _offer_button))
 
 
@@ -258,7 +259,7 @@ func _show_shelf_menu(_shelf: Dictionary, at: Vector2) -> void:
 	_menu_actions.clear()
 	for id: StringName in [&"shelf.restore", &"shelf.rename", &"shelf.discard"]:
 		if Actions.is_enabled(id):
-			_menu.add_item(Actions.get_action(id).label, _menu_actions.size())
+			_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
 			_menu_actions.append(id)
 	if _menu.item_count == 0:
 		return
@@ -510,7 +511,7 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 		if not Actions.is_enabled(id):
 			continue
 		var action: ActionRegistry.Action = Actions.get_action(id)
-		_menu.add_item(action.label, _menu_actions.size())
+		_menu.add_icon_item(Actions.icon(id), action.label, _menu_actions.size())
 		_menu_actions.append(id)
 	if _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
 		_menu.remove_item(_menu.item_count - 1)

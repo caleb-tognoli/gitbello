@@ -151,6 +151,7 @@ func _rebuild(selected: String) -> void:
 	if not others.is_empty():
 		var group: TreeItem = _tree.create_item(root)
 		group.set_text(0, "Other branches (%d)" % others.size())
+		group.set_icon(0, AppTheme.icon(&"GitBranch"))
 		group.set_metadata(0, {"kind": "others"})
 		group.set_selectable(0, false)
 		group.set_custom_color(0, get_theme_color(&"group_color", THEME_TYPE))
@@ -218,7 +219,8 @@ func _is_other(shelf: Dictionary) -> bool:
 func _update_header() -> void:
 	var own: int = own_shelves().size()
 	var others: int = _shelves.size() - own
-	_header.text = "Shelved · %d" % own if others == 0 else "Shelved · %d (+%d on other branches)" % [own, others]
+	_header.text = "Shelved · %d" % _shelves.size()
+	_header.tooltip_text = "%d on this branch · %d on other branches" % [own, others]
 	_header.icon = AppTheme.icon(&"GuiTreeArrowRight" if _collapsed else &"GuiTreeArrowDown")
 	_tree.visible = not _collapsed
 	_update_height()

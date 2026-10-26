@@ -51,7 +51,8 @@ func _ready() -> void:
 		DisplayServer.set_system_theme_change_callback(_on_system_theme_changed)
 	window.files_dropped.connect(_on_files_dropped)
 
-	_version_label.text = "gitbello %s · git %s" % [Core.core_version(), Core.git_version()]
+	_version_label.text = "gitbello %s" % Core.core_version()
+	_version_label.tooltip_text = "git %s" % Core.git_version()
 	_feedback.name = "Feedback"
 	_feedback.toasts = _toasts
 	_feedback.busy_changed.connect(func(_session: RepoSession) -> void: _update_tab_icons())
@@ -250,6 +251,7 @@ func _update_view() -> void:
 		_pages[i].visible = i == _tabs.current_tab
 	var view: WorktreeView = current_view()
 	_status_label.text = view.worktree_path() if view != null else "No repository open"
+	_status_label.tooltip_text = _status_label.text
 	_queue_fit_tabs()
 
 

@@ -15,6 +15,77 @@ signal actions_changed()
 signal action_ran(id: StringName)
 
 
+## Shared visual vocabulary for menus and the palette. Unmapped actions keep
+## their text without an unrelated fallback icon.
+const ICONS: Dictionary[StringName, StringName] = {
+	&"app.command_palette": &"Search",
+	&"app.keyboard_shortcuts": &"Keyboard",
+	&"app.settings": &"Tools",
+	&"app.about": &"Info",
+	&"repo.open": &"FolderAdd",
+	&"repo.refresh": &"Reload",
+	&"tab.close": &"Close",
+	&"repo.open_in_editor": &"ExternalLink",
+	&"repo.open_terminal": &"Terminal",
+	&"repo.show_in_file_manager": &"Folder",
+	&"repo.remotes": &"GitRemote",
+	&"repo.tags": &"GitTag",
+	&"view.changes": &"FileList",
+	&"view.history": &"History",
+	&"view.find": &"Search",
+	&"view.toggle_git_log": &"Terminal",
+	&"history.next_match": &"ChevronDown",
+	&"history.previous_match": &"ChevronUp",
+	&"diff.copy": &"ActionCopy",
+	&"diff.toggle_side_by_side": &"Panels2Alt",
+	&"diff.toggle_whole_file": &"ExpandAll",
+	&"changes.open_file": &"TextFile",
+	&"changes.show_file": &"Folder",
+	&"changes.copy_path": &"ActionCopy",
+	&"changes.focus_message": &"GitCommit",
+	&"changes.commit": &"GitCommit",
+	&"changes.discard": &"Remove",
+	&"changes.undo_discard": &"Undo",
+	&"changes.shelve": &"GitShelf",
+	&"shelf.restore": &"Undo",
+	&"shelf.restore_left": &"Undo",
+	&"shelf.rename": &"Rename",
+	&"shelf.discard": &"Remove",
+	&"shelf.undo_discard": &"Undo",
+	&"sync.sync": &"Reload",
+	&"sync.fetch": &"GitFetch",
+	&"sync.pull": &"GitPull",
+	&"sync.pull_merge": &"GitPull",
+	&"sync.pull_rebase": &"GitPull",
+	&"sync.pull_ff_only": &"GitPull",
+	&"sync.push": &"GitPush",
+	&"sync.force_push": &"GitPush",
+	&"sync.cancel": &"Close",
+	&"branch.switch": &"GitBranch",
+	&"branch.checkout": &"GitBranch",
+	&"branch.new": &"GitBranch",
+	&"branch.rename": &"Rename",
+	&"branch.delete": &"Remove",
+	&"branch.set_upstream": &"GitRemote",
+	&"tag.new": &"GitTag",
+	&"tag.push": &"GitPush",
+	&"tag.delete": &"Remove",
+	&"commit.checkout": &"GitCommit",
+	&"commit.copy_hash": &"ActionCopy",
+	&"task.new": &"GitWorktree",
+	&"worktree.add_existing": &"GitWorktree",
+	&"worktree.open": &"GitWorktree",
+	&"worktree.cleanup": &"Clear",
+	&"worktree.prune": &"Clear",
+	&"worktree.remove": &"Remove",
+	&"worktree.open_in_editor": &"ExternalLink",
+	&"worktree.open_terminal": &"Terminal",
+	&"worktree.show_in_file_manager": &"Folder",
+	&"worktree.copy_path": &"ActionCopy",
+	&"worktree.lock": &"Lock",
+}
+
+
 class Action:
 	extends RefCounted
 	var id: StringName
@@ -79,6 +150,12 @@ func unregister(id: StringName) -> void:
 	if _actions.erase(id):
 		_parsed.erase(id)
 		actions_changed.emit()
+
+
+## The same themed icon wherever an action appears.
+func icon(id: StringName) -> Texture2D:
+	var name: StringName = ICONS.get(id, &"")
+	return AppTheme.icon(name) if name != &"" else null
 
 
 func get_action(id: StringName) -> Action:

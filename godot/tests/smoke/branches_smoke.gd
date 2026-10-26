@@ -31,6 +31,14 @@ func run() -> void:
 	_ops = ops
 	expect(await wait_until(func() -> bool: return _code(session, "lines.txt") == "?"), "lines.txt is untracked")
 	expect(await _commit(session, "lines.txt", "Add lines"), "committed lines.txt on main")
+	# The commit job finishes before status and the history selection refresh.
+	# Wait for the new HEAD so New branch cannot target the previous commit
+	# and open an unexpected bring-or-leave dialog on faster runners.
+	expect(await wait_until(func() -> bool:
+		var selected: Dictionary = page.commit_target()
+		return String(selected.get("subject", "")) == "Add lines" \
+				and String(selected.get("hash", "")) == String(session.status().get("oid", ""))),
+			"the new HEAD is selected before branching")
 
 	# Ctrl+Shift+N: a new branch from HEAD; typed spaces become dashes.
 	press("Ctrl+Shift+N")

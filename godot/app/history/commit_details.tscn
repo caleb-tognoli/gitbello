@@ -51,12 +51,8 @@ stretch_mode = 5
 [node name="AuthorName" type="Label" parent="InfoPanel/Info/Who/Author"]
 unique_name_in_owner = true
 layout_mode = 2
+mouse_filter = 1
 theme_type_variation = &"DetailsName"
-
-[node name="AuthorEmail" type="Label" parent="InfoPanel/Info/Who/Author"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsMeta"
 
 [node name="Date" type="HBoxContainer" parent="InfoPanel/Info/Who"]
 layout_mode = 2
@@ -126,6 +122,7 @@ stretch_mode = 5
 [node name="CommitterLabel" type="Label" parent="InfoPanel/Info/Ids/Committer"]
 unique_name_in_owner = true
 layout_mode = 2
+mouse_filter = 1
 theme_type_variation = &"DetailsMeta"
 
 [node name="BodySeparator" type="HSeparator" parent="InfoPanel/Info"]

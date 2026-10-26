@@ -39,7 +39,8 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 	var row: HBoxContainer = panel.get_child(0).get_child(0) as HBoxContainer
 	if not details.is_empty():
 		var more: Button = Button.new()
-		more.text = "Details"
+		more.icon = AppTheme.icon(&"Info")
+		more.tooltip_text = "Show error details"
 		more.theme_type_variation = &"ToolbarButton"
 		more.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		more.pressed.connect(func() -> void: _show_details(title, details))

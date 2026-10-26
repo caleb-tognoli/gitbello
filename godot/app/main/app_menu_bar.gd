@@ -106,7 +106,7 @@ func _fill(popup: PopupMenu, ids: Array) -> void:
 			popup.add_radio_check_item(action.label, items.size())
 			popup.set_item_checked(index, Core.theme_choice() == String(id).trim_prefix("view.theme_"))
 		else:
-			popup.add_item(action.label, items.size())
+			popup.add_icon_item(Actions.icon(id), action.label, items.size())
 		var shortcuts: PackedStringArray = Actions.shortcuts(id)
 		if not shortcuts.is_empty():
 			var event: InputEventKey = Shortcuts.parse(shortcuts[0])

@@ -114,7 +114,7 @@ wrap_mode = 1
 [node name="Amend" type="CheckBox" parent="Files/CommitPanel/CommitBox"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Amend last commit"
+text = "Amend"
 
 [node name="CommitButton" type="Button" parent="Files/CommitPanel/CommitBox"]
 unique_name_in_owner = true
