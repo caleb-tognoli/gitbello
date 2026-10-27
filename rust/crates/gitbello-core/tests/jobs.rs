@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use gitbello_core::backend::{GitBackend, PatchGuard, ProgressSink};
+use gitbello_core::backend::{GitBackend, PatchGuard, ProgressSink, ShelfChange};
 use gitbello_core::diff::{DiffTarget, FileDiff, PatchMode};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
@@ -168,6 +168,35 @@ impl GitBackend for FakeBackend {
     }
     fn restore_shelf(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
+    }
+    fn restore_shelf_file(
+        &self,
+        _: &Path,
+        _: &str,
+        _: &Path,
+        _: &CancelToken,
+    ) -> Result<ShelfChange, GitError> {
+        unreachable!()
+    }
+    fn discard_shelf_file(
+        &self,
+        _: &Path,
+        _: &str,
+        _: &Path,
+        _: &CancelToken,
+    ) -> Result<ShelfChange, GitError> {
+        unreachable!()
+    }
+    fn undo_shelf_change(
+        &self,
+        _: &Path,
+        _: &ShelfChange,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
+        unreachable!()
+    }
+    fn forget_shelf_change(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        unreachable!()
     }
     fn drop_shelf(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
@@ -450,6 +479,32 @@ fn every_job_reports_started_then_one_final_event() {
         assert_eq!(kinds[0], &EventKind::Started);
         assert!(matches!(kinds[1], EventKind::Finished(Ok(JobOutput::Done))));
     }
+}
+
+#[test]
+fn completed_shelf_swaps_deliver_their_result_even_after_cancellation() {
+    let (scheduler, events, _) = scheduler(1);
+    let job = scheduler.submit(JobSpec::write(
+        "/repo/a",
+        "discard shelf file",
+        RefreshSet::EMPTY,
+        |ctx| {
+            ctx.cancel_token().cancel();
+            Ok(JobOutput::ShelfChanged {
+                change: ShelfChange {
+                    old_oid: "old".into(),
+                    new_oid: Some("new".into()),
+                    subject: "shelf".into(),
+                },
+                remember: true,
+            })
+        },
+    ));
+    let seen = wait_final(&events, &[job]);
+    assert!(seen.iter().any(|e| matches!(
+        e.kind,
+        EventKind::Finished(Ok(JobOutput::ShelfChanged { remember: true, .. }))
+    )));
 }
 
 #[test]

@@ -110,7 +110,31 @@ func run() -> void:
 	var history: HistoryView = page.history()
 	history.split_offset = 520
 	history.drag_ended.emit()
-	expect_eq(int(Core.repo_ui_state(page.key()).get("history_width", 0)), 520, "the history width is saved")
+	expect_eq(int(Core.repo_ui_state(page.key()).get("sidebar_width", 0)), 520, "the shared sidebar width is saved")
+	for which: WorktreeView.View in [WorktreeView.View.CHANGES, WorktreeView.View.SHELVES, WorktreeView.View.HISTORY]:
+		page.show_view(which)
+		for frame: int in 3:
+			await get_tree().process_frame
+		var left: Control = page.history().left_pane() if which == WorktreeView.View.HISTORY else page.changes().left_pane()
+		expect_eq(roundi(left.size.x), 520, "switching views keeps the sidebar width")
+	page.show_view(WorktreeView.View.CHANGES)
+	page.changes().split_offset = 400
+	page.changes().drag_ended.emit()
+	page.show_view(WorktreeView.View.HISTORY)
+	for frame: int in 3:
+		await get_tree().process_frame
+	expect_eq(roundi(page.history().left_pane().size.x), 400, "resizing Changes also resizes History")
+	page.active_view()._restore_widths()
+	expect_eq(page.history().split_offset, 400, "the common width is restored")
+	var original_size: Vector2i = get_window().size
+	get_window().size = Vector2i(960, 680)
+	for which: WorktreeView.View in [WorktreeView.View.SHELVES, WorktreeView.View.CHANGES, WorktreeView.View.HISTORY]:
+		page.show_view(which)
+		for frame: int in 3:
+			await get_tree().process_frame
+		var left: Control = page.history().left_pane() if which == WorktreeView.View.HISTORY else page.changes().left_pane()
+		expect_eq(roundi(left.size.x), 400, "compact-window view switching keeps the sidebar width")
+	get_window().size = original_size
 	main.open_repo(_fixtures.path_join("repo-2-feature"))
 	expect_eq(main.tab_count(), 5, "a worktree of an open repository opens no tab")
 	expect_eq(main.tab_bar().current_tab, 1, "it focuses its repository's tab")

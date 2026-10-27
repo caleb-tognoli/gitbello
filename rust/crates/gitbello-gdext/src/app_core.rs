@@ -184,6 +184,21 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal("shelf_files_loaded", &[gstr(&oid).to_variant()]);
             }
         }
+        RuntimeEvent::ShelfReplaced {
+            repo,
+            old_oid,
+            new_oid,
+        } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal(
+                    "shelf_replaced",
+                    &[
+                        gstr(&old_oid).to_variant(),
+                        gstr(new_oid.as_deref().unwrap_or_default()).to_variant(),
+                    ],
+                );
+            }
+        }
         RuntimeEvent::CleanupLoaded { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("cleanup_loaded", &[]);

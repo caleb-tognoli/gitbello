@@ -23,6 +23,8 @@ const VERBS: Dictionary[String, String] = {
 	"checkout": "Checking out",
 	"shelve": "Shelving",
 	"restore shelf": "Restoring the shelf",
+	"restore shelf file": "Restoring the shelved file",
+	"discard shelf file": "Discarding the shelved file",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
 	"commit": "Committing",

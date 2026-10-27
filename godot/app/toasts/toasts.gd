@@ -201,13 +201,17 @@ func _add_actions(panel: PanelContainer, actions: Array[Dictionary]) -> void:
 func _expire(panel: PanelContainer) -> void:
 	var seconds: float = float(get_theme_constant(&"seconds", THEME_TYPE))
 	var timer: SceneTreeTimer = get_tree().create_timer(seconds)
+	# A toast can be dismissed before its timer fires. Capturing the node
+	# directly makes Godot report a freed lambda capture before the guard runs.
+	var target: WeakRef = weakref(panel)
 	timer.timeout.connect(func() -> void:
-		if not is_instance_valid(panel) or panel.is_queued_for_deletion():
+		var current: PanelContainer = target.get_ref() as PanelContainer
+		if not is_instance_valid(current) or current.is_queued_for_deletion():
 			return
-		if Rect2(Vector2.ZERO, panel.size).has_point(panel.get_local_mouse_position()):
-			_expire(panel)
+		if Rect2(Vector2.ZERO, current.size).has_point(current.get_local_mouse_position()):
+			_expire(current)
 		else:
-			panel.queue_free())
+			current.queue_free())
 
 
 func _run_action(run: Callable, panel: Control) -> void:

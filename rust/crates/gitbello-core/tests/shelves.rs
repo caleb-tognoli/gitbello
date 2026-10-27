@@ -117,6 +117,53 @@ fn shelve_files_untracked_included_then_restore() {
 }
 
 #[test]
+fn rename_the_only_shelf_keeps_its_contents_and_identity() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "base\n", "base");
+    repo.write("a.txt", "saved\n");
+    let (mut rt, key) = open(&repo);
+    let job = rt.shelve(&key, Vec::new(), "original");
+    succeed(&mut rt, &key, job);
+    let shelf = named(&rt, &key, "original");
+    let error = outcome(&mut rt, &key, |rt| {
+        rt.rename_shelf(&key, &shelf.oid, "renamed")
+    });
+    assert!(
+        error.is_none(),
+        "{error:?}; stash list: {}",
+        repo.git(&["stash", "list"])
+    );
+    assert_eq!(shelves(&rt, &key).len(), 1);
+    assert_eq!(named(&rt, &key, "renamed").oid, shelf.oid);
+    assert!(repo
+        .git(&["for-each-ref", "refs/gitbello/rename-shelf/"])
+        .is_empty());
+    let job = rt.restore_shelf(&key, &shelf.oid);
+    succeed(&mut rt, &key, job);
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("saved\n"));
+}
+
+#[test]
+fn rename_the_newest_shelf_leaves_older_shelves_alone() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "base\n", "base");
+    repo.write("a.txt", "older\n");
+    repo.git(&["stash", "push", "-q", "-m", "older"]);
+    repo.write("a.txt", "newer\n");
+    let (mut rt, key) = open(&repo);
+    let older = named(&rt, &key, "older");
+    let job = rt.shelve(&key, Vec::new(), "newer");
+    succeed(&mut rt, &key, job);
+    let newer = named(&rt, &key, "newer");
+    let job = rt.rename_shelf(&key, &newer.oid, "renamed");
+    succeed(&mut rt, &key, job);
+    assert_eq!(shelves(&rt, &key).len(), 2);
+    assert_eq!(named(&rt, &key, "older").oid, older.oid);
+    assert_eq!(named(&rt, &key, "renamed").oid, newer.oid);
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
 fn shelves_are_found_by_commit_after_other_stashes_move() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "base");

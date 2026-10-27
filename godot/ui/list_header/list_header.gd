@@ -9,6 +9,8 @@ extends PanelContainer
 
 ## The check-all box (or its text) was clicked: `include` unless it showed `all`.
 signal check_toggled(include: bool)
+## Right-click anywhere on the header, in screen coordinates.
+signal context_menu_requested(at: Vector2)
 
 const THEME_TYPE: StringName = &"ListHeader"
 
@@ -22,6 +24,8 @@ func _ready() -> void:
 	_check.hide()
 	_check.toggled_to.connect(func(include: bool) -> void: check_toggled.emit(include))
 	_label.gui_input.connect(_on_label_input)
+	for control: Control in [self, _check, _label, _added, _removed]:
+		control.gui_input.connect(_on_context_input.bind(control))
 	show_counts(0, 0)
 	_apply_theme()
 
@@ -90,3 +94,10 @@ func _on_label_input(event: InputEvent) -> void:
 
 func _apply_theme() -> void:
 	custom_minimum_size.y = float(get_theme_constant(&"height", THEME_TYPE))
+
+
+func _on_context_input(event: InputEvent, source: Control) -> void:
+	var mouse: InputEventMouseButton = event as InputEventMouseButton
+	if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_RIGHT:
+		context_menu_requested.emit(source.get_screen_position() + mouse.position)
+		source.accept_event()

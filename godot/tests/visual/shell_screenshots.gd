@@ -236,8 +236,9 @@ func _ready() -> void:
 	while Time.get_ticks_msec() < deadline and not page.changes().offer_bar().visible:
 		await get_tree().process_frame
 	var shelf_list: ShelfList = page.changes().shelf_list()
-	for shelf: Dictionary in page.session.shelves():
-		shelf_list.expand(String(shelf["oid"]))
+	page.show_view(WorktreeView.View.SHELVES)
+	if not page.session.shelves().is_empty():
+		shelf_list.select_shelf(String(page.session.shelves()[0]["oid"]))
 	await _settle()
 	await _shot(out, "shelves")
 

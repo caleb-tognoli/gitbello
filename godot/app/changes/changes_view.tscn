@@ -1,11 +1,12 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://app/changes/changes_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://app/changes/change_list.gd" id="2_list"]
 [ext_resource type="Script" path="res://app/changes/commit_box.gd" id="3_commit"]
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="5_panel"]
 [ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="6_empty"]
-[ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="7_shelves"]
+[ext_resource type="PackedScene" path="res://app/changes/shelf_list.tscn" id="7_shelves"]
+[ext_resource type="Script" path="res://app/changes/shelf_file_list.gd" id="10_shelf_files"]
 [ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="8_header"]
 [ext_resource type="PackedScene" path="res://ui/filter_field/filter_field.tscn" id="9_filter"]
 
@@ -85,13 +86,16 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="Shelves" type="VBoxContainer" parent="Files"]
+[node name="Shelves" parent="Files" instance=ExtResource("7_shelves")]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
+size_flags_vertical = 3
 theme_type_variation = &"PaneColumn"
-script = ExtResource("7_shelves")
+
 
 [node name="CommitPanel" type="PanelContainer" parent="Files"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"CommitPanel"
 
@@ -130,20 +134,136 @@ layout_mode = 2
 theme_type_variation = &"ErrorOutput"
 editable = false
 
-[node name="Right" type="Control" parent="."]
+[node name="Right" type="VBoxContainer" parent="."]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_type_variation = &"PaneColumn"
 
-[node name="DiffPanel" parent="Right" instance=ExtResource("5_panel")]
+[node name="ShelfDetails" type="PanelContainer" parent="Right"]
 unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+visible = false
+layout_mode = 2
+theme_type_variation = &"DetailsHeader"
+
+[node name="Info" type="VBoxContainer" parent="Right/ShelfDetails"]
+layout_mode = 2
+theme_type_variation = &"DetailsInfo"
+
+[node name="TitleRow" type="HBoxContainer" parent="Right/ShelfDetails/Info"]
+layout_mode = 2
+theme_type_variation = &"HeaderRow"
+
+[node name="ShelfTitle" type="Button" parent="Right/ShelfDetails/Info/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"ShelfTitle"
+mouse_default_cursor_shape = 2
+alignment = 0
+text_overrun_behavior = 3
+
+[node name="ShelfNameEdit" type="LineEdit" parent="Right/ShelfDetails/Info/TitleRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"ShelfNameEdit"
+placeholder_text = "Shelf name"
+tooltip_text = "Enter to save · Escape to cancel"
+expand_to_text_length = false
+
+[node name="RestoreShelf" type="Button" parent="Right/ShelfDetails/Info/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ToolbarButton"
+text = "Restore"
+
+[node name="DiscardShelf" type="Button" parent="Right/ShelfDetails/Info/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ShelfDiscardButton"
+text = "Discard"
+
+[node name="Meta" type="HFlowContainer" parent="Right/ShelfDetails/Info"]
+layout_mode = 2
+theme_type_variation = &"DetailsRow"
+
+[node name="Branch" type="HBoxContainer" parent="Right/ShelfDetails/Info/Meta"]
+layout_mode = 2
+theme_type_variation = &"DetailsGroup"
+
+[node name="ShelfBranchIcon" type="TextureRect" parent="Right/ShelfDetails/Info/Meta/Branch"]
+unique_name_in_owner = true
+layout_mode = 2
+stretch_mode = 5
+
+[node name="ShelfBranch" type="Label" parent="Right/ShelfDetails/Info/Meta/Branch"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DetailsName"
+
+[node name="Date" type="HBoxContainer" parent="Right/ShelfDetails/Info/Meta"]
+layout_mode = 2
+theme_type_variation = &"DetailsGroup"
+
+[node name="ShelfDateIcon" type="TextureRect" parent="Right/ShelfDetails/Info/Meta/Date"]
+unique_name_in_owner = true
+layout_mode = 2
+stretch_mode = 5
+
+[node name="ShelfDate" type="Label" parent="Right/ShelfDetails/Info/Meta/Date"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DetailsMeta"
+
+[node name="Hash" type="HBoxContainer" parent="Right/ShelfDetails/Info/Meta"]
+layout_mode = 2
+theme_type_variation = &"DetailsGroup"
+
+[node name="ShelfHashIcon" type="TextureRect" parent="Right/ShelfDetails/Info/Meta/Hash"]
+unique_name_in_owner = true
+layout_mode = 2
+stretch_mode = 5
+
+[node name="ShelfHash" type="Label" parent="Right/ShelfDetails/Info/Meta/Hash"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DetailsHash"
+
+[node name="ShelfAuto" type="Label" parent="Right/ShelfDetails/Info/Meta"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DetailsMeta"
+text = "Left when switching branch"
+
+[node name="ShelfFilesSplit" type="HSplitContainer" parent="Right"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ShelfFilesBox" type="VBoxContainer" parent="Right/ShelfFilesSplit"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"PaneColumn"
+
+[node name="ShelfFilesHeader" parent="Right/ShelfFilesSplit/ShelfFilesBox" instance=ExtResource("8_header")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ShelfFiles" type="Control" parent="Right/ShelfFilesSplit/ShelfFilesBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("10_shelf_files")
+
+[node name="DiffPanel" parent="Right/ShelfFilesSplit" instance=ExtResource("5_panel")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
 
 [node name="Empty" parent="Right" instance=ExtResource("6_empty")]
 unique_name_in_owner = true
 visible = false
-layout_mode = 1
+layout_mode = 2
+size_flags_vertical = 3

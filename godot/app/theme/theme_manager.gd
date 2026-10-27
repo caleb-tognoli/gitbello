@@ -39,9 +39,13 @@ static func apply(root: Node) -> void:
 	if project_theme == null:
 		push_error("gui/theme/custom is not set: the theme cannot be applied")
 		return
+	# Keep fonts alive until controls have reshaped their cached text against
+	# the replacement theme (including shelf headings during a live switch).
+	var previous: Theme = project_theme.duplicate() as Theme
 	project_theme.clear()
 	project_theme.merge_with(AppTheme.build(light, accent))
 	root.get_tree().root.propagate_notification(Control.NOTIFICATION_THEME_CHANGED)
+	previous.clear()
 
 
 ## UI scale for the screen `window` is on: the OS scale on macOS, otherwise

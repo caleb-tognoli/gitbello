@@ -1,0 +1,39 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://app/changes/shelf_list.gd" id="1"]
+[ext_resource type="PackedScene" path="res://ui/filter_field/filter_field.tscn" id="2"]
+
+[node name="ShelfList" type="VBoxContainer"]
+theme_type_variation = &"PaneColumn"
+script = ExtResource("1")
+
+[node name="FilterBar" type="PanelContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"FilterBar"
+
+[node name="ShelfFilter" parent="FilterBar" instance=ExtResource("2")]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder = "Filter shelves by name"
+
+[node name="ShelfNames" type="ItemList" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"ShelfNames"
+allow_rmb_select = true
+
+[node name="NoShelvesMatch" type="Label" parent="ShelfNames"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"DimLabel"
+text = "No shelves match the filter."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3

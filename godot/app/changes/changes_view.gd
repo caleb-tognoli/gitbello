@@ -6,14 +6,15 @@ extends HSplitContainer
 ## (text and options, like GitHub Desktop's) narrows the files shown; the
 ## check-all box then covers the files shown only. The checkboxes are the commit
 ## selection kept in core (PLAN §3.10). With no changes, suggested actions
-## take the diff's place. Under the list, the Shelved section; above it, the
-## offer to restore changes left on this branch (PLAN §4 Shelves).
+## take the diff's place. The Shelves view reuses the preview pane with a
+## dedicated shelf browser and details, without commit controls.
 ## Keyboard: arrows move, Space or Enter toggle the checkboxes of the
 ## highlighted files or diff lines (a hunk header takes its hunk), Right and
 ## Left move between the list and the diff, Delete discards, Ctrl+Z undoes the
 ## last discard; see the `changes.*` actions for the rest.
 
 const THEME_TYPE: StringName = &"ChangesView"
+signal shelf_selection_changed()
 ## The filter's options (`RepoSession.set_change_filter`), like GitHub Desktop's.
 const FILTER_OPTIONS: Array[Array] = [
 	["included", "Included in commit"],
@@ -43,6 +44,10 @@ var _menu: PopupMenu = PopupMenu.new()
 var _menu_actions: Array[StringName] = []
 ## The diff shows a shelved file (not a change): keep it over status reloads.
 var _showing_shelf: bool = false
+var _shelves_mode: bool = false
+var _shelf_oid: String = ""
+var _shelf_path: String = ""
+var _editing_shelf: Dictionary = {}
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
@@ -59,6 +64,18 @@ var _showing_shelf: bool = false
 @onready var _offer_bar: Control = %OfferBar
 @onready var _offer_label: Label = %OfferLabel
 @onready var _offer_button: Button = %OfferButton
+@onready var _commit_panel: Control = %CommitPanel
+@onready var _shelf_details: Control = %ShelfDetails
+@onready var _shelf_title: Button = %ShelfTitle
+@onready var _shelf_name_edit: LineEdit = %ShelfNameEdit
+@onready var _shelf_branch: Label = %ShelfBranch
+@onready var _shelf_date: Label = %ShelfDate
+@onready var _shelf_hash: Label = %ShelfHash
+@onready var _shelf_auto: Label = %ShelfAuto
+@onready var _shelf_files: ShelfFileList = %ShelfFiles
+@onready var _shelf_files_box: Control = %ShelfFilesBox
+@onready var _shelf_files_header: ListHeader = %ShelfFilesHeader
+@onready var _shelf_files_split: HSplitContainer = %ShelfFilesSplit
 
 
 func _ready() -> void:
@@ -68,6 +85,7 @@ func _ready() -> void:
 	_list.context_menu_requested.connect(_show_menu.bind(_list))
 	_list.gui_input.connect(_on_list_key)
 	_list_header.check_toggled.connect(pick_all)
+	_list_header.context_menu_requested.connect(_show_header_menu)
 	_filter.set_options(FILTER_OPTIONS)
 	_filter.changed.connect(_apply_filter)
 	_filter.done.connect(focus_files)
@@ -94,9 +112,26 @@ func _ready() -> void:
 	add_child(_confirm)
 	add_child(_menu)
 	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_menu_actions[id]))
-	_shelves.files_wanted.connect(func(oid: String) -> void: session.load_shelf_files(oid))
-	_shelves.file_chosen.connect(_show_shelf_file)
 	_shelves.menu_requested.connect(_show_shelf_menu)
+	_shelves.shelf_selected.connect(_on_shelf_selected)
+	_shelf_files.current_changed.connect(func(path: String) -> void:
+		if not path.is_empty():
+			_show_shelf_file(_shelf_oid, path))
+	_shelf_files.gui_input.connect(_on_shelf_files_key)
+	_shelf_files.context_menu_requested.connect(_show_shelf_file_menu)
+	_shelves.names().gui_input.connect(_on_shelf_names_key)
+	_shelf_title.pressed.connect(func() -> void: Actions.run_action(&"shelf.rename", _shelf_title))
+	_shelf_name_edit.text_submitted.connect(func(_text: String) -> void: _finish_shelf_name(true))
+	_shelf_name_edit.focus_exited.connect(func() -> void: _finish_shelf_name(true))
+	_shelf_name_edit.gui_input.connect(func(event: InputEvent) -> void:
+		if event.is_action_pressed("ui_cancel"):
+			_shelf_name_edit.accept_event()
+			_finish_shelf_name(false))
+	for entry: Array in [[%RestoreShelf, &"shelf.restore"], [%DiscardShelf, &"shelf.discard"]]:
+		var button: Button = entry[0]
+		var id: StringName = entry[1]
+		button.pressed.connect(func() -> void: Actions.run_action(id, button))
+	_apply_shelf_theme()
 	_offer_button.icon = Actions.icon(&"shelf.restore_left")
 	_offer_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.restore_left", _offer_button))
 
@@ -108,6 +143,7 @@ func set_session(value: RepoSession) -> void:
 		session.selection_changed.disconnect(_on_selection_changed)
 		session.stashes_changed.disconnect(reload_shelves)
 		session.shelf_files_loaded.disconnect(_on_shelf_files_loaded)
+		session.shelf_replaced.disconnect(_on_shelf_replaced)
 	session = value
 	if session != null:
 		session.status_changed.connect(reload)
@@ -115,6 +151,7 @@ func set_session(value: RepoSession) -> void:
 		session.selection_changed.connect(_on_selection_changed)
 		session.stashes_changed.connect(reload_shelves)
 		session.shelf_files_loaded.connect(_on_shelf_files_loaded)
+		session.shelf_replaced.connect(_on_shelf_replaced)
 	_list.session = session
 	_commit_box.session = session
 	if session != null and is_node_ready():
@@ -167,11 +204,42 @@ func filter_field() -> FilterField:
 
 ## Focuses the filter's text box.
 func focus_filter() -> void:
+	if _shelves_mode:
+		_shelves.focus_filter()
+		return
 	_filter.focus_text()
 
 
 func shelf_list() -> ShelfList:
 	return _shelves
+
+
+func shelf_files() -> ShelfFileList:
+	return _shelf_files
+
+
+func shelf_files_split() -> HSplitContainer:
+	return _shelf_files_split
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+		_apply_shelf_theme()
+
+
+func _apply_shelf_theme() -> void:
+	_files.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
+	for entry: Array in [[%RestoreShelf, &"shelf.restore"], [%DiscardShelf, &"shelf.discard"]]:
+		(entry[0] as Button).icon = Actions.icon(entry[1])
+	_shelf_files_box.custom_minimum_size.x = float(get_theme_constant(&"min_files_width", &"CommitDetails"))
+	var tint: Color = get_theme_color(&"icon_tint", &"CommitDetails")
+	var icon_size: float = float(get_theme_constant(&"icon_size", &"CommitDetails"))
+	for entry: Array in [[%ShelfBranchIcon, &"GitBranch"], [%ShelfDateIcon, &"Clock"], [%ShelfHashIcon, &"GitCommit"]]:
+		var icon: TextureRect = entry[0]
+		icon.texture = AppTheme.icon(entry[1])
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.custom_minimum_size = Vector2(icon_size, icon_size)
+		icon.self_modulate = tint
 
 
 func offer_bar() -> Control:
@@ -184,6 +252,93 @@ func offer_label_text() -> String:
 
 # --- Shelves ------------------------------------------------------------------
 
+## Changes and Shelves share the core's changes diff slot. Switching reloads
+## the appropriate selection, so a shelf never becomes a commit candidate.
+func show_shelves_view(enabled: bool) -> void:
+	if _shelves_mode == enabled:
+		return
+	_finish_shelf_name(false)
+	_shelves_mode = enabled
+	_showing_shelf = enabled
+	_list.visible = not enabled
+	_commit_panel.visible = not enabled
+	_shelves.visible = enabled
+	_shelf_details.visible = enabled
+	_shelf_files_box.visible = enabled
+	if not enabled:
+		_shelves.branch_picker().hide()
+	_update_header()
+	_update_offer()
+	_update_empty()
+	_clear_diff()
+	if enabled:
+		_shelf_oid = ""
+		_shelf_path = ""
+		_on_shelf_selected(selected_shelf())
+	else:
+		_shelf_oid = ""
+		_shelf_path = ""
+		_on_current_changed(current_path())
+
+
+func _on_shelf_selected(shelf: Dictionary) -> void:
+	if not _shelves_mode:
+		return
+	var oid: String = String(shelf.get("oid", ""))
+	var changed: bool = oid != _shelf_oid
+	if changed:
+		_finish_shelf_name(false)
+	_shelf_oid = oid
+	_shelf_details.visible = not shelf.is_empty()
+	_update_empty()
+	if changed or shelf.is_empty():
+		_shelf_path = ""
+		_clear_diff()
+		_shelf_files.show_files([])
+		_shelf_files_header.set_text("")
+	shelf_selection_changed.emit()
+	if shelf.is_empty():
+		return
+	_shelf_title.text = String(shelf["name"])
+	_shelf_title.tooltip_text = "%s\nClick to rename" % shelf["name"]
+	(%RestoreShelf as Button).tooltip_text = "Restore into %s; remove the shelf after success" % session.current_branch()
+	(%DiscardShelf as Button).tooltip_text = Actions.tooltip(&"shelf.discard")
+	var branch: String = String(shelf["branch"])
+	_shelf_branch.text = branch if not branch.is_empty() else "No branch"
+	var offset: int = int(Time.get_time_zone_from_system()["bias"]) * 60
+	_shelf_date.text = Time.get_datetime_string_from_unix_time(int(shelf["time"]) + offset, true).left(16)
+	_shelf_hash.text = oid.left(10)
+	_shelf_hash.tooltip_text = oid
+	_shelf_auto.visible = bool(shelf["auto"])
+	if changed:
+		_shelf_files_header.set_text("Loading files…")
+		session.load_shelf_files(oid)
+
+
+func edit_shelf_name() -> void:
+	var shelf: Dictionary = selected_shelf()
+	if shelf.is_empty():
+		return
+	_editing_shelf = shelf.duplicate()
+	_shelf_name_edit.text = String(shelf["name"])
+	_shelf_title.hide()
+	_shelf_name_edit.show()
+	_shelf_name_edit.grab_focus()
+	_shelf_name_edit.select_all()
+
+
+func _finish_shelf_name(save: bool) -> void:
+	if _editing_shelf.is_empty():
+		return
+	var shelf: Dictionary = _editing_shelf
+	var name: String = _shelf_name_edit.text.strip_edges()
+	_editing_shelf = {}
+	_shelf_title.show()
+	_shelf_name_edit.hide()
+	if save and not name.is_empty() and ops != null:
+		ops.rename_shelf(shelf, name)
+
+
 ## Re-reads the shelves (after every stash list change).
 func reload_shelves() -> void:
 	if not is_node_ready() or session == null:
@@ -192,9 +347,17 @@ func reload_shelves() -> void:
 	_update_offer()
 
 
-## The shelf selected in the Shelved section, or {}.
+## The selected shelf in the dedicated browser, or {}.
 func selected_shelf() -> Dictionary:
 	return _shelves.selected_shelf()
+
+
+func selected_shelf_file() -> String:
+	return _shelf_files.path_at(_shelf_files.cursor) if _shelves_mode else ""
+
+
+func _on_shelf_replaced(old_oid: String, new_oid: String) -> void:
+	_shelves.replace_shelf(old_oid, new_oid)
 
 
 ## Shelves the highlighted files after asking for a name.
@@ -216,6 +379,35 @@ func can_shelve() -> bool:
 	return false
 
 
+## Header actions cover the currently listed files, not the highlighted rows
+## or commit checkboxes. Capture paths before opening a dialog.
+func shelve_listed() -> void:
+	if ops != null and session != null:
+		ops.shelve(session.change_paths(0, session.shown_change_count()))
+
+
+func discard_listed() -> void:
+	if session != null:
+		_discard_paths(session.change_paths(0, session.shown_change_count()))
+
+
+func _show_header_menu(at: Vector2) -> void:
+	_menu.clear()
+	_menu_actions.assign([&"changes.shelve_listed", &"changes.discard_listed"])
+	for index: int in _menu_actions.size():
+		var id: StringName = _menu_actions[index]
+		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, index)
+		_menu.set_item_disabled(index, not Actions.is_enabled(id))
+		_menu.set_item_tooltip(index, Actions.tooltip(id))
+	_menu.position = Vector2i(at)
+	_menu.reset_size()
+	_menu.popup()
+
+
+func context_menu() -> PopupMenu:
+	return _menu
+
+
 ## The newest shelf left on the current branch by a switch, or {}.
 func left_shelf() -> Dictionary:
 	for shelf: Dictionary in _shelves.own_shelves():
@@ -227,7 +419,7 @@ func left_shelf() -> Dictionary:
 ## "3 changes were left on main · Restore" while such a shelf exists.
 func _update_offer() -> void:
 	var shelf: Dictionary = left_shelf()
-	_offer_bar.visible = not shelf.is_empty()
+	_offer_bar.visible = not _shelves_mode and not shelf.is_empty()
 	if shelf.is_empty():
 		return
 	var oid: String = String(shelf["oid"])
@@ -243,13 +435,19 @@ func _update_offer() -> void:
 
 
 func _on_shelf_files_loaded(oid: String) -> void:
-	_shelves.set_files(oid, session.shelf_files(oid))
+	if _shelves_mode and oid == _shelf_oid:
+		var files: Array[Dictionary] = session.shelf_files(oid)
+		_shelf_files_header.set_text(ListHeader.count_text(files.size(), "changed file"))
+		_shelf_files.show_files(files, _shelf_path)
 	if String(left_shelf().get("oid", "")) == oid:
 		_update_offer()
 
 
 func _show_shelf_file(oid: String, path: String) -> void:
-	_list.deselect()
+	if not _shelves_mode or (_shelf_oid == oid and _shelf_path == path):
+		return
+	_shelf_oid = oid
+	_shelf_path = path
 	_showing_shelf = true
 	session.select_shelf_file(oid, path, false)
 
@@ -268,12 +466,32 @@ func _show_shelf_menu(_shelf: Dictionary, at: Vector2) -> void:
 	_menu.popup()
 
 
+func _show_shelf_file_menu(row: int, at: Vector2) -> void:
+	var path: String = _shelf_files.path_at(row)
+	if path.is_empty():
+		return
+	_shelf_files.choose_path(path)
+	_menu.clear()
+	_menu_actions.clear()
+	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file"]:
+		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
+		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(id))
+		_menu_actions.append(id)
+	_menu.position = Vector2i(_shelf_files.get_screen_position() + at)
+	_menu.reset_size()
+	_menu.popup()
+
+
 ## Re-reads the list from the session (after every status change).
 func reload() -> void:
 	if not is_node_ready():
 		return
 	var had_focus: bool = _list.has_focus()
 	_list.reload()
+	# A last-shelf restore can remove the shelf before the status refresh
+	# brings files back. Select the first arriving file without stealing focus.
+	if not _shelves_mode:
+		_list.ensure_cursor()
 	_update_header()
 	_update_empty()
 	if had_focus and _list.row_count() == 0:
@@ -287,6 +505,9 @@ func reload() -> void:
 ## Focuses the list (cursor on its first row if none), the filter when it
 ## hides every file, or the summary when there is nothing to list.
 func focus_files() -> void:
+	if _shelves_mode:
+		_shelves.focus_list()
+		return
 	if _list.row_count() > 0:
 		_list.grab_focus()
 		_list.ensure_cursor()
@@ -364,6 +585,10 @@ func discard_selection() -> void:
 		_discard_lines()
 		return
 	var paths: PackedStringArray = _list.paths(_list.highlighted_rows())
+	_discard_paths(paths)
+
+
+func _discard_paths(paths: PackedStringArray) -> void:
 	if paths.is_empty():
 		return
 	_ask("Discard the changes in %s? They go back to the last commit. You can undo this with %s." % [
@@ -432,8 +657,8 @@ func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
 	var shown: int = _list.row_count()
 	var filtered: bool = _filter.is_active()
-	_filter_bar.visible = count > 0
-	_list_header.visible = count > 0
+	_filter_bar.visible = count > 0 and not _shelves_mode
+	_list_header.visible = count > 0 and not _shelves_mode
 	var text: String = ListHeader.count_text(count, "changed file")
 	_list_header.set_text("%d of %s" % [shown, text] if filtered else text)
 	_no_match.visible = count > 0 and shown == 0
@@ -460,9 +685,17 @@ func _apply_filter() -> void:
 
 ## With no changes, suggested actions replace the diff (PLAN §4 empty state).
 func _update_empty() -> void:
+	if _shelves_mode:
+		_empty.hide()
+		var has_shelf: bool = not _shelf_oid.is_empty()
+		_shelf_details.visible = has_shelf
+		_shelf_files_split.visible = has_shelf
+		_diff_panel.visible = has_shelf
+		return
 	var empty: bool = session != null and session.is_ready() and session.change_count() == 0
 	_empty.visible = empty
 	_diff_panel.visible = not empty
+	_shelf_files_split.visible = not empty
 	if not empty:
 		return
 	var badge: Dictionary = session.badge()
@@ -533,12 +766,13 @@ func menu_labels() -> PackedStringArray:
 
 
 func _on_current_changed(path: String) -> void:
+	if _shelves_mode:
+		return
 	if path.is_empty():
 		if not _showing_shelf:
 			_clear_diff()
 		return
 	_showing_shelf = false
-	_shelves.deselect()
 	session.select_change(path, false)
 	_on_diff_changed()
 
@@ -555,15 +789,33 @@ func _on_list_key(event: InputEvent) -> void:
 ## Left in the diff (when it is not scrolled sideways) goes back to the list.
 func _on_diff_key(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_left", false, true) and _diff_view.h_scroll() <= 0.0:
-		focus_files()
+		if _shelves_mode:
+			_shelf_files.grab_focus()
+		else:
+			focus_files()
 		_diff_view.accept_event()
+
+
+func _on_shelf_names_key(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_right", false, true) and _shelf_files.row_count() > 0:
+		_shelf_files.grab_focus()
+		_shelves.names().accept_event()
+
+
+func _on_shelf_files_key(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_right", false, true) and _diff_view.row_count() > 0:
+		_diff_view.grab_focus()
+		_shelf_files.accept_event()
+	elif event.is_action_pressed("ui_left", false, true):
+		_shelves.focus_list()
+		_shelf_files.accept_event()
 
 
 func _clear_diff() -> void:
 	if session != null:
 		session.clear_diff()
 	_diff_view.pickable = false
-	_diff_panel.clear()
+	_diff_panel.clear("Select a shelved file to preview its changes." if _shelves_mode else "Select a file to see its changes.")
 
 
 func _load_full_diff() -> void:

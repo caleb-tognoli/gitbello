@@ -908,11 +908,34 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"pressed", &"SectionHeaderButton", _box(p.hover, 0, section))
 	theme.set_color(&"font_color", &"SectionHeaderButton", p.text_muted)
 	theme.set_color(&"icon_normal_color", &"SectionHeaderButton", p.text_muted)
-	_variation(theme, &"ShelfTree", &"Tree")
-	theme.set_stylebox(&"panel", &"ShelfTree", _box(p.background, 0, Vector4(0, 2, 0, 2)))
-	theme.set_constant(&"row_height", &"ShelfList", 26)
-	theme.set_constant(&"max_height", &"ShelfList", 220)
-	theme.set_color(&"group_color", &"ShelfList", p.text_muted)
+	_variation(theme, &"ShelfNames", &"ItemList")
+	theme.set_stylebox(&"panel", &"ShelfNames", _box(p.background, 0, Vector4(8, 2, 8, 2)))
+	theme.set_constant(&"v_separation", &"ShelfNames", 8)
+	theme.set_color(&"group_color", &"ShelfNames", p.text_muted)
+	theme.set_color(&"group_background", &"ShelfNames", p.surface)
+	_variation(theme, &"ShelfTitle", &"ToolbarButton")
+	theme.set_font(&"font", &"ShelfTitle", bold_font())
+	theme.set_font_size(&"font_size", &"ShelfTitle", 17)
+	_variation(theme, &"ShelfNameEdit", &"LineEdit")
+	theme.set_font(&"font", &"ShelfNameEdit", bold_font())
+	theme.set_font_size(&"font_size", &"ShelfNameEdit", 17)
+	_variation(theme, &"ShelfDiscardButton", &"ToolbarButton")
+	for color: StringName in [&"font_hover_color", &"font_pressed_color", &"font_hover_pressed_color"]:
+		theme.set_color(color, &"ShelfDiscardButton", p.error)
+	var icon_grey: Color = LIGHT_ICON_GREY if p.light else DARK_ICON_GREY
+	var discard_icon: Color = p.error * DARK_ICON_GREY / icon_grey
+	discard_icon.a = 1.0
+	for color: StringName in [&"icon_hover_color", &"icon_pressed_color", &"icon_hover_pressed_color"]:
+		theme.set_color(color, &"ShelfDiscardButton", discard_icon)
+	# Match ToolbarButton's normal padding so hovering cannot clip the label.
+	for state: StringName in [&"hover", &"pressed", &"hover_pressed"]:
+		theme.set_stylebox(state, &"ShelfDiscardButton", _box(Color(p.error, 0.12), 4, Vector4(6, 4, 6, 4)))
+	_variation(theme, &"ShelfBranchPicker", &"PopupPanel")
+	theme.set_stylebox(&"panel", &"ShelfBranchPicker", _box(p.raised, 6, Vector4(8, 8, 8, 8), p.border, 1))
+	theme.set_constant(&"width", &"ShelfBranchPicker", 300)
+	theme.set_constant(&"max_height", &"ShelfBranchPicker", 360)
+	theme.set_constant(&"padding", &"ShelfBranchPicker", 16)
+	theme.set_constant(&"files_width", &"ShelfView", 240)
 	# The first suggestion (Open repository…) in the accent colour
 	_variation(theme, &"PrimarySuggestionButton", &"SuggestionButton")
 	var accent_text: Color = readable_text([p.accent, p.accent.lightened(0.08), p.accent.darkened(0.1)], p.text)

@@ -294,15 +294,21 @@ func restore_shelf(shelf: Dictionary) -> int:
 	return _track(session.restore_shelf(String(shelf["oid"])), "Restoring “%s”" % name, "Restored “%s”" % name)
 
 
-func rename_shelf(shelf: Dictionary) -> void:
-	_begin_form("rename_shelf", "Rename shelf", "Rename", func(values: Dictionary) -> void:
-		var name: String = String(values["name"]).strip_edges()
-		if name != String(shelf["name"]):
-			_track(session.rename_shelf(String(shelf["oid"]), name), "Renaming the shelf", "Renamed the shelf to “%s”" % name))
-	_form.add_line("name", "Name", String(shelf["name"]))
-	_form.validator = func(values: Dictionary) -> String:
-		return "Name the shelf." if String(values["name"]).strip_edges().is_empty() else ""
-	_form.open()
+func rename_shelf(shelf: Dictionary, name: String) -> void:
+	if not name.is_empty() and name != String(shelf["name"]):
+		_track(session.rename_shelf(String(shelf["oid"]), name), "Renaming the shelf", "Renamed the shelf to “%s”" % name)
+
+
+func restore_shelf_file(shelf: Dictionary, path: String) -> void:
+	_track(session.restore_shelf_file(String(shelf["oid"]), path),
+			"Restoring %s" % path.get_file(), "Restored %s" % path.get_file())
+
+
+func discard_shelf_file(shelf: Dictionary, path: String) -> void:
+	_ask("Discard shelved file", "Discard %s from “%s”? You can undo this discard." % [path, shelf["name"]], "Discard",
+			func() -> void:
+				_track(session.discard_shelf_file(String(shelf["oid"]), path), "Discarding shelved file",
+						"Discarded %s from the shelf" % path.get_file(), Callable(), null, undo_shelf_discard), true)
 
 
 func discard_shelf(shelf: Dictionary) -> void:

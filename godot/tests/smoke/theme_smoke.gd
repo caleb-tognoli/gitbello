@@ -22,6 +22,14 @@ func run() -> void:
 		for background: Color in [p.background, p.surface, p.raised]:
 			_expect_readable(p.text_muted, background, "%s: muted text" % name)
 		var theme: Theme = AppTheme.build(light)
+		var discard: Button = Button.new()
+		discard.theme = theme
+		discard.theme_type_variation = &"ShelfDiscardButton"
+		var padding: Vector2 = discard.get_theme_stylebox(&"normal").get_minimum_size()
+		for state: StringName in [&"hover", &"pressed", &"hover_pressed"]:
+			expect_eq(discard.get_theme_stylebox(state).get_minimum_size(), padding,
+					"%s: Discard padding stays stable in %s" % [name, state])
+		discard.free()
 		var label_text: Color = theme.get_color(&"label_color", &"CommitList")
 		for label: StringName in [&"label_head", &"label_branch", &"label_remote", &"label_tag"]:
 			var box: StyleBoxFlat = theme.get_stylebox(label, &"CommitList") as StyleBoxFlat

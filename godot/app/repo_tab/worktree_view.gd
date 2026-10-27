@@ -18,7 +18,7 @@ signal worktree_close_requested(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
 signal worktree_delete_requested(path: String, force: bool, branch: String)
 
-enum View { HISTORY, CHANGES }
+enum View { HISTORY, CHANGES, SHELVES }
 
 ## Context menu entries per ref type; &"" is a separator.
 const REF_MENUS: Dictionary[String, Array] = {
@@ -44,6 +44,7 @@ const BLOCKING: Dictionary[String, String] = {
 	"checkout": "Switching branches",
 	"shelve": "Shelving",
 	"restore shelf": "Restoring the shelf",
+	"restore shelf file": "Restoring the shelved file",
 	"pull": "Pulling",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
@@ -74,10 +75,14 @@ var _popover: BranchPopover = BranchPopover.new()
 var _switch: HBoxContainer = HBoxContainer.new()
 var _history_button: Button = Button.new()
 var _changes_button: Button = Button.new()
+var _shelves_button: Button = Button.new()
+var _shelves_badge: CountBadge = CountBadge.new()
 ## The number of changed files on the Changes button.
 var _changes_badge: CountBadge = CountBadge.new()
 ## The blocking job the overlay shows, or -1.
 var _overlay_job: int = -1
+## One left-column width shared by Changes, History and Shelves.
+var _sidebar_width: int = 0
 
 @onready var _layout: Control = %Layout
 @onready var _history: HistoryView = %History
@@ -100,7 +105,8 @@ func _ready() -> void:
 	_switch.theme_type_variation = &"ViewSwitch"
 	var group: ButtonGroup = ButtonGroup.new()
 	for entry: Array in [[_changes_button, "Changes", &"FileList", View.CHANGES, &"view.changes"],
-			[_history_button, "History", &"History", View.HISTORY, &"view.history"]]:
+			[_history_button, "History", &"History", View.HISTORY, &"view.history"],
+			[_shelves_button, "Shelves", &"GitShelf", View.SHELVES, &"view.shelves"]]:
 		var button: Button = entry[0]
 		button.text = entry[1]
 		button.icon = AppTheme.icon(entry[2])
@@ -108,10 +114,13 @@ func _ready() -> void:
 		button.focus_mode = Control.FOCUS_NONE
 		button.button_group = group
 		button.theme_type_variation = &"SegmentButton"
-		button.pressed.connect(show_view.bind(entry[3]))
+		var action_id: StringName = entry[4]
+		button.pressed.connect(func() -> void: Actions.run_action(action_id, button))
 		button.tooltip_text = Actions.tooltip(entry[4])
 		_switch.add_child(button)
 	_changes_button.add_child(_changes_badge)
+	_shelves_button.add_child(_shelves_badge)
+	_shelves_button.hide()
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
@@ -140,7 +149,8 @@ func _ready() -> void:
 	_overlay_cancel.pressed.connect(func() -> void:
 		if _overlay_job >= 0:
 			session.cancel_job(_overlay_job))
-	var panes: Array[SplitContainer] = [_history, _changes, _history.details(), _history.details().files_split()]
+	var panes: Array[SplitContainer] = [_history, _changes, _history.details(), _history.details().files_split(),
+			_changes.shelf_files_split()]
 	for pane: SplitContainer in panes:
 		pane.drag_ended.connect(_on_split_dragged.bind(pane))
 	show_view(View.HISTORY)
@@ -159,7 +169,7 @@ func setup(value: RepoSession) -> void:
 	_ops.feedback = feedback
 	_popover.session = session
 	for sig: Signal in [session.opened, session.badge_changed, session.status_changed, session.refs_changed,
-			session.worktrees_changed, session.operation_changed]:
+			session.worktrees_changed, session.operation_changed, session.stashes_changed]:
 		sig.connect(_on_state)
 	session.open_failed.connect(_on_open_failed)
 	session.missing.connect(_on_missing)
@@ -211,6 +221,10 @@ func sync_button() -> BigButton:
 ## The number of changes on the Changes button.
 func changes_badge() -> CountBadge:
 	return _changes_badge
+
+
+func shelves_button() -> Button:
+	return _shelves_button
 
 
 func branch_popover() -> BranchPopover:
@@ -374,39 +388,53 @@ func _open_sync_menu() -> void:
 
 ## Switches the panes and focuses them (the changes view focuses its files).
 func show_view(which: View) -> void:
+	if which == View.SHELVES and (session == null or session.shelves().is_empty()):
+		which = View.CHANGES
 	view = which
 	_history.visible = which == View.HISTORY
-	_changes.visible = which == View.CHANGES
+	_changes.visible = which != View.HISTORY
+	_changes.show_shelves_view(which == View.SHELVES)
 	_history_button.set_pressed_no_signal(which == View.HISTORY)
 	_changes_button.set_pressed_no_signal(which == View.CHANGES)
+	_shelves_button.set_pressed_no_signal(which == View.SHELVES)
 	var slot: Container = _history.switch_slot() if which == View.HISTORY else _changes.switch_slot()
 	if _switch.get_parent() != slot:
 		if _switch.get_parent() != null:
 			_switch.get_parent().remove_child(_switch)
 		slot.add_child(_switch)
+	if _sidebar_width > 0:
+		_set_sidebar_width(_sidebar_width)
 	focus_view()
 
 
 func focus_view() -> void:
 	if not is_visible_in_tree():
 		return
-	if view == View.CHANGES:
+	if view != View.HISTORY:
 		_changes.focus_files()
 	else:
 		_history.commit_list().grab_focus()
 
 
-## The left-pane width of each view, and the commit details' height and
+## The shared left-pane width, and the commit details' height and
 ## files width, are saved per repository.
 func _on_split_dragged(pane: SplitContainer) -> void:
+	if pane == _history or pane == _changes:
+		_set_sidebar_width(pane.split_offset)
 	Core.set_repo_ui_state(_repo_key(), _split_key(pane), pane.split_offset)
 
 
+func _set_sidebar_width(width: int) -> void:
+	_sidebar_width = width
+	_history.split_offset = width
+	_changes.split_offset = width
+
+
 func _split_key(pane: SplitContainer) -> String:
-	if pane == _history:
-		return "history_width"
-	if pane == _changes:
-		return "changes_width"
+	if pane == _changes.shelf_files_split():
+		return "shelves_files_width"
+	if pane == _history or pane == _changes:
+		return "sidebar_width"
 	if pane == _history.details():
 		return "details_height"
 	return "details_files_width"
@@ -417,8 +445,10 @@ func _split_key(pane: SplitContainer) -> String:
 func _restore_widths() -> void:
 	var saved: Dictionary = Core.repo_ui_state(_repo_key())
 	var default: int = get_theme_constant(&"default_left_width", &"Panes")
-	_history.split_offset = int(saved.get("history_width", default))
-	_changes.split_offset = int(saved.get("changes_width", default))
+	# Reuse an existing width when migrating from separate per-view settings.
+	_set_sidebar_width(int(saved.get("sidebar_width", saved.get("history_width",
+			saved.get("changes_width", saved.get("shelves_width", default))))))
+	_changes.shelf_files_split().split_offset = int(saved.get("shelves_files_width", get_theme_constant(&"files_width", &"ShelfView")))
 	var details: CommitDetails = _history.details()
 	details.split_offset = int(saved.get("details_height",
 			details.get_theme_constant(&"details_height", CommitDetails.THEME_TYPE)))
@@ -440,6 +470,10 @@ func _on_state() -> void:
 	_update_header()
 	_update_banner()
 	_changes_badge.count = int(session.badge().get("changed", 0))
+	_shelves_badge.count = session.shelves().size()
+	_shelves_button.visible = _shelves_badge.count > 0
+	if view == View.SHELVES and _shelves_badge.count == 0:
+		show_view(View.CHANGES)
 	state_changed.emit()
 
 

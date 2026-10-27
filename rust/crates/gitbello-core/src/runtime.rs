@@ -12,7 +12,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard};
+use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange};
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::{
@@ -62,6 +62,8 @@ pub const UNDO_DISCARD_JOB_LABEL: &str = "undo discard";
 /// Labels of the shelf jobs (PLAN §4 Shelves).
 pub const SHELVE_JOB_LABEL: &str = "shelve";
 pub const RESTORE_SHELF_JOB_LABEL: &str = "restore shelf";
+pub const RESTORE_SHELF_FILE_JOB_LABEL: &str = "restore shelf file";
+pub const DISCARD_SHELF_FILE_JOB_LABEL: &str = "discard shelf file";
 pub const RENAME_SHELF_JOB_LABEL: &str = "rename shelf";
 pub const DISCARD_SHELF_JOB_LABEL: &str = "discard shelf";
 pub const UNDO_SHELF_DISCARD_JOB_LABEL: &str = "undo shelf discard";
@@ -94,6 +96,9 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     "cherry-pick",
     "abort",
     RESTORE_SHELF_JOB_LABEL,
+    RESTORE_SHELF_FILE_JOB_LABEL,
+    DISCARD_SHELF_FILE_JOB_LABEL,
+    UNDO_SHELF_DISCARD_JOB_LABEL,
 ];
 
 /// A graph reload waits this long after the last ref or HEAD change, so a
@@ -162,6 +167,11 @@ pub enum RuntimeEvent {
         repo: PathBuf,
         oid: String,
     },
+    ShelfReplaced {
+        repo: PathBuf,
+        old_oid: String,
+        new_oid: Option<String>,
+    },
     /// The HEAD commit's message, requested with [`Runtime::load_head_message`].
     HeadMessage {
         repo: PathBuf,
@@ -193,7 +203,7 @@ pub struct RepoState {
     /// Files of shelves, by commit (a shelf's content never changes).
     shelf_files: HashMap<String, Vec<ShelfFile>>,
     /// Discarded shelves `(commit, subject)`, newest last, for undo.
-    dropped_shelves: Vec<(String, String)>,
+    dropped_shelves: Vec<ShelfChange>,
     operation: Option<Operation>,
     labels: HashMap<String, Vec<RefLabel>>,
     changes: ChangeList,
@@ -1535,6 +1545,48 @@ impl Runtime {
         )))
     }
 
+    pub fn restore_shelf_file(&self, key: &Path, oid: &str, path: &Path) -> Option<JobId> {
+        self.edit_shelf_file(key, oid, path, true)
+    }
+
+    pub fn discard_shelf_file(&self, key: &Path, oid: &str, path: &Path) -> Option<JobId> {
+        self.edit_shelf_file(key, oid, path, false)
+    }
+
+    fn edit_shelf_file(&self, key: &Path, oid: &str, path: &Path, restore: bool) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let (oid, path) = (oid.to_owned(), path.to_owned());
+        let label = if restore {
+            RESTORE_SHELF_FILE_JOB_LABEL
+        } else {
+            DISCARD_SHELF_FILE_JOB_LABEL
+        };
+        Some(
+            self.scheduler
+                .submit(JobSpec::write(key, label, shelf_refresh(), move |ctx| {
+                    let change = if restore {
+                        ctx.backend().restore_shelf_file(
+                            &toplevel,
+                            &oid,
+                            &path,
+                            ctx.cancel_token(),
+                        )?
+                    } else {
+                        ctx.backend().discard_shelf_file(
+                            &toplevel,
+                            &oid,
+                            &path,
+                            ctx.cancel_token(),
+                        )?
+                    };
+                    Ok(JobOutput::ShelfChanged {
+                        change,
+                        remember: !restore,
+                    })
+                })),
+        )
+    }
+
     /// Drops shelf `oid`; [`Runtime::undo_shelf_discard`] stores it again.
     pub fn discard_shelf(&self, key: &Path, oid: &str) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
@@ -1555,15 +1607,16 @@ impl Runtime {
     /// Stores the most recently discarded shelf again.
     pub fn undo_shelf_discard(&mut self, key: &Path) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
-        let (oid, subject) = self.repos.get_mut(key)?.dropped_shelves.pop()?;
+        // Keep a failed/stale Undo available; only remove it after success.
+        let change = self.repos.get(key)?.dropped_shelves.last()?.clone();
         Some(self.scheduler.submit(JobSpec::write(
             key,
             UNDO_SHELF_DISCARD_JOB_LABEL,
             RefreshSet::EMPTY.with(RefreshKind::Stashes),
             move |ctx| {
                 ctx.backend()
-                    .store_shelf(&toplevel, &oid, &subject, ctx.cancel_token())
-                    .map(|()| JobOutput::Done)
+                    .undo_shelf_change(&toplevel, &change, ctx.cancel_token())
+                    .map(|()| JobOutput::ShelfUndone(change))
             },
         )))
     }
@@ -1596,7 +1649,11 @@ impl Runtime {
                 }
             } else {
                 CommitSide {
-                    oid: oid.to_owned(),
+                    oid: if file.index_only {
+                        format!("{oid}^2")
+                    } else {
+                        oid.to_owned()
+                    },
                     parent: Some(format!("{oid}^1")),
                 }
             };
@@ -2040,14 +2097,74 @@ impl Runtime {
             self.scheduler.request_refresh(&repo, RefreshSet::all());
         }
         if let EventKind::Finished(Ok(JobOutput::ShelfDropped { oid, subject })) = &kind {
-            state.dropped_shelves.push((oid.clone(), subject.clone()));
-            let excess = state.dropped_shelves.len().saturating_sub(MAX_SHELF_UNDO);
-            state.dropped_shelves.drain(..excess);
+            state.dropped_shelves.push(ShelfChange {
+                old_oid: oid.clone(),
+                new_oid: None,
+                subject: subject.clone(),
+            });
+        }
+        if let EventKind::Finished(Ok(JobOutput::ShelfChanged { change, remember })) = &kind {
+            if *remember {
+                state.dropped_shelves.push(change.clone());
+            }
+        }
+        if let EventKind::Finished(Ok(JobOutput::ShelfUndone(change))) = &kind {
+            if state.dropped_shelves.last() == Some(change) {
+                state.dropped_shelves.pop();
+            }
+        }
+        let common = state.paths.as_ref().map(|p| p.common_dir.clone());
+        let replacement = match &kind {
+            EventKind::Finished(Ok(JobOutput::ShelfChanged { change, .. })) => {
+                Some((change.old_oid.clone(), change.new_oid.clone()))
+            }
+            EventKind::Finished(Ok(JobOutput::ShelfUndone(change))) => Some((
+                change.new_oid.clone().unwrap_or_default(),
+                Some(change.old_oid.clone()),
+            )),
+            _ => None,
+        };
+        // Bound the Undo history and release its old protection refs on a
+        // worker. A failed/crashed edit keeps its recovery reference.
+        let excess = state.dropped_shelves.len().saturating_sub(MAX_SHELF_UNDO);
+        let expired: Vec<ShelfChange> = state.dropped_shelves.drain(..excess).collect();
+        if let Some(toplevel) = state.toplevel.clone() {
+            for change in expired {
+                self.scheduler.submit(JobSpec::write(
+                    &repo,
+                    "forget shelf undo",
+                    RefreshSet::EMPTY,
+                    {
+                        let toplevel = toplevel.clone();
+                        move |ctx| {
+                            ctx.backend()
+                                .forget_shelf_change(&toplevel, &change.old_oid, ctx.cancel_token())
+                                .map(|()| JobOutput::Done)
+                        }
+                    },
+                ));
+            }
+        }
+        if let Some((old_oid, new_oid)) = replacement {
+            for (key, sibling) in &self.repos {
+                if key == &repo
+                    || (common.is_some()
+                        && sibling.paths.as_ref().map(|p| &p.common_dir) == common.as_ref())
+                {
+                    out.push(RuntimeEvent::ShelfReplaced {
+                        repo: key.clone(),
+                        old_oid: old_oid.clone(),
+                        new_oid: new_oid.clone(),
+                    });
+                }
+            }
         }
         // The stash list is shared by every worktree of the repository.
         let shelf_job = [
             SHELVE_JOB_LABEL,
             RESTORE_SHELF_JOB_LABEL,
+            RESTORE_SHELF_FILE_JOB_LABEL,
+            DISCARD_SHELF_FILE_JOB_LABEL,
             RENAME_SHELF_JOB_LABEL,
             DISCARD_SHELF_JOB_LABEL,
             UNDO_SHELF_DISCARD_JOB_LABEL,
@@ -2055,7 +2172,6 @@ impl Runtime {
         ]
         .contains(&label.as_str());
         if shelf_job && matches!(kind, EventKind::Finished(_)) {
-            let common = state.paths.as_ref().map(|p| p.common_dir.clone());
             for (other, sibling) in &self.repos {
                 if *other != repo
                     && sibling.paths.as_ref().map(|p| &p.common_dir) == common.as_ref()
@@ -2187,6 +2303,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Discarded(_)
         | JobOutput::ShelfFiles(..)
         | JobOutput::ShelfDropped { .. } => {}
+        JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }
 

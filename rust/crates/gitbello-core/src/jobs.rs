@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
-use crate::backend::GitBackend;
+use crate::backend::{GitBackend, ShelfChange};
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::repo::{
@@ -170,6 +170,11 @@ pub enum JobOutput {
         oid: String,
         subject: String,
     },
+    ShelfChanged {
+        change: ShelfChange,
+        remember: bool,
+    },
+    ShelfUndone(ShelfChange),
     /// A repository was opened: its worktree root and git directories.
     Opened {
         toplevel: PathBuf,
@@ -630,8 +635,16 @@ fn worker(inner: &Inner) {
             })
         };
         let succeeded = result.is_ok();
-        let cancelled = cancel.is_cancelled()
-            || matches!(&result, Err(err) if err.kind == GitErrorKind::Cancelled);
+        // A shelf swap completes without cancellation once it starts writing.
+        // Deliver that committed result (including Undo) even if cancellation
+        // was requested during its final steps.
+        let committed_shelf = matches!(
+            &result,
+            Ok(JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_))
+        );
+        let cancelled = !committed_shelf
+            && (cancel.is_cancelled()
+                || matches!(&result, Err(err) if err.kind == GitErrorKind::Cancelled));
         let kind = if cancelled {
             EventKind::Cancelled
         } else {

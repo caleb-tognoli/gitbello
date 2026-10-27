@@ -415,6 +415,10 @@ func _register_actions() -> void:
 	Actions.register(&"view.changes", "Changes", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.CHANGES),
 			PackedStringArray(["Ctrl+Shift+G"]), has_tab, no_repo)
+	Actions.register(&"view.shelves", "Shelves", "View",
+			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(),
+			func() -> bool: return current_page() != null and not current_page().session.shelves().is_empty(),
+			_says("This repository has no shelves."))
 	for i: int in CHIP_SHORTCUTS:
 		var index: int = i
 		var action: ActionRegistry.Action = Actions.register(StringName("worktree.select_%d" % (i + 1)),
@@ -461,6 +465,14 @@ func _register_change_actions() -> void:
 	var has_file: Callable = func() -> bool:
 		return in_changes.call() and not current_page().changes().current_path().is_empty()
 	var no_file: Callable = _says("Select a changed file first.")
+	var has_listed: Callable = func() -> bool:
+		return in_changes.call() and current_page().session.shown_change_count() > 0
+	Actions.register(&"changes.shelve_listed", "Shelve all", "Changes",
+			func() -> void: changes.call().shelve_listed(), PackedStringArray(), has_listed,
+			_says("No changed files are listed."))
+	Actions.register(&"changes.discard_listed", "Discard all", "Changes",
+			func() -> void: changes.call().discard_listed(), PackedStringArray(), has_listed,
+			_says("No changed files are listed."))
 	Actions.register(&"changes.toggle_selected", "Include or leave out the selection", "Changes",
 			func() -> void: changes.call().toggle_selected(), PackedStringArray(), in_changes)
 	Actions.register(&"changes.include_all", "Include all changes", "Changes",
@@ -516,17 +528,44 @@ func _register_change_actions() -> void:
 			func() -> bool: return in_changes.call() and current_page().changes().can_shelve(),
 			_says("Select changed files in the Changes view first."))
 	var has_shelf: Callable = func() -> bool:
-		return in_changes.call() and not current_page().changes().selected_shelf().is_empty()
-	var no_shelf: Callable = _says("Select a shelf in the Shelved section first.")
+		return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES \
+				and not current_page().changes().selected_shelf().is_empty()
+	var no_shelf: Callable = _says("Select a shelf in the Shelves view first.")
+	var in_shelves: Callable = func() -> bool:
+		return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES
+	var toggle_group: ActionRegistry.Action = Actions.register(&"shelf.toggle_branch_group", "Expand or collapse shelf branch", "Shelves",
+			func() -> void: changes.call().shelf_list().toggle_pending_group(), PackedStringArray(), in_shelves)
+	toggle_group.hidden = true
+	Actions.register(&"shelf.filter_branches", "Filter shelves by branch…", "Shelves",
+			func() -> void: changes.call().shelf_list().open_branches(), PackedStringArray(), in_shelves)
+	Actions.register(&"shelf.scope_none", "Clear shelf branch selection", "Shelves",
+			func() -> void: changes.call().shelf_list().set_branches(PackedStringArray()), PackedStringArray(), in_shelves)
+	var toggle_branch: ActionRegistry.Action = Actions.register(&"shelf.toggle_filter_branch", "Toggle shelf branch filter", "Shelves",
+			func() -> void: changes.call().shelf_list().toggle_pending_branch(), PackedStringArray(), in_shelves)
+	toggle_branch.hidden = true
+	for all_branches: bool in [false, true]:
+		Actions.register(&"shelf.scope_all" if all_branches else &"shelf.scope_current",
+				"Shelves on all branches" if all_branches else "Shelves on this branch", "Shelves",
+				func() -> void: current_page().changes().shelf_list().set_scope(all_branches), PackedStringArray(),
+				func() -> bool: return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES)
 	Actions.register(&"shelf.restore", "Restore shelf", "Shelves",
 			func() -> void: current_page().ops().restore_shelf(changes.call().selected_shelf()),
 			PackedStringArray(), has_shelf, no_shelf)
-	Actions.register(&"shelf.rename", "Rename shelf…", "Shelves",
-			func() -> void: current_page().ops().rename_shelf(changes.call().selected_shelf()),
+	Actions.register(&"shelf.rename", "Rename shelf", "Shelves",
+			func() -> void: changes.call().edit_shelf_name(),
 			PackedStringArray(), has_shelf, no_shelf)
 	Actions.register(&"shelf.discard", "Discard shelf…", "Shelves",
 			func() -> void: current_page().ops().discard_shelf(changes.call().selected_shelf()),
 			PackedStringArray(), has_shelf, no_shelf)
+	var has_shelf_file: Callable = func() -> bool:
+		return has_shelf.call() and not _feedback.is_busy(current_page().session) \
+				and not current_page().changes().selected_shelf_file().is_empty()
+	Actions.register(&"shelf.restore_file", "Restore file", "Shelves",
+			func() -> void: current_page().ops().restore_shelf_file(changes.call().selected_shelf(), changes.call().selected_shelf_file()),
+			PackedStringArray(), has_shelf_file, _says("Select a shelved file first."))
+	Actions.register(&"shelf.discard_file", "Discard file", "Shelves",
+			func() -> void: current_page().ops().discard_shelf_file(changes.call().selected_shelf(), changes.call().selected_shelf_file()),
+			PackedStringArray(), has_shelf_file, _says("Select a shelved file first."))
 	Actions.register(&"shelf.undo_discard", "Undo shelf discard", "Shelves",
 			func() -> void: current_page().ops().undo_shelf_discard(), PackedStringArray(),
 			func() -> bool: return repo_ready.call() and current_page().session.can_undo_shelf_discard(),

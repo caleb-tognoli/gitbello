@@ -150,6 +150,8 @@ pub struct ShelfFile {
     pub original_path: Option<PathBuf>,
     /// Untracked when shelved (stored in the stash's third parent).
     pub untracked: bool,
+    /// The worktree matches base; preview the staged version instead.
+    pub index_only: bool,
 }
 
 #[cfg(test)]

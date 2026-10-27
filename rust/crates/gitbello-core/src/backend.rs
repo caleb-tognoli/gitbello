@@ -26,6 +26,16 @@ use crate::repo::{
 };
 use crate::worktrees::new_worktree_path_error;
 
+mod shelf_files;
+
+/// A shelf replacement, retained to undo a per-file discard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShelfChange {
+    pub old_oid: String,
+    pub new_oid: Option<String>,
+    pub subject: String,
+}
+
 /// Read access to a repository. `repo` is any directory inside a worktree (or
 /// a bare repository). Implementations must be usable from worker threads.
 pub trait GitBackend: Send + Sync {
@@ -203,6 +213,33 @@ pub trait GitBackend: Send + Sync {
     fn restore_shelf(
         &self,
         toplevel: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    fn restore_shelf_file(
+        &self,
+        repo: &Path,
+        oid: &str,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<ShelfChange, GitError>;
+    fn discard_shelf_file(
+        &self,
+        repo: &Path,
+        oid: &str,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<ShelfChange, GitError>;
+    /// Restores the original shelf, refusing a stale or renamed remainder.
+    fn undo_shelf_change(
+        &self,
+        repo: &Path,
+        change: &ShelfChange,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    fn forget_shelf_change(
+        &self,
+        repo: &Path,
         oid: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
@@ -980,6 +1017,7 @@ impl GitBackend for CliBackend {
         message: &str,
         cancel: &CancelToken,
     ) -> Result<Option<String>, GitError> {
+        let _lock = self.shelf_lock(toplevel, cancel)?;
         let before = self.stash_top(toplevel, cancel)?;
         self.runner
             .write(toplevel)
@@ -997,6 +1035,7 @@ impl GitBackend for CliBackend {
         index: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
+        let _lock = self.shelf_lock(toplevel, cancel)?;
         if self.stash_top(toplevel, cancel)?.as_deref() != Some(expected) {
             return Err(GitError::new(
                 "stash pop",
@@ -1018,6 +1057,7 @@ impl GitBackend for CliBackend {
         message: &str,
         cancel: &CancelToken,
     ) -> Result<Option<String>, GitError> {
+        let _lock = self.shelf_lock(toplevel, cancel)?;
         let before = self.stash_top(toplevel, cancel)?;
         let cmd = self.runner.write(toplevel).args([
             "stash",
@@ -1038,6 +1078,7 @@ impl GitBackend for CliBackend {
         oid: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
+        let _lock = self.shelf_lock(toplevel, cancel)?;
         self.stash_index(toplevel, oid, cancel)?;
         let apply = |index: bool| {
             let mut cmd = self.runner.write(toplevel).args(["stash", "apply"]);
@@ -1054,18 +1095,50 @@ impl GitBackend for CliBackend {
             Err(err) => return Err(err),
         }
         // Applied: dropping must not be cut short by a cancel.
-        self.drop_shelf(toplevel, oid, &CancelToken::new())
+        self.drop_shelf_unlocked(toplevel, oid, &CancelToken::new())
     }
 
     fn drop_shelf(&self, repo: &Path, oid: &str, cancel: &CancelToken) -> Result<(), GitError> {
-        let index = self.stash_index(repo, oid, cancel)?;
-        let selector = format!("stash@{{{index}}}");
-        self.runner
-            .write(repo)
-            .args(["stash", "drop", "-q", &selector])
-            .cancel_token(cancel)
-            .run()
-            .map(drop)
+        let _lock = self.shelf_lock(repo, cancel)?;
+        self.drop_shelf_unlocked(repo, oid, cancel)
+    }
+
+    fn restore_shelf_file(
+        &self,
+        repo: &Path,
+        oid: &str,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<ShelfChange, GitError> {
+        self.edit_shelf_file(repo, oid, path, true, cancel)
+    }
+
+    fn discard_shelf_file(
+        &self,
+        repo: &Path,
+        oid: &str,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<ShelfChange, GitError> {
+        self.edit_shelf_file(repo, oid, path, false, cancel)
+    }
+
+    fn undo_shelf_change(
+        &self,
+        repo: &Path,
+        change: &ShelfChange,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.undo_shelf_file_change(repo, change, cancel)
+    }
+
+    fn forget_shelf_change(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.remove_shelf_backup(repo, oid, cancel)
     }
 
     fn store_shelf(
@@ -1075,12 +1148,8 @@ impl GitBackend for CliBackend {
         message: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
-        self.runner
-            .write(repo)
-            .args(["stash", "store", "-q", "-m", message, oid])
-            .cancel_token(cancel)
-            .run()
-            .map(drop)
+        let _lock = self.shelf_lock(repo, cancel)?;
+        self.store_shelf_unlocked(repo, oid, message, cancel)
     }
 
     fn rename_shelf(
@@ -1090,8 +1159,45 @@ impl GitBackend for CliBackend {
         message: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
+        let _lock = self.shelf_lock(repo, cancel)?;
         let index = self.stash_index(repo, oid, cancel)?;
-        self.store_shelf(repo, oid, message, cancel)?;
+        if index == 0 {
+            // `stash store` does nothing when refs/stash already points at
+            // this commit. Keep it reachable while replacing the top entry,
+            // and put the original back if storing its new name fails.
+            let entries = self.stashes(repo, cancel)?;
+            let original = crate::repo::shelves(&entries)
+                .into_iter()
+                .find(|s| s.oid == oid)
+                .ok_or_else(|| stale_shelf(oid))?;
+            let backup = format!("refs/gitbello/rename-shelf/{oid}");
+            self.runner
+                .write(repo)
+                .args(["update-ref", &backup, oid, ""])
+                .cancel_token(cancel)
+                .run()?;
+            let finish = CancelToken::new();
+            let remove_backup = || {
+                self.runner
+                    .write(repo)
+                    .args(["update-ref", "-d", &backup, oid])
+                    .cancel_token(&finish)
+                    .run()
+                    .map(drop)
+            };
+            if let Err(error) = self.drop_shelf_unlocked(repo, oid, &finish) {
+                remove_backup()?;
+                return Err(error);
+            }
+            if let Err(error) = self.store_shelf_unlocked(repo, oid, message, &finish) {
+                // Leave the backup ref in place if recovery itself fails.
+                self.store_shelf_unlocked(repo, oid, &original.subject, &finish)?;
+                remove_backup()?;
+                return Err(error);
+            }
+            return remove_backup();
+        }
+        self.store_shelf_unlocked(repo, oid, message, cancel)?;
         // The old entry moved one down; check it is still this shelf.
         let old = index + 1;
         let restore = CancelToken::new();
@@ -1124,8 +1230,39 @@ impl GitBackend for CliBackend {
                 path: f.path,
                 original_path: f.original_path,
                 untracked: false,
+                index_only: false,
             })
             .collect();
+        // A stash can contain staged edits whose working-copy content equals
+        // the base. Include these so partial edits never leave an invisible
+        // index-only remainder behind.
+        let staged_args = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-z",
+            "-M",
+            "--name-status",
+            &format!("{oid}^1"),
+            &format!("{oid}^2"),
+            "--",
+        ];
+        let staged = self.read(repo, &staged_args, cancel)?;
+        for f in parse_name_status(&staged.stdout).map_err(|e| unexpected(&staged_args, e))? {
+            let represented = files.iter().any(|known| {
+                known.path == f.path
+                    || (f.original_path.is_some() && known.original_path == f.original_path)
+            });
+            if !represented {
+                files.push(ShelfFile {
+                    change: f.change,
+                    path: f.path,
+                    original_path: f.original_path,
+                    untracked: false,
+                    index_only: true,
+                });
+            }
+        }
         let untracked_args = [
             "stash",
             "show",
@@ -1144,6 +1281,7 @@ impl GitBackend for CliBackend {
                     path: crate::repo::git_path(p),
                     original_path: None,
                     untracked: true,
+                    index_only: false,
                 }),
         );
         Ok(files)
@@ -1274,6 +1412,37 @@ fn stale_shelf(oid: &str) -> GitError {
 }
 
 impl CliBackend {
+    fn drop_shelf_unlocked(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let index = self.stash_index(repo, oid, cancel)?;
+        let selector = format!("stash@{{{index}}}");
+        self.runner
+            .write(repo)
+            .args(["stash", "drop", "-q", &selector])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn store_shelf_unlocked(
+        &self,
+        repo: &Path,
+        oid: &str,
+        message: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.runner
+            .write(repo)
+            .args(["stash", "store", "-q", "-m", message, oid])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
     /// `n` in `stash@{n}` of the stash whose commit is `oid` (indices shift
     /// as stashes are pushed and dropped, from any worktree).
     fn stash_index(&self, repo: &Path, oid: &str, cancel: &CancelToken) -> Result<usize, GitError> {

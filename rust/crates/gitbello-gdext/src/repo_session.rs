@@ -102,6 +102,8 @@ impl RepoSession {
     /// The files of shelf `oid` arrived (`shelf_files`).
     #[signal]
     fn shelf_files_loaded(oid: GString);
+    #[signal]
+    fn shelf_replaced(old_oid: GString, new_oid: GString);
     /// The history search found more, progressed, finished or was replaced
     /// (`search_info`, `match` in `graph_rows`).
     #[signal]
@@ -439,6 +441,26 @@ impl RepoSession {
     #[func]
     fn restore_shelf(&self, oid: GString) -> i64 {
         job_id(runtime_cell::with(|rt| rt.restore_shelf(&self.key, &oid.to_string())).flatten())
+    }
+
+    #[func]
+    fn restore_shelf_file(&self, oid: GString, path: GString) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.restore_shelf_file(&self.key, &oid.to_string(), Path::new(&path.to_string()))
+            })
+            .flatten(),
+        )
+    }
+
+    #[func]
+    fn discard_shelf_file(&self, oid: GString, path: GString) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.discard_shelf_file(&self.key, &oid.to_string(), Path::new(&path.to_string()))
+            })
+            .flatten(),
+        )
     }
 
     /// Label `rename shelf`.
