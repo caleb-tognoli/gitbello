@@ -129,13 +129,16 @@ func _ready() -> void:
 		worktree_delete_requested.emit(path, force, branch))
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
+	_menu.popup_hide.connect(func() -> void:
+		if _menu.get_parent() == _popover:
+			_menu.reparent(self))
 	add_child(_sync_menu)
 	_sync_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_sync_ids[id], _sync_button))
 	add_child(_popover)
 	_popover.branch_chosen.connect(_on_branch_chosen)
 	_popover.menu_requested.connect(func(ref: Dictionary, at: Vector2) -> void:
-		_popover.hide()
-		show_ref_menu(ref, at))
+		_menu.reparent(_popover)
+		show_ref_menu.call_deferred(ref, at))
 	_popover.new_branch_requested.connect(func() -> void: Actions.run_action(&"branch.new", _branch_button))
 	_history.commit_menu_requested.connect(_on_commit_menu)
 	_history.label_menu_requested.connect(_on_label_menu)

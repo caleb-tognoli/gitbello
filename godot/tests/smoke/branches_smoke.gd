@@ -116,7 +116,15 @@ func run() -> void:
 	popover.set_filter("renamed")
 	expect_eq(popover.row_names(), PackedStringArray(["renamed"]), "the filter narrows the list")
 	popover.menu_requested.emit(popover.first_ref(), Vector2.ZERO)
-	popover.hide()
+	var release: InputEventMouseButton = InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_RIGHT
+	release.pressed = false
+	release.window_id = popover.get_window_id()
+	popover.push_input(release, true)
+	await get_tree().process_frame
+	expect(popover.visible, "right-click keeps the branch list open behind its context menu")
+	expect(page.context_menu().visible, "right-click shows the branch context menu")
+	expect(page.context_menu().get_parent() == popover, "the branch menu belongs to the branch popup window")
 	expect("Delete branch…" in page.menu_labels(), "the branch menu offers delete: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete branch…"), "delete chosen from the menu")
 	expect(await wait_until(func() -> bool: return confirm.visible), "delete asks first")
