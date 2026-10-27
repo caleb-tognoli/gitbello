@@ -98,6 +98,9 @@ func run() -> void:
 	expect(await wait_until(func() -> bool:
 		return session.branch_refs().any(func(r: Dictionary) -> bool: return String(r["short_name"]) == "origin/remote-only")),
 			"the remote branch is listed")
+	popover.set_filter("origin/")
+	expect_eq(popover.row_names(), PackedStringArray(["origin/remote-only"]),
+			"Remote keeps remote-only branches but not local duplicates")
 	press("Ctrl+T")
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks again")
 	var track: CheckBox = form.field("track") as CheckBox

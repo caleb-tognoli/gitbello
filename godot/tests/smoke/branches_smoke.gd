@@ -40,6 +40,20 @@ func run() -> void:
 				and String(selected.get("hash", "")) == String(session.status().get("oid", ""))),
 			"the new HEAD is selected before branching")
 
+	# A lone prefix stays inline; two branches with that prefix form a group.
+	var popover: BranchPopover = page.active_view().branch_popover()
+	popover.set_filter("")
+	expect_eq(popover.row_labels(), PackedStringArray(["feature/login", "main"]),
+			"a single feature branch is not grouped")
+	popover.set_filter("origin/")
+	expect(popover.row_names().is_empty(), "origin/main is not duplicated in Remote")
+	session.create_branch("feature/settings", "main", false)
+	expect(await wait_until(func() -> bool: return _has_branch(session, "feature/settings")),
+			"a second feature branch was created")
+	popover.set_filter("")
+	expect_eq(popover.row_labels(), PackedStringArray(["feature/", "login", "settings", "main"]),
+			"multiple feature branches are grouped")
+
 	# Ctrl+Shift+N: a new branch from HEAD; typed spaces become dashes.
 	press("Ctrl+Shift+N")
 	var form: FormDialog = ops.form()
@@ -58,7 +72,6 @@ func run() -> void:
 	expect(await _commit(session, "lines.txt", "Edit line 1"), "committed on topic-one")
 
 	# Ctrl+B lists the branches; Enter in the filter checks out the first.
-	var popover: BranchPopover = page.active_view().branch_popover()
 	expect(await _choose_branch(popover, "main"), "the branch list finds main")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "Enter checked out main")
 

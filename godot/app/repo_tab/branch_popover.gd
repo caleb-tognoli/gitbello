@@ -1,8 +1,8 @@
 class_name BranchPopover
 extends PopupPanel
-## The Branch button's list (PLAN §4): a filter, then Recent, Local (grouped
-## by prefix such as `feature/`) and Remote branches with ↑↓. Enter or a
-## click chooses a branch; one checked out in another worktree says so ("in
+## The Branch button's list (PLAN §4): a filter, then Recent, local branches
+## (grouped by prefix such as `feature/`) and Remote branches with ↑↓. Enter or
+## a click chooses a branch; one checked out in another worktree says so ("in
 ## fix-login ↗") and choosing it shows that worktree. Right-click opens the
 ## branch's menu.
 
@@ -15,10 +15,11 @@ signal new_branch_requested()
 
 const THEME_TYPE: StringName = &"BranchPopover"
 const RECENT_COUNT: int = 5
+const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.tscn")
 
 var session: RepoSession = null
 
-var _filter: LineEdit = LineEdit.new()
+var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
 var _tree: Tree = Tree.new()
 var _new_button: Button = Button.new()
 
@@ -26,12 +27,10 @@ var _new_button: Button = Button.new()
 func _ready() -> void:
 	var box: VBoxContainer = VBoxContainer.new()
 	add_child(box)
-	_filter.placeholder_text = "Filter branches"
-	_filter.clear_button_enabled = true
-	_filter.right_icon = AppTheme.icon(&"Search")
-	_filter.text_changed.connect(func(_text: String) -> void: _rebuild())
-	_filter.text_submitted.connect(func(_text: String) -> void: _activate_first())
-	_filter.gui_input.connect(_on_filter_key)
+	_filter.placeholder = "Filter branches"
+	_filter.changed.connect(_rebuild)
+	_filter.submitted.connect(func(_backwards: bool) -> void: _activate_first())
+	_filter.done.connect(_on_filter_done)
 	box.add_child(_filter)
 	_tree.hide_root = true
 	_tree.columns = 2
@@ -57,8 +56,7 @@ func _ready() -> void:
 
 ## Opens under `anchor` with an empty filter.
 func open_below(anchor: Control) -> void:
-	_filter.text = ""
-	_rebuild()
+	_filter.set_text("")
 	var rect: Rect2 = anchor.get_global_rect()
 	var window_position: Vector2 = Vector2(anchor.get_window().position)
 	var width: int = get_theme_constant(&"width", THEME_TYPE)
@@ -66,7 +64,7 @@ func open_below(anchor: Control) -> void:
 	var scale: float = anchor.get_window().content_scale_factor
 	popup(Rect2i(Vector2i(window_position + rect.position * scale + Vector2(0.0, rect.size.y * scale)),
 			Vector2i(Vector2(width, height) * scale)))
-	_filter.grab_focus()
+	_filter.focus_text()
 
 
 ## Visible branch rows, as `short` names in order (for tests).
@@ -78,6 +76,15 @@ func row_names() -> PackedStringArray:
 	return out
 
 
+## Visible row labels, including sections and folders (for tests).
+func row_labels() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var root: TreeItem = _tree.get_root()
+	if root != null:
+		_collect_labels(root, out)
+	return out
+
+
 ## The first branch row's ref (for tests), or empty.
 func first_ref() -> Dictionary:
 	var first: TreeItem = _first_ref(_tree.get_root())
@@ -85,8 +92,7 @@ func first_ref() -> Dictionary:
 
 
 func set_filter(text: String) -> void:
-	_filter.text = text
-	_rebuild()
+	_filter.set_text(text)
 
 
 ## Chooses the first branch row (what Enter in the filter does).
@@ -102,17 +108,25 @@ func _rebuild() -> void:
 	if session == null or not session.is_ready():
 		return
 	var refs: Array[Dictionary] = session.branch_refs()
-	var query: String = _filter.text.strip_edges().to_lower()
+	var local: Array[Dictionary] = []
+	var remote: Array[Dictionary] = []
+	var local_names: PackedStringArray = PackedStringArray()
+	for ref: Dictionary in refs:
+		(local if String(ref["kind"]) == "branch" else remote).append(ref)
+		if String(ref["kind"]) == "branch":
+			local_names.append(String(ref["short_name"]))
+	remote.assign(remote.filter(func(ref: Dictionary) -> bool:
+		return not _remote_has_local(String(ref["short_name"]), local_names)))
+	refs.clear()
+	refs.append_array(local)
+	refs.append_array(remote)
+	var query: String = _filter.text().strip_edges().to_lower()
 	if not query.is_empty():
 		for ref: Dictionary in refs:
 			if String(ref["short_name"]).to_lower().contains(query):
 				_add_ref(root, ref, String(ref["short_name"]))
 		_select_first()
 		return
-	var local: Array[Dictionary] = []
-	var remote: Array[Dictionary] = []
-	for ref: Dictionary in refs:
-		(local if String(ref["kind"]) == "branch" else remote).append(ref)
 	var recent: Array[Dictionary] = []
 	recent.assign(local.filter(func(ref: Dictionary) -> bool: return not bool(ref["is_head"])))
 	recent.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -122,24 +136,39 @@ func _rebuild() -> void:
 		var section: TreeItem = _section(root, "Recent")
 		for i: int in mini(RECENT_COUNT, recent.size()):
 			_add_ref(section, recent[i], String(recent[i]["short_name"]))
-	var locals: TreeItem = _section(root, "Local")
+	var locals: TreeItem = root
+	var folder_counts: Dictionary[String, int] = {}
+	for ref: Dictionary in local:
+		var name: String = String(ref["short_name"])
+		var slash: int = name.rfind("/")
+		if slash > 0:
+			var folder: String = name.left(slash)
+			folder_counts[folder] = int(folder_counts.get(folder, 0)) + 1
 	var folders: Dictionary[String, TreeItem] = {}
 	for ref: Dictionary in local:
 		var name: String = String(ref["short_name"])
 		var parent: TreeItem = locals
 		var slash: int = name.rfind("/")
-		if slash > 0:
-			var folder: String = name.left(slash)
+		var folder: String = name.left(slash) if slash > 0 else ""
+		var grouped: bool = slash > 0 and int(folder_counts[folder]) > 1
+		if grouped:
 			if not folders.has(folder):
 				folders[folder] = _section(locals, folder + "/", false)
 			parent = folders[folder]
-		_add_ref(parent, ref, name.substr(slash + 1) if slash > 0 else name)
+		_add_ref(parent, ref, name.substr(slash + 1) if grouped else name)
 	if not remote.is_empty():
 		var remotes: TreeItem = _section(root, "Remote")
 		remotes.collapsed = true
 		for ref: Dictionary in remote:
 			_add_ref(remotes, ref, String(ref["short_name"]))
 	_select_first()
+
+
+static func _remote_has_local(remote_name: String, local_names: PackedStringArray) -> bool:
+	for local_name: String in local_names:
+		if remote_name.ends_with("/" + local_name):
+			return true
+	return false
 
 
 func _section(parent: TreeItem, text: String, header: bool = true) -> TreeItem:
@@ -219,6 +248,13 @@ func _collect(item: TreeItem, out: PackedStringArray) -> void:
 			_collect(child, out)
 
 
+func _collect_labels(item: TreeItem, out: PackedStringArray) -> void:
+	for child: TreeItem in item.get_children():
+		out.append(child.get_text(0))
+		if not child.collapsed:
+			_collect_labels(child, out)
+
+
 func _on_mouse_selected(at_position: Vector2, button: int) -> void:
 	if button != MOUSE_BUTTON_RIGHT:
 		return
@@ -227,15 +263,13 @@ func _on_mouse_selected(at_position: Vector2, button: int) -> void:
 		menu_requested.emit(item.get_metadata(0) as Dictionary, _tree.get_screen_position() + at_position)
 
 
-func _on_filter_key(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_down", false, true):
-		_tree.grab_focus()
-		_select_first()
-		_filter.accept_event()
+func _on_filter_done() -> void:
+	_tree.grab_focus()
+	_select_first()
 
 
 func _on_tree_key(event: InputEvent) -> void:
 	var item: TreeItem = _tree.get_selected()
 	if event.is_action_pressed("ui_up", false, true) and item != null and item == _first_ref(_tree.get_root()):
-		_filter.grab_focus()
+		_filter.focus_text()
 		_tree.accept_event()
