@@ -13,8 +13,9 @@ use toml::{Table, Value};
 
 use crate::ops::PullMode;
 
-/// PLAN O3: worktrees go next to the repository, grouped per repository.
-pub const DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
+/// PLAN O3: worktrees go in the repository's locally ignored `.worktrees` folder.
+pub const DEFAULT_WORKTREE_TEMPLATE: &str = ".worktrees/{branch_slug}";
+const LEGACY_DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
 pub const DEFAULT_AUTO_FETCH_MINUTES: u32 = 10;
 /// PLAN §3.8; `{path}` is the worktree (or file) to open.
 pub const DEFAULT_EDITOR_COMMAND: &str = "code {path}";
@@ -199,8 +200,13 @@ impl Config {
             known_repos: take_paths(&mut table, "known_repos")?,
             open_tabs: take_paths(&mut table, "open_tabs")?,
             active_tab: take_index(&mut table, "active_tab")?,
-            worktree_template: take_string(&mut table, "worktree_template")?
-                .unwrap_or(defaults.worktree_template),
+            worktree_template: match take_string(&mut table, "worktree_template")? {
+                None => defaults.worktree_template,
+                Some(template) if template == LEGACY_DEFAULT_WORKTREE_TEMPLATE => {
+                    DEFAULT_WORKTREE_TEMPLATE.to_owned()
+                }
+                Some(template) => template,
+            },
             branch_prefix: take_string(&mut table, "branch_prefix")?.unwrap_or_default(),
             auto_fetch_minutes: take_u32(&mut table, "auto_fetch_minutes")?
                 .unwrap_or(defaults.auto_fetch_minutes),
@@ -408,6 +414,18 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.auto_fetch_minutes, 10);
         assert_eq!(config.worktree_template, DEFAULT_WORKTREE_TEMPLATE);
+    }
+
+    #[test]
+    fn migrates_only_the_old_default_worktree_template() {
+        let old = format!("worktree_template = \"{LEGACY_DEFAULT_WORKTREE_TEMPLATE}\"");
+        assert_eq!(
+            Config::parse(&old).unwrap().worktree_template,
+            DEFAULT_WORKTREE_TEMPLATE
+        );
+        let custom =
+            Config::parse("worktree_template = \"{repo_parent}/wt/{branch_slug}\"").unwrap();
+        assert_eq!(custom.worktree_template, "{repo_parent}/wt/{branch_slug}");
     }
 
     #[test]

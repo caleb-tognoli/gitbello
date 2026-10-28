@@ -63,14 +63,14 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
 			"the folder follows the branch: %s" % folder.text)
 	expect_eq(form.size.x, form_width, "typing the name does not resize the form")
-	expect(folder.text.begins_with("repo-10.worktrees/"),
-			"the default template is used, shown from the repository's folder: %s" % folder.text)
-	var task_path: String = fixtures.path_join(folder.text)
+	expect_eq(folder.text, ".worktrees/task-one",
+			"the default template is shown from the repository root: %s" % folder.text)
+	var task_path: String = repo.path_join(folder.text)
 	# Browse: a folder with things in it is where the worktree goes; an empty
 	# one is the worktree's folder.
-	form.pick_folder("folder", fixtures)
+	form.pick_folder("folder", repo)
 	expect_eq(folder.text, "task-one", "a picked folder holds the worktree")
-	var empty: String = fixtures.path_join("picked empty")
+	var empty: String = repo.path_join("picked empty")
 	DirAccess.make_dir_absolute(empty)
 	form.pick_folder("folder", empty)
 	expect_eq(folder.text, "picked empty", "a picked empty folder is the worktree's")
@@ -84,6 +84,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return page.session.current_branch() == "task-one"),
 			"the task's worktree shows, on task-one")
 	expect(await wait_until(func() -> bool: return strip.chips().size() == 3), "three chips")
+	expect(FileAccess.get_file_as_string(repo.path_join(".git/info/exclude")).contains("/.worktrees/"),
+			"the nested worktrees are excluded from the main repository's status")
 	strip.chips()[0].chosen.emit()
 
 	# A name that matches a remote branch offers to check it out instead; a

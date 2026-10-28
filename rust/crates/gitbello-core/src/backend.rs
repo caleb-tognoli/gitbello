@@ -6,7 +6,7 @@
 //! so status paths can be passed back unchanged.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::changes::IndexEntry;
@@ -344,6 +344,59 @@ impl CliBackend {
         cancel: &CancelToken,
     ) -> Result<GitOutput, GitError> {
         self.runner.read(repo).args(args).cancel_token(cancel).run()
+    }
+
+    /// Keeps nested worktrees out of status without changing a tracked `.gitignore`.
+    fn exclude_default_worktrees(
+        &self,
+        repo: &Path,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let main = self
+            .worktrees(repo, cancel)?
+            .into_iter()
+            .find(|wt| wt.is_main);
+        let Some(main) = main else {
+            return Ok(());
+        };
+        if !path.starts_with(main.path.join(".worktrees")) {
+            return Ok(());
+        }
+        let exclude = self
+            .repo_paths(repo, cancel)?
+            .common_dir
+            .join("info/exclude");
+        let io = |err: std::io::Error| {
+            GitError::new(
+                format!("write {}", exclude.display()),
+                GitErrorKind::Io,
+                err.to_string(),
+            )
+        };
+        let contents = match fs::read(&exclude) {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(err) => return Err(io(err)),
+        };
+        if String::from_utf8_lossy(&contents)
+            .lines()
+            .any(|line| line == "/.worktrees/")
+        {
+            return Ok(());
+        }
+        if let Some(parent) = exclude.parent() {
+            fs::create_dir_all(parent).map_err(io)?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&exclude)
+            .map_err(io)?;
+        if contents.last().is_some_and(|b| *b != b'\n') {
+            writeln!(file).map_err(io)?;
+        }
+        writeln!(file, "/.worktrees/").map_err(io)
     }
 }
 
@@ -1293,6 +1346,9 @@ impl GitBackend for CliBackend {
         op: &WorktreeOp,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
+        if let WorktreeOp::Add { path, .. } = op {
+            self.exclude_default_worktrees(repo, path, cancel)?;
+        }
         let mut cmd = self.runner.write(repo).arg("worktree");
         cmd = match op {
             WorktreeOp::Add {

@@ -803,7 +803,7 @@ func _open_settings() -> void:
 	_settings_form.add_line("terminal_command", "Terminal", String(settings["terminal_command"]), false,
 			"The platform's terminal")
 	_settings_form.add_line("worktree_template", "New worktree folders", String(settings["worktree_template"]))
-	_settings_form.add_note("{repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
+	_settings_form.add_note("Relative paths start at the repository root. {repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
 	_settings_form.add_line("branch_prefix", "Branch prefix", String(settings["branch_prefix"]), false, "None")
 	_settings_form.add_note("Starts the name of new worktrees' branches, for example caleb/.")
 	_settings_form.add_color("accent", "Accent colour", ThemeManager.configured_accent(), AppTheme.ACCENT_PRESETS)

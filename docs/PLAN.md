@@ -45,7 +45,7 @@ GitHub, GitLab or any hosting integration (gitbello is pure git) · interactive 
 
 - ~~**O1 License.**~~ **Decided: MIT OR Apache-2.0** (2026-10-24).
 - **O2 Terminal approach** (M10). A full embedded terminal or "open system terminal here". See §3.13.
-- ~~**O3 Default worktree path template.**~~ **Decided: `{repo_parent}/{repo_name}.worktrees/{branch_slug}`** (2026-10-24); editable in Settings.
+- ~~**O3 Default worktree path template.**~~ **Decided: `.worktrees/{branch_slug}`**, relative to the main worktree's root and locally excluded through `.git/info/exclude` (2026-10-24; revised 2026-10-28); editable in Settings.
 
 ---
 

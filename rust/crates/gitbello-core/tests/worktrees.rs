@@ -136,11 +136,7 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
     assert_eq!(state.default_base().as_deref(), Some("origin/main"));
     let main = state.main_worktree().unwrap().to_path_buf();
     let path = worktree_path(DEFAULT_WORKTREE_TEMPLATE, &main, "feature/new task");
-    assert!(
-        path.to_string_lossy().contains(".worktrees"),
-        "{}",
-        path.display()
-    );
+    assert_eq!(path, main.join(".worktrees").join("feature-new-task"));
 
     let task = NewTask {
         branch: "feature/new-task".into(),
@@ -164,6 +160,29 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
         .clone();
     assert_eq!(branch.target, upstream_tip);
     assert_eq!(branch.upstream, None, "the task branch does not track main");
+    let exclude = main.join(".git/info/exclude");
+    assert!(fs::read_to_string(&exclude)
+        .unwrap()
+        .ends_with("/.worktrees/\n"));
+    assert!(repo.git(&["status", "--porcelain"]).is_empty());
+    assert!(!main.join(".gitignore").exists());
+
+    let second = main.join(".worktrees").join("second");
+    let add_second = WorktreeOp::Add {
+        path: second,
+        branch: "second".into(),
+        start: Some("main".into()),
+    };
+    ok(&mut rt, &key, |rt| rt.worktree_op(&key, add_second));
+    settle_worktrees(&mut rt, &key);
+    assert_eq!(
+        fs::read_to_string(&exclude)
+            .unwrap()
+            .matches("/.worktrees/")
+            .count(),
+        1,
+        "the exclude entry is not duplicated"
+    );
 
     // The same branch again is refused before anything is created.
     let other_path = repo.sibling("another");

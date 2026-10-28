@@ -601,12 +601,12 @@ func new_task() -> void:
 	name_line.caret_column = name_line.text.length()
 
 
-## Where the folder field's relative paths start: the main worktree's parent.
+## Where the folder field's relative paths start: the main worktree's root.
 func _folder_base() -> String:
 	for wt: Dictionary in session.worktrees():
 		if bool(wt["is_main"]):
-			return String(wt["path"]).get_base_dir()
-	return session.toplevel().get_base_dir()
+			return String(wt["path"])
+	return session.main_worktree() if not session.main_worktree().is_empty() else session.toplevel()
 
 
 ## `path` as the folder field shows it: relative when inside `_folder_base()`.

@@ -186,19 +186,8 @@ mod tests {
     #[test]
     fn expands_the_template() {
         let main = Path::new("/home/ädä/dev/my repo");
-        let path = worktree_path(
-            "{repo_parent}/{repo_name}.worktrees/{branch_slug}",
-            main,
-            "feature/x",
-        );
-        assert_eq!(
-            path,
-            PathBuf::from(if cfg!(windows) {
-                "\\home\\ädä\\dev\\my repo.worktrees\\feature-x"
-            } else {
-                "/home/ädä/dev/my repo.worktrees/feature-x"
-            })
-        );
+        let path = worktree_path(crate::config::DEFAULT_WORKTREE_TEMPLATE, main, "feature/x");
+        assert_eq!(path, main.join(".worktrees").join("feature-x"));
         let bare = worktree_path(
             "{repo_parent}/{repo_name}-{branch}",
             Path::new("/srv/proj.git"),
