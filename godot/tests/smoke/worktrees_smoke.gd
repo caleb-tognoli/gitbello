@@ -178,14 +178,11 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return not _has_branch(session, "task-one") and not _has_branch(session, "feature/login")),
 			"their branches were deleted")
 
-	# Settings: a bad interval is refused; a good one is saved.
+	# Settings apply as soon as a control changes.
 	expect(Actions.run_action(&"app.settings"), "Settings opens")
-	var settings: FormDialog = main.settings_form()
-	expect(await wait_until(func() -> bool: return settings.visible), "the settings form shows")
-	(settings.field("auto_fetch_minutes") as LineEdit).text = "soon"
-	expect(not settings.submit(), "a non-number is refused")
-	(settings.field("auto_fetch_minutes") as LineEdit).text = "15"
-	expect(settings.submit(), "settings saved")
+	var settings: SettingsWindow = main.settings_window()
+	expect(await wait_until(func() -> bool: return settings.visible), "the settings window shows")
+	(settings.get_control(&"auto_fetch_minutes") as SpinBox).value = 15
 	expect_eq(int(Core.settings()["auto_fetch_minutes"]), 15, "the interval was saved")
 	Core.set_settings({"auto_fetch_minutes": 0})
 

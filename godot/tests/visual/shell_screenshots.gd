@@ -217,8 +217,10 @@ func _ready() -> void:
 	await _shot_window(form, out, "cleanup")
 	form.hide()
 	Actions.run_action(&"app.settings")
-	await _shot_window(main.settings_form(), out, "settings")
-	main.settings_form().hide()
+	await _shot_window(main.settings_window(), out, "settings")
+	main.settings_window().show_category("Interface")
+	await _shot_window(main.settings_window(), out, "settings_interface")
+	main.settings_window().hide()
 
 	# M6.5 P4: the switch with changes, then changes left on main and the
 	# Shelved section (only the fixture repo changes).

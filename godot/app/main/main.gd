@@ -8,7 +8,6 @@ extends PanelContainer
 const MIN_WINDOW_SIZE: Vector2i = Vector2i(960, 600)
 const REPO_ARG: String = "--repo="
 const REPO_TAB: PackedScene = preload("res://app/repo_tab/repo_tab.tscn")
-const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 const ADD_REPOSITORY: PackedScene = preload("res://app/add_repository/add_repository_dialog.tscn")
 ## Worktree chips Ctrl+1 … Ctrl+9 select.
 const CHIP_SHORTCUTS: int = 9
@@ -16,7 +15,7 @@ const CHIP_SHORTCUTS: int = 9
 var _pages: Array[RepoTab] = []
 var _current: int = -1
 var _feedback: Feedback = Feedback.new()
-var _settings_form: FormDialog = null
+var _settings_window: SettingsWindow = SettingsWindow.new()
 var _add_dialog: AddRepositoryDialog = ADD_REPOSITORY.instantiate() as AddRepositoryDialog
 var _remotes_dialog: RemotesDialog = RemotesDialog.new()
 var _tags_dialog: TagsDialog = TagsDialog.new()
@@ -69,8 +68,7 @@ func _ready() -> void:
 	add_child(_spinner)
 	_apply_theme()
 	_palette.dynamic_entries = _palette_entries
-	_settings_form = FORM.instantiate() as FormDialog
-	add_child(_settings_form)
+	add_child(_settings_window)
 	_toasts.fix_provider = _error_fixes
 	_toasts.error_filter = _error_handled_elsewhere
 
@@ -789,52 +787,16 @@ func _register_worktree_actions() -> void:
 				return openable.call() and not bool(wt["is_main"]))
 
 
-## The Settings dialog: pull mode, auto-fetch, editor, terminal, the
-## worktree folder template, the branch prefix and the accent colour.
 func _open_settings() -> void:
-	var settings: Dictionary = Core.settings()
-	var modes: PackedStringArray = PackedStringArray(["ff-only", "merge", "rebase"])
-	_settings_form.begin("Settings", "Save", _save_settings)
-	_settings_form.add_choice("pull_mode", "Pull", modes, modes.find(String(settings["pull_mode"])))
-	_settings_form.add_line("auto_fetch_minutes", "Auto-fetch", str(int(settings["auto_fetch_minutes"])))
-	_settings_form.add_note("Minutes between fetches; 0 turns it off.")
-	_settings_form.add_line("editor_command", "Editor", String(settings["editor_command"]))
-	_settings_form.add_note("{path} is replaced by the folder.")
-	_settings_form.add_line("terminal_command", "Terminal", String(settings["terminal_command"]), false,
-			"The platform's terminal")
-	_settings_form.add_line("worktree_template", "New worktree folders", String(settings["worktree_template"]))
-	_settings_form.add_note("Relative paths start at the repository root. {repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.")
-	_settings_form.add_line("branch_prefix", "Branch prefix", String(settings["branch_prefix"]), false, "None")
-	_settings_form.add_note("Starts the name of new worktrees' branches, for example caleb/.")
-	_settings_form.add_color("accent", "Accent colour", ThemeManager.configured_accent(), AppTheme.ACCENT_PRESETS)
-	_settings_form.validator = func(values: Dictionary) -> String:
-		var minutes: String = String(values["auto_fetch_minutes"])
-		if not minutes.is_valid_int() or int(minutes) < 0:
-			return "Enter a whole number of minutes."
-		return Core.branch_prefix_error(String(values["branch_prefix"]))
-	_settings_form.open()
+	_settings_window.open()
 
 
-func settings_form() -> FormDialog:
-	return _settings_form
+func settings_window() -> SettingsWindow:
+	return _settings_window
 
 
 func add_repository_dialog() -> AddRepositoryDialog:
 	return _add_dialog
-
-
-func _save_settings(values: Dictionary) -> void:
-	var settings: Dictionary = values.duplicate()
-	settings["auto_fetch_minutes"] = int(String(values["auto_fetch_minutes"]))
-	if Color(String(values["accent"])).is_equal_approx(AppTheme.DEFAULT_ACCENT):
-		settings["accent"] = ""
-	var error: String = Core.set_settings(settings)
-	if not error.is_empty():
-		_toasts.show_toast("Settings not saved", error)
-		return
-	if not ThemeManager.configured_accent().is_equal_approx(ThemeManager.accent):
-		ThemeManager.apply(self)
-	_toasts.show_success("Settings saved")
 
 
 ## Where a new branch or tag starts: `[commit-ish, label]` from the menu's

@@ -263,6 +263,8 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"DimLabel", p.text_muted)
 	_variation(theme, &"HeaderLabel", &"Label")
 	theme.set_font_size(&"font_size", &"HeaderLabel", 28)
+	_variation(theme, &"HeaderSmall", &"Label")
+	theme.set_color(&"font_color", &"HeaderSmall", p.text_muted)
 	_variation(theme, &"ErrorLabel", &"Label")
 	theme.set_color(&"font_color", &"ErrorLabel", p.error)
 	_variation(theme, &"AccentLabel", &"Label")
@@ -369,6 +371,13 @@ static func _add_fields(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"clear_button_color", &"LineEdit", p.text_muted)
 	theme.set_color(&"clear_button_color_pressed", &"LineEdit", p.accent)
 	theme.set_color(&"font_readonly_color", &"TextEdit", p.text)
+	for color: StringName in [&"up_icon_modulate", &"down_icon_modulate"]:
+		theme.set_color(color, &"SpinBox", p.text)
+	for color: StringName in [&"up_hover_icon_modulate", &"down_hover_icon_modulate",
+			&"up_pressed_icon_modulate", &"down_pressed_icon_modulate"]:
+		theme.set_color(color, &"SpinBox", p.accent)
+	for color: StringName in [&"up_disabled_icon_modulate", &"down_disabled_icon_modulate"]:
+		theme.set_color(color, &"SpinBox", Color(p.text_muted, 0.6))
 	_variation(theme, &"ErrorOutput", &"TextEdit")
 	theme.set_color(&"font_readonly_color", &"ErrorOutput", p.error)
 	theme.set_font(&"font", &"ErrorOutput", mono_font())
@@ -549,6 +558,9 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"note_width", &"FormDialog", 380)
 	theme.set_constant(&"separation", &"FormDialog", 8)
 	theme.set_constant(&"section_separation", &"FormDialog", 14)
+	theme.set_constant(&"width", &"SettingsDialog", 840)
+	theme.set_constant(&"height", &"SettingsDialog", 540)
+	theme.set_constant(&"label_width", &"SettingsDialog", 220)
 
 
 static func _add_history(theme: Theme, p: Palette) -> void:
