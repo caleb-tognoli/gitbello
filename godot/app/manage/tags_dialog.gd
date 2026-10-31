@@ -12,16 +12,16 @@ var _buttons: Dictionary[String, Button] = {}
 
 
 func _ready() -> void:
-	title = "Tags"
-	ok_button_text = "Close"
+	title = tr("Tags")
+	ok_button_text = tr("Close")
 	var box: VBoxContainer = VBoxContainer.new()
 	add_child(box)
 	_tree.hide_root = true
 	_tree.columns = 3
 	_tree.column_titles_visible = true
-	_tree.set_column_title(0, "Tag")
-	_tree.set_column_title(1, "Commit")
-	_tree.set_column_title(2, "Kind")
+	_tree.set_column_title(0, tr("Tag"))
+	_tree.set_column_title(1, tr("Commit"))
+	_tree.set_column_title(2, tr("Kind"))
 	_tree.set_column_expand(1, false)
 	_tree.set_column_expand(2, false)
 	_tree.set_column_custom_minimum_width(1, 90)
@@ -34,11 +34,23 @@ func _ready() -> void:
 	box.add_child(row)
 	for entry: Array in [["new", "Tag HEAD…", &"Add"], ["push", "Push", &"GitPush"], ["delete", "Delete…", &"Remove"]]:
 		var button: Button = Button.new()
-		button.text = entry[1]
+		button.text = tr(entry[1])
 		button.icon = AppTheme.icon(entry[2])
 		button.pressed.connect(_run.bind(String(entry[0])))
 		row.add_child(button)
 		_buttons[String(entry[0])] = button
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_tree.set_column_title(0, tr("Tag"))
+		_tree.set_column_title(1, tr("Commit"))
+		_tree.set_column_title(2, tr("Kind"))
+		_buttons["new"].text = tr("Tag HEAD…")
+		_buttons["push"].text = tr("Push")
+		_buttons["delete"].text = tr("Delete…")
+		if _session != null:
+			_rebuild()
 
 
 ## Shows the tags of `ops`' repository.
@@ -70,7 +82,7 @@ func _rebuild() -> void:
 		var item: TreeItem = _tree.create_item(root)
 		item.set_text(0, String(tag["name"]))
 		item.set_text(1, String(tag["commit"]).left(7))
-		item.set_text(2, "annotated" if bool(tag["annotated"]) else "lightweight")
+		item.set_text(2, tr("annotated") if bool(tag["annotated"]) else tr("lightweight"))
 		if String(tag["name"]) == chosen:
 			item.select(0)
 	_update_buttons()

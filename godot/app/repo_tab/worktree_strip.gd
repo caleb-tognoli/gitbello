@@ -52,8 +52,7 @@ func _ready() -> void:
 	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_row.add_child(_actions)
 	_new_task.icon = AppTheme.icon(&"Add")
-	var shortcut: String = Actions.shortcut_label(&"task.new")
-	_new_task.tooltip_text = "New worktree" + (" (%s)" % shortcut if not shortcut.is_empty() else "")
+	_update_tooltips()
 	_new_task.theme_type_variation = &"ChipAction"
 	_new_task.focus_mode = Control.FOCUS_NONE
 	_new_task.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -79,6 +78,18 @@ func _ready() -> void:
 
 ## Shows `worktrees` (rows of `RepoSession.worktrees()`) with `selected_path`'s
 ## chip selected.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_update_tooltips()
+
+
+func _update_tooltips() -> void:
+	_all_button.tooltip_text = tr("All worktrees")
+	var shortcut: String = Actions.shortcut_label(&"task.new")
+	_new_task.tooltip_text = tr("New worktree") + (" (%s)" % shortcut if not shortcut.is_empty() else "")
+	_task_menu_button.tooltip_text = tr("More worktree actions")
+
+
 func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void:
 	_worktrees = _ordered(worktrees)
 	_selected = selected_path

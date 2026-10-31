@@ -14,8 +14,8 @@ extends CenterContainer
 ## `{id: StringName, label: String (else the action's), icon: StringName}`.
 ## Disabled actions are left out.
 func show_state(title: String, hint: String, actions: Array[Dictionary]) -> void:
-	_title.text = title
-	_hint.text = hint
+	_title.text = tr(title)
+	_hint.text = tr(hint)
 	_hint.visible = not hint.is_empty()
 	clear_buttons()
 	for entry: Dictionary in actions:
@@ -31,7 +31,7 @@ func show_state(title: String, hint: String, actions: Array[Dictionary]) -> void
 ## Adds a big button that calls `pressed` (when valid). Returns it.
 func add_button(label: String, icon_name: StringName, pressed: Callable) -> Button:
 	var button: Button = Button.new()
-	button.text = label
+	button.text = tr(label)
 	button.theme_type_variation = &"SuggestionButton"
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

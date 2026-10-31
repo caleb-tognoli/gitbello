@@ -27,7 +27,7 @@ var _new_button: Button = Button.new()
 func _ready() -> void:
 	var box: VBoxContainer = VBoxContainer.new()
 	add_child(box)
-	_filter.placeholder = "Filter branches"
+	_filter.placeholder = tr("Filter branches")
 	_filter.changed.connect(_rebuild)
 	_filter.submitted.connect(func(_backwards: bool) -> void: _activate_first())
 	_filter.done.connect(_on_filter_done)
@@ -44,7 +44,7 @@ func _ready() -> void:
 	_tree.gui_input.connect(_on_tree_key)
 	box.add_child(_tree)
 	var footer: HBoxContainer = HBoxContainer.new()
-	_new_button.text = "New branch…"
+	_new_button.text = tr("New branch…")
 	_new_button.icon = AppTheme.icon(&"Add")
 	_new_button.theme_type_variation = &"ToolbarButton"
 	_new_button.pressed.connect(func() -> void:
@@ -181,6 +181,13 @@ func _section(parent: TreeItem, text: String, header: bool = true) -> TreeItem:
 	return item
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_filter.placeholder = tr("Filter branches")
+		_new_button.text = tr("New branch…")
+		_rebuild()
+
+
 func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 	var item: TreeItem = _tree.create_item(parent)
 	var worktree: String = String(ref["worktree"])
@@ -188,18 +195,18 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 			and not Paths.same(worktree, session.toplevel())
 	var badge: PackedStringArray = PackedStringArray()
 	if bool(ref["gone"]):
-		badge.append("gone")
+		badge.append(tr("gone"))
 	if int(ref["ahead"]) > 0:
 		badge.append("↑%d" % int(ref["ahead"]))
 	if int(ref["behind"]) > 0:
 		badge.append("↓%d" % int(ref["behind"]))
 	if elsewhere:
-		badge.append("in %s ↗" % worktree.replace("\\", "/").get_file())
+		badge.append(tr("in %s ↗") % worktree.replace("\\", "/").get_file())
 	item.set_text(0, text)
 	item.set_text(1, " ".join(badge))
 	item.set_custom_color(1, get_theme_color(&"badge_color", THEME_TYPE))
 	item.set_tooltip_text(0, String(ref["short_name"]) + (
-			"\ntracks " + String(ref["upstream"]) if not String(ref["upstream"]).is_empty() else ""))
+			"\n" + tr("tracks %s") % String(ref["upstream"]) if not String(ref["upstream"]).is_empty() else ""))
 	if bool(ref["is_head"]):
 		item.set_icon(0, AppTheme.dot(get_theme_color(&"head_color", THEME_TYPE)))
 	item.set_metadata(0, {

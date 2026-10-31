@@ -15,12 +15,17 @@ func _ready() -> void:
 	refresh()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED:
+		refresh()
+
+
 func refresh() -> void:
 	if not is_node_ready():
 		return
 	var shortcut: String = Actions.shortcut_label(&"repo.open")
-	show_state("gitbello", "Open a repository (%s) or drop a folder here" % shortcut if not shortcut.is_empty() \
-			else "Open a repository or drop a folder here", [])
+	show_state("gitbello", tr("Open a repository (%s) or drop a folder here") % shortcut if not shortcut.is_empty() \
+			else tr("Open a repository or drop a folder here"), [])
 	var open_button: Button = add_button("Open repository…", &"Folder", func() -> void: open_requested.emit())
 	open_button.theme_type_variation = &"PrimarySuggestionButton"
 	var recent: PackedStringArray = Core.recent_repos()

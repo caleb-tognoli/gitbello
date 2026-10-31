@@ -15,10 +15,10 @@ func _ready() -> void:
 	columns = 4
 	hide_root = true
 	column_titles_visible = true
-	set_column_title(0, "Time")
-	set_column_title(1, "Repository")
-	set_column_title(2, "Command")
-	set_column_title(3, "Result")
+	set_column_title(0, tr("Time"))
+	set_column_title(1, tr("Repository"))
+	set_column_title(2, tr("Command"))
+	set_column_title(3, tr("Result"))
 	set_column_expand(0, false)
 	set_column_expand(1, false)
 	set_column_expand(3, false)
@@ -29,6 +29,14 @@ func _ready() -> void:
 	Core.commands_logged.connect(fetch)
 	visibility_changed.connect(_scroll_to_newest)
 	fetch()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		set_column_title(0, tr("Time"))
+		set_column_title(1, tr("Repository"))
+		set_column_title(2, tr("Command"))
+		set_column_title(3, tr("Result"))
 
 
 ## Appends commands logged since the last fetch and follows the newest one.

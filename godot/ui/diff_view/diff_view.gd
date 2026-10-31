@@ -137,6 +137,10 @@ func _notification(what: int) -> void:
 		queue_redraw()
 	elif what == NOTIFICATION_FOCUS_ENTER or what == NOTIFICATION_FOCUS_EXIT:
 		queue_redraw()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		if not _hover.is_empty():
+			tooltip_text = tr(EXPANDER_TIPS.get(String(_hover[1]), ""))
+		queue_redraw()
 
 
 ## Shows a diff of `line_count` lines (`split_count` side-by-side rows);
@@ -336,12 +340,15 @@ func expander_label(row: int) -> String:
 	if String(data.get("expand", "")).is_empty():
 		return ""
 	if int(data.get("gap", -1)) == _expanding_gap:
-		return "Loading…"
+		return tr("Loading…")
 	var hidden: int = int(data.get("hidden", -1))
-	var lines: String = "1 line" if hidden == 1 else "%d lines" % hidden
 	if String(data.get("text", "")).is_empty():
-		return "Show %d more %s" % [hidden, "line" if hidden == 1 else "lines"] if hidden > 0 else "Show more lines"
-	return "%s hidden" % lines if hidden > 0 else ""
+		if hidden <= 0:
+			return tr("Show more lines")
+		return tr("Show %d more line") % hidden if hidden == 1 else tr("Show %d more lines") % hidden
+	if hidden <= 0:
+		return ""
+	return tr("1 line hidden") if hidden == 1 else tr("%d lines hidden") % hidden
 
 
 ## Copies the selected text; false when nothing is selected.
@@ -942,7 +949,7 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 func _set_hover(expander: Array) -> void:
 	if expander != _hover:
 		_hover = expander
-		tooltip_text = EXPANDER_TIPS.get(String(expander[1]), "") if not expander.is_empty() else ""
+		tooltip_text = tr(EXPANDER_TIPS.get(String(expander[1]), "")) if not expander.is_empty() else ""
 		queue_redraw()
 
 

@@ -20,6 +20,7 @@ run/low_processor_mode=true
 [autoload]
 
 Core="*res://app/core/core.tscn"
+L10n="*res://app/localization/l10n.gd"
 Actions="*res://app/actions/action_registry.gd"
 
 [debug]
@@ -36,6 +37,10 @@ window/subwindows/embed_subwindows=false
 [gui]
 
 theme/custom="res://themes/app_theme.tres"
+
+[internationalization]
+
+locale/translations=PackedStringArray("res://localization/gitbello.en.translation", "res://localization/gitbello.it.translation")
 
 [rendering]
 

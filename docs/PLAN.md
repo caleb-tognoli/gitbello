@@ -153,6 +153,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - **Type variations** for the big header buttons, worktree chips, segmented toggles, section headers, toasts and the blocking overlay. Text on selected rows is checked for WCAG AA contrast against the accent.
   - This replaces `cargo xtask themes` and the generated `themes/*.tres`; AGENTS.md changes with it.
 - **Icons** (M6.5 P1): Godot editor SVG icons (MIT, notice kept with the licenses) plus git icons drawn on the same 16 px grid in the same greys: branch, commit, merge, fetch, pull, push, worktree, shelf, tag, remote. They are recoloured for the light theme, and active icons take the accent colour.
+- **Localization:** English source strings are keys in `godot/localization/gitbello.csv`, imported as Godot translations. `L10n` applies the persisted Settings → Interface → Language choice (System, English or Italian); System selects Italian for `it*` OS locales and English otherwise. Fixed app/core messages are translated at the UI boundary, while paths, refs, user content, Git commands/progress and raw stderr remain unchanged. Controls with dynamic text refresh on `NOTIFICATION_TRANSLATION_CHANGED`.
 - **Menu bar:** a `MenuBar` with `prefer_global_menu`, so macOS gets the system menu bar where Godot supports it and the other platforms an in-window bar.
 - **Export:** use custom export templates built with 3D and unneeded modules disabled to shrink the binary (M11).
 
@@ -167,7 +168,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - pull mode (`ff-only` by default, `merge` or `rebase`)
   - auto-fetch interval
   - keybindings
-  - theme override and accent colour
+  - theme override, interface language and accent colour
 - Per-repo user state (last selected branch, panel sizes, the shared sidebar width) is stored in the app's data dir, keyed by the repo's canonical path. **Never write to the user's repo**, except the optional repo-shared `.gitbello/actions.toml` that users create themselves.
 
 ### 3.9 History graph

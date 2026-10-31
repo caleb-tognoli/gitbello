@@ -28,6 +28,8 @@ const CATEGORIES: Array = [
 		"Interface",
 		[
 			[&"theme", "Theme", &"option", ["System", "Dark", "Light"], ["system", "dark", "light"]],
+			[&"language", "Language", &"option", ["System", "English", "Italian"],
+				["system", "en", "it"]],
 			[&"accent", "Accent colour", &"color"],
 		],
 	],
@@ -40,6 +42,7 @@ const DETAILS: Dictionary = {
 	&"worktree_template": "Relative paths start at the repository root. {repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.",
 	&"branch_prefix": "Starts the name of new worktrees' branches, for example caleb/",
 	&"theme": "System follows the operating system's dark or light mode",
+	&"language": "System follows the operating system's language",
 	&"accent": "Used for selections, focused fields and active controls",
 }
 const DEFAULTS: Dictionary = {
@@ -50,6 +53,7 @@ const DEFAULTS: Dictionary = {
 	&"worktree_template": ".worktrees/{branch_slug}",
 	&"branch_prefix": "",
 	&"theme": "system",
+	&"language": "system",
 	&"accent": "",
 }
 
@@ -64,15 +68,16 @@ var _refreshers: Dictionary[StringName, Callable] = {}
 var _category: String = "General"
 var _refreshing: bool = false
 var _reset: ConfirmationDialog = ConfirmationDialog.new()
+var _reset_all: Button
 
 
 func _init() -> void:
 	title = "Settings"
 	ok_button_text = "Close"
 	min_size = Vector2i(820, 520)
-	var reset: Button = add_button("Reset All…", false, &"reset")
-	reset.icon = AppTheme.icon(&"Reload")
-	reset.tooltip_text = "Restore every setting to its default"
+	_reset_all = add_button("Reset All…", false, &"reset")
+	_reset_all.icon = AppTheme.icon(&"Reload")
+	_reset_all.tooltip_text = "Restore every setting to its default"
 	custom_action.connect(_on_custom_action)
 
 	var content: VBoxContainer = VBoxContainer.new()
@@ -114,7 +119,14 @@ func _init() -> void:
 	add_child(_reset)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_translate()
+		_filter()
+
+
 func _ready() -> void:
+	_translate()
 	get_ok_button().theme_type_variation = &"PrimaryButton"
 	_reset.get_ok_button().theme_type_variation = &"DangerButton"
 	for row: Dictionary in _rows:
@@ -161,6 +173,7 @@ func reset_to_defaults() -> void:
 		return
 	Core.set_theme_choice(String(DEFAULTS[&"theme"]))
 	ThemeManager.apply(self)
+	L10n.apply(String(DEFAULTS[&"language"]))
 	_refresh(&"")
 	_show_error(&"", "")
 
@@ -169,8 +182,10 @@ func _build() -> void:
 	for category: Array in CATEGORIES:
 		var category_name: String = category[0]
 		categories.add_item(category_name)
+		categories.set_item_metadata(categories.item_count - 1, category_name)
 		var header: Label = Label.new()
 		header.text = category_name
+		header.set_meta(&"category", category_name)
 		header.theme_type_variation = &"HeaderSmall"
 		_list.add_child(header)
 		_headers.append(header)
@@ -224,6 +239,7 @@ func _create_control(key: StringName, kind: StringName, options: Array) -> Contr
 		&"line":
 			var line: LineEdit = LineEdit.new()
 			line.placeholder_text = options[0]
+			line.set_meta(&"placeholder", options[0])
 			line.text_submitted.connect(func(_text: String) -> void: _commit_line(key, line))
 			line.focus_exited.connect(func() -> void: _commit_line(key, line))
 			_refreshers[key] = func() -> void: line.text = String(_current_value(key))
@@ -234,6 +250,7 @@ func _create_control(key: StringName, kind: StringName, options: Array) -> Contr
 			spin.max_value = options[0][1]
 			spin.step = options[0][2]
 			spin.suffix = options[0][3]
+			spin.set_meta(&"suffix", options[0][3])
 			spin.alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			spin.value_changed.connect(func(value: float) -> void: _set_value(key, int(value)))
 			_refreshers[key] = func() -> void: spin.set_value_no_signal(int(_current_value(key)))
@@ -246,6 +263,7 @@ func _create_control(key: StringName, kind: StringName, options: Array) -> Contr
 			var values: Array = options[1]
 			for label: String in labels:
 				option.add_item(label)
+				option.set_item_metadata(option.item_count - 1, label)
 			option.item_selected.connect(func(index: int) -> void: _set_value(key, values[index]))
 			_refreshers[key] = func() -> void:
 				option.select(maxi(0, values.find(_current_value(key))))
@@ -295,6 +313,8 @@ func _set_value(key: StringName, value: Variant) -> bool:
 		if key == &"theme":
 			Core.set_theme_choice(String(value))
 			ThemeManager.apply(self)
+		elif key == &"language":
+			error = L10n.set_choice(String(value))
 		else:
 			error = Core.set_settings({key: value})
 			if error.is_empty() and key == &"accent":
@@ -339,27 +359,28 @@ func _filter() -> void:
 	var query: String = search.text().strip_edges().to_lower()
 	categories.deselect_all()
 	for i: int in categories.item_count:
-		if query.is_empty() and categories.get_item_text(i) == _category:
+		if query.is_empty() and String(categories.get_item_metadata(i)) == _category:
 			categories.select(i)
 	var shown_categories: Dictionary = {}
 	for row: Dictionary in _rows:
-		var described: String = "%s %s" % [row.text, row.details]
+		var described: String = "%s %s %s %s" % [row.text, row.details, tr(row.text), tr(row.details)]
 		var shown: bool = query in described.to_lower() if not query.is_empty() else row.category == _category
 		(row.row as Control).visible = shown
 		if shown:
 			shown_categories[row.category] = true
 	for header: Label in _headers:
-		header.visible = not query.is_empty() and shown_categories.has(header.text)
+		header.visible = not query.is_empty() and shown_categories.has(String(header.get_meta(&"category")))
 
 
 func _show_error(key: StringName, text: String) -> void:
-	_error.text = text
+	var message: String = tr(L10n.config_error(text))
+	_error.text = message
 	_error.visible = not text.is_empty()
-	_error.tooltip_text = text
+	_error.tooltip_text = _error.text
 	if key != &"":
 		var control: Control = get_control(key)
 		if control != null:
-			control.tooltip_text = text if not text.is_empty() else String(DETAILS.get(key, ""))
+			control.tooltip_text = message if not text.is_empty() else tr(String(DETAILS.get(key, "")))
 
 
 func _stored_accent(color: Color) -> String:
@@ -367,9 +388,39 @@ func _stored_accent(color: Color) -> String:
 
 
 func _on_category_selected(index: int) -> void:
-	_category = categories.get_item_text(index)
+	_category = String(categories.get_item_metadata(index))
 	search.set_text("")
 	_filter()
+
+
+func _translate() -> void:
+	title = tr("Settings")
+	ok_button_text = tr("Close")
+	search.placeholder = tr("Filter settings")
+	_reset_all.text = tr("Reset All…")
+	_reset_all.tooltip_text = tr("Restore every setting to its default")
+	_reset.title = tr("Reset settings")
+	_reset.dialog_text = tr("Restore every setting to its default?")
+	_reset.ok_button_text = tr("Reset")
+	for i: int in categories.item_count:
+		categories.set_item_text(i, tr(String(categories.get_item_metadata(i))))
+	for header: Label in _headers:
+		header.text = tr(String(header.get_meta(&"category")))
+	for row: Dictionary in _rows:
+		var label: Label = row.label
+		label.text = tr(row.text)
+		label.tooltip_text = tr(row.details)
+		(row.revert as Button).tooltip_text = tr("Revert to the default")
+		var control: Control = row.control
+		control.tooltip_text = label.tooltip_text
+		if control is OptionButton:
+			var option: OptionButton = control
+			for i: int in option.item_count:
+				option.set_item_text(i, tr(String(option.get_item_metadata(i))))
+		elif control is LineEdit:
+			(control as LineEdit).placeholder_text = tr(String(control.get_meta(&"placeholder", "")))
+		elif control is SpinBox:
+			(control as SpinBox).suffix = tr(String(control.get_meta(&"suffix", "")))
 
 
 func _on_custom_action(action: StringName) -> void:

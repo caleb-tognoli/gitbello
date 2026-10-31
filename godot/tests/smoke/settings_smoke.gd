@@ -8,7 +8,8 @@ const MAIN: PackedScene = preload("res://app/main/main.tscn")
 func run() -> void:
 	var before: Dictionary = Core.settings()
 	var before_theme: String = Core.theme_choice()
-	Core.set_settings({"auto_fetch_minutes": 10, "branch_prefix": "", "accent": ""})
+	Core.set_settings({"auto_fetch_minutes": 10, "branch_prefix": "", "accent": "", "language": "en"})
+	L10n.apply("en")
 	Core.set_theme_choice("system")
 	var main: Main = MAIN.instantiate() as Main
 	add_child(main)
@@ -46,6 +47,13 @@ func run() -> void:
 	expect_eq(String(Core.settings()["branch_prefix"]), "caleb/", "a valid prefix saves")
 
 	settings.show_category("Interface")
+	var language: OptionButton = settings.get_control(&"language") as OptionButton
+	language.select(2)
+	language.item_selected.emit(2)
+	expect_eq(String(Core.settings()["language"]), "it", "the language choice saves")
+	expect_eq(TranslationServer.get_locale(), "it", "the language applies immediately")
+	settings.get_revert_button(&"language").pressed.emit()
+	expect_eq(String(Core.settings()["language"]), "system", "revert restores the System language")
 	var theme: OptionButton = settings.get_control(&"theme") as OptionButton
 	theme.select(2)
 	theme.item_selected.emit(2)
@@ -65,10 +73,12 @@ func run() -> void:
 	settings._reset.confirmed.emit()
 	expect_eq(int(Core.settings()["auto_fetch_minutes"]), 10, "Reset All restores settings")
 	expect_eq(Core.theme_choice(), "system", "Reset All restores the theme")
+	expect_eq(String(Core.settings()["language"]), "system", "Reset All restores the language")
 	settings._reset.hide()
 	settings.hide()
 
 	Core.set_settings(before)
 	Core.set_theme_choice(before_theme)
+	L10n.apply(String(before.get("language", "system")))
 	main.queue_free()
 	await get_tree().process_frame

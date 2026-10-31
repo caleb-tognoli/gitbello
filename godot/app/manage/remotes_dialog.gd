@@ -12,14 +12,14 @@ var _buttons: Dictionary[String, Button] = {}
 
 
 func _ready() -> void:
-	title = "Remotes"
-	ok_button_text = "Close"
+	title = tr("Remotes")
+	ok_button_text = tr("Close")
 	var box: VBoxContainer = VBoxContainer.new()
 	add_child(box)
 	_tree.hide_root = true
 	_tree.columns = 2
 	_tree.column_titles_visible = true
-	_tree.set_column_title(0, "Name")
+	_tree.set_column_title(0, tr("Name"))
 	_tree.set_column_title(1, "URL")
 	_tree.set_column_expand(0, false)
 	_tree.set_column_custom_minimum_width(0, 140)
@@ -33,11 +33,23 @@ func _ready() -> void:
 	for entry: Array in [["add", "Add…", &"Add"], ["url", "Change URL…", &"Rename"], ["rename", "Rename…", &"Rename"],
 			["remove", "Remove…", &"Remove"]]:
 		var button: Button = Button.new()
-		button.text = entry[1]
+		button.text = tr(entry[1])
+		button.set_meta(&"label", entry[1])
 		button.icon = AppTheme.icon(entry[2])
 		button.pressed.connect(_run.bind(String(entry[0])))
 		row.add_child(button)
 		_buttons[String(entry[0])] = button
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		title = tr("Remotes")
+		ok_button_text = tr("Close")
+		_tree.set_column_title(0, tr("Name"))
+		for button: Button in _buttons.values():
+			button.text = tr(String(button.get_meta(&"label")))
+		if _session != null:
+			_rebuild()
 
 
 ## Shows the remotes of `ops`' worktree.
@@ -84,7 +96,7 @@ func _rebuild() -> void:
 		var fetch_url: String = String(remote["fetch_url"])
 		var push_url: String = String(remote["push_url"])
 		item.set_text(0, String(remote["name"]))
-		item.set_text(1, fetch_url if fetch_url == push_url else "%s (push: %s)" % [fetch_url, push_url])
+		item.set_text(1, fetch_url if fetch_url == push_url else tr("%s (push: %s)") % [fetch_url, push_url])
 		item.set_tooltip_text(1, item.get_text(1))
 		if String(remote["name"]) == chosen:
 			item.select(0)

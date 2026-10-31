@@ -28,6 +28,8 @@ cargo xtask smoke    # headless Godot smoke tests
 
 `cargo xtask help` lists every task.
 
+The interface is available in English and Italian. Choose **Settings → Interface → Language**, or use **System** to follow the OS locale.
+
 ## Layout
 
 - `rust/crates/gitbello-core`: all git logic, models and scheduling (no Godot dependency)

@@ -54,7 +54,7 @@ func show_worktree(path: String) -> bool:
 		return true
 	var opened: RepoSession = Core.open_session(path)
 	if opened == null:
-		notice.emit("Cannot open the worktree", Core.start_error())
+		notice.emit("Cannot open the worktree", L10n.runtime_error(Core.start_error()))
 		return false
 	_activate(_add_view(opened))
 	return true
@@ -195,6 +195,8 @@ func summary() -> String:
 	var lines: PackedStringArray = PackedStringArray()
 	for wt: Dictionary in WorktreeStrip._ordered(worktrees()):
 		var state: String = String(wt["badge"])
+		for word: String in ["merging", "rebasing", "cherry-picking", "reverting", "bisecting"]:
+			state = state.replace(word, tr(word))
 		lines.append("%s · %s%s" % [String(wt["name"]), String(wt["branch"]), "  " + state if not state.is_empty() else ""])
 	return "\n".join(lines) if not lines.is_empty() else repo_path()
 

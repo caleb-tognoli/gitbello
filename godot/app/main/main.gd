@@ -81,13 +81,14 @@ func _ready() -> void:
 	_welcome.open_requested.connect(func() -> void: Actions.run_action(&"repo.open"))
 	_welcome.recent_chosen.connect(open_repo)
 	_register_actions()
+	_update_localized_actions()
 	_menu_bar.dynamic_menus["Open recent"] = _recent_entries
 	_menu_strip.visible = not _menu_bar.is_native_menu()
 
-	if not Core.start_error().is_empty():
-		_toasts.show_toast("gitbello cannot run git", Core.start_error())
-	if not Core.config_warning().is_empty():
-		_toasts.show_toast("Settings file ignored", Core.config_warning())
+	if not L10n.runtime_error(Core.start_error()).is_empty():
+		_toasts.show_toast("gitbello cannot run git", L10n.runtime_error(Core.start_error()))
+	if not L10n.config_error(Core.config_warning()).is_empty():
+		_toasts.show_toast("Settings file ignored", L10n.config_error(Core.config_warning()))
 	_restore_tabs()
 	var repo: String = repo_from_args(OS.get_cmdline_user_args())
 	if not repo.is_empty():
@@ -105,6 +106,11 @@ func _notification(what: int) -> void:
 	elif what == NOTIFICATION_THEME_CHANGED and is_node_ready():
 		_apply_theme()
 		_update_tab_icons()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_update_localized_actions()
+		_update_view()
+		for page: RepoTab in _pages:
+			_on_page_state(page)
 
 
 static func repo_from_args(args: PackedStringArray) -> String:
@@ -126,7 +132,7 @@ func open_repo(path: String) -> RepoTab:
 			return _pages[i]
 	var session: RepoSession = Core.open_session(path)
 	if session == null:
-		_toasts.show_toast("Cannot open repository", Core.start_error())
+		_toasts.show_toast("Cannot open repository", L10n.runtime_error(Core.start_error()))
 		return null
 	for i: int in _pages.size():
 		if _pages[i].view_for(session.repo_path()) != null:
@@ -242,7 +248,7 @@ func _save_tabs() -> void:
 			paths.append(p.repo_path())
 	var error: String = Core.save_tabs(paths, _tabs.current_tab)
 	if not error.is_empty():
-		_toasts.show_toast("Cannot save settings", error)
+		_toasts.show_toast("Cannot save settings", L10n.config_error(error))
 
 
 func _update_view() -> void:
@@ -251,7 +257,7 @@ func _update_view() -> void:
 	for i: int in _pages.size():
 		_pages[i].visible = i == _tabs.current_tab
 	var view: WorktreeView = current_view()
-	_status_label.text = view.worktree_path() if view != null else "No repository open"
+	_status_label.text = view.worktree_path() if view != null else tr("No repository open")
 	_status_label.tooltip_text = _status_label.text
 	_queue_fit_tabs()
 
@@ -787,6 +793,13 @@ func _register_worktree_actions() -> void:
 				return openable.call() and not bool(wt["is_main"]))
 
 
+func _update_localized_actions() -> void:
+	for i: int in CHIP_SHORTCUTS:
+		Actions.get_action(StringName("worktree.select_%d" % (i + 1))).label = tr("Show worktree %d") % (i + 1)
+	for choice: String in ["system", "light", "dark"]:
+		Actions.get_action(StringName("view.theme_" + choice)).label = tr("Theme: %s") % tr(choice.capitalize())
+
+
 func _open_settings() -> void:
 	_settings_window.open()
 
@@ -884,7 +897,7 @@ func _show_open_dialog() -> void:
 	dialog.use_native_dialog = true
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.title = "Open repository"
+	dialog.title = tr("Open repository")
 	dialog.dir_selected.connect(func(path: String) -> void: open_repo(path))
 	dialog.visibility_changed.connect(func() -> void:
 		if not dialog.visible:
@@ -894,8 +907,8 @@ func _show_open_dialog() -> void:
 
 
 func _show_about() -> void:
-	_about.title = "About gitbello"
-	_about.dialog_text = "gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s" % [
+	_about.title = tr("About gitbello")
+	_about.dialog_text = tr("gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s") % [
 		Core.core_version(), Core.git_version(), Engine.get_version_info()["string"]]
 	_about.popup_centered()
 
@@ -924,8 +937,8 @@ func _palette_entries() -> Array[Dictionary]:
 			var full: String = String(ref["name"])
 			var ops: RepoOps = page.ops()
 			entries.append({
-				"label": "Check out: " + name,
-				"detail": "branch" if local else "remote branch",
+				"label": tr("Check out: %s") % name,
+				"detail": tr("branch") if local else tr("remote branch"),
 				"run": (func() -> void: ops.checkout_branch(name)) if local
 						else (func() -> void: ops.checkout_remote(full)),
 			})
@@ -933,8 +946,8 @@ func _palette_entries() -> Array[Dictionary]:
 		var index: int = i
 		var tab: RepoTab = _pages[i]
 		entries.append({
-			"label": "Go to: " + tab.title(),
-			"detail": "repository",
+			"label": tr("Go to: %s") % tab.title(),
+			"detail": tr("repository"),
 			"run": func() -> void: _tabs.current_tab = index,
 		})
 		for wt: Dictionary in tab.worktrees():
@@ -942,13 +955,13 @@ func _palette_entries() -> Array[Dictionary]:
 				continue
 			var path: String = String(wt["path"])
 			entries.append({
-				"label": "Go to: %s · %s" % [tab.title(), String(wt["name"])],
-				"detail": "worktree · " + String(wt["branch"]),
+				"label": tr("Go to: %s · %s") % [tab.title(), String(wt["name"])],
+				"detail": tr("worktree") + " · " + String(wt["branch"]),
 				"run": func() -> void:
 					_tabs.current_tab = index
 					tab.show_worktree(path),
 			})
 	for entry: Dictionary in _recent_entries():
-		entries.append({"label": "Open recent: " + String(entry["label"]), "detail": String(entry["tooltip"]),
+		entries.append({"label": tr("Open recent: %s") % String(entry["label"]), "detail": String(entry["tooltip"]),
 			"run": entry["run"]})
 	return entries

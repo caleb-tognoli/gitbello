@@ -81,6 +81,8 @@ var _shelves_badge: CountBadge = CountBadge.new()
 var _changes_badge: CountBadge = CountBadge.new()
 ## The blocking job the overlay shows, or -1.
 var _overlay_job: int = -1
+var _overlay_doing: String = ""
+var _overlay_detail: String = ""
 ## One left-column width shared by Changes, History and Shelves.
 var _sidebar_width: int = 0
 
@@ -480,11 +482,18 @@ func _on_state() -> void:
 	state_changed.emit()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_on_state()
+		if _overlay_job >= 0:
+			_update_overlay()
+
+
 func _update_header() -> void:
 	var branch: String = session.current_branch()
 	var head: String = String(session.status().get("oid", ""))
 	if branch.is_empty():
-		branch = "Detached at %s" % head.left(7) if not head.is_empty() else "No branch yet"
+		branch = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("No branch yet")
 	_branch_button.show_state(branch, AppTheme.icon(&"GitBranch"), session.is_ready())
 	_branch_button.tooltip_text = Actions.tooltip(&"branch.switch")
 	var state: String = _ops.sync_state()
@@ -492,26 +501,26 @@ func _update_header() -> void:
 	var ahead: int = int(badge.get("ahead", 0))
 	var behind: int = int(badge.get("behind", 0))
 	var caption: String = {
-		"publish": "Publish branch",
-		"push": "Push ↑%d" % ahead,
-		"pull": "Pull ↓%d" % behind,
-		"sync": "Sync ↓%d ↑%d" % [behind, ahead],
-		"fetch": "Fetch",
+		"publish": tr("Publish branch"),
+		"push": tr("Push ↑%d") % ahead,
+		"pull": tr("Pull ↓%d") % behind,
+		"sync": tr("Sync ↓%d ↑%d") % [behind, ahead],
+		"fetch": tr("Fetch"),
 	}[state]
 	_sync_button.show_state(caption, AppTheme.icon(SYNC_ICONS[state]), session.is_ready() and session.can_fetch())
 	var tooltip: String = {
-		"publish": "Push %s and set its upstream" % session.current_branch(),
-		"push": "Push your commits to %s" % session.default_remote(),
-		"pull": "Pull the new commits from %s" % session.default_remote(),
-		"sync": "Pull the new commits, then push yours",
-		"fetch": "Fetch from %s" % session.default_remote(),
+		"publish": tr("Push %s and set its upstream") % session.current_branch(),
+		"push": tr("Push your commits to %s") % session.default_remote(),
+		"pull": tr("Pull the new commits from %s") % session.default_remote(),
+		"sync": tr("Pull the new commits, then push yours"),
+		"fetch": tr("Fetch from %s") % session.default_remote(),
 	}[state]
 	if feedback != null:
 		var seconds: int = feedback.seconds_since_fetch(session.repo_path())
 		if seconds >= 0:
-			tooltip += "\nFetched %s" % _ago(seconds)
+			tooltip += "\n" + tr("Fetched %s") % _ago(seconds)
 	if not session.can_fetch() and session.is_ready():
-		tooltip = "This repository has no remote. Add one with Repository → Remotes…"
+		tooltip = tr("This repository has no remote. Add one with Repository → Remotes…")
 	_sync_button.tooltip_text = tooltip
 
 
@@ -521,21 +530,25 @@ func _update_banner() -> void:
 	if operation.is_empty():
 		return
 	var doing: String = {
-		"merge": "Merging", "rebase": "Rebasing", "cherry-pick": "Cherry-picking",
-		"revert": "Reverting", "bisect": "Bisecting",
+		"merge": tr("Merging"), "rebase": tr("Rebasing"), "cherry-pick": tr("Cherry-picking"),
+		"revert": tr("Reverting"), "bisect": tr("Bisecting"),
 	}.get(operation, operation.capitalize())
 	var conflicts: int = int(session.badge().get("conflicts", 0))
 	var where: String = session.current_branch()
-	_banner_label.text = "%s%s%s" % [doing, " into " + where if not where.is_empty() and operation == "merge" else "",
-			" · %d conflict%s" % [conflicts, "" if conflicts == 1 else "s"] if conflicts > 0 else ""]
+	var banner_text: String = doing
+	if not where.is_empty() and operation == "merge":
+		banner_text += tr(" into ") + where
+	if conflicts > 0:
+		banner_text += tr(" · %d conflict") % conflicts if conflicts == 1 else tr(" · %d conflicts") % conflicts
+	_banner_label.text = banner_text
 
 
 static func _ago(seconds: int) -> String:
 	if seconds < 60:
-		return "just now"
+		return TranslationServer.translate("just now")
 	if seconds < 3600:
-		return "%d min ago" % (seconds / 60)
-	return "%d h ago" % (seconds / 3600)
+		return TranslationServer.translate("%d min ago") % (seconds / 60)
+	return TranslationServer.translate("%d h ago") % (seconds / 3600)
 
 
 # --- Blocking jobs --------------------------------------------------------------
@@ -544,7 +557,9 @@ func _on_job_started(job: int, label: String) -> void:
 	if not BLOCKING.has(label):
 		return
 	_overlay_job = job
-	_overlay_label.text = BLOCKING[label] + "…"
+	_overlay_doing = BLOCKING[label]
+	_overlay_detail = ""
+	_update_overlay()
 	_overlay_progress.indeterminate = true
 	get_tree().create_timer(OVERLAY_DELAY).timeout.connect(func() -> void:
 		if _overlay_job == job:
@@ -554,9 +569,15 @@ func _on_job_started(job: int, label: String) -> void:
 func _on_job_progress(job: int, label: String, percent: int, text: String) -> void:
 	if job != _overlay_job:
 		return
-	_overlay_label.text = BLOCKING.get(label, label.capitalize()) + "…" + ("  " + text if not text.is_empty() else "")
+	_overlay_doing = BLOCKING.get(label, label.capitalize())
+	_overlay_detail = text
+	_update_overlay()
 	_overlay_progress.indeterminate = percent < 0
 	_overlay_progress.value = maxf(0.0, float(percent))
+
+
+func _update_overlay() -> void:
+	_overlay_label.text = tr(_overlay_doing) + "…" + ("  " + _overlay_detail if not _overlay_detail.is_empty() else "")
 
 
 func _on_job_ended(job: int) -> void:
@@ -570,7 +591,7 @@ func _on_job_ended(job: int) -> void:
 func _on_missing() -> void:
 	_layout.hide()
 	_error_panel.show()
-	_error_label.text = "%s\n\nThis worktree's folder no longer exists." % worktree_path()
+	_error_label.text = tr("%s\n\nThis worktree's folder no longer exists.") % worktree_path()
 	state_changed.emit()
 
 
@@ -579,7 +600,7 @@ func _on_open_failed(error: Dictionary) -> void:
 	_error_panel.show()
 	_error_label.text = "%s\n%s\n\n%s" % [
 		session.repo_path(),
-		String(error.get("title", "")),
-		String(error.get("message", "")),
+		tr(String(error.get("title", ""))),
+		tr(String(error.get("message", ""))),
 	]
 	state_changed.emit()

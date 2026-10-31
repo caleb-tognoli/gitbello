@@ -6,11 +6,12 @@ extends AcceptDialog
 var _tree: Tree = Tree.new()
 var _hint: Label = Label.new()
 var _capturing: StringName = &""
+var _buttons: Array[Button] = []
 
 
 func _init() -> void:
-	title = "Keyboard shortcuts"
-	ok_button_text = "Close"
+	title = tr("Keyboard shortcuts")
+	ok_button_text = tr("Close")
 	var layout: VBoxContainer = VBoxContainer.new()
 	add_child(layout)
 	_tree.columns = 2
@@ -22,9 +23,11 @@ func _init() -> void:
 	layout.add_child(buttons)
 	for spec: Array in [["Change", _start_capture], ["Reset", _reset], ["Remove", _remove]]:
 		var button: Button = Button.new()
-		button.text = String(spec[0])
+		button.text = tr(String(spec[0]))
+		button.set_meta(&"label", spec[0])
 		button.pressed.connect(spec[1])
 		buttons.add_child(button)
+		_buttons.append(button)
 	_hint.theme_type_variation = &"DimLabel"
 	layout.add_child(_hint)
 	Actions.actions_changed.connect(_rebuild)
@@ -50,9 +53,18 @@ func _selected() -> StringName:
 	return StringName(item.get_metadata(0)) if item != null else &""
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED:
+		title = tr("Keyboard shortcuts")
+		ok_button_text = tr("Close")
+		for button: Button in _buttons:
+			button.text = tr(String(button.get_meta(&"label")))
+		_rebuild()
+
+
 func _start_capture() -> void:
 	_capturing = _selected()
-	_hint.text = "Press the new shortcut (Escape to cancel)" if _capturing != &"" else "Select an action first"
+	_hint.text = tr("Press the new shortcut (Escape to cancel)") if _capturing != &"" else tr("Select an action first")
 
 
 func _reset() -> void:
@@ -81,6 +93,7 @@ func _input(event: InputEvent) -> void:
 		return # modifier only; wait for the key
 	var taken: StringName = Actions.action_for_event(key)
 	Actions.set_shortcut(_capturing, text)
-	_hint.text = "%s set%s" % [Shortcuts.display(text),
-			" (also used by %s)" % Actions.get_action(taken).label if taken != &"" and taken != _capturing else ""]
+	_hint.text = tr("%s set") % Shortcuts.display(text)
+	if taken != &"" and taken != _capturing:
+		_hint.text += tr(" (also used by %s)") % Actions.get_action(taken).label
 	_capturing = &""

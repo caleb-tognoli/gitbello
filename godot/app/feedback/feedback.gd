@@ -84,16 +84,16 @@ func track(session: RepoSession, job: int, doing: String, done: String = "",
 	var item: Tracked = Tracked.new()
 	item.session = session
 	item.job = job
-	item.doing = doing
-	item.done = done
+	item.doing = tr(doing)
+	item.done = tr(done)
 	item.then = then
 	item.undo = undo
 	item.origin = origin if origin != null else Actions.origin()
 	_tracked.append(item)
 	if item.origin != null:
-		_set_busy(item.origin, true, doing, -1)
+		_set_busy(item.origin, true, item.doing, -1)
 	elif toasts != null:
-		item.toast = toasts.show_progress(doing + "…", func() -> void: session.cancel_job(job))
+		item.toast = toasts.show_progress(item.doing + "…", func() -> void: session.cancel_job(job))
 
 
 ## Whether `session` runs a job in `VERBS`.

@@ -94,8 +94,14 @@ const ICONS: Dictionary[StringName, StringName] = {
 class Action:
 	extends RefCounted
 	var id: StringName
-	var label: String
-	var category: String
+	var _label: String
+	var label: String:
+		get: return tr(_label)
+		set(value): _label = value
+	var _category: String
+	var category: String:
+		get: return tr(_category)
+		set(value): _category = value
 	var run: Callable
 	## Returns bool; an invalid Callable means always enabled.
 	var enabled: Callable
@@ -115,7 +121,7 @@ class Action:
 	func disabled_reason() -> String:
 		if is_enabled():
 			return ""
-		return String(reason.call()) if reason.is_valid() else ""
+		return tr(String(reason.call())) if reason.is_valid() else ""
 
 
 var _actions: Dictionary[StringName, Action] = {}

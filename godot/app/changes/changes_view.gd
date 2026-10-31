@@ -223,8 +223,16 @@ func shelf_files_split() -> HSplitContainer:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_shelf_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		reload()
+		if _shelves_mode:
+			_on_shelf_selected(selected_shelf())
+		else:
+			_on_diff_changed()
 
 
 func _apply_shelf_theme() -> void:
@@ -300,18 +308,18 @@ func _on_shelf_selected(shelf: Dictionary) -> void:
 	if shelf.is_empty():
 		return
 	_shelf_title.text = String(shelf["name"])
-	_shelf_title.tooltip_text = "%s\nClick to rename" % shelf["name"]
-	(%RestoreShelf as Button).tooltip_text = "Restore into %s; remove the shelf after success" % session.current_branch()
+	_shelf_title.tooltip_text = tr("%s\nClick to rename") % shelf["name"]
+	(%RestoreShelf as Button).tooltip_text = tr("Restore into %s; remove the shelf after success") % session.current_branch()
 	(%DiscardShelf as Button).tooltip_text = Actions.tooltip(&"shelf.discard")
 	var branch: String = String(shelf["branch"])
-	_shelf_branch.text = branch if not branch.is_empty() else "No branch"
+	_shelf_branch.text = branch if not branch.is_empty() else tr("No branch")
 	var offset: int = int(Time.get_time_zone_from_system()["bias"]) * 60
 	_shelf_date.text = Time.get_datetime_string_from_unix_time(int(shelf["time"]) + offset, true).left(16)
 	_shelf_hash.text = oid.left(10)
 	_shelf_hash.tooltip_text = oid
 	_shelf_auto.visible = bool(shelf["auto"])
 	if changed:
-		_shelf_files_header.set_text("Loading files…")
+		_shelf_files_header.set_text(tr("Loading files…"))
 		session.load_shelf_files(oid)
 
 
@@ -427,10 +435,10 @@ func _update_offer() -> void:
 	var branch: String = session.current_branch()
 	if files.is_empty():
 		session.load_shelf_files(oid)
-		_offer_label.text = "Changes were left on %s" % branch
+		_offer_label.text = tr("Changes were left on %s") % branch
 	else:
-		_offer_label.text = "%s left on %s" % [
-			"1 change was" if files.size() == 1 else "%d changes were" % files.size(), branch]
+		_offer_label.text = tr("1 change was left on %s") % branch if files.size() == 1 \
+				else tr("%d changes were left on %s") % [files.size(), branch]
 	_offer_button.tooltip_text = Actions.tooltip(&"shelf.restore_left")
 
 
@@ -591,11 +599,11 @@ func discard_selection() -> void:
 func _discard_paths(paths: PackedStringArray) -> void:
 	if paths.is_empty():
 		return
-	_ask("Discard the changes in %s? They go back to the last commit. You can undo this with %s." % [
+	_ask(tr("Discard the changes in %s? They go back to the last commit. You can undo this with %s.") % [
 		_describe(paths), Actions.shortcut_label(&"changes.undo_discard")], func() -> void:
 		var job: int = session.discard_paths(paths)
 		if feedback != null:
-			feedback.track(session, job, "Discarding", "Discarded the changes in %s" % _describe(paths),
+			feedback.track(session, job, "Discarding", tr("Discarded the changes in %s") % _describe(paths),
 					null, Callable(), undo_discard))
 
 
@@ -632,23 +640,23 @@ func _discard_lines() -> void:
 	if rows.is_empty():
 		return
 	var path: String = String(session.diff_info().get("path", ""))
-	var what: String = "the selected lines" if rows.size() > 1 else "the selected line"
-	_ask("Discard %s in %s? You can undo this with %s." % [
+	var what: String = tr("the selected lines") if rows.size() > 1 else tr("the selected line")
+	_ask(tr("Discard %s in %s? You can undo this with %s.") % [
 		what, path.get_file(), Actions.shortcut_label(&"changes.undo_discard")],
 		func() -> void: session.apply_lines("discard", rows))
 
 
 func _ask(text: String, on_confirm: Callable) -> void:
-	_confirm.title = "Discard changes"
+	_confirm.title = tr("Discard changes")
 	_confirm.dialog_text = text
-	_confirm.ok_button_text = "Discard"
+	_confirm.ok_button_text = tr("Discard")
 	_pending_discard = on_confirm
 	_confirm.popup_centered()
 	_confirm.get_ok_button().grab_focus()
 
 
 static func _describe(paths: PackedStringArray) -> String:
-	return paths[0].get_file() if paths.size() == 1 else "%d files" % paths.size()
+	return paths[0].get_file() if paths.size() == 1 else TranslationServer.translate("%d files") % paths.size()
 
 
 ## "N changed files" ("2 of N" while filtered) and the check-all box, under
@@ -660,11 +668,11 @@ func _update_header() -> void:
 	_filter_bar.visible = count > 0 and not _shelves_mode
 	_list_header.visible = count > 0 and not _shelves_mode
 	var text: String = ListHeader.count_text(count, "changed file")
-	_list_header.set_text("%d of %s" % [shown, text] if filtered else text)
+	_list_header.set_text(tr("%d of %s") % [shown, text] if filtered else text)
 	_no_match.visible = count > 0 and shown == 0
 	var state: String = session.selection_state() if session != null else "none"
-	var what: String = "every shown file" if filtered else "every file"
-	_list_header.show_check(state, ("Leave out " if state == "all" else "Include ") + what)
+	var what: String = tr("every shown file") if filtered else tr("every file")
+	_list_header.show_check(state, (tr("Leave out ") if state == "all" else tr("Include ")) + what)
 
 
 ## Whether including or leaving out a file can change what the filter shows.
@@ -703,11 +711,11 @@ func _update_empty() -> void:
 	var behind: int = int(badge.get("behind", 0))
 	var actions: Array[Dictionary] = []
 	if ahead > 0 and behind > 0:
-		actions.append({"id": &"sync.sync", "label": "Sync ↓%d ↑%d" % [behind, ahead], "icon": &"GitFetch"})
+		actions.append({"id": &"sync.sync", "label": tr("Sync ↓%d ↑%d") % [behind, ahead], "icon": &"GitFetch"})
 	elif behind > 0:
-		actions.append({"id": &"sync.sync", "label": "Pull ↓%d" % behind, "icon": &"GitPull"})
+		actions.append({"id": &"sync.sync", "label": tr("Pull ↓%d") % behind, "icon": &"GitPull"})
 	elif ahead > 0:
-		actions.append({"id": &"sync.sync", "label": "Push ↑%d" % ahead, "icon": &"GitPush"})
+		actions.append({"id": &"sync.sync", "label": tr("Push ↑%d") % ahead, "icon": &"GitPush"})
 	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})

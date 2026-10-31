@@ -60,13 +60,18 @@ func texts() -> Dictionary:
 	return {"name": _name.text, "branch": _branch.text if _branch.visible else "", "badge": _badge.text}
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_show()
+
+
 func _show() -> void:
 	if worktree.is_empty():
 		return
 	var name: String = String(worktree["name"])
 	var branch: String = String(worktree["branch"])
 	if bool(worktree["detached"]):
-		branch = "detached " + String(worktree["head"]).left(7)
+		branch = tr("detached %s") % String(worktree["head"]).left(7)
 	_name.text = name
 	_branch.text = branch
 	_branch.visible = not branch.is_empty() and branch != name
@@ -90,11 +95,11 @@ func _show() -> void:
 	_marker.visible = marker != &""
 	var tooltip: PackedStringArray = PackedStringArray([String(worktree["path"])])
 	if bool(worktree["prunable"]):
-		tooltip.append("The folder is missing.")
+		tooltip.append(tr("The folder is missing."))
 	if bool(worktree["locked"]):
-		tooltip.append("Locked" + (": " + String(worktree["lock_reason"]) if not String(worktree["lock_reason"]).is_empty() else ""))
+		tooltip.append(tr("Locked") + (": " + String(worktree["lock_reason"]) if not String(worktree["lock_reason"]).is_empty() else ""))
 	if not String(worktree.get("operation", "")).is_empty():
-		tooltip.append("%s in progress" % String(worktree["operation"]).capitalize())
+		tooltip.append(tr("%s in progress") % tr(String(worktree["operation"]).capitalize()))
 	tooltip_text = "\n".join(tooltip)
 
 

@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://tivlcovvfnyb"
+
+[deps]
+
+files=["res://localization/gitbello.en.translation", "res://localization/gitbello.it.translation"]
+
+source_file="res://localization/gitbello.csv"
+dest_files=["res://localization/gitbello.en.translation", "res://localization/gitbello.it.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

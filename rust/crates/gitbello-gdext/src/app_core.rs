@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use gitbello_core::changes::split_message;
-use gitbello_core::config::{parse_accent, ThemeChoice};
+use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
 use gitbello_core::diff::rename_parts;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
@@ -611,8 +611,8 @@ impl AppCore {
 
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
-    /// worktree_template, branch_prefix, accent}`; an empty terminal command means the
-    /// platform's, an empty accent the app's default (else `#rrggbb`).
+    /// worktree_template, branch_prefix, language, accent}`; an empty terminal command means
+    /// the platform's, an empty accent the app's default (else `#rrggbb`).
     #[func]
     fn settings(&self) -> VarDictionary {
         runtime_cell::with(|rt| {
@@ -624,6 +624,7 @@ impl AppCore {
                 "terminal_command" => &gstr(c.terminal_command.as_deref().unwrap_or_default()),
                 "worktree_template" => &gstr(&c.worktree_template),
                 "branch_prefix" => &gstr(&c.branch_prefix),
+                "language" => c.language.as_str(),
                 "accent" => &gstr(c.accent.as_deref().unwrap_or_default()),
             }
         })
@@ -665,6 +666,13 @@ impl AppCore {
         if let Some(error) = prefix.as_deref().and_then(branch_prefix_error) {
             return gstr(error);
         }
+        let language = match text("language") {
+            None => None,
+            Some(value) => match LanguageChoice::parse(&value) {
+                Some(language) => Some(language),
+                None => return gstr("Language must be system, en or it."),
+            },
+        };
         let accent = match text("accent") {
             None => None,
             Some(a) if a.trim().is_empty() => Some(None),
@@ -693,6 +701,9 @@ impl AppCore {
             }
             if let Some(prefix) = prefix {
                 config.branch_prefix = prefix;
+            }
+            if let Some(language) = language {
+                config.language = language;
             }
             if let Some(accent) = accent {
                 config.accent = accent;

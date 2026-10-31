@@ -42,7 +42,7 @@ var _menu: PopupMenu = PopupMenu.new()
 
 func _ready() -> void:
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(&"commit.copy_hash", _copy_hash))
-	_copy_hash.tooltip_text = "Copy the full hash"
+	_copy_hash.tooltip_text = tr("Copy the full hash")
 	dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
 	_apply_theme()
 	_files.current_changed.connect(_on_file_changed)
@@ -65,8 +65,15 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		_copy_hash.tooltip_text = tr("Copy the full hash")
+		if session != null:
+			_on_commit_loaded()
+			_on_diff_changed()
 
 
 func set_session(value: RepoSession) -> void:
@@ -157,12 +164,12 @@ func _on_commit_loaded() -> void:
 		short_parents.append(parent.left(PARENT_LENGTH))
 	_parents.visible = not parents.is_empty()
 	_parents_icon.texture = AppTheme.icon(&"GitMerge" if parents.size() > 1 else &"GitCommit")
-	_parents_icon.tooltip_text = "Parents" if parents.size() > 1 else "Parent"
+	_parents_icon.tooltip_text = tr("Parents") if parents.size() > 1 else tr("Parent")
 	_parents_label.text = " ".join(short_parents)
 	_parents_label.tooltip_text = "\n".join(parents)
 	_committer.visible = String(info["committer"]) != String(info["author"])
 	_committer_label.text = String(info["committer"])
-	_committer_label.tooltip_text = "Committed by %s" % String(info["committer"])
+	_committer_label.tooltip_text = tr("Committed by %s") % String(info["committer"])
 	_who.show()
 	_ids.show()
 	_show_body(String(info["body"]).strip_edges())

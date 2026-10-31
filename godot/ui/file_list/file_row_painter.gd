@@ -178,7 +178,7 @@ static func dir_color(control: Control) -> Color:
 
 ## "Added", "Modified", ... for `code`.
 static func code_name(code: String) -> String:
-	return CODE_NAMES.get(code, "")
+	return TranslationServer.translate(CODE_NAMES.get(code, ""))
 
 
 ## Width the checkbox takes (with its gap), when shown.

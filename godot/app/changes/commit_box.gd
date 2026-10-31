@@ -35,7 +35,7 @@ var _draft_body: String = ""
 func _ready() -> void:
 	_apply_theme()
 	_commit_button.icon = Actions.icon(&"changes.commit")
-	_amend.tooltip_text = "Amend the last commit"
+	_amend.tooltip_text = tr("Amend the last commit")
 	_summary.text_changed.connect(func(_t: String) -> void: update_state())
 	_summary.text_submitted.connect(func(_t: String) -> void: _body.grab_focus())
 	_body.text_changed.connect(update_state)
@@ -45,8 +45,13 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		_amend.tooltip_text = tr("Amend the last commit")
+		update_state()
 
 
 func set_session(value: RepoSession) -> void:
@@ -100,24 +105,25 @@ func can_commit() -> bool:
 ## Why the commit button is disabled, or "".
 func block_reason() -> String:
 	if session == null:
-		return "No repository"
+		return tr("No repository")
 	var reason: String = session.commit_block_reason(_amend.button_pressed)
 	if not reason.is_empty():
-		return reason
+		return tr(reason)
 	if _summary.text.strip_edges().is_empty():
-		return "Write a summary"
+		return tr("Write a summary")
 	return ""
 
 
 ## What the button commits: "Commit 2 files to main", "Amend last commit"...
 func button_text() -> String:
 	var count: int = session.picked_count() if session != null else 0
-	var files: String = "1 file" if count == 1 else "%d files" % count
+	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
 	if _amend.button_pressed:
-		return "Amend last commit" if count == 0 else "Amend last commit with %s" % files
+		return tr("Amend last commit") if count == 0 else tr("Amend last commit with %s") % files
 	var branch: String = session.current_branch() if session != null else ""
-	var what: String = "Commit" if count == 0 else "Commit " + files
-	return "%s to %s" % [what, branch] if not branch.is_empty() else what
+	if branch.is_empty():
+		return tr("Commit") if count == 0 else tr("Commit %s") % files
+	return tr("Commit to %s") % branch if count == 0 else tr("Commit %s to %s") % [files, branch]
 
 
 func focus_summary() -> void:
@@ -130,7 +136,7 @@ func update_state() -> void:
 		return
 	_commit_button.disabled = not can_commit()
 	if _job >= 0:
-		_commit_button.text = "Committing…"
+		_commit_button.text = tr("Committing…")
 	else:
 		_commit_button.text = button_text()
 	var shortcut: String = Actions.shortcut_label(&"changes.commit")
@@ -155,11 +161,11 @@ func commit() -> bool:
 ## The success toast of the commit about to start.
 func _done_text() -> String:
 	var count: int = session.picked_count()
-	var files: String = "1 file" if count == 1 else "%d files" % count
+	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
 	var branch: String = session.current_branch()
 	if _amend.button_pressed:
-		return "Amended the last commit" if count == 0 else "Amended the last commit with %s" % files
-	return "Committed %s to %s" % [files, branch] if not branch.is_empty() else "Committed %s" % files
+		return tr("Amended the last commit") if count == 0 else tr("Amended the last commit with %s") % files
+	return tr("Committed %s to %s") % [files, branch] if not branch.is_empty() else tr("Committed %s") % files
 
 
 func _on_amend_toggled(on: bool) -> void:

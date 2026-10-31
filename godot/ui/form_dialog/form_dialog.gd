@@ -43,8 +43,8 @@ func _notification(what: int) -> void:
 
 ## Clears the form and sets what it is for. `on_submit` receives the values.
 func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
-	title = title_text
-	ok_button_text = ok_text
+	title = tr(title_text)
+	ok_button_text = tr(ok_text)
 	get_ok_button().theme_type_variation = &"PrimaryButton"
 	_on_submit = on_submit
 	validator = Callable()
@@ -62,10 +62,10 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 ## A one-line text field. `ref_name` turns typed spaces into dashes.
 func add_line(key: String, label: String, value: String = "", ref_name: bool = false,
 		placeholder: String = "") -> LineEdit:
-	_add_label(label)
+	_add_label(tr(label))
 	var line: LineEdit = LineEdit.new()
 	line.text = value
-	line.placeholder_text = placeholder
+	line.placeholder_text = tr(placeholder)
 	line.text_changed.connect(_on_line_changed.bind(line))
 	line.text_submitted.connect(func(_text: String) -> void: submit())
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -88,7 +88,7 @@ func add_folder(key: String, label: String, value: String = "", placeholder: Str
 	row.add_child(line)
 	var browse: Button = Button.new()
 	browse.icon = AppTheme.icon(&"Folder")
-	browse.tooltip_text = "Choose a folder"
+	browse.tooltip_text = tr("Choose a folder")
 	browse.focus_mode = Control.FOCUS_NONE
 	browse.pressed.connect(_browse.bind(key))
 	row.add_child(browse)
@@ -133,7 +133,7 @@ func _browse(key: String) -> void:
 	dialog.use_native_dialog = true
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.title = "Choose a folder"
+	dialog.title = tr("Choose a folder")
 	# Start at the nearest folder of the path typed so far that exists.
 	var dir: String = (_fields[key] as LineEdit).text.strip_edges()
 	while not dir.is_empty() and not DirAccess.dir_exists_absolute(dir) and dir.get_base_dir() != dir:
@@ -150,7 +150,7 @@ func _browse(key: String) -> void:
 
 func add_check(key: String, label: String, value: bool = false) -> CheckBox:
 	var check: CheckBox = CheckBox.new()
-	check.text = label
+	check.text = tr(label)
 	check.button_pressed = value
 	check.toggled.connect(func(_on: bool) -> void: _touch(key))
 	_add_label("")
@@ -161,7 +161,7 @@ func add_check(key: String, label: String, value: bool = false) -> CheckBox:
 
 ## A drop-down; its value is the chosen option's text.
 func add_choice(key: String, label: String, options: PackedStringArray, selected: int = 0) -> OptionButton:
-	_add_label(label)
+	_add_label(tr(label))
 	var choice: OptionButton = OptionButton.new()
 	for option: String in options:
 		choice.add_item(option)
@@ -174,10 +174,10 @@ func add_choice(key: String, label: String, options: PackedStringArray, selected
 
 
 func add_text(key: String, label: String, value: String = "", placeholder: String = "") -> TextEdit:
-	_add_label(label, true)
+	_add_label(tr(label), true)
 	var text: TextEdit = TextEdit.new()
 	text.text = value
-	text.placeholder_text = placeholder
+	text.placeholder_text = tr(placeholder)
 	text.custom_minimum_size.y = float(get_theme_constant(&"text_height", THEME_TYPE))
 	text.text_changed.connect(_touch.bind(key))
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -189,7 +189,7 @@ func add_text(key: String, label: String, value: String = "", placeholder: Strin
 ## A colour: swatches for `presets` and a picker for any other. Its value is
 ## `#rrggbb`.
 func add_color(key: String, label: String, value: Color, presets: Array[Color] = []) -> ColorPickerButton:
-	_add_label(label)
+	_add_label(tr(label))
 	var row: HBoxContainer = HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var picker: ColorPickerButton = ColorPickerButton.new()
@@ -230,7 +230,7 @@ func add_color(key: String, label: String, value: Color, presets: Array[Color] =
 ## else under the field above.
 func add_note(text: String) -> Label:
 	var note: Label = Label.new()
-	note.text = text
+	note.text = tr(text)
 	note.theme_type_variation = &"DimLabel"
 	# Wrapping needs a width up front, or the label measures itself tall.
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -305,7 +305,7 @@ func _submit() -> void:
 
 
 func _validate() -> bool:
-	_error = String(validator.call(values())) if validator.is_valid() else ""
+	_error = tr(String(validator.call(values()))) if validator.is_valid() else ""
 	get_ok_button().disabled = not _error.is_empty()
 	get_ok_button().tooltip_text = _error
 	return _error.is_empty()

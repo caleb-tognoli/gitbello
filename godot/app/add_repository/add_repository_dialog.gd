@@ -93,23 +93,23 @@ func _validate_form(values: Dictionary) -> String:
 	match _mode:
 		CREATE:
 			if String(values["name"]).is_empty():
-				return "Enter a repository name."
+				return tr("Enter a repository name.")
 			if String(values["location"]).is_empty():
-				return "Choose a location."
+				return tr("Choose a location.")
 			var branch_error: String = Core.ref_name_error(String(values["branch"]))
 			if not branch_error.is_empty():
-				return branch_error
-			return Core.new_repository_path_error(_create_path(values))
+				return tr(branch_error)
+			return tr(Core.new_repository_path_error(_create_path(values)))
 		OPEN:
 			var path: String = String(values["existing"])
 			if path.is_empty():
-				return "Choose a repository folder."
+				return tr("Choose a repository folder.")
 			if not DirAccess.dir_exists_absolute(path):
-				return "Choose an existing folder."
+				return tr("Choose an existing folder.")
 		CLONE:
 			if String(values["url"]).is_empty():
-				return "Enter a repository URL or path."
-			return Core.new_repository_path_error(String(values["destination"]))
+				return tr("Enter a repository URL or path.")
+			return tr(Core.new_repository_path_error(String(values["destination"])))
 	return ""
 
 
@@ -129,11 +129,11 @@ func _submit() -> void:
 
 func _start_job(job: int) -> void:
 	if job < 0:
-		_show_error(Core.start_error())
+		_show_error(L10n.runtime_error(Core.start_error()))
 		return
 	_job = job
 	_status.theme_type_variation = &"DimLabel"
-	_status.text = "Cloning repository…" if _mode == CLONE else "Creating repository…"
+	_status.text = tr("Cloning repository…") if _mode == CLONE else tr("Creating repository…")
 	_status.show()
 	_progress.value = 0
 	_progress.visible = _mode == CLONE
@@ -178,7 +178,7 @@ func _set_busy(busy: bool) -> void:
 		elif control is OptionButton:
 			(control as OptionButton).disabled = busy
 	get_ok_button().disabled = busy
-	get_cancel_button().text = "Cancel operation" if busy else "Cancel"
+	get_cancel_button().text = tr("Cancel operation") if busy else tr("Cancel")
 	if not busy:
 		_progress.hide()
 		_validate()
@@ -219,5 +219,5 @@ func _on_canceled() -> void:
 
 func _show_error(message: String) -> void:
 	_status.theme_type_variation = &"ErrorLabel"
-	_status.text = message
+	_status.text = tr(message)
 	_status.show()

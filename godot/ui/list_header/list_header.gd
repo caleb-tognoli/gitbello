@@ -82,7 +82,8 @@ static func count_text(count: int, noun: String, plural: String = "") -> String:
 	while digits.length() > 3:
 		out = "," + digits.right(3) + out
 		digits = digits.left(digits.length() - 3)
-	return "%s%s %s" % [digits, out, noun if count == 1 else (plural if not plural.is_empty() else noun + "s")]
+	var word: String = noun if count == 1 else (plural if not plural.is_empty() else noun + "s")
+	return "%s%s %s" % [digits, out, TranslationServer.translate(word)]
 
 
 func _on_label_input(event: InputEvent) -> void:

@@ -40,7 +40,7 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 	if not details.is_empty():
 		var more: Button = Button.new()
 		more.icon = AppTheme.icon(&"Info")
-		more.tooltip_text = "Show error details"
+		more.tooltip_text = tr("Show error details")
 		more.theme_type_variation = &"ToolbarButton"
 		more.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		more.pressed.connect(func() -> void: _show_details(title, details))
@@ -162,19 +162,19 @@ func _panel(variation: StringName, title: String, message: String, closable: boo
 	row.add_child(texts)
 	var title_label: Label = Label.new()
 	title_label.name = "Title"
-	title_label.text = title
+	title_label.text = tr(title)
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	texts.add_child(title_label)
 	if not message.is_empty():
 		var message_label: Label = Label.new()
-		message_label.text = message
+		message_label.text = tr(message)
 		message_label.theme_type_variation = &"DimLabel"
 		message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		texts.add_child(message_label)
 	if closable:
 		var close: Button = Button.new()
 		close.icon = AppTheme.CLOSE
-		close.tooltip_text = "Dismiss"
+		close.tooltip_text = tr("Dismiss")
 		close.theme_type_variation = &"ToolbarButton"
 		close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		close.pressed.connect(panel.queue_free)
@@ -190,7 +190,7 @@ func _add_actions(panel: PanelContainer, actions: Array[Dictionary]) -> void:
 	row.alignment = BoxContainer.ALIGNMENT_END
 	for action: Dictionary in actions:
 		var button: Button = Button.new()
-		button.text = String(action["label"])
+		button.text = tr(String(action["label"]))
 		button.add_to_group(ACTION_GROUP)
 		button.pressed.connect(_run_action.bind(action["run"], panel))
 		row.add_child(button)
@@ -229,7 +229,7 @@ func _on_git_error(repo_path: String, error: Dictionary) -> void:
 	if _recent.has(key) and now - _recent[key] < REPEAT_WINDOW_MSEC:
 		return
 	_recent[key] = now
-	var title: String = "%s: %s" % [repo_path.get_file(), String(error.get("title", "git failed"))]
+	var title: String = "%s: %s" % [repo_path.get_file(), tr(String(error.get("title", "git failed")))]
 	var details: String = "git %s\n\n%s" % [String(error.get("command", "")), String(error.get("stderr", ""))]
 	var fixes: Array[Dictionary] = []
 	if fix_provider.is_valid():

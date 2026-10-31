@@ -207,9 +207,9 @@ func open_branches() -> void:
 		for shelf: Dictionary in _shelves:
 			if String(shelf["branch"]) == branch:
 				count += 1
-		var label: String = branch if not branch.is_empty() else "No branch"
+		var label: String = branch if not branch.is_empty() else tr("No branch")
 		if branch == _branch and not branch.is_empty():
-			label += " (current)"
+			label += tr(" (current)")
 		var check: CheckBox = _choice(label, count)
 		_checks[branch] = check
 		check.pressed.connect(func() -> void:
@@ -279,9 +279,9 @@ func _rebuild() -> void:
 				continue
 			if not has_heading:
 				var arrow: StringName = &"GuiTreeArrowDown" if branch_expanded(branch) else &"GuiTreeArrowRight"
-				var group: int = _names.add_item(branch if not branch.is_empty() else "No branch", AppTheme.icon(arrow))
+				var group: int = _names.add_item(branch if not branch.is_empty() else tr("No branch"), AppTheme.icon(arrow))
 				_names.set_item_selectable(group, false)
-				_names.set_item_tooltip(group, "Collapse branch" if branch_expanded(branch) else "Expand branch")
+				_names.set_item_tooltip(group, tr("Collapse branch") if branch_expanded(branch) else tr("Expand branch"))
 				_rows.append({"group": branch})
 				has_heading = true
 			_shown.append(shelf)
@@ -296,9 +296,9 @@ func _rebuild() -> void:
 			_names.set_item_tooltip(index, "%s\n%s" % [shelf["name"], shelf["branch"]])
 	_apply_group_colors()
 	_empty.visible = _shown.is_empty()
-	_empty.text = "No branches selected." if not _all_branches and _branches.is_empty() else "No shelves match the filter."
-	_branch_button.text = "All" if _all_branches else ("Branch" if _branches.size() == 1 else "Branches")
-	_branch_button.tooltip_text = "All branches" if _all_branches else "Branches: " + ", ".join(_branches)
+	_empty.text = tr("No branches selected.") if not _all_branches and _branches.is_empty() else tr("No shelves match the filter.")
+	_branch_button.text = tr("All") if _all_branches else (tr("Branch") if _branches.size() == 1 else tr("Branches"))
+	_branch_button.tooltip_text = tr("All branches") if _all_branches else tr("Branches: %s") % ", ".join(_branches)
 	_branch_badge.count = selected_branches().size()
 	if selected_index < 0 and selected_shelf().is_empty():
 		selected_index = first_index
@@ -339,8 +339,12 @@ func _toggle_group(branch: String) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_group_colors.call_deferred()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		_rebuild()
 
 
 func _apply_group_colors() -> void:

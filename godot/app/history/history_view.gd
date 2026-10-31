@@ -58,8 +58,14 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		_update_header()
+		for i: int in _match_buttons.size():
+			_match_buttons[i].tooltip_text = tr("Previous match (Shift+Enter)") if i == 0 else tr("Next match (Enter)")
 
 
 func set_session(value: RepoSession) -> void:
@@ -191,18 +197,18 @@ func _on_search_changed() -> void:
 func _update_header() -> void:
 	var info: Dictionary = session.search_info() if session != null else {}
 	if info.is_empty():
-		_list_header.set_text(_commits_text)
+		_list_header.set_text(tr(_commits_text))
 		return
 	var matches: int = int(info["matches"])
 	var text: String = ListHeader.count_text(matches, "match", "matches")
 	var index: int = session.search_match_index(_commit_list.cursor)
 	if not bool(info["done"]):
-		text = "Searching… %s" % text
+		text = tr("Searching… %s") % text
 	elif matches == 0:
-		text = "No matches"
+		text = tr("No matches")
 	elif index >= 0:
-		text = "%d of %s" % [index + 1, text]
-	_list_header.set_text(text)
+		text = tr("%d of %s") % [index + 1, text]
+	_list_header.set_text(tr(_commits_text) if info.is_empty() else text)
 
 
 func _on_list_key(event: InputEvent) -> void:
@@ -230,18 +236,18 @@ func _apply_theme() -> void:
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
-	_commits_text = "Loading… %s" % ListHeader.count_text(session.graph_row_count(), "commit")
+	_commits_text = tr("Loading… %s") % ListHeader.count_text(session.graph_row_count(), "commit")
 	_update_header()
 	_select_newest_if_none()
 
 
 func _on_graph_reset() -> void:
-	_commits_text = "Reloading…"
+	_commits_text = tr("Reloading…")
 	_update_header()
 
 
 func _on_graph_loaded(row_count: int, error: String) -> void:
-	_commits_text = error if not error.is_empty() else ListHeader.count_text(row_count, "commit")
+	_commits_text = tr(error) if not error.is_empty() else ListHeader.count_text(row_count, "commit")
 	_update_header()
 	_select_newest_if_none()
 	if row_count == 0:

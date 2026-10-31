@@ -46,23 +46,24 @@ var _placeholder: String = ""
 var _code: String = ""
 ## `[path, original_path, similarity]` of the header, redrawn on theme changes.
 var _path_shown: Array = ["", "", -1]
+var _info: Dictionary = {}
 
 
 func _ready() -> void:
 	add_to_group(GROUP)
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
 	var group: ButtonGroup = ButtonGroup.new()
-	var shortcut: String = Actions.shortcut_label(&"diff.toggle_side_by_side")
 	for entry: Array in [[_unified_button, &"Panels1", false, "Unified", "Old and new lines in one column"],
 			[_split_button, &"Panels2Alt", true, "Side by side", "Old lines on the left, new lines on the right"]]:
 		var button: Button = entry[0]
 		button.icon = AppTheme.icon(entry[1])
 		button.button_group = group
-		var tip: String = "%s\n%s" % [String(entry[3]), String(entry[4])]
-		button.tooltip_text = tip if shortcut.is_empty() else "%s\n%s switches" % [tip, shortcut]
+		button.set_meta(&"title", entry[3])
+		button.set_meta(&"description", entry[4])
 		button.pressed.connect(func() -> void:
 			if bool(entry[2]) != _view.side_by_side:
 				Actions.run_action(&"diff.toggle_side_by_side"))
+	_update_layout_tooltips()
 	set_side_by_side(Core.diff_side_by_side())
 	_view.expand_requested.connect(func(gap: int, how: String) -> void: expand_requested.emit(gap, how))
 	_whole_button.icon = AppTheme.icon(&"ExpandAll")
@@ -71,8 +72,25 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		_update_layout_tooltips()
+		if not _info.is_empty():
+			show_info(_info)
+		else:
+			show_message(tr(_placeholder))
+		_show_code(_code)
+		_show_path(_path_shown[0], _path_shown[1], _path_shown[2])
+
+
+func _update_layout_tooltips() -> void:
+	var shortcut: String = Actions.shortcut_label(&"diff.toggle_side_by_side")
+	for button: Button in [_unified_button, _split_button]:
+		var tip: String = "%s\n%s" % [tr(String(button.get_meta(&"title"))), tr(String(button.get_meta(&"description")))]
+		button.tooltip_text = tip if shortcut.is_empty() else tr("%s\n%s switches") % [tip, shortcut]
 
 
 func view() -> DiffView:
@@ -120,6 +138,7 @@ func set_side_by_side(value: bool) -> void:
 func clear(placeholder: String = "") -> void:
 	if not placeholder.is_empty():
 		_placeholder = placeholder
+	_info = {}
 	_shown = ""
 	_view.show_lines(0, 0, false)
 	_show_code("")
@@ -127,13 +146,14 @@ func clear(placeholder: String = "") -> void:
 	_stats.text = ""
 	show_counts(_added, _removed, 0, 0)
 	_show_whole_button(false, false)
-	show_message(_placeholder)
+	show_message(tr(_placeholder))
 
 
 ## Shows a diff described by `info` (`state`, `path`, `kind`, `content`,
 ## `code`, `original_path`, `similarity`, `notes`, `additions`, `deletions`,
 ## `line_count`, `max_line`, `can_expand`, `whole`, sizes, `error`).
 func show_info(info: Dictionary) -> void:
+	_info = info.duplicate(true)
 	var state: String = String(info.get("state", "none"))
 	if state == "none":
 		clear()
@@ -144,18 +164,21 @@ func show_info(info: Dictionary) -> void:
 	_show_code(code)
 	_show_path(path, String(info.get("original_path", "")), int(info.get("similarity", -1)))
 	var notes: PackedStringArray = info.get("notes", PackedStringArray())
-	_stats.text = "  ·  ".join(notes)
+	var translated_notes: PackedStringArray = PackedStringArray()
+	for note: String in notes:
+		translated_notes.append(tr(note))
+	_stats.text = "  ·  ".join(translated_notes)
 	show_counts(_added, _removed, int(info.get("additions", 0)), int(info.get("deletions", 0)))
 	match state:
 		"loading":
 			if key != _shown:
 				_view.show_lines(0, 0, false)
-				show_message("Loading…")
+				show_message(tr("Loading…"))
 			return
 		"error":
 			var error: Dictionary = info.get("error", {})
 			_view.show_lines(0, 0, false)
-			show_message("Cannot show this diff.\n%s" % String(error.get("message", error.get("title", ""))))
+			show_message(tr("Cannot show this diff.\n%s") % tr(String(error.get("message", error.get("title", "")))))
 			_shown = ""
 			return
 	var keep: bool = key == _shown
@@ -169,21 +192,21 @@ func show_info(info: Dictionary) -> void:
 					int(info.get("split_count", info["line_count"])))
 		"binary":
 			_view.show_lines(0, 0, false)
-			show_message("Binary file: %s → %s" % [
+			show_message(tr("Binary file: %s → %s") % [
 				_size_text(int(info["old_size"])), _size_text(int(info["new_size"]))])
 		"too_large":
 			_view.show_lines(0, 0, false)
-			show_message("This diff is large (more than %s)." % _size_text(int(info["bytes"])), true)
+			show_message(tr("This diff is large (more than %s).") % _size_text(int(info["bytes"])), true)
 		"empty":
 			_view.show_lines(0, 0, false)
-			show_message("\n".join(notes) if not notes.is_empty() else EMPTY_MESSAGES.get(code, "No changes to show."))
+			show_message("\n".join(translated_notes) if not notes.is_empty() else tr(EMPTY_MESSAGES.get(code, "No changes to show.")))
 
 
 func _show_whole_button(shown: bool, pressed: bool) -> void:
 	_whole_button.visible = shown
 	_whole_button.set_pressed_no_signal(pressed)
 	var shortcut: String = Actions.shortcut_label(&"diff.toggle_whole_file")
-	var tip: String = "Show only the changes" if pressed else "Show the whole file"
+	var tip: String = tr("Show only the changes") if pressed else tr("Show the whole file")
 	_whole_button.tooltip_text = tip if shortcut.is_empty() else "%s (%s)" % [tip, shortcut]
 
 
@@ -242,9 +265,9 @@ func _show_path(path: String, original: String, similarity: int) -> void:
 	_path.add_text(path.get_file())
 	if original.is_empty() or original == path:
 		return
-	_path.tooltip_text = "%s from %s" % ["Copied" if _code == "C" else "Renamed", original]
+	_path.tooltip_text = tr("Copied from %s") % original if _code == "C" else tr("Renamed from %s") % original
 	if similarity >= 0:
-		_path.tooltip_text += " · %d%% similar" % similarity
+		_path.tooltip_text += tr(" · %d%% similar") % similarity
 
 
 func _apply_theme() -> void:
@@ -260,5 +283,5 @@ func _apply_theme() -> void:
 
 static func _size_text(bytes: int) -> String:
 	if bytes < 0:
-		return "none"
+		return TranslationServer.translate(&"none")
 	return String.humanize_size(bytes)

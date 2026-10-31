@@ -65,6 +65,8 @@ pub struct Config {
     /// platform's terminal.
     pub terminal_command: Option<String>,
     pub theme: ThemeChoice,
+    /// UI language; `System` follows the OS locale.
+    pub language: LanguageChoice,
     /// Accent colour as `#rrggbb` (see [`parse_accent`]); `None` uses the
     /// app's default.
     pub accent: Option<String>,
@@ -104,6 +106,33 @@ impl ThemeChoice {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LanguageChoice {
+    #[default]
+    System,
+    English,
+    Italian,
+}
+
+impl LanguageChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::English => "en",
+            Self::Italian => "it",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "system" => Some(Self::System),
+            "en" => Some(Self::English),
+            "it" => Some(Self::Italian),
+            _ => None,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -118,6 +147,7 @@ impl Default for Config {
             editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
             terminal_command: None,
             theme: ThemeChoice::System,
+            language: LanguageChoice::System,
             accent: None,
             diff_side_by_side: false,
             keybindings: BTreeMap::new(),
@@ -158,6 +188,7 @@ const KEYS: &[&str] = &[
     "editor_command",
     "terminal_command",
     "theme",
+    "language",
     "accent",
     "diff_side_by_side",
     "keybindings",
@@ -228,6 +259,13 @@ impl Config {
                     expected: "\"system\", \"light\" or \"dark\"",
                 })?,
             },
+            language: match take_string(&mut table, "language")? {
+                None => LanguageChoice::System,
+                Some(text) => LanguageChoice::parse(&text).ok_or(ConfigError::Invalid {
+                    key: "language",
+                    expected: "\"system\", \"en\" or \"it\"",
+                })?,
+            },
             accent: match take_string(&mut table, "accent")? {
                 None => None,
                 Some(text) => Some(parse_accent(&text).ok_or(ConfigError::Invalid {
@@ -281,6 +319,10 @@ impl Config {
             );
         }
         table.insert("theme".into(), Value::String(self.theme.as_str().into()));
+        table.insert(
+            "language".into(),
+            Value::String(self.language.as_str().into()),
+        );
         if let Some(accent) = &self.accent {
             table.insert("accent".into(), Value::String(accent.clone()));
         }
@@ -445,6 +487,7 @@ mod tests {
             editor_command: "subl -n {path}".into(),
             terminal_command: Some("wt -d \"{path}\"".into()),
             theme: ThemeChoice::Dark,
+            language: LanguageChoice::Italian,
             accent: Some("#e0569a".into()),
             diff_side_by_side: true,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
@@ -525,6 +568,13 @@ mod tests {
         assert!(matches!(
             Config::parse("theme = \"purple\""),
             Err(ConfigError::Invalid { key: "theme", .. })
+        ));
+        assert!(matches!(
+            Config::parse("language = \"fr\""),
+            Err(ConfigError::Invalid {
+                key: "language",
+                ..
+            })
         ));
         assert!(matches!(
             Config::parse("accent = \"blue\""),
