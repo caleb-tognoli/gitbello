@@ -100,7 +100,7 @@ func _ready() -> void:
 	_list.gui_input.connect(_on_list_key)
 	_list_header.check_toggled.connect(pick_all)
 	_list_header.context_menu_requested.connect(_show_header_menu)
-	_filter.set_options(FILTER_OPTIONS)
+	_filter.set_options(FILTER_OPTIONS, &"changes.clear_filters")
 	_filter.changed.connect(_apply_filter)
 	_filter.done.connect(focus_files)
 	_commit_box.feedback = feedback
@@ -656,6 +656,11 @@ func commit() -> bool:
 	return _commit_box.commit()
 
 
+func begin_amend(target: Dictionary) -> void:
+	_commit_box.begin_amend(target)
+	focus_message()
+
+
 # --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
 
 ## Whether the diff pane shows a conflicted file's resolver.
@@ -747,10 +752,6 @@ func _on_base_requested(shown: bool) -> void:
 	_diff_panel.base_button().set_pressed_no_signal(false)
 	if ops != null:
 		ops.recreate_with_base(conflict_path())
-
-
-func toggle_amend() -> void:
-	_commit_box.set_amend(not _commit_box.is_amend())
 
 
 func has_changes() -> bool:
@@ -983,6 +984,20 @@ func _clear_diff() -> void:
 		session.clear_diff()
 	_diff_view.pickable = false
 	_diff_panel.clear("Select a shelved file to preview its changes." if _shelves_mode else "Select a file to see its changes.")
+
+
+func retry_diff() -> void:
+	if session == null or not _diff_panel.can_retry():
+		return
+	var info: Dictionary = session.diff_info()
+	if String(info.get("state", "")) != "error":
+		return
+	var path: String = String(info.get("path", ""))
+	if _showing_shelf:
+		session.select_shelf_file(_shelf_oid, path, false)
+	else:
+		session.select_change(path, false)
+	_on_diff_changed()
 
 
 func _load_full_diff() -> void:

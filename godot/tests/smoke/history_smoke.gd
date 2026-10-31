@@ -3,7 +3,8 @@ extends SmokeTest
 ## first file's diff; Right and Left move between list, files and diff. The
 ## files sit beside the diff, the layout buttons work like radio buttons and
 ## the details' sizes are saved.
-## Uses fixture `repo-5` read-only. Skipped without `--fixtures`.
+## Parent navigation merges the fixture's local remote into `repo-5`.
+## Skipped without `--fixtures`.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 
@@ -105,6 +106,9 @@ func run() -> void:
 
 	await _check_search(page.session, list)
 	await _check_search_ui(history, list, details)
+	await _check_parents(main, page)
+	await _check_merge_parents(page)
+	await _check_pending_parents(page)
 
 	while main.tab_count() > 0:
 		main.close_tab(0)
@@ -195,6 +199,174 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	expect_eq(list.search_query(), "", "nothing is dimmed")
 	press("Escape")
 	expect(list.has_focus(), "a second Escape goes back to the list")
+
+
+class DelayedHistory:
+	extends HistoryView
+	var report_parents: bool = false
+
+	func _parent_rows() -> Dictionary:
+		return super._parent_rows() if report_parents else {}
+
+
+func _select_ready(history: HistoryView, row: int) -> bool:
+	history._select(row)
+	var oid: String = history.commit_list().hash_at(row)
+	history.details().show_commit(oid)
+	return await wait_until(func() -> bool: return history.details().commit_oid() == oid \
+			and String(history.session.commit_info().get("oid", "")) == oid)
+
+
+func _check_parents(main: Main, page: RepoTab) -> void:
+	var history: HistoryView = page.history()
+	var list: CommitList = history.commit_list()
+	var details: CommitDetails = history.details()
+	expect(await _select_ready(history, 0), "parent source loads")
+	var parent: String = list.hash_at(1)
+	expect_eq(page.session.graph_parent_rows(0), {parent: 1}, "the bridge maps full parent OIDs to rows")
+	expect(page.session.graph_parent_rows(-1).is_empty(), "negative source rows have no parents")
+	expect(page.session.graph_parent_rows(3).is_empty(), "unreported source rows have no parents")
+	expect(page.session.graph_parent_rows(2).is_empty(), "root rows have no parents")
+	expect(Actions.get_action(&"history.go_to_parent").hidden, "the contextual action stays out of the palette")
+	expect(not Actions.is_enabled(&"history.go_to_parent"), "there is no target between activations")
+	expect_eq(details.parent_links().size(), 1, "an ordinary commit has one link")
+	if details.parent_links().size() != 1:
+		return
+	var link: LinkButton = details.parent_links()[0]
+	expect_eq(link.text, parent.left(7), "the parent hash stays short")
+	expect(link.tooltip_text.contains(parent), "the tooltip contains the full parent OID")
+	expect_eq(link.focus_mode, Control.FOCUS_ALL, "parent links are keyboard accessible")
+	link.grab_focus()
+	press("Enter")
+	expect(await wait_until(func() -> bool: return details.commit_oid() == parent), "Enter opens the parent")
+	expect_eq(list.cursor, 1, "Enter selects the actual graph row")
+	expect_eq(String(page.commit_target().get("hash", "")), parent, "commit actions target the displayed parent")
+	expect(list.has_focus(), "navigation returns focus to the commit list")
+	var stale: LinkButton = details.parent_links()[0]
+	list.select_only(0)
+	stale.pressed.emit()
+	expect_eq(list.cursor, 0, "a removed link cannot navigate an old source")
+	expect(await _select_ready(history, 0), "the source loads again")
+	history.search_field().set_text("Improve")
+	expect(await wait_until(func() -> bool: return bool(page.session.search_info().get("done", false))), "search completes")
+	details.parent_links()[0].grab_focus()
+	press("Space")
+	expect(await wait_until(func() -> bool: return list.cursor == 1 and details.commit_oid() == parent),
+			"Space can navigate to a nonmatching parent")
+	expect_eq(history.search_field().text(), "Improve", "parent navigation preserves the query")
+	expect_eq(page.session.search_match_index(list.cursor), -1, "the selected parent is not a search match")
+	press("F3")
+	expect(await wait_until(func() -> bool: return list.cursor == 0), "F3 still visits the original search matches")
+	history.search_field().set_text("")
+	expect(await _select_ready(history, 1), "the root's child loads")
+	details.parent_links()[0].pressed.emit()
+	expect(await wait_until(func() -> bool: return list.cursor == 2 and details.parent_links().is_empty()),
+			"a parent jump to the root leaves no links")
+	expect(not (details.get_node("%Parents") as Control).visible, "the root has no parent row")
+	expect(await _select_ready(history, 0), "the source is restored before switching tabs")
+	var other: RepoTab = main.open_repo(fixtures_dir().path_join("repo-1"))
+	expect(await wait_until(func() -> bool: return other.history().details().parent_links().size() == 1),
+			"another session opens")
+	details.parent_links()[0].pressed.emit()
+	expect_eq(list.cursor, 0, "an inactive tab's link cannot navigate")
+	expect_eq(other.history().commit_list().cursor, 0, "it cannot target the active tab either")
+	main.close_tab(1)
+
+
+func _check_merge_parents(page: RepoTab) -> void:
+	var history: HistoryView = page.history()
+	var session: RepoSession = page.session
+	var previous: String = String(session.status().get("oid", ""))
+	expect(session.pull("merge") >= 0, "the fixture's local remote can be merged")
+	if not await wait_until(func() -> bool: return session.graph_row_count() == 5 \
+			and not String(session.status().get("oid", "")).is_empty() \
+			and String(session.status().get("oid", "")) != previous):
+		expect(false, "the fixture merge finishes")
+		return
+	expect(await _select_ready(history, 0), "the merge details load")
+	var parents: PackedStringArray = session.commit_info()["parents"]
+	expect_eq(parents.size(), 2, "the fixture has two merge parents")
+	var rows: Dictionary = session.graph_parent_rows(0)
+	expect_eq(rows.size(), parents.size(), "both merge parents resolve independently")
+	for index: int in parents.size():
+		expect(await _select_ready(history, 0), "the merge is reselected")
+		var links: Array[LinkButton] = history.details().parent_links()
+		expect_eq(links.size(), 2, "both parents have links")
+		if links.size() != 2:
+			return
+		expect(links[index].tooltip_text.contains(parents[index]), "links preserve Git parent order")
+		links[index].pressed.emit()
+		expect(await wait_until(func() -> bool: return history.details().commit_oid() == parents[index]),
+				"each merge parent opens its own details")
+		expect_eq(history.commit_list().cursor, int(rows[parents[index]]), "the mapped parent row is selected")
+		expect_eq(String(page.commit_target().get("hash", "")), parents[index], "actions follow each merge parent")
+
+
+func _queue_delayed(history: HistoryView, target: String) -> void:
+	history._parent_action_source = history.details().commit_oid()
+	history._parent_action_oid = target
+	history._parent_action_session = history.session
+	expect(history.can_go_to_parent(), "the delayed request has valid source context")
+	history.go_to_parent()
+	history._clear_parent_action()
+
+
+func _check_pending_parents(page: RepoTab) -> void:
+	var scene: PackedScene = load("res://app/history/history_view.tscn") as PackedScene
+	var history: HistoryView = scene.instantiate() as HistoryView
+	history.set_script(DelayedHistory)
+	add_child(history)
+	history.session = page.session
+	expect(await _select_ready(history, 0), "the delayed view loads real merge metadata")
+	var parents: PackedStringArray = page.session.commit_info()["parents"]
+	if parents.size() != 2:
+		history.session = null
+		history.queue_free()
+		return
+	var target: String = parents[1]
+	var destination: int = int(page.session.graph_parent_rows(0)[target])
+	_queue_delayed(history, target)
+	expect_eq(history._pending_parent_oid, target, "an unreported parent stays pending")
+	expect_eq(history.commit_list().cursor, 0, "pending navigation leaves the source selected")
+	history.commit_list().set("_row_count", 1)
+	history.set("report_parents", true)
+	history._on_graph_changed(0, 5)
+	expect_eq(history.commit_list().cursor, destination, "reporting the parent resolves the pending jump")
+	expect(history._pending_parent_oid.is_empty(), "the pending request is consumed")
+	expect(await _select_ready(history, 0), "the delayed source is restored")
+	history.set("report_parents", false)
+	_queue_delayed(history, target)
+	history._select(1)
+	expect(history._pending_parent_oid.is_empty(), "competing selection cancels pending navigation")
+	history.set("report_parents", true)
+	history._on_graph_changed(0, 5)
+	expect_eq(history.commit_list().cursor, 1, "later graph progress cannot steal selection")
+	expect(await _select_ready(history, 0), "the source is restored for reset")
+	history.set("report_parents", false)
+	_queue_delayed(history, target)
+	history._on_graph_reset()
+	expect(history._pending_parent_oid.is_empty(), "a graph reset cancels navigation")
+	var notices: Array[String] = []
+	history.notice.connect(func(_title: String, message: String) -> void: notices.append(message))
+	_queue_delayed(history, target)
+	history._on_graph_loaded(5, "")
+	expect_eq(notices.size(), 1, "an unavailable parent produces one explanation")
+	expect_eq(history.commit_list().cursor, 0, "an unavailable parent preserves selection")
+	expect_eq(history.details().commit_oid(), String(page.session.commit_info()["oid"]),
+			"an unavailable parent preserves the displayed commit")
+	history._try_parent_navigation()
+	expect_eq(notices.size(), 1, "completed requests do not repeat notices")
+	history._graph_loading = true
+	_queue_delayed(history, target)
+	history.hide()
+	expect(history._pending_parent_oid.is_empty(), "hiding the view cancels navigation")
+	history.show()
+	_queue_delayed(history, target)
+	history.session = null
+	expect(history._pending_parent_oid.is_empty(), "switching sessions cancels navigation")
+	expect(history.details().parent_links().is_empty(), "switching sessions clears stale links")
+	history.queue_free()
+	await get_tree().process_frame
 
 
 func _diff_has(diff: DiffView, needle: String) -> bool:

@@ -48,6 +48,7 @@ signal open_file_requested()
 @onready var _message: Control = %DiffMessage
 @onready var _message_label: Label = %DiffMessageLabel
 @onready var _load_anyway: Button = %LoadAnywayButton
+@onready var _retry: Button = %RetryButton
 @onready var _unified_button: Button = %UnifiedButton
 @onready var _split_button: Button = %SplitButton
 @onready var _whole_button: Button = %WholeFileButton
@@ -80,6 +81,7 @@ var _info: Dictionary = {}
 func _ready() -> void:
 	add_to_group(GROUP)
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
+	_retry.pressed.connect(func() -> void: Actions.run_action(&"diff.retry", _retry))
 	var group: ButtonGroup = ButtonGroup.new()
 	for entry: Array in [[_unified_button, &"Panels1", false, "Unified", "Old and new lines in one column"],
 			[_split_button, &"Panels2Alt", true, "Side by side", "Old lines on the left, new lines on the right"]]:
@@ -252,6 +254,7 @@ func _notification(what: int) -> void:
 
 
 func _update_layout_tooltips() -> void:
+	_retry.text = tr("Retry")
 	var shortcut: String = Actions.shortcut_label(&"diff.toggle_side_by_side")
 	for button: Button in [_unified_button, _split_button]:
 		var tip: String = "%s\n%s" % [tr(String(button.get_meta(&"title"))), tr(String(button.get_meta(&"description")))]
@@ -275,6 +278,10 @@ func whole_file_button() -> Button:
 ## Whether the diff shown can switch between its changes and the whole file.
 func can_toggle_whole_file() -> bool:
 	return is_visible_in_tree() and _whole_button.visible
+
+
+func can_retry() -> bool:
+	return is_visible_in_tree() and _retry.visible
 
 
 ## Shows the whole file, or only the changes again.
@@ -337,8 +344,10 @@ func show_info(info: Dictionary) -> void:
 		translated_notes.append(tr(note))
 	_stats.text = "  ·  ".join(translated_notes)
 	show_counts(_added, _removed, int(info.get("additions", 0)), int(info.get("deletions", 0)))
+	_retry.hide()
 	match state:
 		"loading":
+			_show_whole_button(false, false)
 			if key != _shown:
 				_view.show_lines(0, 0, false)
 				show_message(tr("Loading…"))
@@ -346,7 +355,9 @@ func show_info(info: Dictionary) -> void:
 		"error":
 			var error: Dictionary = info.get("error", {})
 			_view.show_lines(0, 0, false)
+			_show_whole_button(false, false)
 			show_message(tr("Cannot show this diff.\n%s") % tr(String(error.get("message", error.get("title", "")))))
+			_retry.show()
 			_shown = ""
 			return
 	var keep: bool = key == _shown
@@ -491,6 +502,7 @@ func _show_whole_button(shown: bool, pressed: bool) -> void:
 func show_message(text: String, offer_full: bool = false) -> void:
 	_message_label.text = text
 	_load_anyway.visible = offer_full
+	_retry.hide()
 	_card.hide()
 	_card_icon.hide()
 	_card_table.hide()

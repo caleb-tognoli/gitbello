@@ -25,6 +25,7 @@ const THEME_TYPE: StringName = &"FilterField"
 
 ## `[id, label]` of each option, in menu order; "" is a separator.
 var _options: Array[Array] = []
+var _clear_action: StringName = &""
 var _options_button: Button = null
 var _menu: PopupMenu = PopupMenu.new()
 
@@ -35,6 +36,7 @@ var _menu: PopupMenu = PopupMenu.new()
 
 
 func _ready() -> void:
+	changed.connect(_update_clear_entry)
 	_text.placeholder_text = placeholder
 	_text.text_changed.connect(func(_value: String) -> void: changed.emit())
 	_text.gui_input.connect(_on_text_key)
@@ -54,8 +56,17 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		for i: int in _options.size():
+			if not String(_options[i][0]).is_empty():
+				_menu.set_item_text(_menu.get_item_index(i), tr(String(_options[i][1])))
+		if _options_button != null:
+			_options_button.tooltip_text = tr("Filter options")
+		_update_clear_entry()
 
 
 func text() -> String:
@@ -80,7 +91,7 @@ func text_box() -> LineEdit:
 func add_button(icon: StringName, tooltip: String) -> Button:
 	var button: Button = Button.new()
 	button.icon = AppTheme.icon(icon)
-	button.tooltip_text = tooltip
+	button.tooltip_text = tr(tooltip)
 	button.focus_mode = Control.FOCUS_NONE
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.theme_type_variation = &"FilterFieldButton"
@@ -92,14 +103,15 @@ func add_button(icon: StringName, tooltip: String) -> Button:
 
 ## Adds the options button with a menu of check items: `[id, label]` each,
 ## "" ids for separators.
-func set_options(entries: Array[Array]) -> void:
+func set_options(entries: Array[Array], clear_action: StringName = &"") -> void:
 	_options = entries
+	_clear_action = clear_action
 	_menu.clear()
 	for i: int in entries.size():
 		if String(entries[i][0]).is_empty():
 			_menu.add_separator()
 		else:
-			_menu.add_check_item(String(entries[i][1]), i)
+			_menu.add_check_item(tr(String(entries[i][1])), i)
 	if _options_button == null:
 		_options_button = add_button(&"Filter", "Filter options")
 		_options_button.toggle_mode = true
@@ -139,7 +151,16 @@ func menu() -> PopupMenu:
 	return _menu
 
 
+func clear_filters() -> void:
+	_text.text = ""
+	for i: int in _options.size():
+		if not _menu.is_item_separator(i):
+			_menu.set_item_checked(i, false)
+	_options_changed()
+
+
 func _show_menu() -> void:
+	_update_clear_entry()
 	_options_button.set_pressed_no_signal(not options().is_empty())
 	_menu.position = Vector2i(_options_button.get_screen_position() + Vector2(0.0, _options_button.size.y))
 	_menu.reset_size()
@@ -147,6 +168,10 @@ func _show_menu() -> void:
 
 
 func _on_option(id: int) -> void:
+	if id == _options.size() + 1 and _clear_action != &"":
+		_menu.hide()
+		Actions.run_action(_clear_action)
+		return
 	var index: int = _menu.get_item_index(id)
 	_menu.set_item_checked(index, not _menu.is_item_checked(index))
 	_options_changed()
@@ -156,6 +181,17 @@ func _options_changed() -> void:
 	if _options_button != null:
 		_options_button.set_pressed_no_signal(not options().is_empty())
 	changed.emit()
+
+
+func _update_clear_entry() -> void:
+	while _menu.item_count > _options.size():
+		_menu.remove_item(_menu.item_count - 1)
+	var action: ActionRegistry.Action = Actions.get_action(_clear_action)
+	if action != null and is_active():
+		_menu.add_separator()
+		_menu.add_icon_item(Actions.icon(_clear_action), action.label, _options.size() + 1)
+	if _menu.visible:
+		_menu.reset_size()
 
 
 func _on_text_key(event: InputEvent) -> void:

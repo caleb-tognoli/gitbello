@@ -1373,9 +1373,14 @@ impl Runtime {
         };
         let current = state.slot_mut(slot);
         let same = current.as_ref().is_some_and(|d| d.target == target);
-        if same && current.as_ref().is_some_and(|d| d.full || !full) {
+        let retry = same
+            && current
+                .as_ref()
+                .is_some_and(|d| d.error.is_some() && !d.loading);
+        if same && !retry && current.as_ref().is_some_and(|d| d.full || !full) {
             return;
         }
+        let full = full || (retry && current.as_ref().is_some_and(|d| d.full));
         let keep = current.take().filter(|_| same);
         let mut next = DiffState::new(target, full);
         if let Some(keep) = keep {
@@ -1434,14 +1439,24 @@ impl Runtime {
             return;
         };
         if let Some(kind) = state.conflict_kind(path) {
-            if state.conflict.as_ref().is_some_and(|c| c.path == path) {
+            let same = state.conflict.as_ref().is_some_and(|c| c.path == path);
+            if same
+                && state
+                    .conflict
+                    .as_ref()
+                    .is_some_and(|c| c.loading || c.error.is_none())
+            {
                 return;
             }
-            self.select_diff(key, None, false);
+            if !same {
+                self.select_diff(key, None, false);
+            }
             let Some(state) = self.repos.get_mut(key) else {
                 return;
             };
-            state.conflict = Some(ConflictState::new(path.to_path_buf(), kind));
+            if !same {
+                state.conflict = Some(ConflictState::new(path.to_path_buf(), kind));
+            }
             self.diff_generation += 1;
             submit_conflict(&self.scheduler, state, self.diff_generation);
             return;

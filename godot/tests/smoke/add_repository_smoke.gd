@@ -30,6 +30,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool:
 		return main.current_page().session.is_ready() and main.current_page().session.current_branch() == "trunk"),
 			"created repository uses the requested branch")
+	expect(not main.current_page().changes().commit_box().can_amend(), "an unborn repository cannot enter amend mode")
+	expect(not Actions.is_enabled(&"commit.amend"), "Amend is unavailable without HEAD")
 
 	Actions.run_action(&"repo.add")
 	dialog.show_mode(AddRepositoryDialog.OPEN)
@@ -41,6 +43,7 @@ func run() -> void:
 
 	Actions.run_action(&"repo.add")
 	dialog.show_mode(AddRepositoryDialog.CLONE)
+	_test_progress(dialog)
 	_set_line(dialog, "url", "https://example.com/owner/suggested.git")
 	expect((dialog.field("destination") as LineEdit).text.ends_with("suggested"),
 			"clone suggests a destination folder from the URL")
@@ -69,6 +72,48 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+func _test_progress(dialog: AddRepositoryDialog) -> void:
+	var bar: ProgressBar = dialog._progress
+	dialog._start_job(190019)
+	expect(bar.visible and bar.indeterminate, "clone starts indeterminate before any progress")
+	dialog._on_job_progress(190018, "", "", 50, "Unrelated job")
+	expect(bar.indeterminate, "another job cannot change clone progress")
+	expect_eq(dialog.job_status(), "Cloning repository…", "another job cannot change clone status")
+	dialog._on_job_progress(190019, "", "", -1, "Enumerating objects: 5, done.")
+	expect(bar.indeterminate, "unknown percentage stays indeterminate")
+	dialog._on_job_progress(190019, "", "", 0, "Receiving objects: 0% (0/10)")
+	expect(not bar.indeterminate, "zero is a known percentage")
+	expect_eq(bar.value, 0.0, "known zero is preserved")
+	dialog._on_job_progress(190019, "", "", 45, "Receiving objects: 45%")
+	expect_eq(bar.value, 45.0, "known percentage is displayed")
+	dialog._on_job_progress(190019, "", "", 100, "Receiving objects: 100%")
+	expect(dialog.running(), "phase completion does not finish the clone")
+	dialog._on_job_progress(190019, "", "", 0, "Resolving deltas: 0%")
+	expect(not bar.indeterminate and bar.value == 0.0, "new phase can reset to known zero")
+	expect_eq(dialog.job_status(), "Resolving deltas: 0%", "phase text follows the progress event")
+	dialog._on_job_progress(190019, "", "", -1, "Enumerating objects: 8, done.")
+	expect(bar.indeterminate, "unknown after known returns to indeterminate")
+	dialog._on_job_cancelled(190018, "", "")
+	expect(dialog.running(), "another job cannot cancel the clone")
+	dialog._on_job_cancelled(190019, "", "")
+	expect(not dialog.running() and not bar.visible, "cancel acknowledgement hides progress")
+	expect(not bar.indeterminate and bar.value == 0.0, "cancel clears progress state")
+	expect(not dialog._status.visible, "cancel acknowledgement hides status")
+	dialog._on_job_progress(190019, "", "", 99, "Late progress")
+	expect(not bar.visible and bar.value == 0.0, "late progress from cancelled job is ignored")
+	dialog._start_job(190020)
+	expect(bar.indeterminate and bar.value == 0.0, "retry starts fresh and indeterminate")
+	dialog._on_job_finished(190020, "", "", false, {"message": "Fixture failure"})
+	expect(not dialog.running() and not bar.visible, "failure hides progress")
+	expect(not bar.indeterminate and bar.value == 0.0, "failure clears progress state")
+	expect_eq(dialog.job_status(), "Fixture failure", "failure stays inline")
+	expect(not dialog.get_ok_button().disabled or not dialog.error_text().is_empty(),
+			"failure returns to normal form validation")
+	dialog._start_job(190021)
+	expect(bar.indeterminate and bar.value == 0.0, "retry after failure starts indeterminate")
+	dialog._on_job_cancelled(190021, "", "")
 
 
 func _set_line(dialog: AddRepositoryDialog, key: String, text: String) -> void:

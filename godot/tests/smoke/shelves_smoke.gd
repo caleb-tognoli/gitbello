@@ -277,8 +277,8 @@ func run() -> void:
 	shelves.select_shelf(String(_shelf(session, "File actions")["oid"]))
 	expect(await wait_until(func() -> bool: return view.shelf_files().row_count() == 2), "both saved files load")
 	var shelf_files: ShelfFileList = view.shelf_files()
-	# Rapid fixture operations can stack success toasts over the file rows.
-	for toast: Node in main.toasts().get_children():
+	# Keep the target file row clear of the bounded notification overlay.
+	for toast: Node in main.toasts().get_node("Scroll/Stack").get_children():
 		toast.queue_free()
 	for frame: int in 3:
 		await get_tree().process_frame

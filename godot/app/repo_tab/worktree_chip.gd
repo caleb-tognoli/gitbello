@@ -3,7 +3,8 @@ extends PanelContainer
 ## One worktree in a repository tab's strip (PLAN §4): the folder name, the
 ## branch in muted text (left out when it is the folder's name), the changed
 ## files and ↑↓, and markers for an operation in progress, a lock or a missing
-## folder. A click shows the worktree; right-click opens its menu.
+## folder. Click or Enter/Space shows the worktree; right-click or the
+## context-menu key opens its menu.
 
 signal chosen()
 ## `at_position` is on the screen.
@@ -22,9 +23,13 @@ var _name: Label = Label.new()
 var _branch: Label = Label.new()
 var _badge: Label = Label.new()
 var _marker: TextureRect = TextureRect.new()
+var _tooltip_content: VBoxContainer = null
 
 
 func _ready() -> void:
+	focus_mode = Control.FOCUS_ALL
+	focus_entered.connect(queue_redraw)
+	focus_exited.connect(queue_redraw)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -96,11 +101,67 @@ func _show() -> void:
 	var tooltip: PackedStringArray = PackedStringArray([String(worktree["path"])])
 	if bool(worktree["prunable"]):
 		tooltip.append(tr("The folder is missing."))
+	elif int(worktree["changed"]) < 0:
+		tooltip.append(tr("Status not available yet"))
+	else:
+		var changed: int = int(worktree["changed"])
+		if changed == 0:
+			tooltip.append(tr("No changed files"))
+		else:
+			tooltip.append(tr("1 changed file") if changed == 1 else tr("%d changed files") % changed)
+		var conflicts: int = int(worktree.get("conflicts", 0))
+		if conflicts > 0:
+			tooltip.append(tr("1 conflicted file") if conflicts == 1 else tr("%d conflicted files") % conflicts)
 	if bool(worktree["locked"]):
 		tooltip.append(tr("Locked") + (": " + String(worktree["lock_reason"]) if not String(worktree["lock_reason"]).is_empty() else ""))
 	if not String(worktree.get("operation", "")).is_empty():
 		tooltip.append(tr("%s in progress") % tr(String(worktree["operation"]).capitalize()))
 	tooltip_text = "\n".join(tooltip)
+	if is_instance_valid(_tooltip_content):
+		_fill_tooltip(_tooltip_content, tooltip_text)
+
+
+func _make_custom_tooltip(for_text: String) -> Control:
+	_tooltip_content = VBoxContainer.new()
+	_tooltip_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fill_tooltip(_tooltip_content, for_text)
+	return _tooltip_content
+
+
+func _fill_tooltip(content: VBoxContainer, for_text: String) -> void:
+	for child: Node in content.get_children():
+		content.remove_child(child)
+		child.queue_free()
+	var text: Label = Label.new()
+	text.theme_type_variation = &"TooltipLabel"
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.text = for_text
+	content.add_child(text)
+	if worktree.is_empty() or bool(worktree["prunable"]) or int(worktree["changed"]) < 0:
+		return
+	var tracking: HBoxContainer = null
+	for icon_name: StringName in [&"GitPush", &"GitPull"]:
+		var count: int = int(worktree.get("ahead" if icon_name == &"GitPush" else "behind", 0))
+		if count <= 0:
+			continue
+		if tracking == null:
+			tracking = HBoxContainer.new()
+			tracking.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			content.add_child(tracking)
+		var pair: HBoxContainer = HBoxContainer.new()
+		pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tracking.add_child(pair)
+		var icon: TextureRect = TextureRect.new()
+		icon.texture = AppTheme.icon(icon_name)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pair.add_child(icon)
+		var value: Label = Label.new()
+		value.theme_type_variation = &"TooltipLabel"
+		value.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		value.text = str(count)
+		pair.add_child(value)
 
 
 func _update_style() -> void:
@@ -112,7 +173,23 @@ func _update_style() -> void:
 		theme_type_variation = &"WorktreeChip"
 
 
+func _draw() -> void:
+	if has_focus():
+		draw_style_box(get_theme_stylebox(&"focus"), Rect2(Vector2.ZERO, size))
+
+
 func _gui_input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key != null:
+		if not key.pressed or key.echo:
+			return
+		if key.is_action_pressed("ui_accept", false, true):
+			accept_event()
+			chosen.emit()
+		elif key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed):
+			accept_event()
+			menu_requested.emit(get_screen_position() + Vector2(0.0, size.y))
+		return
 	var click: InputEventMouseButton = event as InputEventMouseButton
 	if click == null or not click.pressed:
 		return

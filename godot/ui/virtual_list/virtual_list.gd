@@ -215,7 +215,7 @@ func _handle_key(key: InputEventKey) -> void:
 		row_activated.emit(cursor)
 		accept_event()
 		return
-	elif key.keycode == KEY_A and key.is_command_or_control_pressed():
+	elif key.keycode == KEY_A and key.is_command_or_control_pressed() and not key.shift_pressed and not key.alt_pressed:
 		_select_range(0, _row_count - 1, false)
 		accept_event()
 		return

@@ -17,7 +17,13 @@ var session: RepoSession = null:
 ## Formats unix times (the commit list's local-time format).
 var date_format: Callable = Callable()
 
+signal parent_requested(source: String, oid: String, origin: LinkButton)
+
 var _menu: PopupMenu = PopupMenu.new()
+var _parent_links: Array[LinkButton] = []
+var _shown_oid: String = ""
+var _requested_oid: String = ""
+
 
 @onready var _files_box: VBoxContainer = %FilesBox
 @onready var _split: HSplitContainer = %Split
@@ -30,7 +36,6 @@ var _menu: PopupMenu = PopupMenu.new()
 @onready var _copy_hash: Button = %CopyHash
 @onready var _parents: Control = %Parents
 @onready var _parents_icon: TextureRect = %ParentsIcon
-@onready var _parents_label: Label = %ParentsLabel
 @onready var _committer: Control = %Committer
 @onready var _committer_label: Label = %CommitterLabel
 @onready var _body_separator: Control = %BodySeparator
@@ -81,6 +86,7 @@ func set_session(value: RepoSession) -> void:
 		session.commit_loaded.disconnect(_on_commit_loaded)
 		session.commit_diff_changed.disconnect(_on_diff_changed)
 	session = value
+	show_placeholder()
 	_files.session = session
 	if session != null:
 		session.commit_loaded.connect(_on_commit_loaded)
@@ -123,12 +129,19 @@ func show_commit(oid: String) -> void:
 	if session == null or oid.is_empty():
 		show_placeholder()
 		return
+	_requested_oid = oid
+	if _shown_oid != oid:
+		_clear_parents()
+		_shown_oid = ""
 	session.load_commit(oid)
 
 
 ## Shows `text` instead of a commit (while the history loads, or when it
 ## has none).
 func show_placeholder(text: String = "") -> void:
+	_requested_oid = ""
+	_shown_oid = ""
+	_clear_parents()
 	_summary.text = text
 	_who.hide()
 	_ids.hide()
@@ -148,7 +161,7 @@ func focus_files() -> void:
 
 func _on_commit_loaded() -> void:
 	var info: Dictionary = session.commit_info()
-	if info.is_empty():
+	if info.is_empty() or _requested_oid.is_empty() or not String(info["oid"]).begins_with(_requested_oid):
 		return
 	_summary.text = String(info["summary"])
 	_author_name.text = String(info["author"])
@@ -156,17 +169,27 @@ func _on_commit_loaded() -> void:
 	_author_name.tooltip_text = _author_name.text if email.is_empty() else "%s <%s>" % [_author_name.text, email]
 	_date.text = date_format.call(int(info["time"])) if date_format.is_valid() else str(info["time"])
 	var oid: String = String(info["oid"])
+	_requested_oid = oid
+	_shown_oid = oid
 	_hash.text = oid.left(HASH_LENGTH)
 	_hash.tooltip_text = oid
 	var parents: PackedStringArray = info["parents"]
-	var short_parents: PackedStringArray = PackedStringArray()
-	for parent: String in parents:
-		short_parents.append(parent.left(PARENT_LENGTH))
+	_clear_parents()
+	for index: int in parents.size():
+		var parent: String = parents[index]
+		var link: LinkButton = LinkButton.new()
+		link.text = parent.left(PARENT_LENGTH)
+		link.tooltip_text = (tr("Go to parent %d") % (index + 1) if parents.size() > 1 \
+				else tr("Go to parent")) + "\n" + parent
+		link.theme_type_variation = &"DetailsParentLink"
+		link.underline = LinkButton.UNDERLINE_MODE_ON_HOVER
+		link.focus_mode = Control.FOCUS_ALL
+		link.pressed.connect(_request_parent.bind(oid, parent, link))
+		_parent_links.append(link)
+		_parents.add_child(link)
 	_parents.visible = not parents.is_empty()
 	_parents_icon.texture = AppTheme.icon(&"GitMerge" if parents.size() > 1 else &"GitCommit")
 	_parents_icon.tooltip_text = tr("Parents") if parents.size() > 1 else tr("Parent")
-	_parents_label.text = " ".join(short_parents)
-	_parents_label.tooltip_text = "\n".join(parents)
 	_committer.visible = String(info["committer"]) != String(info["author"])
 	_committer_label.text = String(info["committer"])
 	_committer_label.tooltip_text = tr("Committed by %s") % String(info["committer"])
@@ -183,10 +206,41 @@ func _on_commit_loaded() -> void:
 		_diff_panel.clear()
 
 
+func parent_links() -> Array[LinkButton]:
+	return _parent_links.duplicate()
+
+
+func commit_oid() -> String:
+	return _shown_oid
+
+
+func _clear_parents() -> void:
+	for link: LinkButton in _parent_links:
+		_parents.remove_child(link)
+		link.queue_free()
+	_parent_links.clear()
+	_parents.hide()
+
+
+func _request_parent(source: String, oid: String, origin: LinkButton) -> void:
+	if _shown_oid == source and _requested_oid == source and _parent_links.has(origin):
+		parent_requested.emit(source, oid, origin)
+
+
 func _on_file_changed(path: String) -> void:
 	if path.is_empty():
 		return
 	session.select_commit_file(path, false)
+	_on_diff_changed()
+
+
+func retry_diff() -> void:
+	if session == null or not _diff_panel.can_retry():
+		return
+	var info: Dictionary = session.commit_diff_info()
+	if String(info.get("state", "")) != "error":
+		return
+	session.select_commit_file(String(info.get("path", "")), false)
 	_on_diff_changed()
 
 

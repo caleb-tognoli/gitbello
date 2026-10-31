@@ -72,8 +72,55 @@ func run() -> void:
 	expect(await _commit(session, "lines.txt", "Edit line 1"), "committed on topic-one")
 
 	# Ctrl+B lists the branches; Enter in the filter checks out the first.
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "the branch picker opens")
+	var no_match: Label = popover._empty
+	expect(not no_match.visible, "the empty message is hidden while branches are listed")
+	_expect_branch_icons(popover, "topic-one")
+	popover.set_filter("TOPIC")
+	_expect_branch_icons(popover, "topic-one")
+	popover.set_filter("main")
+	_expect_branch_icons(popover, "topic-one", 0)
+	popover.set_filter("")
+	var chosen: Array[int] = [0]
+	var on_chosen: Callable = func(_ref: Dictionary) -> void: chosen[0] += 1
+	popover.branch_chosen.connect(on_chosen)
+	popover.set_filter("no-matching-branch")
+	expect(popover.row_names().is_empty() and popover.first_ref().is_empty(), "an unmatched search has no branch rows")
+	expect(no_match.visible, "an unmatched search shows its empty state")
+	expect_eq(no_match.text, "No matching branches", "the empty message is concise")
+	expect_eq(no_match.theme_type_variation, &"DimLabel", "the empty message uses the quiet theme style")
+	expect_eq(no_match.mouse_filter, Control.MOUSE_FILTER_IGNORE, "the empty message does not capture mouse input")
+	press("Enter", popover)
+	press("Down", popover)
+	press("Enter", popover)
+	expect_eq(chosen[0], 0, "Enter cannot choose a branch from empty results")
+	expect(popover.visible, "empty-result activation keeps the picker open")
+	popover.set_filter("TOPIC")
+	expect(not no_match.visible and not popover.row_names().is_empty(), "a matching query restores rows and hides the message")
+	popover.set_filter("no-matching-branch")
+	popover.set_filter("")
+	expect(not no_match.visible and not popover.first_ref().is_empty(), "clearing the query restores branches")
+	popover.set_filter("   ")
+	expect(not no_match.visible, "whitespace is not an unmatched search")
+	popover.set_filter("no-matching-branch")
+	popover.hide()
+	press("Ctrl+B")
+	expect(popover.visible and not no_match.visible and not popover.first_ref().is_empty(), "reopening resets the query and empty state")
+	popover.branch_chosen.disconnect(on_chosen)
+	popover.hide()
 	expect(await _choose_branch(popover, "main"), "the branch list finds main")
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "Enter checked out main")
+	expect(await wait_until(func() -> bool:
+		return session.branch_refs().any(func(ref: Dictionary) -> bool:
+			return String(ref["short_name"]) == "main" and bool(ref["is_head"]))),
+			"branch refs reflect checkout before reopening the picker")
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "the branch picker reopens after checkout")
+	_expect_branch_icons(popover, "main")
+	popover.set_filter("topic-one")
+	_expect_branch_icons(popover, "main", 0)
+	popover.hide()
 
 	# A local edit that topic-one's version would overwrite: the switch asks
 	# first; bringing the changes stashes, switches and re-applies them.
@@ -171,6 +218,28 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+func _expect_branch_icons(popover: BranchPopover, current: String, expected_current: int = 1) -> void:
+	expect(not popover.row_names().is_empty(), "the icon check has branch rows")
+	expect_eq(_check_branch_icon_rows(popover._tree.get_root(), current), expected_current,
+			"only the current branch has a checkmark")
+
+
+func _check_branch_icon_rows(parent: TreeItem, current: String) -> int:
+	var current_count: int = 0
+	for item: TreeItem in parent.get_children():
+		if item.get_metadata(0) is Dictionary:
+			var ref: Dictionary = item.get_metadata(0) as Dictionary
+			var is_current: bool = String(ref["short"]) == current
+			var icon_name: StringName = &"StatusSuccess" if is_current else &"GitBranch"
+			expect_eq(item.get_icon(0), AppTheme.icon(icon_name),
+					"%s has the %s icon" % [ref["short"], icon_name])
+			expect(not item.get_text(1).contains("Current"), "no redundant Current badge")
+			if is_current:
+				current_count += 1
+		current_count += _check_branch_icon_rows(item, current)
+	return current_count
 
 
 ## Opens the branch list with Ctrl+B, filters it by `name` and presses

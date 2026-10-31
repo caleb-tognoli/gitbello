@@ -446,6 +446,20 @@ func _register_actions() -> void:
 	Actions.register(&"diff.toggle_whole_file", "Show whole file", "View",
 			func() -> void: _shown_diff_panel().toggle_whole_file(), PackedStringArray(),
 			func() -> bool: return _shown_diff_panel() != null)
+	Actions.register(&"diff.retry", "Retry diff", "View",
+			func() -> void:
+				var page: RepoTab = current_page()
+				if page.view == WorktreeView.View.HISTORY:
+					page.history().details().retry_diff()
+				else:
+					page.changes().retry_diff(),
+			PackedStringArray(), func() -> bool:
+				var page: RepoTab = current_page()
+				if page == null or page.session == null or not page.session.is_ready():
+					return false
+				var panel: DiffPanel = page.history().details().diff_panel() \
+						if page.view == WorktreeView.View.HISTORY else page.changes().diff_panel()
+				return panel.can_retry(), _says("There is no failed diff to retry."))
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
@@ -477,6 +491,9 @@ func _register_change_actions() -> void:
 	Actions.register(&"changes.discard_listed", "Discard all", "Changes",
 			func() -> void: changes.call().discard_listed(), PackedStringArray(), has_listed,
 			_says("No changed files are listed."))
+	Actions.register(&"changes.clear_filters", "Clear all filters", "Changes",
+			func() -> void: changes.call().filter_field().clear_filters(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and changes.call().filter_field().is_active())
 	Actions.register(&"changes.toggle_selected", "Include or leave out the selection", "Changes",
 			func() -> void: changes.call().toggle_selected(), PackedStringArray(), in_changes)
 	Actions.register(&"changes.include_all", "Include all changes", "Changes",
@@ -505,6 +522,13 @@ func _register_change_actions() -> void:
 			"History", func() -> void: current_page().history().step_match(false), PackedStringArray(["Shift+F3"]),
 			in_history, no_matches)
 	previous.in_text_fields = true
+	var parent: ActionRegistry.Action = Actions.register(&"history.go_to_parent", "Go to parent commit", "History",
+			func() -> void: current_page().history().go_to_parent(), PackedStringArray(),
+			func() -> bool:
+				var page: RepoTab = current_page()
+				return page != null and page.view == WorktreeView.View.HISTORY \
+						and page.history().can_go_to_parent())
+	parent.hidden = true
 	Actions.register(&"changes.open_file", "Open file", "Changes",
 			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
@@ -522,9 +546,10 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().undo_discard(), PackedStringArray(["Ctrl+Z"]),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard(),
 			_says("There is no discard to undo."))
-	var amend: ActionRegistry.Action = Actions.register(&"changes.toggle_amend", "Toggle amend last commit", "Changes",
-			func() -> void: changes.call().toggle_amend(), PackedStringArray(["Ctrl+Shift+A"]), in_changes)
-	amend.in_text_fields = true
+	Actions.register(&"changes.cancel_amend", "Cancel", "Changes",
+			func() -> void: changes.call().commit_box().cancel_amend(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and changes.call().commit_box().is_amend() \
+					and not changes.call().commit_box().is_busy())
 	# Shelves (PLAN §4 Shelves): on the highlighted files, the selected shelf,
 	# or the newest one left on this branch by a switch.
 	Actions.register(&"changes.shelve", "Shelve selected files…", "Shelves",
@@ -716,6 +741,18 @@ func _register_branch_actions() -> void:
 		var target: Dictionary = target_commit.call()
 		return not target.is_empty() \
 				and String(target["hash"]) != String(current_page().session.status().get("oid", ""))
+	Actions.register(&"commit.amend", "Amend…", "History",
+			func() -> void:
+				var target: Dictionary = commit.call()
+				current_page().show_view(WorktreeView.View.CHANGES)
+				current_page().changes().begin_amend(target),
+			PackedStringArray(["Ctrl+Shift+A"]),
+			func() -> bool:
+				return is_ready.call() and not commit.call().is_empty() \
+						and String(commit.call().get("hash", "")) == String(current_page().session.status().get("oid", "")) \
+						and not _feedback.is_busy(current_page().session) \
+						and current_page().changes().commit_box().can_amend(),
+			_says("Select the current HEAD commit in History to amend it."))
 	Actions.register(&"commit.checkout", "Check out commit (detached)…", "History",
 			func() -> void: ops.call().checkout_commit(String(target_commit.call()["hash"])),
 			PackedStringArray(), not_head)

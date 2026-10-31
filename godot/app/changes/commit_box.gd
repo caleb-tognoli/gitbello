@@ -1,10 +1,10 @@
 class_name CommitBox
 extends VBoxContainer
-## Commit message (summary and body), amend toggle and the commit button,
+## Commit message (summary and body), temporary amend mode and the commit button,
 ## which says what it commits ("Commit 2 files to main") and, when it cannot,
 ## why in its tooltip. Hook or git output from a failed commit is shown below
 ## until the next attempt. While a merge or cherry-pick is committed, the box
-## starts with git's message, Amend is hidden, the button says what it
+## starts with git's message, amend mode is unavailable, the button says what it
 ## finishes and, while it cannot, why under it ("Resolve login.rs first").
 ## Under the button, the undo strip offers the last unpushed commit (PLAN §4).
 
@@ -20,11 +20,10 @@ var session: RepoSession = null:
 var feedback: Feedback = null
 
 var _job: int = -1
-## Message loaded from HEAD for amending, to tell it apart from user edits.
-var _loaded_summary: String = ""
-var _loaded_body: String = ""
-var _waiting_for_message: bool = false
-## What the user had typed before an amend filled in HEAD's message.
+var _message_job: int = -1
+var _amending: bool = false
+var _amend_head: String = ""
+var _amend_subject: String = ""
 var _draft_summary: String = ""
 var _draft_body: String = ""
 ## The operation whose message filled the box (`kind:oid`), so it fills once.
@@ -40,7 +39,9 @@ var _undo_button: Button = Button.new()
 
 @onready var _summary: LineEdit = %Summary
 @onready var _body: TextEdit = %Body
-@onready var _amend: CheckBox = %Amend
+@onready var _amend_header: HBoxContainer = %AmendHeader
+@onready var _amend_title: Label = %AmendTitle
+@onready var _cancel_amend: Button = %CancelAmend
 @onready var _commit_button: Button = %CommitButton
 @onready var _output: TextEdit = %Output
 
@@ -48,11 +49,10 @@ var _undo_button: Button = Button.new()
 func _ready() -> void:
 	_apply_theme()
 	_commit_button.icon = Actions.icon(&"changes.commit")
-	_amend.tooltip_text = tr("Amend the last commit")
 	_summary.text_changed.connect(func(_t: String) -> void: update_state())
 	_summary.text_submitted.connect(func(_t: String) -> void: _body.grab_focus())
 	_body.text_changed.connect(update_state)
-	_amend.toggled.connect(_on_amend_toggled)
+	_cancel_amend.pressed.connect(func() -> void: Actions.run_action(&"changes.cancel_amend", _cancel_amend))
 	_commit_button.pressed.connect(commit)
 	_undo_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	_undo_icon.modulate.a = 0.6
@@ -61,7 +61,7 @@ func _ready() -> void:
 	_undo_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_undo_label.clip_text = true
 	_undo_label.mouse_filter = Control.MOUSE_FILTER_PASS
-	_undo_button.text = "Undo"
+	_undo_button.text = tr("Undo")
 	_undo_button.icon = AppTheme.icon(&"Undo")
 	_undo_button.pressed.connect(func() -> void: Actions.run_action(&"commit.undo", _undo_button))
 	_undo_strip.add_child(_undo_icon)
@@ -84,13 +84,14 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
-		_amend.tooltip_text = tr("Amend the last commit")
+		_undo_button.text = tr("Undo")
 		update_state()
 
 
 func set_session(value: RepoSession) -> void:
 	if session != null:
 		session.job_finished.disconnect(_on_job_finished)
+		session.job_cancelled.disconnect(_on_job_cancelled)
 		session.head_message_loaded.disconnect(_on_head_message_loaded)
 		session.status_changed.disconnect(update_state)
 		session.operation_changed.disconnect(update_state)
@@ -99,6 +100,7 @@ func set_session(value: RepoSession) -> void:
 	session = value
 	if session != null:
 		session.job_finished.connect(_on_job_finished)
+		session.job_cancelled.connect(_on_job_cancelled)
 		session.head_message_loaded.connect(_on_head_message_loaded)
 		session.status_changed.connect(update_state)
 		session.operation_changed.connect(update_state)
@@ -138,11 +140,40 @@ func undo_text() -> String:
 
 
 func is_amend() -> bool:
-	return _amend.button_pressed
+	return _amending
 
 
-func set_amend(value: bool) -> void:
-	_amend.button_pressed = value
+func can_amend() -> bool:
+	return session != null and session.is_ready() and not _amending and _job < 0 and _message_job < 0 \
+			and not String(session.status().get("oid", "")).is_empty() and session.operation().is_empty()
+
+
+func begin_amend(target: Dictionary) -> void:
+	if not can_amend() or String(target.get("hash", "")) != String(session.status().get("oid", "")):
+		return
+	_draft_summary = _summary.text
+	_draft_body = _body.text
+	_amend_head = String(target["hash"])
+	_amend_subject = String(target.get("subject", ""))
+	_amending = true
+	_output.hide()
+	_message_job = session.load_head_message()
+	if _message_job < 0:
+		cancel_amend()
+		_show_error({"title": "Could not load the commit message"})
+	update_state()
+
+
+func cancel_amend() -> void:
+	if not _amending or is_busy():
+		return
+	_amending = false
+	_amend_head = ""
+	_amend_subject = ""
+	set_message(_draft_summary, _draft_body)
+	_draft_summary = ""
+	_draft_body = ""
+	_output.hide()
 
 
 func is_busy() -> bool:
@@ -161,7 +192,14 @@ func can_commit() -> bool:
 func block_reason() -> String:
 	if session == null:
 		return tr("No repository")
-	var reason: String = session.commit_block_reason(_amend.button_pressed)
+	if _amending:
+		if _amend_head != String(session.status().get("oid", "")):
+			return tr("The last commit changed. Start amend again.")
+		if _message_job >= 0:
+			return tr("Loading the commit message")
+		if not session.operation().is_empty():
+			return tr("Finish the operation in progress first")
+	var reason: String = session.commit_block_reason(_amending)
 	if reason == "Resolve conflicts first":
 		return _resolve_reason()
 	if not reason.is_empty():
@@ -171,7 +209,7 @@ func block_reason() -> String:
 	return ""
 
 
-## What the button commits: "Commit 2 files to main", "Amend last commit",
+## What the button commits: "Commit 2 files to main", "Amend commit",
 ## "Commit merge into main"...
 func button_text() -> String:
 	var mode: String = session.commit_mode() if session != null else "normal"
@@ -180,10 +218,10 @@ func button_text() -> String:
 		return tr("Commit merge into %s") % into if not into.is_empty() else tr("Commit merge")
 	if mode == "cherry_pick":
 		return tr("Commit cherry-pick") if session.operation() == "cherry_pick" else tr("Commit revert")
+	if _amending:
+		return tr("Amend commit")
 	var count: int = session.picked_count() if session != null else 0
 	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
-	if _amend.button_pressed:
-		return tr("Amend last commit") if count == 0 else tr("Amend last commit with %s") % files
 	var branch: String = session.current_branch() if session != null else ""
 	if branch.is_empty():
 		return tr("Commit") if count == 0 else tr("Commit %s") % files
@@ -216,22 +254,33 @@ func update_state() -> void:
 	if not is_node_ready():
 		return
 	var mode: String = session.commit_mode() if session != null else "normal"
-	_amend.disabled = mode != "normal"
-	_amend.visible = mode == "normal"
-	if _amend.disabled and _amend.button_pressed:
-		_amend.set_pressed_no_signal(false)
+	if _amending and not is_busy() and (session == null or mode != "normal" \
+			or _amend_head != String(session.status().get("oid", ""))):
+		cancel_amend()
+		return
+	_amend_header.visible = _amending
+	_amend_title.text = tr("Amending “%s”") % _amend_subject
+	_amend_title.tooltip_text = _amend_title.text
+	_cancel_amend.text = tr("Cancel")
+	_cancel_amend.disabled = is_busy()
+	var editable: bool = not is_busy() and not (_amending and _message_job >= 0)
+	_summary.editable = editable
+	_body.editable = editable
 	_fill_operation_message(mode)
 	_update_undo_strip()
 	_commit_button.disabled = not can_commit()
 	_commit_button.icon = AppTheme.icon(&"GitMerge") if mode == "merge" else Actions.icon(&"changes.commit")
 	if _job >= 0:
-		_commit_button.text = tr("Committing…")
+		_commit_button.text = tr("Amending…") if _amending else tr("Committing…")
 	else:
 		_commit_button.text = button_text()
 	var shortcut: String = Actions.shortcut_label(&"changes.commit")
 	var why: String = block_reason() if _job < 0 else ""
+	var detail: String = button_text()
+	if _amending and session != null:
+		detail += tr(" with %d included file(s)") % session.picked_count()
 	_commit_button.tooltip_text = why if not why.is_empty() \
-			else (button_text() + (" (%s)" % shortcut if not shortcut.is_empty() else ""))
+			else (detail + (" (%s)" % shortcut if not shortcut.is_empty() else ""))
 	_reason.text = why
 	_reason.visible = not why.is_empty() and mode in ["merge", "cherry_pick"]
 
@@ -243,9 +292,10 @@ func commit(origin: Control = null) -> bool:
 		return false
 	_output.hide()
 	var done: String = _done_text()
-	_job = session.commit(_summary.text, _body.text, _amend.button_pressed)
+	_job = session.commit(_summary.text, _body.text, _amending)
 	if feedback != null:
-		feedback.track(session, _job, "Committing", done, origin if origin != null else _commit_button)
+		feedback.track(session, _job, "Amending" if _amending else "Committing", done,
+				origin if origin != null else _commit_button, func(_ok: bool) -> void: update_state())
 	update_state()
 	return _job >= 0
 
@@ -303,54 +353,55 @@ func _done_text() -> String:
 	var count: int = session.picked_count()
 	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
 	var branch: String = session.current_branch()
-	if _amend.button_pressed:
-		return tr("Amended the last commit") if count == 0 else tr("Amended the last commit with %s") % files
+	if _amending:
+		return tr("Amended “%s”") % _amend_subject
 	return tr("Committed %s to %s") % [files, branch] if not branch.is_empty() else tr("Committed %s") % files
 
 
-func _on_amend_toggled(on: bool) -> void:
-	if on:
-		_draft_summary = _summary.text
-		_draft_body = _body.text
-		if _summary.text.strip_edges().is_empty() and _body.text.strip_edges().is_empty() and session != null:
-			_waiting_for_message = session.load_head_message() >= 0
-	else:
-		_waiting_for_message = false
-		# Put back the user's draft unless they edited the loaded message.
-		if _summary.text == _loaded_summary and _body.text == _loaded_body:
-			set_message(_draft_summary, _draft_body)
-		_loaded_summary = ""
-		_loaded_body = ""
-	update_state()
-
-
 func _on_head_message_loaded(summary_text: String, body_text: String) -> void:
-	if not _waiting_for_message or not _amend.button_pressed:
+	if _message_job < 0:
 		return
-	_waiting_for_message = false
-	_loaded_summary = summary_text
-	_loaded_body = body_text
+	_message_job = -1
+	if not _amending:
+		update_state()
+		return
+	if _amend_head != String(session.status().get("oid", "")):
+		cancel_amend()
+		return
+	_amend_subject = summary_text
 	set_message(summary_text, body_text)
 
 
 func _on_job_finished(job: int, label: String, ok: bool, error: Dictionary) -> void:
+	if job == _message_job:
+		_message_job = -1
+		if _amending and not ok:
+			cancel_amend()
+			_show_error(error)
+		update_state()
+		return
 	if job != _job or label != COMMIT_LABEL:
 		return
 	_job = -1
 	if ok:
-		_loaded_summary = ""
-		_loaded_body = ""
-		_draft_summary = ""
-		_draft_body = ""
-		_waiting_for_message = false
-		_amend.set_pressed_no_signal(false)
-		set_message("", "")
+		if _amending:
+			cancel_amend()
+		else:
+			set_message("", "")
 		committed.emit()
 	else:
-		var stderr: String = String(error.get("stderr", "")).strip_edges()
-		_output.text = stderr if not stderr.is_empty() else String(error.get("title", "Commit failed"))
-		_output.show()
+		_show_error(error)
 	update_state()
+
+
+func _on_job_cancelled(job: int, label: String) -> void:
+	_on_job_finished(job, label, false, {"title": "Operation cancelled"})
+
+
+func _show_error(error: Dictionary) -> void:
+	var stderr: String = String(error.get("stderr", "")).strip_edges()
+	_output.text = stderr if not stderr.is_empty() else tr(String(error.get("title", "Commit failed")))
+	_output.show()
 
 
 func _apply_theme() -> void:

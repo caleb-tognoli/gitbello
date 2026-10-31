@@ -13,6 +13,7 @@ var _fixtures: String = ""
 
 
 func run() -> void:
+	_check_recent_labels()
 	_fixtures = fixtures_dir()
 	if _fixtures.is_empty():
 		print("shell_smoke: no --fixtures, skipped")
@@ -47,6 +48,15 @@ func run() -> void:
 	expect_eq(chips.size(), 2, "two worktree chips")
 	if chips.size() == 2:
 		expect_eq(chips[0].texts(), {"name": "repo-1", "branch": "main", "badge": "2 ↑1"}, "the main worktree's chip")
+		expect(chips[0].tooltip_text.contains("2 changed files"), "the chip explains its live changed count")
+		var chip_tooltip: Control = chips[0]._make_custom_tooltip(chips[0].tooltip_text)
+		var tracking_icons: Array[Node] = chip_tooltip.find_children("*", "TextureRect", true, false)
+		expect_eq(tracking_icons.size(), 1, "the live fixture has one tracking icon")
+		if tracking_icons.size() == 1:
+			var tracking_icon: TextureRect = tracking_icons[0] as TextureRect
+			expect_eq(tracking_icon.texture, AppTheme.icon(&"GitPush"), "the live ahead count uses the themed push SVG")
+			expect_eq((tracking_icon.get_parent().get_child(1) as Label).text, "1", "the live ahead icon has its count")
+		chip_tooltip.free()
 		expect(chips[0].selected and not chips[1].selected, "the opened worktree's chip is selected")
 
 	# + follows the last tab, and New worktree the last chip.
@@ -83,7 +93,8 @@ func run() -> void:
 	file.close()
 	var updated: bool = await _wait(func() -> bool:
 		var now: Array[WorktreeChip] = main.page_at(0).strip().chips()
-		return not now.is_empty() and String(now[0].texts()["badge"]) == "3 ↑1")
+		return not now.is_empty() and String(now[0].texts()["badge"]) == "3 ↑1" \
+				and now[0].tooltip_text.contains("3 changed files"))
 	expect(updated, "the chip updates after an outside change")
 
 	# Worktrees: Ctrl+2 shows the second chip in the same tab; opening a
@@ -170,6 +181,7 @@ func run() -> void:
 	expect(not labels.is_empty() and labels[0] == "Go to: repo-3 · repo-3-feature",
 			"palette lists worktrees: %s" % [labels])
 	main.palette().close()
+	await _check_palette(main)
 
 	# A folder that is not a repository opens a tab with an error and a toast.
 	var plain: String = _fixtures.path_join("not a repo")
@@ -198,6 +210,188 @@ func run() -> void:
 		restored.close_tab(0)
 	restored.queue_free()
 	await get_tree().process_frame
+	await _check_welcome()
+
+
+func _check_welcome() -> void:
+	var welcome: Welcome = load("res://app/welcome/welcome.tscn").instantiate() as Welcome
+	welcome.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(welcome)
+	var chosen: Array[String] = [""]
+	welcome.recent_chosen.connect(func(path: String) -> void: chosen[0] = path)
+	for frame: int in 3:
+		await get_tree().process_frame
+	var recent: PackedStringArray = Core.recent_repos().slice(0, Welcome.MAX_RECENT)
+	var labels: PackedStringArray = welcome.call(&"_recent_labels", recent)
+	var actions: VBoxContainer = welcome.get_node("%Actions") as VBoxContainer
+	expect_eq(actions.get_child_count(), recent.size() + 1, "Welcome offers at most six recents plus Open")
+	for i: int in recent.size():
+		var button: Button = actions.get_child(i + 1) as Button
+		expect_eq(button.text, labels[i], "Welcome keeps recent ordering")
+		expect_eq(button.tooltip_text, recent[i], "Welcome preserves the full original tooltip")
+		expect(button.clip_text, "recent labels cannot grow the layout")
+		button.pressed.emit()
+		expect_eq(chosen[0], recent[i], "each recent button emits its original path")
+	welcome.refresh()
+	expect_eq(actions.get_child_count(), recent.size() + 1, "refresh replaces rather than duplicates recent buttons")
+	if not recent.is_empty():
+		for frame: int in 3:
+			await get_tree().process_frame
+		var long_button: Button = actions.get_child(1) as Button
+		var width: float = long_button.size.x
+		long_button.text = "工程 café ".repeat(100) + " · parent"
+		for frame: int in 3:
+			await get_tree().process_frame
+		expect(long_button.size.x <= width, "long Unicode labels stay within the existing Welcome width")
+		expect_eq(long_button.text_overrun_behavior, TextServer.OVERRUN_TRIM_ELLIPSIS, "long labels use ellipsis")
+	welcome.queue_free()
+	await get_tree().process_frame
+
+
+func _check_recent_labels() -> void:
+	var welcome: Welcome = Welcome.new()
+	var paths: PackedStringArray = [
+		"C:\\Work\\clients\\gitbello\\", "D:/Personal/clients/gitbello",
+		"C:/Projects/unique", "//server/team/gitbello",
+		"C:/very long parent with spaces/工程/café", "D:/Archive/café",
+		"D:/hidden/unique",
+	]
+	expect_eq(welcome.call(&"_recent_labels", paths), PackedStringArray([
+		"gitbello · Work/clients", "gitbello · Personal/clients", "unique",
+		"gitbello · team", "café · 工程", "café · Archive",
+	]), "only visible duplicate names receive distinguishing parent suffixes")
+	expect_eq(welcome.call(&"_recent_labels", PackedStringArray([
+		"C:/team/repo", "D:/team/repo", "//alpha/team/repo", "//beta/team/repo",
+	])), PackedStringArray([
+		"repo · C:/team", "repo · D:/team", "repo · //alpha/team", "repo · //beta/team",
+	]), "drive and server names distinguish otherwise identical parent suffixes")
+	var case_labels: PackedStringArray = welcome.call(&"_recent_labels", PackedStringArray([
+		"C:/Work/Repo", "D:/Personal/repo",
+	]))
+	expect_eq(case_labels, PackedStringArray(["Repo · Work", "repo · Personal"]) \
+			if OS.has_feature("windows") else PackedStringArray(["Repo", "repo"]),
+			"basename comparison respects platform case rules while preserving display case")
+	expect_eq(welcome.call(&"_recent_labels", PackedStringArray(["/repo", "/work/repo", "C:/", "/"])),
+			PackedStringArray(["repo · /", "repo · work", "C:", "/"]), "root parents and root names stay meaningful")
+	welcome.free()
+
+
+func _check_palette(main: Main) -> void:
+	var ran: Array[int] = [0]
+	var available: Array[bool] = [true]
+	Actions.register(&"test.palette_probe_a", "Paletteprobe a", "Tests",
+			func() -> void: ran[0] += 1, PackedStringArray(["Ctrl+Alt+F12"]),
+			func() -> bool: return available[0])
+	Actions.register(&"test.palette_probe_b", "Paletteprobe b", "Tests",
+			func() -> void: ran[0] += 1, PackedStringArray(), func() -> bool: return false,
+			func() -> String: return "Open a repository first.")
+	Actions.register(&"test.palette_probe_c", "Paletteprobe c", "Tests", func() -> void: ran[0] += 1)
+	Actions.register(&"test.palette_probe_d", "Paletteprobe d", "Tests",
+			func() -> void: ran[0] += 1, PackedStringArray(), func() -> bool: return false)
+	var hidden: ActionRegistry.Action = Actions.register(&"test.palette_probe_e", "Paletteprobe e", "Tests",
+			func() -> void: ran[0] += 1)
+	hidden.hidden = true
+	var palette: CommandPalette = main.palette()
+	var results: Tree = palette.get_node("%Results") as Tree
+	palette.open()
+	expect("Tests: Paletteprobe a" in palette.visible_labels(), "available actions are listed without a query")
+	expect(not "Tests: Paletteprobe b" in palette.visible_labels(), "unavailable actions stay hidden without a query")
+	palette.set_query("   ")
+	expect(not "Tests: Paletteprobe b" in palette.visible_labels(), "whitespace does not reveal unavailable actions")
+	palette.set_query("paletteprobe")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	expect_eq(palette.visible_labels().size(), 4, "search finds enabled and unavailable actions, but not hidden actions")
+	var enabled_items: Array[TreeItem] = []
+	var item: TreeItem = results.get_root().get_first_child()
+	var disabled: TreeItem = null
+	while item != null:
+		if item.get_text(0) == "Tests: Paletteprobe b":
+			disabled = item
+			expect_eq(item.get_text(1), "Open a repository", "an unavailable match shows a compact hint")
+			expect(not item.is_selectable(0) and not item.is_selectable(1), "neither column of an unavailable match is selectable")
+			expect_eq(item.get_custom_color(0), palette.get_theme_color(&"font_color", &"DimLabel"), "unavailable commands use muted theme text")
+			expect(item.get_tooltip_text(1).contains("Open a repository first."), "the full reason remains in the tooltip")
+			expect_eq(item.get_text_overrun_behavior(1), TextServer.OVERRUN_NO_TRIMMING, "hints are never ellipsized")
+			expect_eq(item.get_autowrap_mode(1), TextServer.AUTOWRAP_WORD_SMART, "long hints can wrap")
+		elif item.get_text(0) == "Tests: Paletteprobe d":
+			expect_eq(item.get_text(1), "Unavailable here", "actions without a reason have a compact fallback")
+		if item.is_selectable(0):
+			enabled_items.append(item)
+		item = item.get_next()
+	expect_eq(enabled_items.size(), 2, "two probe commands can run")
+	if enabled_items.size() == 2:
+		expect(results.get_selected() == enabled_items[0], "initial selection skips unavailable matches")
+		press("Down")
+		expect(results.get_selected() == enabled_items[1], "Down skips unavailable matches")
+		press("Up")
+		expect(results.get_selected() == enabled_items[0], "Up skips unavailable matches")
+	if disabled != null:
+		var at: Vector2 = results.get_global_rect().position + results.get_item_area_rect(disabled, 0).get_center()
+		var motion: InputEventMouseMotion = InputEventMouseMotion.new()
+		motion.position = at
+		get_viewport().push_input(motion)
+		var click: InputEventMouseButton = InputEventMouseButton.new()
+		click.position = at
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = true
+		click.double_click = true
+		get_viewport().push_input(click)
+		click = click.duplicate() as InputEventMouseButton
+		click.pressed = false
+		get_viewport().push_input(click)
+		expect_eq(ran[0], 0, "double-clicking an unavailable match does not execute a selected enabled command")
+		expect(palette.visible, "double-clicking an unavailable match keeps the palette open")
+	palette.set_query("paletteprobe b")
+	expect_eq(palette.visible_labels(), PackedStringArray(["Tests: Paletteprobe b"]), "an unavailable command can be found on its own")
+	expect(results.get_selected() == null, "all-unavailable results have no selection")
+	press("Down")
+	press("Enter")
+	expect_eq(ran[0], 0, "Enter cannot execute an unavailable match")
+	expect(palette.visible, "Enter on unavailable-only results keeps the explanation visible")
+	palette.set_query("paletteprobe a")
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	expect((palette.get_node("%Query") as LineEdit).has_focus(), "the query keeps keyboard focus after an unavailable click (focus: %s)" % str(focus))
+	available[0] = false
+	press("Enter")
+	expect_eq(ran[0], 0, "availability is checked again before execution")
+	expect(palette.visible and results.get_selected() == null, "a newly unavailable command is refreshed without dismissing the palette")
+	available[0] = true
+	palette.set_query("paletteprobe a")
+	press("Enter")
+	expect_eq(ran[0], 1, "an available match still executes")
+	expect(not palette.visible, "executing an available match closes the palette")
+	var long_reason: String = "This unfamiliar explanation must stay completely visible even when it needs several lines. ".repeat(3).strip_edges()
+	Actions.get_action(&"test.palette_probe_b").reason = func() -> String: return long_reason
+	palette.open()
+	palette.set_query("paletteprobe b")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var wrapped: TreeItem = results.get_root().get_first_child()
+	expect_eq(wrapped.get_text(1), long_reason.trim_suffix("."), "unknown reasons keep their full wording")
+	var font: Font = results.get_theme_font(&"font")
+	var font_size: int = results.get_theme_font_size(&"font_size")
+	expect(results.get_item_area_rect(wrapped, 1).size.y > font.get_height(font_size) * 2.0,
+			"a long reason grows the row instead of clipping")
+	palette.close()
+	for id: StringName in [&"test.palette_probe_a", &"test.palette_probe_b", &"test.palette_probe_c",
+			&"test.palette_probe_d", &"test.palette_probe_e"]:
+		Actions.unregister(id)
+	var previous_view: WorktreeView.View = main.current_page().view
+	main.current_page().show_view(WorktreeView.View.CHANGES)
+	palette.open()
+	palette.set_query("amend")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var amend: TreeItem = results.get_root().get_first_child()
+	expect_eq(amend.get_text(1), "Select HEAD in History", "Amend has a short, specific hint")
+	var room: float = results.get_item_area_rect(amend, 1).size.x \
+			- float(results.get_theme_constant(&"inner_item_margin_left") + results.get_theme_constant(&"inner_item_margin_right"))
+	for hint: String in CommandPalette.DISABLED_HINTS.values():
+		expect(font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= room,
+				"the compact hint fits its column: %s" % hint)
+	palette.close()
+	main.current_page().show_view(previous_view)
 
 
 func _check_menus(main: Main) -> void:

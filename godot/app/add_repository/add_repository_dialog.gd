@@ -136,6 +136,7 @@ func _start_job(job: int) -> void:
 	_status.text = tr("Cloning repository…") if _mode == CLONE else tr("Creating repository…")
 	_status.show()
 	_progress.value = 0
+	_progress.indeterminate = _mode == CLONE
 	_progress.visible = _mode == CLONE
 	_set_busy(true)
 
@@ -181,12 +182,15 @@ func _set_busy(busy: bool) -> void:
 	get_cancel_button().text = tr("Cancel operation") if busy else tr("Cancel")
 	if not busy:
 		_progress.hide()
+		_progress.indeterminate = false
+		_progress.value = 0
 		_validate()
 
 
 func _on_job_progress(job: int, _path: String, _label: String, percent: int, text: String) -> void:
 	if job != _job:
 		return
+	_progress.indeterminate = percent < 0
 	_progress.value = maxf(0.0, float(percent))
 	_status.text = text
 

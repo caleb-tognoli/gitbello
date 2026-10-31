@@ -67,7 +67,10 @@ func _ready() -> void:
 	box.add_child(_tree)
 	_empty.theme_type_variation = &"DimLabel"
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_empty.visible = false
+	_empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_empty.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_empty.hide()
 	box.add_child(_empty)
 	var footer: HBoxContainer = HBoxContainer.new()
 	_new_button.text = tr("New branch…")
@@ -138,6 +141,7 @@ func _activate_first() -> void:
 
 func _rebuild() -> void:
 	_tree.clear()
+	_empty.hide()
 	_tree.set_column_custom_minimum_width(1, 0)
 	var root: TreeItem = _tree.create_item()
 	if session == null or not session.is_ready():
@@ -211,7 +215,7 @@ func _fit() -> void:
 	var last: TreeItem = _last_visible(_tree.get_root())
 	_tree.visible = last != null
 	_empty.visible = last == null
-	_empty.text = tr("No branches match") if not _filter.text().strip_edges().is_empty() \
+	_empty.text = tr("No matching branches") if not _filter.text().strip_edges().is_empty() \
 			else tr("No other branches") if _merging else tr("No branches")
 	_tree.custom_minimum_size.y = 0.0
 	var rows: float = 0.0
@@ -244,7 +248,7 @@ static func _remote_has_local(remote_name: String, local_names: PackedStringArra
 
 func _section(parent: TreeItem, text: String, header: bool = true) -> TreeItem:
 	var item: TreeItem = _tree.create_item(parent)
-	item.set_text(0, text)
+	item.set_text(0, tr(text) if header else text)
 	item.set_selectable(0, false)
 	item.set_selectable(1, false)
 	if header:
@@ -256,6 +260,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
 		_filter.placeholder = tr("Filter branches")
 		_new_button.text = tr("New branch…")
+		if _merging and session != null:
+			_header_label.text = tr("Merge into %s") % session.current_branch()
 		_rebuild()
 
 
@@ -277,7 +283,6 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 		badge.clear()
 		if ref.has("committed_at") and int(ref["committed_at"]) > 0:
 			badge.append(RepoOps.ago(int(Time.get_unix_time_from_system()) - int(ref["committed_at"])))
-		item.set_icon(0, AppTheme.icon(&"GitBranch" if String(ref["kind"]) == "branch" else &"GitRemote"))
 		item.set_icon_modulate(0, get_theme_color(&"icon_color", THEME_TYPE))
 	item.set_text(0, text)
 	item.set_text(1, " ".join(badge))
@@ -291,8 +296,7 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 	item.set_custom_color(1, get_theme_color(&"badge_color", THEME_TYPE))
 	item.set_tooltip_text(0, String(ref["short_name"]) + (
 			"\n" + tr("tracks %s") % String(ref["upstream"]) if not String(ref["upstream"]).is_empty() else ""))
-	if bool(ref["is_head"]):
-		item.set_icon(0, AppTheme.dot(get_theme_color(&"head_color", THEME_TYPE)))
+	item.set_icon(0, AppTheme.icon(&"StatusSuccess" if bool(ref["is_head"]) else &"GitBranch"))
 	item.set_metadata(0, {
 		"type": "branch" if String(ref["kind"]) == "branch" else "remote",
 		"name": String(ref["name"]),

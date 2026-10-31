@@ -35,7 +35,7 @@ const LABEL_MENUS: Dictionary[String, Array] = {
 	"remote": [&"branch.checkout", &"branch.merge"],
 	"tag": [&"branch.merge", &"", &"tag.push", &"tag.delete"],
 }
-const COMMIT_MENU: Array[StringName] = [&"commit.checkout", &"branch.new", &"tag.new", &"",
+const COMMIT_MENU: Array[StringName] = [&"commit.amend", &"commit.checkout", &"branch.new", &"tag.new", &"",
 	&"commit.cherry_pick", &"commit.merge", &"", &"commit.copy_hash"]
 const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"sync.pull_merge", &"sync.pull_rebase", &"sync.push",
 	&"", &"sync.force_push"]
@@ -164,6 +164,7 @@ func _ready() -> void:
 	_popover.new_branch_requested.connect(func() -> void: Actions.run_action(&"branch.new", _branch_button))
 	_history.commit_menu_requested.connect(_on_commit_menu)
 	_history.label_menu_requested.connect(_on_label_menu)
+	_history.notice.connect(notice.emit)
 	_branch_button.icon = AppTheme.icon(&"GitBranch")
 	_branch_button.pressed.connect(open_branches)
 	_branch_button.menu_requested.connect(open_branches)

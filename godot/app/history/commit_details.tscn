@@ -94,20 +94,17 @@ size_flags_vertical = 4
 focus_mode = 0
 theme_type_variation = &"DetailsIconButton"
 
-[node name="Parents" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
+[node name="Parents" type="HFlowContainer" parent="InfoPanel/Info/Ids"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"DetailsGroup"
+size_flags_horizontal = 3
+theme_type_variation = &"DetailsParents"
 
 [node name="ParentsIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Parents"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
 stretch_mode = 5
-
-[node name="ParentsLabel" type="Label" parent="InfoPanel/Info/Ids/Parents"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsId"
 
 [node name="Committer" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
 unique_name_in_owner = true

@@ -104,6 +104,24 @@ unique_name_in_owner = true
 layout_mode = 2
 script = ExtResource("3_commit")
 
+[node name="AmendHeader" type="HBoxContainer" parent="Files/CommitPanel/CommitBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="AmendTitle" type="Label" parent="Files/CommitPanel/CommitBox/AmendHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DimLabel"
+text_overrun_behavior = 3
+
+[node name="CancelAmend" type="Button" parent="Files/CommitPanel/CommitBox/AmendHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ToolbarButton"
+text = "Cancel"
+
 [node name="Summary" type="LineEdit" parent="Files/CommitPanel/CommitBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -114,11 +132,6 @@ unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Description"
 wrap_mode = 1
-
-[node name="Amend" type="CheckBox" parent="Files/CommitPanel/CommitBox"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Amend"
 
 [node name="CommitButton" type="Button" parent="Files/CommitPanel/CommitBox"]
 unique_name_in_owner = true

@@ -127,3 +127,10 @@ visible = false
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Load anyway"
+
+[node name="RetryButton" type="Button" parent="DiffStack/DiffMessage/Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Retry"

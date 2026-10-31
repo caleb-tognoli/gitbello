@@ -64,6 +64,7 @@ func run() -> void:
 	diff.invalidate()
 	expect_eq(diff.expander_label(0), "2 righe nascoste", "Italian plural line text is grammatical")
 	diff.queue_free()
+	await _check_reviewed_ui(main)
 
 	var invalid: String = Core.set_settings({"language": "fr"})
 	expect(not invalid.is_empty(), "Core rejects an invalid language")
@@ -83,6 +84,66 @@ func run() -> void:
 		TranslationServer.set_locale(before_locale)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+func _check_reviewed_ui(main: Main) -> void:
+	var chip: WorktreeChip = WorktreeChip.new()
+	main.add_child(chip)
+	chip.set_worktree({"path": "C:/fixture/é project", "name": "Open a repository", "branch": "No shelves",
+		"head": "abcdef1234", "detached": false, "prunable": false, "locked": false,
+		"lock_reason": "", "changed": 2, "ahead": 1, "behind": 0, "operation": ""})
+	expect(chip.tooltip_text.contains("2 file modificati"), "compact badge tooltip translates into Italian")
+	expect_eq(chip.texts()["name"], "Open a repository", "worktree names remain user content")
+	expect_eq(chip.texts()["branch"], "No shelves", "branch names remain user content")
+	var filter: FilterField = preload("res://ui/filter_field/filter_field.tscn").instantiate() as FilterField
+	main.add_child(filter)
+	filter.set_options([["modified", "Modified"]], &"changes.clear_filters")
+	filter.set_text("literal user query")
+	filter.set_option("modified", true)
+	expect_eq(filter.menu().get_item_text(filter.menu().item_count - 1), "Azzera tutti i filtri",
+			"conditional clear-all entry uses the translated action label")
+	var stack: Node = main.toasts().get_node("Scroll/Stack")
+	var previous: Array[Node] = stack.get_children()
+	for i: int in 8:
+		main.toasts().show_toast("User title %d" % i, "User diagnostic")
+	for frame: int in 6:
+		await get_tree().process_frame
+	var overflow: Label = main.toasts().get_node("Overflow") as Label
+	expect(overflow.visible and overflow.text.contains("notifiche"), "notification overflow translates")
+	var palette: CommandPalette = main.palette()
+	palette.open()
+	palette.set_query("…")
+	expect_eq(_palette_hint(palette, &"commit.amend"), "Seleziona HEAD in Cronologia",
+			"unavailable commands retain compact hints in Italian")
+	L10n.set_choice("en")
+	for frame: int in 6:
+		await get_tree().process_frame
+	expect(chip.tooltip_text.contains("2 changed files"), "visible chip tooltip updates live")
+	expect_eq(filter.options(), PackedStringArray(["modified"]), "language changes preserve active filter options")
+	expect_eq(filter.text(), "literal user query", "language changes preserve user filter text")
+	expect_eq(filter.menu().get_item_text(filter.menu().item_count - 1), "Clear all filters",
+			"conditional clear-all entry updates live")
+	expect(overflow.text.contains("notifications"), "visible notification overflow updates live")
+	expect_eq(palette._query.text, "…", "language changes preserve the palette query")
+	expect_eq(palette._query.placeholder_text, "Type a command, repository or tab…",
+			"palette placeholder updates live")
+	expect_eq(_palette_hint(palette, &"commit.amend"), "Select HEAD in History",
+			"visible unavailable-command hints update live")
+	palette.close()
+	L10n.set_choice("it")
+	for child: Node in stack.get_children():
+		if not previous.has(child):
+			child.queue_free()
+	filter.queue_free()
+	chip.queue_free()
+	await get_tree().process_frame
+
+
+func _palette_hint(palette: CommandPalette, id: StringName) -> String:
+	for i: int in palette._visible.size():
+		if StringName(palette._visible[i].get("action", &"")) == id:
+			return palette._results.get_root().get_child(i).get_text(1)
+	return ""
 
 
 func _check_catalog() -> void:

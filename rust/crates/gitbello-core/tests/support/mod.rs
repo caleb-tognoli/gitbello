@@ -411,15 +411,16 @@ pub mod rt {
         }
     }
 
-    /// Refreshes status and refs and waits until every job (that refresh
-    /// included) is done and applied, so the state is current.
+    /// Refreshes status, refs and operation and waits until every job (that
+    /// refresh included) is done and applied, so the state is current.
     pub fn settle(rt: &mut Runtime, key: &Path) {
         use gitbello_core::jobs::{RefreshKind, RefreshSet};
         rt.refresh(
             key,
             RefreshSet::EMPTY
                 .with(RefreshKind::Status)
-                .with(RefreshKind::Refs),
+                .with(RefreshKind::Refs)
+                .with(RefreshKind::Operation),
         );
         poll_until(rt, |rt, _| rt.pending_jobs() == 0);
         // Final events are sent before a job leaves the queue: apply them.

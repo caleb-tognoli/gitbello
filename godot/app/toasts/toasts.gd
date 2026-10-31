@@ -6,7 +6,7 @@ extends VBoxContainer
 ##   they stay until dismissed, with "Details" (the full command and stderr)
 ##   and buttons that fix known errors (a rejected push offers Pull);
 ## - successes (`show_success`): short, hidden after a few seconds unless
-##   hovered, with Undo when the operation can really be undone;
+##   hovered or focused, with Undo when the operation can really be undone;
 ## - progress (`show_progress`): a job started without a button to show it,
 ##   turned into its result by `finish_progress`.
 
@@ -24,12 +24,70 @@ var fix_provider: Callable = Callable()
 var error_filter: Callable = Callable()
 
 var _recent: Dictionary[String, int] = {}
+var _scroll: ScrollContainer = ScrollContainer.new()
+var _stack: VBoxContainer = VBoxContainer.new()
+var _overflow: Label = Label.new()
+var _layout_queued: bool = false
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	alignment = BoxContainer.ALIGNMENT_END
+	_scroll.name = "Scroll"
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.follow_focus = true
+	add_child(_scroll)
+	_stack.name = "Stack"
+	_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_stack)
+	_overflow.name = "Overflow"
+	_overflow.theme_type_variation = &"DimLabel"
+	_overflow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_overflow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_overflow)
+	_stack.minimum_size_changed.connect(_queue_layout)
+	_stack.child_exiting_tree.connect(func(_node: Node) -> void: _queue_layout())
+	(get_parent() as Control).resized.connect(_queue_layout)
 	Core.git_error.connect(_on_git_error)
+	_queue_layout()
+
+
+func _notification(what: int) -> void:
+	if what in [NOTIFICATION_THEME_CHANGED, NOTIFICATION_TRANSLATION_CHANGED] and is_node_ready():
+		_queue_layout()
+		if what == NOTIFICATION_TRANSLATION_CHANGED:
+			for child: Node in get_children():
+				if child is AcceptDialog:
+					var output: TextEdit = child.get_node_or_null("ErrorDetails") as TextEdit
+					if output != null:
+						output.tooltip_text = tr("Select text to copy; use %s to select all.") % Shortcuts.display("Ctrl+A")
+
+
+func _queue_layout() -> void:
+	if not _layout_queued:
+		_layout_queued = true
+		_layout.call_deferred()
+
+
+func _layout() -> void:
+	_layout_queued = false
+	var available: Vector2 = (get_parent() as Control).size
+	var width: float = minf(float(get_theme_constant(&"width", THEME_TYPE)),
+			maxf(1.0, available.x - 2.0 * float(get_theme_constant(&"edge_margin", THEME_TYPE))))
+	var limit: float = minf(float(get_theme_constant(&"max_height", THEME_TYPE)),
+			available.y * float(get_theme_constant(&"height_percent", THEME_TYPE)) / 100.0)
+	var height: float = _stack.get_combined_minimum_size().y
+	var count: int = toast_count()
+	_overflow.visible = count > 0 and height > limit
+	_overflow.text = tr("%d notifications · scroll for more") % count
+	var footer: float = _overflow.get_combined_minimum_size().y + float(get_theme_constant(&"separation")) if _overflow.visible else 0.0
+	_scroll.visible = count > 0
+	_scroll.custom_minimum_size.y = minf(height, maxf(0.0, limit - footer)) if count > 0 else 0.0
+	custom_minimum_size.x = width
+	size = Vector2(width, 0.0)
+	reset_size()
+	position = Vector2((available.x - size.x) / 2.0,
+			available.y - float(get_theme_constant(&"bottom_margin", THEME_TYPE)) - size.y)
 
 
 ## Shows an error toast; `details` (if any) opens in a dialog; each of
@@ -47,19 +105,21 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 		row.add_child(more)
 		row.move_child(more, row.get_child_count() - 2)
 	_add_actions(panel, fixes)
-	add_child(panel)
+	_stack.add_child(panel)
+	_queue_layout()
 
 
-## Shows a short success message, hidden after a few seconds (not while the
-## mouse is over it). `undo` adds an Undo button.
+## Shows a short success message, pausing its remaining lifetime while
+## hovered or focused. `undo` adds an Undo button and a longer lifetime.
 func show_success(text: String, undo: Callable = Callable()) -> PanelContainer:
 	var panel: PanelContainer = _panel(&"SuccessToastPanel", text, "")
 	var actions: Array[Dictionary] = []
 	if undo.is_valid():
 		actions.append({"label": "Undo", "run": undo})
 	_add_actions(panel, actions)
-	add_child(panel)
-	_expire(panel)
+	_stack.add_child(panel)
+	_queue_layout()
+	_expire(panel, undo.is_valid())
 	return panel
 
 
@@ -75,7 +135,8 @@ func show_progress(text: String, cancel: Callable = Callable()) -> PanelContaine
 	if cancel.is_valid():
 		var actions: Array[Dictionary] = [{"label": "Cancel", "run": cancel}]
 		_add_actions(panel, actions)
-	add_child(panel)
+	_stack.add_child(panel)
+	_queue_layout()
 	return panel
 
 
@@ -99,12 +160,12 @@ func finish_progress(panel: PanelContainer, text: String = "") -> void:
 	var at: int = panel.get_index()
 	panel.queue_free()
 	var done: PanelContainer = show_success(text)
-	move_child(done, at)
+	_stack.move_child(done, at)
 
 
 func toast_count() -> int:
 	var count: int = 0
-	for child: Node in get_children():
+	for child: Node in _stack.get_children():
 		if not child.is_queued_for_deletion():
 			count += 1
 	return count
@@ -113,7 +174,7 @@ func toast_count() -> int:
 ## Every toast's title text, oldest first (for tests).
 func toast_texts() -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
-	for child: Node in get_children():
+	for child: Node in _stack.get_children():
 		if child.is_queued_for_deletion():
 			continue
 		var title: Label = child.find_child("Title", true, false) as Label
@@ -152,7 +213,6 @@ func _panel(variation: StringName, title: String, message: String, closable: boo
 	var panel: PanelContainer = PanelContainer.new()
 	panel.theme_type_variation = variation
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	panel.custom_minimum_size.x = float(get_theme_constant(&"width", THEME_TYPE))
 	var box: VBoxContainer = VBoxContainer.new()
 	panel.add_child(box)
 	var row: HBoxContainer = HBoxContainer.new()
@@ -197,21 +257,23 @@ func _add_actions(panel: PanelContainer, actions: Array[Dictionary]) -> void:
 	(panel.get_child(0) as VBoxContainer).add_child(row)
 
 
-## Hides `panel` after the theme's seconds, waiting while the mouse is over it.
-func _expire(panel: PanelContainer) -> void:
-	var seconds: float = float(get_theme_constant(&"seconds", THEME_TYPE))
-	var timer: SceneTreeTimer = get_tree().create_timer(seconds)
-	# A toast can be dismissed before its timer fires. Capturing the node
-	# directly makes Godot report a freed lambda capture before the guard runs.
-	var target: WeakRef = weakref(panel)
-	timer.timeout.connect(func() -> void:
-		var current: PanelContainer = target.get_ref() as PanelContainer
-		if not is_instance_valid(current) or current.is_queued_for_deletion():
-			return
-		if Rect2(Vector2.ZERO, current.size).has_point(current.get_local_mouse_position()):
-			_expire(current)
-		else:
-			current.queue_free())
+func _expire(panel: PanelContainer, has_undo: bool) -> void:
+	var duration: StringName = &"undo_seconds" if has_undo else &"seconds"
+	var timer: ToastLifetime = ToastLifetime.new()
+	timer.wait_time = float(get_theme_constant(duration, THEME_TYPE))
+	timer.visibility_guard = _capacity_hides_actions.bind(panel)
+	_scroll.get_v_scroll_bar().value_changed.connect(timer._queue_refresh.unbind(1))
+	_scroll.resized.connect(timer._queue_refresh)
+	panel.add_child(timer)
+
+
+func _capacity_hides_actions(panel: PanelContainer) -> bool:
+	if _scroll.get_global_rect().encloses(panel.get_global_rect()):
+		return false
+	for button: Node in panel.find_children("*", "Button", true, false):
+		if button.is_in_group(ACTION_GROUP):
+			return true
+	return false
 
 
 func _run_action(run: Callable, panel: Control) -> void:
@@ -240,9 +302,20 @@ func _on_git_error(repo_path: String, error: Dictionary) -> void:
 func _show_details(title: String, details: String) -> void:
 	var dialog: AcceptDialog = AcceptDialog.new()
 	dialog.title = title
-	dialog.dialog_text = details
-	dialog.dialog_autowrap = true
+	var output: TextEdit = TextEdit.new()
+	output.name = "ErrorDetails"
+	output.theme_type_variation = &"DiagnosticOutput"
+	output.editable = false
+	output.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	output.text = details
+	output.tooltip_text = tr("Select text to copy; use %s to select all.") % Shortcuts.display("Ctrl+A")
+	output.gui_input.connect(func(event: InputEvent) -> void:
+		if event.is_action_pressed(&"ui_cancel"):
+			output.accept_event()
+			dialog.canceled.emit())
+	dialog.add_child(output)
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
 	add_child(dialog)
 	dialog.popup_centered_ratio(0.5)
+	output.grab_focus()

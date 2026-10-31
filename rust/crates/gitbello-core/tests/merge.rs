@@ -451,7 +451,10 @@ fn continues_and_skips_a_rebase() {
     repo.commit("f.txt", "topic 1\n", "topic 1");
     repo.commit("f.txt", "topic 2\n", "topic 2");
     let (mut rt, key) = open(&repo);
-    let _ = repo.try_git(&["rebase", "main"]);
+    let error = repo
+        .try_git(&["rebase", "main"])
+        .expect_err("rebase stops on the conflicting first commit");
+    assert_eq!(error.kind, GitErrorKind::Conflict);
     settle(&mut rt, &key);
     let state = rt.repo(&key).unwrap();
     assert_eq!(state.commit_mode(), CommitMode::Rebase);

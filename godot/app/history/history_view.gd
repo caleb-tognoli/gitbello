@@ -16,6 +16,16 @@ signal repo_loaded(row_count: int, error: String)
 signal commit_menu_requested(at_position: Vector2)
 ## Right-click on a ref label: `{name, short, kind, is_head}`, screen position.
 signal label_menu_requested(label: Dictionary, at_position: Vector2)
+signal notice(title: String, message: String)
+
+var _graph_loading: bool = true
+var _parent_action_oid: String = ""
+var _parent_action_source: String = ""
+var _parent_action_session: RepoSession = null
+var _pending_parent_oid: String = ""
+var _pending_parent_source: String = ""
+var _pending_parent_session: RepoSession = null
+
 
 var session: RepoSession = null:
 	set = set_session
@@ -46,6 +56,7 @@ func _ready() -> void:
 		else:
 			label_menu_requested.emit(label, _commit_list.get_screen_position() + at))
 	_details.file_list().gui_input.connect(_on_files_key)
+	_details.parent_requested.connect(_on_parent_requested)
 	for entry: Array in [[&"ChevronUp", "Previous match (Shift+Enter)", false], [&"ChevronDown", "Next match (Enter)", true]]:
 		var button: Button = _search.add_button(entry[0], entry[1])
 		button.pressed.connect(step_match.bind(entry[2]))
@@ -62,6 +73,8 @@ func _notification(what: int) -> void:
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
+		_cancel_parent_navigation()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		_update_header()
 		for i: int in _match_buttons.size():
@@ -69,6 +82,10 @@ func _notification(what: int) -> void:
 
 
 func set_session(value: RepoSession) -> void:
+	if session == value:
+		return
+	_cancel_parent_navigation()
+	_graph_loading = true
 	if session != null:
 		session.graph_changed.disconnect(_on_graph_changed)
 		session.graph_loaded.disconnect(_on_graph_loaded)
@@ -156,7 +173,76 @@ func selected_commit() -> Dictionary:
 	return {"hash": oid, "subject": String(data.get("subject", "")), "in_head": bool(data.get("in_head", true))}
 
 
+func can_go_to_parent() -> bool:
+	return session != null and session == _parent_action_session and is_visible_in_tree() \
+			and not _parent_action_oid.is_empty() and _parent_source_valid(_parent_action_source, _parent_action_oid)
+
+
+func go_to_parent() -> void:
+	if not can_go_to_parent():
+		return
+	_pending_parent_oid = _parent_action_oid
+	_pending_parent_source = _parent_action_source
+	_pending_parent_session = session
+	_jump_pending = false
+	_try_parent_navigation()
+
+
+func _on_parent_requested(source: String, oid: String, origin: LinkButton) -> void:
+	_parent_action_source = source
+	_parent_action_oid = oid
+	_parent_action_session = session
+	Actions.run_action(&"history.go_to_parent", origin)
+	_clear_parent_action()
+
+
+func _clear_parent_action() -> void:
+	_parent_action_oid = ""
+	_parent_action_source = ""
+	_parent_action_session = null
+
+
+func _cancel_parent_navigation() -> void:
+	_pending_parent_oid = ""
+	_pending_parent_source = ""
+	_pending_parent_session = null
+	_clear_parent_action()
+
+
+func _parent_source_valid(source: String, oid: String) -> bool:
+	if session == null or source.is_empty() or _details.commit_oid() != source \
+			or _commit_list.hash_at(_commit_list.cursor) != source:
+		return false
+	var info: Dictionary = session.commit_info()
+	var parents: PackedStringArray = info.get("parents", PackedStringArray())
+	return String(info.get("oid", "")) == source and parents.has(oid)
+
+
+func _parent_rows() -> Dictionary:
+	return session.graph_parent_rows(_commit_list.cursor)
+
+
+func _try_parent_navigation() -> void:
+	if _pending_parent_oid.is_empty():
+		return
+	if session != _pending_parent_session or not is_visible_in_tree() \
+			or not _parent_source_valid(_pending_parent_source, _pending_parent_oid):
+		_cancel_parent_navigation()
+		return
+	var row: int = int(_parent_rows().get(_pending_parent_oid, -1))
+	if row >= 0 and _commit_list.hash_at(row) == _pending_parent_oid:
+		_commit_list.refresh()
+		_cancel_parent_navigation()
+		_select(row)
+		_commit_list.grab_focus()
+	elif not _graph_loading:
+		var oid: String = _pending_parent_oid
+		_cancel_parent_navigation()
+		notice.emit(tr("Parent unavailable"), tr("This parent is not available in loaded history.\n%s") % oid)
+
+
 func _on_commit_selected() -> void:
+	_cancel_parent_navigation()
 	_details.show_commit(_commit_list.hash_at(_commit_list.cursor))
 	_update_header()
 
@@ -174,6 +260,7 @@ func _first_match_from(row: int) -> int:
 
 
 func _on_search_text() -> void:
+	_cancel_parent_navigation()
 	_jump_pending = true
 	for button: Button in _match_buttons:
 		button.visible = not _search.text().strip_edges().is_empty()
@@ -241,19 +328,24 @@ func _on_graph_changed(_start: int, _count: int) -> void:
 	_commits_text = tr("Loading… %s") % ListHeader.count_text(session.graph_row_count(), "commit")
 	_update_header()
 	_select_newest_if_none()
+	_try_parent_navigation()
 
 
 func _on_graph_reset() -> void:
+	_cancel_parent_navigation()
+	_graph_loading = true
 	_commits_text = tr("Reloading…")
 	_update_header()
 
 
 func _on_graph_loaded(row_count: int, error: String) -> void:
+	_graph_loading = false
 	_commits_text = tr(error) if not error.is_empty() else ListHeader.count_text(row_count, "commit")
 	_update_header()
 	_select_newest_if_none()
 	if row_count == 0:
 		_details.show_placeholder("No commits yet." if error.is_empty() else "")
+	_try_parent_navigation()
 	repo_loaded.emit(row_count, error)
 
 

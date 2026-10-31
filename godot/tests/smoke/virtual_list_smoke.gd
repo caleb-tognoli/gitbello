@@ -53,6 +53,14 @@ func run() -> void:
 	_click(list, Vector2(10, click_y + list.row_height()), true)
 	expect_eq(list.selected_rows(), PackedInt32Array([3, 4]), "Ctrl+click adds a row")
 
+	list.select_only(0)
+	var select_all: InputEventKey = Shortcuts.parse("Ctrl+Shift+A")
+	list._gui_input(select_all)
+	expect_eq(list.selected_rows(), PackedInt32Array([0]), "Ctrl+Shift+A is not consumed as Select All")
+	select_all.shift_pressed = false
+	list._gui_input(select_all)
+	expect_eq(list.selected_rows().size(), list.count, "Ctrl+A still selects all rows")
+
 	list.drawn.clear()
 	list.set_scroll_offset(50_000 * list.row_height())
 	await get_tree().process_frame

@@ -1284,6 +1284,34 @@ impl RepoSession {
         to_i64(self.reported_rows)
     }
 
+    /// Full parent object ids mapped to their reported graph rows; unresolved
+    /// parents and invalid source rows are omitted.
+    #[func]
+    fn graph_parent_rows(&self, row: i64) -> VarDictionary {
+        let Ok(row) = usize::try_from(row) else {
+            return VarDictionary::new();
+        };
+        if row >= self.reported_rows {
+            return VarDictionary::new();
+        }
+        self.read(|state| {
+            let mut rows = VarDictionary::new();
+            let Some(loader) = state.graph() else {
+                return rows;
+            };
+            let index = loader.index();
+            if let Some(commit) = index.commit(row) {
+                for parent in commit.parent_rows {
+                    if parent < self.reported_rows {
+                        rows.set(&gstr(&to_hex(index.hash(parent))), to_i64(parent));
+                    }
+                }
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
     /// Visible slice of the graph. Each row is a Dictionary with `row`, `hash`,
     /// `subject`, `author`, `email`, `time` (unix seconds), `column`, `color`,
     /// `width` (columns used), `segments` (PackedInt32Array of

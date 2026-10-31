@@ -424,6 +424,8 @@ static func _add_fields(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_readonly_color", &"ErrorOutput", p.error)
 	theme.set_font(&"font", &"ErrorOutput", mono_font())
 	theme.set_font_size(&"font_size", &"ErrorOutput", 12)
+	_variation(theme, &"DiagnosticOutput", &"TextEdit")
+	theme.set_font(&"font", &"DiagnosticOutput", mono_font())
 
 
 static func _add_menus(theme: Theme, p: Palette) -> void:
@@ -577,7 +579,11 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	toast.shadow_size = 6
 	theme.set_stylebox(&"panel", &"ToastPanel", toast)
 	theme.set_constant(&"seconds", &"Toasts", 6)
+	theme.set_constant(&"undo_seconds", &"Toasts", 12)
 	theme.set_constant(&"width", &"Toasts", 380)
+	theme.set_constant(&"max_height", &"Toasts", 280)
+	theme.set_constant(&"height_percent", &"Toasts", 33)
+	theme.set_constant(&"edge_margin", &"Toasts", 16)
 	_variation(theme, &"SidebarTree", &"Tree")
 	theme.set_stylebox(&"panel", &"SidebarTree", _box(p.surface, 0, Vector4(4, 6, 4, 6)))
 	_variation(theme, &"SidebarSplit", &"HSplitContainer")
@@ -687,6 +693,14 @@ static func _add_commit_details(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"DetailsHash", p.accent_text)
 	_variation(theme, &"DetailsId", &"DetailsHash")
 	theme.set_color(&"font_color", &"DetailsId", p.text_muted)
+	_variation(theme, &"DetailsParents", &"HFlowContainer")
+	theme.set_constant(&"h_separation", &"DetailsParents", 6)
+	theme.set_constant(&"v_separation", &"DetailsParents", 4)
+	_variation(theme, &"DetailsParentLink", &"LinkButton")
+	theme.set_font(&"font", &"DetailsParentLink", mono_font())
+	theme.set_font_size(&"font_size", &"DetailsParentLink", 13)
+	theme.set_color(&"font_color", &"DetailsParentLink", p.text_muted)
+	theme.set_stylebox(&"focus", &"DetailsParentLink", theme.get_stylebox(&"focus", &"Button"))
 	_variation(theme, &"DetailsIconButton", &"ToolbarButton")
 	var small: Vector4 = Vector4(3, 2, 3, 2)
 	theme.set_stylebox(&"normal", &"DetailsIconButton", _box(Color.TRANSPARENT, 4, small))
@@ -806,6 +820,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 			[&"WorktreeChipSelected", Color(p.accent, 0.25), p.accent]]:
 		_variation(theme, entry[0], &"PanelContainer")
 		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 12, chip, entry[2], 1))
+		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 12, Vector4.ZERO, p.accent, 2))
 	_variation(theme, &"ChipBadge", &"Label")
 	theme.set_color(&"font_color", &"ChipBadge", p.modified)
 	theme.set_font_size(&"font_size", &"ChipBadge", 12)
@@ -829,7 +844,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 				box.corner_radius_bottom_left = 0
 				box.border_width_left = 0
 			theme.set_stylebox(state[0], entry[0], box)
-		theme.set_stylebox(&"focus", entry[0], StyleBoxEmpty.new())
+		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 12, Vector4.ZERO, p.accent, 2))
 		theme.set_color(&"font_color", entry[0], p.text_muted)
 		theme.set_color(&"icon_normal_color", entry[0], Color(1, 1, 1, 0.7))
 		theme.set_constant(&"h_separation", entry[0], 4)

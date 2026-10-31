@@ -6,9 +6,9 @@ extends PanelContainer
 ## worktree for a branch and pruning. When the chips do not fit, the row
 ## scrolls and a ▾ at its end lists them all.
 
-## A chip was clicked: show worktree `path`.
+## A chip was activated: show worktree `path`.
 signal worktree_chosen(path: String)
-## Right-click on a chip; `at_position` is on the screen.
+## A chip's context menu was requested; `at_position` is on the screen.
 signal worktree_menu_requested(worktree: Dictionary, at_position: Vector2)
 
 const TASK_MENU: Array[StringName] = [&"worktree.cleanup", &"worktree.add_existing", &"", &"worktree.prune"]
@@ -28,23 +28,29 @@ var _all_button: Button = Button.new()
 var _all_menu: PopupMenu = PopupMenu.new()
 var _worktrees: Array[Dictionary] = []
 var _selected: String = ""
+var _reveal_pending: bool = false
+var _revealed_path: String = ""
+var _revealed_layout: Array[Rect2] = []
 
 
 func _ready() -> void:
 	theme_type_variation = &"WorktreeStrip"
 	add_child(_row)
 	_row.resized.connect(_update_overflow)
+	_scroll.resized.connect(_queue_reveal)
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_scroll.follow_focus = true
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_chips.theme_type_variation = &"ChipRow"
 	_chips.minimum_size_changed.connect(_update_overflow)
+	_chips.sort_children.connect(_queue_reveal)
 	_scroll.add_child(_chips)
 	_row.add_child(_scroll)
 	_all_button.icon = AppTheme.ARROW_DOWN
 	_all_button.tooltip_text = "All worktrees"
 	_all_button.theme_type_variation = &"ChipIconButton"
-	_all_button.focus_mode = Control.FOCUS_NONE
+	_all_button.focus_mode = Control.FOCUS_ALL
 	_all_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_all_button.pressed.connect(_open_all_menu)
 	_row.add_child(_all_button)
@@ -54,14 +60,14 @@ func _ready() -> void:
 	_new_task.icon = AppTheme.icon(&"Add")
 	_update_tooltips()
 	_new_task.theme_type_variation = &"ChipAction"
-	_new_task.focus_mode = Control.FOCUS_NONE
+	_new_task.focus_mode = Control.FOCUS_ALL
 	_new_task.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_new_task.pressed.connect(func() -> void: Actions.run_action(&"task.new", _new_task))
 	_actions.add_child(_new_task)
 	_task_menu_button.icon = AppTheme.ARROW_DOWN
 	_task_menu_button.tooltip_text = "More worktree actions"
 	_task_menu_button.theme_type_variation = &"ChipActionMenu"
-	_task_menu_button.focus_mode = Control.FOCUS_NONE
+	_task_menu_button.focus_mode = Control.FOCUS_ALL
 	_task_menu_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_task_menu_button.pressed.connect(_open_task_menu)
 	_actions.add_child(_task_menu_button)
@@ -81,6 +87,8 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
 		_update_tooltips()
+		if _all_menu.visible:
+			_open_all_menu()
 
 
 func _update_tooltips() -> void:
@@ -91,11 +99,15 @@ func _update_tooltips() -> void:
 
 
 func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void:
+	var focused: WorktreeChip = get_viewport().gui_get_focus_owner() as WorktreeChip
+	var focused_path: String = focused.path() if focused != null and focused.get_parent() == _chips else ""
 	_worktrees = _ordered(worktrees)
 	_selected = selected_path
-	var existing: Array[Node] = _chips.get_children()
+	var existing: Array[WorktreeChip] = chips()
+	var restore: WorktreeChip = null
+	var selected_chip: WorktreeChip = null
 	for i: int in _worktrees.size():
-		var chip: WorktreeChip = existing[i] as WorktreeChip if i < existing.size() else null
+		var chip: WorktreeChip = existing[i] if i < existing.size() else null
 		if chip == null:
 			chip = WorktreeChip.new()
 			chip.chosen.connect(func() -> void: worktree_chosen.emit(chip.path()))
@@ -104,8 +116,20 @@ func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void
 			_chips.add_child(chip)
 		chip.set_worktree(_worktrees[i])
 		chip.selected = Paths.same(chip.path(), selected_path)
+		if chip.selected:
+			selected_chip = chip
+		if Paths.same(chip.path(), focused_path):
+			restore = chip
 	for i: int in range(_worktrees.size(), existing.size()):
+		existing[i].hide()
 		existing[i].queue_free()
+	if not focused_path.is_empty():
+		if restore != null:
+			restore.grab_focus()
+		elif selected_chip != null:
+			selected_chip.grab_focus()
+		else:
+			_new_task.grab_focus()
 	_update_overflow()
 
 
@@ -147,17 +171,88 @@ func _update_overflow() -> void:
 	var room: float = _row.size.x - _actions.get_combined_minimum_size().x \
 			- 2.0 * float(_row.get_theme_constant(&"separation"))
 	var fits: bool = natural <= room
+	if fits and _all_button.has_focus():
+		_new_task.grab_focus()
 	_all_button.visible = not fits
 	_spacer.visible = fits
 	_scroll.size_flags_stretch_ratio = natural
 	_spacer.size_flags_stretch_ratio = maxf(room - natural, 1.0)
+	_queue_reveal()
+
+
+func _queue_reveal() -> void:
+	if _reveal_pending or not is_inside_tree():
+		return
+	_reveal_pending = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_reveal_pending = false
+	var layout: Array[Rect2] = [Rect2(Vector2.ZERO, _scroll.size)]
+	var selected_chip: WorktreeChip = null
+	for chip: WorktreeChip in chips():
+		layout.append(chip.get_rect())
+		if Paths.same(chip.path(), _selected):
+			selected_chip = chip
+	if selected_chip != null:
+		layout.append(selected_chip.get_rect())
+	if Paths.same(_revealed_path, _selected) and layout == _revealed_layout:
+		return
+	_revealed_path = _selected
+	_revealed_layout = layout
+	if selected_chip == null:
+		return
+	if selected_chip.size.x > _scroll.size.x:
+		_scroll.scroll_horizontal += roundi(selected_chip.global_position.x - _scroll.global_position.x)
+	else:
+		_scroll.ensure_control_visible(selected_chip)
 
 
 func _open_all_menu() -> void:
 	_all_menu.clear()
 	for i: int in _worktrees.size():
 		var wt: Dictionary = _worktrees[i]
-		_all_menu.add_radio_check_item("%s  ·  %s" % [String(wt["name"]), String(wt["branch"])], i)
+		var branch: String = String(wt["branch"])
+		if bool(wt["detached"]):
+			branch = tr("detached %s") % String(wt["head"]).left(7)
+		var counts: PackedStringArray = PackedStringArray()
+		var tooltip: PackedStringArray = PackedStringArray([String(wt["path"])])
+		var changed: int = int(wt["changed"])
+		if changed > 0:
+			counts.append(str(changed))
+			tooltip.append(tr("1 changed file") if changed == 1 else tr("%d changed files") % changed)
+		var conflicts: int = int(wt.get("conflicts", 0))
+		if conflicts > 0:
+			tooltip.append(tr("1 conflicted file") if conflicts == 1 else tr("%d conflicted files") % conflicts)
+		for direction: String in ["ahead", "behind"]:
+			var count: int = int(wt.get(direction, 0))
+			if count > 0:
+				counts.append(("↑" if direction == "ahead" else "↓") + str(count))
+				if direction == "ahead":
+					tooltip.append(tr("1 commit ahead") if count == 1 else tr("%d commits ahead") % count)
+				else:
+					tooltip.append(tr("1 commit behind") if count == 1 else tr("%d commits behind") % count)
+		var operation: String = String(wt.get("operation", ""))
+		if not operation.is_empty():
+			tooltip.append(tr("%s in progress") % tr(operation.capitalize()))
+		if bool(wt["locked"]):
+			var reason: String = String(wt["lock_reason"])
+			tooltip.append(tr("Locked") + (": " + reason if not reason.is_empty() else ""))
+		if bool(wt["prunable"]):
+			tooltip.append(tr("The folder is missing."))
+		var marker: StringName = &""
+		if bool(wt["prunable"]):
+			marker = &"StatusWarning"
+		elif conflicts > 0 or not operation.is_empty():
+			marker = &"GitConflict"
+		elif bool(wt["locked"]):
+			marker = &"Lock"
+		var label: String = "%s  ·  %s" % [String(wt["name"]), branch]
+		if not counts.is_empty():
+			label += "  " + " ".join(counts)
+		_all_menu.add_radio_check_item(label, i)
+		if marker != &"":
+			_all_menu.set_item_icon(i, AppTheme.icon(marker))
+		_all_menu.set_item_tooltip(i, "\n".join(tooltip))
 		_all_menu.set_item_checked(i, Paths.same(String(wt["path"]), _selected))
 	_popup_under(_all_menu, _all_button)
 
