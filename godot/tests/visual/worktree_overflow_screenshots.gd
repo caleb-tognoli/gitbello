@@ -23,16 +23,16 @@ func _ready() -> void:
 	get_window().size = Vector2i(1100, 760)
 	var page: RepoTab = main.open_repo(repo)
 	var deadline: int = Time.get_ticks_msec() + 30_000
-	var ready: bool = false
+	var loaded: bool = false
 	while Time.get_ticks_msec() < deadline:
-		ready = page.worktrees().size() >= 7
+		loaded = page.worktrees().size() >= 7
 		for wt: Dictionary in page.worktrees():
 			if not bool(wt["prunable"]) and int(wt["changed"]) < 0:
-				ready = false
-		if ready:
+				loaded = false
+		if loaded:
 			break
 		await get_tree().process_frame
-	if not ready:
+	if not loaded:
 		printerr("worktree overflow capture: fixture status did not load")
 		get_tree().quit(1)
 		return

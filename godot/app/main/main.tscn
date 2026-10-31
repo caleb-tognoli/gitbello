@@ -1,7 +1,7 @@
 [gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://app/main/main.gd" id="1_main"]
-[ext_resource type="PackedScene" path="res://app/welcome/welcome.tscn" id="2_welcome"]
+[ext_resource type="PackedScene" path="res://app/home/home.tscn" id="2_home"]
 [ext_resource type="Script" path="res://app/log_panel/log_panel.gd" id="3_log"]
 [ext_resource type="Script" path="res://app/toasts/toasts.gd" id="4_toasts"]
 [ext_resource type="PackedScene" path="res://app/palette/command_palette.tscn" id="5_palette"]
@@ -49,7 +49,7 @@ drag_to_rearrange_enabled = true
 [node name="AddButton" type="Button" parent="Layout/TabStrip/TabRow"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Open repository"
+tooltip_text = "Home"
 focus_mode = 0
 theme_type_variation = &"ToolbarButton"
 
@@ -68,7 +68,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Welcome" parent="Layout/Body/Content" instance=ExtResource("2_welcome")]
+[node name="Home" parent="Layout/Body/Content" instance=ExtResource("2_home")]
 unique_name_in_owner = true
 layout_mode = 1
 

@@ -9,7 +9,8 @@ extends MenuBar
 ## Menus and their actions, in order; &"" is a separator, a String names a
 ## submenu filled by `dynamic_menus`.
 const MENUS: Array[Array] = [
-	["File", [&"repo.open", "Open recent", &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
+	["File", [&"home.open", &"", &"repo.clone", &"repo.add_existing", &"repo.scan", &"repo.create", &"repo.init",
+		"Open recent", &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
 	["Edit", [&"diff.copy", &"diff.select_all", &"", &"changes.undo_discard", &"shelf.undo_discard",
 		&"conflict.undo", &"commit.undo", &"",
 		&"view.find", &"history.next_match", &"history.previous_match", &"", &"app.command_palette"]],

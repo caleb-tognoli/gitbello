@@ -13,12 +13,15 @@ pub mod graph;
 pub mod highlight;
 pub mod jobs;
 pub mod launch;
+pub mod library;
 pub mod merge;
+pub mod new_repo;
 
 pub mod ops;
 pub mod paths;
 pub mod repo;
 pub mod runtime;
+pub mod scan;
 pub mod sidebar;
 pub mod ui_state;
 pub mod watch;

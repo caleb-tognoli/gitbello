@@ -109,6 +109,26 @@ Line staging round trip (core test `random_selections_stage_exactly_what_was_pic
 about 0.35 s per round including fixture commits.
 
 
+## M7.5 — Home
+
+`gitbello-cli home-bench <folder> [--depth N] [--max N]` (read-only) scans a
+folder the way Scan folder… does, then reads up to 50 summaries through the
+runtime as Home does (`SUMMARY_JOBS` = 2 at a time). Release build, git
+2.53.0.windows.3, Windows, 2026-10-31:
+
+```text
+50 fixture repositories (plus their 50 bare origins), depth 1
+scan     100 repositories (50 not bare) in 304.4 ms
+summary  50 of 50 in 2031 ms, first after 78 ms, 81 ms each
+
+C:\caleb\dev, depth 3 (real repositories, gitbello's own included)
+scan     14 repositories (13 not bare) in 3.1 ms
+summary  13 of 13 in 872 ms, first after 93 ms, 134 ms each
+```
+
+Home only asks for the rows and cards on screen, a screenful at a time, and
+each status arrives on its own, so the first rows fill in within ~100 ms.
+
 ## M6.5 P5 — history search
 
 `gitbello-cli graph-bench <repo>` (read-only) searches the loaded index the way

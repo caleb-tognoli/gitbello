@@ -210,70 +210,76 @@ func run() -> void:
 		restored.close_tab(0)
 	restored.queue_free()
 	await get_tree().process_frame
-	await _check_welcome()
+	await _check_home_recent()
 
 
-func _check_welcome() -> void:
-	var welcome: Welcome = load("res://app/welcome/welcome.tscn").instantiate() as Welcome
-	welcome.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(welcome)
-	var chosen: Array[String] = [""]
-	welcome.recent_chosen.connect(func(path: String) -> void: chosen[0] = path)
+## Home's Recent cards (M7.5 replaced the welcome screen): ordered as the
+## library's recent list, names told apart, full path as tooltip, long names
+## cut with an ellipsis instead of widening the card.
+func _check_home_recent() -> void:
+	var main: Main = MAIN.instantiate() as Main
+	add_child(main)
 	for frame: int in 3:
 		await get_tree().process_frame
-	var recent: PackedStringArray = Core.recent_repos().slice(0, Welcome.MAX_RECENT)
-	var labels: PackedStringArray = welcome.call(&"_recent_labels", recent)
-	var actions: VBoxContainer = welcome.get_node("%Actions") as VBoxContainer
-	expect_eq(actions.get_child_count(), recent.size() + 1, "Welcome offers at most six recents plus Open")
+	var home: Home = main.home()
+	var chosen: Array[String] = [""]
+	home.chosen.connect(func(path: String) -> void: chosen[0] = path)
+	var recent: PackedStringArray = Core.recent_repos(home.get_theme_constant(&"recent_count", &"Home"))
+	var labels: PackedStringArray = Paths.short_labels(recent)
+	expect_eq(home.recent_paths().size(), recent.size(), "Home shows the library's recent repositories")
 	for i: int in recent.size():
-		var button: Button = actions.get_child(i + 1) as Button
-		expect_eq(button.text, labels[i], "Welcome keeps recent ordering")
-		expect_eq(button.tooltip_text, recent[i], "Welcome preserves the full original tooltip")
-		expect(button.clip_text, "recent labels cannot grow the layout")
-		button.pressed.emit()
-		expect_eq(chosen[0], recent[i], "each recent button emits its original path")
-	welcome.refresh()
-	expect_eq(actions.get_child_count(), recent.size() + 1, "refresh replaces rather than duplicates recent buttons")
+		var card: Button = home.card_for(recent[i]) as Button
+		expect(card != null and Paths.same(home.recent_paths()[i], recent[i]), "Home keeps recent ordering")
+		if card == null:
+			continue
+		var title: Label = card.find_child("Name", true, false) as Label
+		expect_eq(title.text, labels[i], "a card's name is told apart from the others'")
+		expect(card.tooltip_text.begins_with(recent[i]), "a card's tooltip starts with its full path")
+		expect_eq(title.text_overrun_behavior, TextServer.OVERRUN_TRIM_ELLIPSIS, "long names use an ellipsis")
 	if not recent.is_empty():
+		var card: Control = home.card_for(recent[0])
+		var width: float = card.size.x
+		(card.find_child("Name", true, false) as Label).text = "工程 café ".repeat(100) + " · parent"
 		for frame: int in 3:
 			await get_tree().process_frame
-		var long_button: Button = actions.get_child(1) as Button
-		var width: float = long_button.size.x
-		long_button.text = "工程 café ".repeat(100) + " · parent"
-		for frame: int in 3:
-			await get_tree().process_frame
-		expect(long_button.size.x <= width, "long Unicode labels stay within the existing Welcome width")
-		expect_eq(long_button.text_overrun_behavior, TextServer.OVERRUN_TRIM_ELLIPSIS, "long labels use ellipsis")
-	welcome.queue_free()
+		expect(card.size.x <= width, "long Unicode names stay within the card")
+	# Choosing opens the repository, which rebuilds Home: one card at a time.
+	for path: String in recent:
+		Actions.run_action(&"home.open")
+		await get_tree().process_frame
+		var card: Button = home.card_for(path) as Button
+		if card != null:
+			card.pressed.emit()
+			expect_eq(chosen[0], path, "each card chooses its own path")
+	while main.tab_count() > 0:
+		main.close_tab(0)
+	main.queue_free()
 	await get_tree().process_frame
 
 
 func _check_recent_labels() -> void:
-	var welcome: Welcome = Welcome.new()
 	var paths: PackedStringArray = [
 		"C:\\Work\\clients\\gitbello\\", "D:/Personal/clients/gitbello",
 		"C:/Projects/unique", "//server/team/gitbello",
 		"C:/very long parent with spaces/工程/café", "D:/Archive/café",
-		"D:/hidden/unique",
 	]
-	expect_eq(welcome.call(&"_recent_labels", paths), PackedStringArray([
+	expect_eq(Paths.short_labels(paths), PackedStringArray([
 		"gitbello · Work/clients", "gitbello · Personal/clients", "unique",
 		"gitbello · team", "café · 工程", "café · Archive",
-	]), "only visible duplicate names receive distinguishing parent suffixes")
-	expect_eq(welcome.call(&"_recent_labels", PackedStringArray([
+	]), "only duplicate names receive distinguishing parent suffixes")
+	expect_eq(Paths.short_labels(PackedStringArray([
 		"C:/team/repo", "D:/team/repo", "//alpha/team/repo", "//beta/team/repo",
 	])), PackedStringArray([
 		"repo · C:/team", "repo · D:/team", "repo · //alpha/team", "repo · //beta/team",
 	]), "drive and server names distinguish otherwise identical parent suffixes")
-	var case_labels: PackedStringArray = welcome.call(&"_recent_labels", PackedStringArray([
+	var case_labels: PackedStringArray = Paths.short_labels(PackedStringArray([
 		"C:/Work/Repo", "D:/Personal/repo",
 	]))
 	expect_eq(case_labels, PackedStringArray(["Repo · Work", "repo · Personal"]) \
 			if OS.has_feature("windows") else PackedStringArray(["Repo", "repo"]),
 			"basename comparison respects platform case rules while preserving display case")
-	expect_eq(welcome.call(&"_recent_labels", PackedStringArray(["/repo", "/work/repo", "C:/", "/"])),
+	expect_eq(Paths.short_labels(PackedStringArray(["/repo", "/work/repo", "C:/", "/"])),
 			PackedStringArray(["repo · /", "repo · work", "C:", "/"]), "root parents and root names stay meaningful")
-	welcome.free()
 
 
 func _check_palette(main: Main) -> void:

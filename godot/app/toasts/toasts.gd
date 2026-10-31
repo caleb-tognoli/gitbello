@@ -110,12 +110,13 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 
 
 ## Shows a short success message, pausing its remaining lifetime while
-## hovered or focused. `undo` adds an Undo button and a longer lifetime.
-func show_success(text: String, undo: Callable = Callable()) -> PanelContainer:
+## hovered or focused. `undo` adds an Undo button (or a `label` one, such as
+## Open) and a longer lifetime.
+func show_success(text: String, undo: Callable = Callable(), label: String = "Undo") -> PanelContainer:
 	var panel: PanelContainer = _panel(&"SuccessToastPanel", text, "")
 	var actions: Array[Dictionary] = []
 	if undo.is_valid():
-		actions.append({"label": "Undo", "run": undo})
+		actions.append({"label": label, "run": undo})
 	_add_actions(panel, actions)
 	_stack.add_child(panel)
 	_queue_layout()

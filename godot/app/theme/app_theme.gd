@@ -238,6 +238,7 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT) -> Theme:
 	_add_changes(theme, p)
 	_add_shell_p2(theme, p)
 	_add_changes_p3(theme, p)
+	_add_home(theme, p)
 	return theme
 
 
@@ -1091,6 +1092,58 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 			&"icon_pressed_color", &"icon_hover_pressed_color"]:
 		theme.set_color(color, &"PrimarySuggestionButton", accent_text)
 
+
+
+## Home (PLAN §4 Home, M7.5): the filter and Add on top, the Recent cards,
+## and the repository rows, flat until hovered.
+static func _add_home(theme: Theme, p: Palette) -> void:
+	_variation(theme, &"HomePage", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"HomePage", _box(p.background))
+	_variation(theme, &"HomeMargins", &"MarginContainer")
+	theme.set_constant(&"margin_top", &"HomeMargins", 20)
+	theme.set_constant(&"margin_bottom", &"HomeMargins", 12)
+	_variation(theme, &"HomeColumn", &"VBoxContainer")
+	theme.set_constant(&"separation", &"HomeColumn", 12)
+	_variation(theme, &"HomeList", &"VBoxContainer")
+	theme.set_constant(&"separation", &"HomeList", 2)
+	_variation(theme, &"HomeSection", &"Label")
+	theme.set_color(&"font_color", &"HomeSection", p.text_muted)
+	theme.set_font(&"font", &"HomeSection", bold_font())
+	theme.set_font_size(&"font_size", &"HomeSection", 13)
+	_variation(theme, &"HomeRowName", &"Label")
+	theme.set_font(&"font", &"HomeRowName", bold_font())
+	_variation(theme, &"HomeBranch", &"Label")
+	theme.set_color(&"font_color", &"HomeBranch", p.text_muted)
+	_variation(theme, &"HomeOpenChip", &"Label")
+	theme.set_color(&"font_color", &"HomeOpenChip", p.accent_text)
+	theme.set_stylebox(&"normal", &"HomeOpenChip", _box(Color(p.accent, 0.15), 4, Vector4(6, 1, 6, 1)))
+	theme.set_font_size(&"font_size", &"HomeOpenChip", 12)
+	_variation(theme, &"HomeRow", &"Button")
+	theme.set_stylebox(&"normal", &"HomeRow", _box(Color.TRANSPARENT, 4))
+	theme.set_stylebox(&"hover", &"HomeRow", _box(p.hovered, 4))
+	theme.set_stylebox(&"pressed", &"HomeRow", _box(p.selected, 4))
+	theme.set_stylebox(&"hover_pressed", &"HomeRow", _box(p.selected, 4))
+	theme.set_stylebox(&"focus", &"HomeRow", _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1))
+	_variation(theme, &"HomeRowBox", &"MarginContainer")
+	for side: String in ["left", "right"]:
+		theme.set_constant(&"margin_" + side, &"HomeRowBox", 8)
+	for side: String in ["top", "bottom"]:
+		theme.set_constant(&"margin_" + side, &"HomeRowBox", 4)
+	_variation(theme, &"HomeCard", &"ChoiceRow")
+	_variation(theme, &"HomeCardBox", &"ChoiceRowBox")
+	_variation(theme, &"HomeCloneRow", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"HomeCloneRow", _box(p.surface, 6, Vector4(10, 6, 8, 6), p.border, 1))
+	theme.set_constant(&"recent_count", &"Home", 8)
+	theme.set_constant(&"card_width", &"Home", 210)
+	theme.set_constant(&"scrollbar_gap", &"Home", 8)
+	_variation(theme, &"HomeCards", &"GridContainer")
+	theme.set_constant(&"h_separation", &"HomeCards", 8)
+	theme.set_constant(&"v_separation", &"HomeCards", 8)
+	theme.set_constant(&"max_width", &"Home", 1040)
+	theme.set_constant(&"margin", &"Home", 24)
+	theme.set_constant(&"icon_size", &"Home", 16)
+	theme.set_constant(&"clone_text_width", &"Home", 220)
+	theme.set_constant(&"width", &"ScanDialog", 760)
 
 ## Frame `frame` of the busy spinner, in the icon grey of the light or dark
 ## theme.

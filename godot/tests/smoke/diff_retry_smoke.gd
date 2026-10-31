@@ -144,11 +144,11 @@ func _message_states() -> void:
 	await get_tree().process_frame
 
 
-func _shot(name: String) -> void:
+func _shot(shot_name: String) -> void:
 	if _preview.is_empty():
 		return
 	for frame: int in 4:
 		await get_tree().process_frame
-	var path: String = _preview.path_join(name + ".png")
+	var path: String = _preview.path_join(shot_name + ".png")
 	expect_eq(get_viewport().get_texture().get_image().save_png(path), OK, "screenshot saved")
 	print("SHOT ", path)

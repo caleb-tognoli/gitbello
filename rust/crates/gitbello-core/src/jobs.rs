@@ -22,10 +22,12 @@ use std::thread::{self, JoinHandle};
 use crate::backend::{GitBackend, ShelfChange};
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
+use crate::library::{LocationCheck, RepoSummary};
 use crate::merge::{ConflictFile, HeadInfo, MergePreview, OperationDetails};
 use crate::repo::{
     CommitDetails, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
 };
+use crate::scan::ScanHit;
 use crate::sidebar::Badge;
 use crate::worktrees::CleanupCandidate;
 
@@ -201,6 +203,12 @@ pub enum JobOutput {
         toplevel: PathBuf,
         paths: RepoPaths,
     },
+    /// What Home shows of a repository without a tab.
+    Summary(Box<RepoSummary>),
+    /// Repositories a folder scan found.
+    Scan(Vec<ScanHit>),
+    /// Where a chosen folder leads (Add existing folder, Change location).
+    Location(Box<LocationCheck>),
     /// Jobs whose effect is elsewhere (writes, graph loads).
     Done,
 }

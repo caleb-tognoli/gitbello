@@ -8,12 +8,13 @@ use gitbello_core::diff::rename_parts;
 use gitbello_core::git::CommandOutcome;
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
+use gitbello_core::library::{self, RepoSummary};
+use gitbello_core::new_repo::{
+    init_folder_error, CloneOptions, CreateOptions, GITIGNORE_TEMPLATES,
+};
 use gitbello_core::ops::{branch_prefix_error, ref_name_error, PullMode};
 use gitbello_core::paths;
-use gitbello_core::runtime::{
-    DiffSlot, JobState, Runtime, RuntimeEvent, CLONE_REPOSITORY_JOB_LABEL,
-    CREATE_REPOSITORY_JOB_LABEL,
-};
+use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent, REPOSITORY_JOB_LABELS};
 use gitbello_core::ui_state::{self, UiState};
 use gitbello_core::worktrees::new_worktree_path_error;
 use godot::prelude::*;
@@ -32,6 +33,7 @@ pub struct AppCore {
     sessions: HashMap<PathBuf, Gd<RepoSession>>,
     start_error: String,
     config_warning: String,
+    library_warning: String,
     ui_state: UiState,
 }
 
@@ -43,6 +45,7 @@ impl INode for AppCore {
             sessions: HashMap::new(),
             start_error: String::new(),
             config_warning: String::new(),
+            library_warning: String::new(),
             ui_state: UiState::default(),
         }
     }
@@ -57,13 +60,19 @@ impl INode for AppCore {
             Some(config) => PathBuf::from(config).parent().map(Path::to_path_buf),
             None => paths::data_dir(),
         };
-        self.ui_state = UiState::load(ui_dir.map(|dir| dir.join(ui_state::FILE_NAME)));
+        self.ui_state = UiState::load(ui_dir.as_ref().map(|dir| dir.join(ui_state::FILE_NAME)));
         let (config, warning) = Runtime::load_config(config_path.as_deref());
         if let Some(warning) = warning {
             self.config_warning = warning.to_string();
         }
         match Runtime::new(config, config_path) {
-            Ok(runtime) => runtime_cell::install(runtime),
+            Ok(mut runtime) => {
+                let library = ui_dir.map(|dir| dir.join(library::FILE_NAME));
+                if let Some(warning) = runtime.load_library(library) {
+                    self.library_warning = warning.to_string();
+                }
+                runtime_cell::install(runtime);
+            }
             Err(err) => self.start_error = err.to_string(),
         }
     }
@@ -108,6 +117,15 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
     match event {
         RuntimeEvent::CommandsLogged => {
             core.emit_signal("commands_logged", &[]);
+        }
+        RuntimeEvent::LibraryChanged { error } => {
+            core.emit_signal(
+                "library_changed",
+                &[gstr(error.as_deref().unwrap_or_default()).to_variant()],
+            );
+        }
+        RuntimeEvent::SummaryLoaded { repo } => {
+            core.emit_signal("repo_summary_ready", &[path_str(&repo).to_variant()]);
         }
         RuntimeEvent::Opened { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
@@ -244,7 +262,7 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
             state,
         } => {
             let job = i64::try_from(job).unwrap_or(i64::MAX).to_variant();
-            if [CREATE_REPOSITORY_JOB_LABEL, CLONE_REPOSITORY_JOB_LABEL].contains(&label.as_str()) {
+            if REPOSITORY_JOB_LABELS.contains(&label.as_str()) {
                 let path = path_str(&repo).to_variant();
                 let label = gstr(&label).to_variant();
                 match state {
@@ -322,7 +340,8 @@ impl AppCore {
     #[signal]
     fn git_error(repo_path: GString, error: VarDictionary);
 
-    /// Lifecycle of a create or clone job, which has no RepoSession yet.
+    /// Lifecycle of a job about a folder rather than an open repository:
+    /// create, initialize, clone, scan and location checks.
     #[signal]
     fn repository_job_started(job: i64, path: GString, label: GString);
     #[signal]
@@ -347,6 +366,14 @@ impl AppCore {
     /// New entries are in the git command log (`command_log`).
     #[signal]
     fn commands_logged();
+
+    /// The repository library changed; `error` is why saving it failed, or "".
+    #[signal]
+    fn library_changed(error: GString);
+
+    /// The summary of library entry `path` (see `repo_summary`) arrived.
+    #[signal]
+    fn repo_summary_ready(path: GString);
 
     /// Emitted in response to `ping` (M0 boundary check).
     #[signal]
@@ -383,28 +410,55 @@ impl AppCore {
     }
 
     /// Initializes a repository on a worker thread; returns its job id.
+    /// `options`: `{initial_branch, gitignore (template name or ""), readme,
+    /// first_commit, existing}` (`existing` initializes a folder with files).
     #[func]
-    fn create_repository(&mut self, path: GString, initial_branch: GString) -> i64 {
-        runtime_cell::with(|rt| {
-            i64::try_from(
-                rt.create_repository(Path::new(&path.to_string()), &initial_branch.to_string()),
-            )
-            .unwrap_or(i64::MAX)
-        })
-        .unwrap_or(-1)
+    fn create_repository(&mut self, path: GString, options: VarDictionary) -> i64 {
+        let flag = |key: &str| {
+            options
+                .get(key)
+                .and_then(|v| v.try_to::<bool>().ok())
+                .unwrap_or(false)
+        };
+        let text = |key: &str| options.get(key).map(|v| v.to_string()).unwrap_or_default();
+        let branch = text("initial_branch");
+        let mut create = CreateOptions::new(if branch.is_empty() { "main" } else { &branch });
+        let template = text("gitignore");
+        create.gitignore = (!template.is_empty()).then_some(template);
+        create.readme = flag("readme");
+        create.first_commit = flag("first_commit");
+        create.existing = flag("existing");
+        job_id(runtime_cell::with(|rt| {
+            rt.create_repository(Path::new(&path.to_string()), create)
+        }))
     }
 
     /// Clones a repository on a worker thread; returns its job id.
+    /// `options`: `{branch ("" for the remote's default), submodules}`.
     #[func]
-    fn clone_repository(&mut self, url: GString, path: GString) -> i64 {
-        runtime_cell::with(|rt| {
-            i64::try_from(rt.clone_repository(&url.to_string(), Path::new(&path.to_string())))
-                .unwrap_or(i64::MAX)
-        })
-        .unwrap_or(-1)
+    fn clone_repository(&mut self, url: GString, path: GString, options: VarDictionary) -> i64 {
+        let branch = options
+            .get("branch")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let clone = CloneOptions {
+            branch: (!branch.trim().is_empty()).then(|| branch.trim().to_owned()),
+            submodules: options
+                .get("submodules")
+                .and_then(|v| v.try_to::<bool>().ok())
+                .unwrap_or(false),
+        };
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| {
+            if let Some(parent) = path.parent() {
+                rt.config_mut().last_clone_folder = Some(parent.to_path_buf());
+                let _ = rt.save_config();
+            }
+            rt.clone_repository(&url.to_string(), &path, clone)
+        }))
     }
 
-    /// Cancels a create or clone job.
+    /// Cancels a create, initialize, clone, scan or location job.
     #[func]
     fn cancel_repository_job(&self, job: i64) -> bool {
         u64::try_from(job)
@@ -450,27 +504,222 @@ impl AppCore {
         runtime_cell::with(|rt| rt.on_focus(&key));
     }
 
-    /// Recently opened repositories, most recent first.
+    /// Why the repository library could not be read (it starts empty and
+    /// the old file is kept as `library.toml.broken`), or "".
     #[func]
-    fn recent_repos(&self) -> PackedStringArray {
+    fn library_warning(&self) -> GString {
+        gstr(&self.library_warning)
+    }
+
+    /// Every library entry, in the order added: `{path, name (display name
+    /// or folder name), folder_name, display_name, pinned, added_at,
+    /// last_opened_at (unix seconds, -1 when never opened)}`.
+    #[func]
+    fn library_rows(&self) -> Array<VarDictionary> {
         runtime_cell::with(|rt| {
-            rt.config()
-                .known_repos
+            let mut rows = Array::new();
+            for entry in rt.library().entries() {
+                let folder = entry.path.file_name().map_or_else(
+                    || entry.path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                rows.push(&vdict! {
+                    "path" => &path_str(&entry.path),
+                    "name" => &gstr(&entry.name()),
+                    "folder_name" => &gstr(&folder),
+                    "display_name" => &gstr(entry.display_name.as_deref().unwrap_or_default()),
+                    "pinned" => entry.pinned,
+                    "added_at" => entry.added_at,
+                    "last_opened_at" => entry.last_opened_at.unwrap_or(-1),
+                });
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// Paths of the `count` most recently opened library entries.
+    #[func]
+    fn recent_repos(&self, count: i64) -> PackedStringArray {
+        let count = usize::try_from(count).unwrap_or(0);
+        runtime_cell::with(|rt| {
+            rt.library()
+                .recent(count)
                 .iter()
-                .map(|p| path_str(p))
+                .map(|e| path_str(&e.path))
                 .collect()
         })
         .unwrap_or_default()
     }
 
-    /// Removes a repository from the recent list (for example, if it is gone).
+    /// Adds a repository folder (as `location_result` resolved it). Returns
+    /// whether it was new.
     #[func]
-    fn forget_repo(&mut self, path: GString) {
-        let path = PathBuf::from(path.to_string());
+    fn library_add(&mut self, path: GString) -> bool {
+        runtime_cell::with(|rt| rt.library_add(Path::new(&path.to_string()))).unwrap_or(false)
+    }
+
+    /// Removes an entry (never its files); `library_undo_remove` brings it back.
+    #[func]
+    fn library_remove(&mut self, path: GString) -> bool {
+        runtime_cell::with(|rt| rt.library_remove(Path::new(&path.to_string()))).unwrap_or(false)
+    }
+
+    #[func]
+    fn library_can_undo_remove(&self) -> bool {
+        runtime_cell::with(|rt| rt.library().can_undo_remove()).unwrap_or(false)
+    }
+
+    /// Puts the last removed entry back; returns its path, or "".
+    #[func]
+    fn library_undo_remove(&mut self) -> GString {
+        runtime_cell::with(|rt| rt.library_undo_remove())
+            .flatten()
+            .map_or_else(GString::new, |p| path_str(&p))
+    }
+
+    /// Sets the display name; an empty `name` (or the folder name) clears it.
+    #[func]
+    fn library_rename(&mut self, path: GString, name: GString) -> bool {
+        runtime_cell::with(|rt| rt.library_rename(Path::new(&path.to_string()), &name.to_string()))
+            .unwrap_or(false)
+    }
+
+    #[func]
+    fn library_pin(&mut self, path: GString, pinned: bool) -> bool {
+        runtime_cell::with(|rt| rt.library_pin(Path::new(&path.to_string()), pinned))
+            .unwrap_or(false)
+    }
+
+    /// Moves entry `old` to the repository folder `new` (Change location);
+    /// its per-repo UI state moves too.
+    #[func]
+    fn library_relocate(&mut self, old: GString, new: GString) -> bool {
+        let (old, new) = (
+            PathBuf::from(old.to_string()),
+            PathBuf::from(new.to_string()),
+        );
+        let moved = runtime_cell::with(|rt| rt.library_relocate(&old, &new)).unwrap_or(false);
+        if moved {
+            let _ = self.ui_state.rename(&old, &new);
+        }
+        moved
+    }
+
+    /// Reads the summaries of library entries `paths` in the background
+    /// (a few at a time); each one ends with `repo_summary_ready`.
+    #[func]
+    fn load_repo_summaries(&mut self, paths: PackedStringArray) {
+        let paths: Vec<PathBuf> = paths
+            .as_slice()
+            .iter()
+            .map(|p| PathBuf::from(p.to_string()))
+            .collect();
+        runtime_cell::with(|rt| rt.load_summaries(&paths));
+    }
+
+    /// The last summary read for `path`: `{missing, error (as git_error's,
+    /// or {}), branch, detached, changes, conflicts, upstream, ahead,
+    /// behind}`, or {} before the first read.
+    #[func]
+    fn repo_summary(&self, path: GString) -> VarDictionary {
+        runtime_cell::with(|rt| rt.summary(Path::new(&path.to_string())).map(summary_dict))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Looks for repositories under `root`, `depth` folders down; returns
+    /// the job id (`repository_job_*` signals, then `scan_results`).
+    #[func]
+    fn scan_repositories(&mut self, root: GString, depth: i64) -> i64 {
+        let depth = usize::try_from(depth).unwrap_or(gitbello_core::scan::DEFAULT_DEPTH);
+        job_id(runtime_cell::with(|rt| {
+            rt.scan(Path::new(&root.to_string()), depth)
+        }))
+    }
+
+    /// The repositories a finished scan found (once): `{path, worktrees,
+    /// bare, known (already in the library)}`.
+    #[func]
+    fn scan_results(&mut self, job: i64) -> Array<VarDictionary> {
+        let Ok(job) = u64::try_from(job) else {
+            return Array::new();
+        };
         runtime_cell::with(|rt| {
-            rt.config_mut().known_repos.retain(|p| *p != path);
-            let _ = rt.save_config();
-        });
+            let mut rows = Array::new();
+            for hit in rt.take_scan(job).unwrap_or_default() {
+                let worktrees: PackedStringArray =
+                    hit.worktrees.iter().map(|p| path_str(p)).collect();
+                rows.push(&vdict! {
+                    "path" => &path_str(&hit.path),
+                    "worktrees" => &worktrees,
+                    "bare" => hit.bare,
+                    "known" => rt.library().contains(&hit.path),
+                });
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// Resolves folder `path` to its repository in the background; with
+    /// `expected_for` (a library entry) also compares root commits. Returns
+    /// the job id (`repository_job_*` signals, then `location_result`).
+    #[func]
+    fn check_location(&mut self, path: GString, expected_for: GString) -> i64 {
+        let expected = PathBuf::from(expected_for.to_string());
+        let expected = (!expected.as_os_str().is_empty()).then_some(expected);
+        job_id(runtime_cell::with(|rt| {
+            rt.check_location(Path::new(&path.to_string()), expected.as_deref())
+        }))
+    }
+
+    /// A finished location check (once): `{path, root ("" when the folder is
+    /// not in a repository), same_root (1 same, 0 different, -1 unknown)}`.
+    #[func]
+    fn location_result(&mut self, job: i64) -> VarDictionary {
+        let Ok(job) = u64::try_from(job) else {
+            return VarDictionary::new();
+        };
+        runtime_cell::with(|rt| rt.take_location(job))
+            .flatten()
+            .map(|check| {
+                vdict! {
+                    "path" => &path_str(&check.path),
+                    "root" => &check.root.as_deref().map_or_else(GString::new, path_str),
+                    "same_root" => check.same_root.map_or(-1, i64::from),
+                }
+            })
+            .unwrap_or_default()
+    }
+
+    /// Names of the bundled `.gitignore` templates.
+    #[func]
+    fn gitignore_templates(&self) -> PackedStringArray {
+        GITIGNORE_TEMPLATES
+            .iter()
+            .map(|(name, _)| gstr(name))
+            .collect()
+    }
+
+    /// Why `path` cannot be initialized in place, or "".
+    #[func]
+    fn init_folder_error(&self, path: GString) -> GString {
+        gstr(init_folder_error(Path::new(&path.to_string())).unwrap_or_default())
+    }
+
+    /// Where Clone suggests putting a repository: the Settings folder, the
+    /// last clone's parent folder, or "" (the documents folder).
+    #[func]
+    fn clone_folder(&self) -> GString {
+        runtime_cell::with(|rt| {
+            let c = rt.config();
+            c.clone_folder
+                .as_deref()
+                .or(c.last_clone_folder.as_deref())
+                .map_or_else(GString::new, path_str)
+        })
+        .unwrap_or_default()
     }
 
     /// Tabs to restore on launch.
@@ -485,7 +734,7 @@ impl AppCore {
         runtime_cell::with(|rt| rt.config().active_tab.map_or(-1, to_i64)).unwrap_or(-1)
     }
 
-    /// Remembers open tabs (and the recent list) in the config file. Returns
+    /// Remembers open tabs in the config file. Returns
     /// an error message, or an empty string.
     #[func]
     fn save_tabs(&mut self, paths: PackedStringArray, active: i64) -> GString {
@@ -630,8 +879,9 @@ impl AppCore {
 
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
-    /// worktree_template, branch_prefix, language, accent}`; an empty terminal command means
-    /// the platform's, an empty accent the app's default (else `#rrggbb`).
+    /// worktree_template, branch_prefix, language, accent, clone_folder}`; an
+    /// empty terminal command means the platform's, an empty accent the
+    /// app's default (else `#rrggbb`), an empty clone folder the last one used.
     #[func]
     fn settings(&self) -> VarDictionary {
         runtime_cell::with(|rt| {
@@ -645,6 +895,7 @@ impl AppCore {
                 "branch_prefix" => &gstr(&c.branch_prefix),
                 "language" => c.language.as_str(),
                 "accent" => &gstr(c.accent.as_deref().unwrap_or_default()),
+                "clone_folder" => &c.clone_folder.as_deref().map_or_else(GString::new, path_str),
             }
         })
         .unwrap_or_default()
@@ -727,6 +978,10 @@ impl AppCore {
             if let Some(accent) = accent {
                 config.accent = accent;
             }
+            if let Some(folder) = text("clone_folder") {
+                let folder = folder.trim();
+                config.clone_folder = (!folder.is_empty()).then(|| PathBuf::from(folder));
+            }
             rt.save_config()
                 .err()
                 .map_or_else(GString::new, |e| gstr(&e.to_string()))
@@ -808,5 +1063,24 @@ impl AppCore {
             .into_iter()
             .map(|i| i32::try_from(i).unwrap_or(i32::MAX))
             .collect()
+    }
+}
+
+/// A job id for GDScript; -1 when the runtime is not running.
+fn job_id(job: Option<u64>) -> i64 {
+    job.map_or(-1, |job| i64::try_from(job).unwrap_or(i64::MAX))
+}
+
+fn summary_dict(summary: &RepoSummary) -> VarDictionary {
+    vdict! {
+        "missing" => summary.missing,
+        "error" => &summary.error.as_ref().map(convert::error_dict).unwrap_or_default(),
+        "branch" => &gstr(summary.branch.as_deref().unwrap_or_default()),
+        "detached" => summary.detached,
+        "changes" => to_i64(summary.changes),
+        "conflicts" => summary.conflicts,
+        "upstream" => summary.upstream,
+        "ahead" => i64::from(summary.ahead),
+        "behind" => i64::from(summary.behind),
     }
 }

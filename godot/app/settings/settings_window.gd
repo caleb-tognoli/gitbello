@@ -15,6 +15,7 @@ const CATEGORIES: Array = [
 			[&"auto_fetch_minutes", "Auto-fetch", &"spin", [0, 99999, 1, " min"]],
 			[&"editor_command", "Editor", &"line", "code {path}"],
 			[&"terminal_command", "Terminal", &"line", "Platform default"],
+			[&"clone_folder", "Clone folder", &"line", "Folder of the last clone"],
 		],
 	],
 	[
@@ -39,6 +40,7 @@ const DETAILS: Dictionary = {
 	&"auto_fetch_minutes": "Minutes between automatic fetches; 0 turns auto-fetch off",
 	&"editor_command": "The command for Open in editor; {path} is replaced by the folder",
 	&"terminal_command": "The command for Open terminal here; {path} is replaced by the folder. Leave empty for the platform's terminal.",
+	&"clone_folder": "Where Clone puts repositories. Empty uses the folder of the last clone.",
 	&"worktree_template": "Relative paths start at the repository root. {repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.",
 	&"branch_prefix": "Starts the name of new worktrees' branches, for example caleb/",
 	&"theme": "System follows the operating system's dark or light mode",
@@ -50,6 +52,7 @@ const DEFAULTS: Dictionary = {
 	&"auto_fetch_minutes": 10,
 	&"editor_command": "code {path}",
 	&"terminal_command": "",
+	&"clone_folder": "",
 	&"worktree_template": ".worktrees/{branch_slug}",
 	&"branch_prefix": "",
 	&"theme": "system",

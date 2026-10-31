@@ -366,3 +366,72 @@ pub fn config(args: &[String]) -> Result<()> {
     print!("{}", Config::load(&file)?.to_toml());
     Ok(())
 }
+
+/// `home-bench <folder> [--depth N] [--max N]`: what Home does with the
+/// repositories under a folder, read-only: a scan, then the summaries of at
+/// most `--max` of them (default 50) through the runtime, a few at a time.
+pub fn home_bench(args: &[String]) -> Result<()> {
+    use gitbello_core::runtime::{Runtime, RuntimeEvent, SUMMARY_JOBS};
+    use gitbello_core::scan;
+    use std::time::{Duration, Instant};
+
+    let mut root: Option<PathBuf> = None;
+    let mut depth = scan::DEFAULT_DEPTH;
+    let mut max = 50usize;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--depth" => depth = iter.next().context("--depth needs a number")?.parse()?,
+            "--max" => max = iter.next().context("--max needs a number")?.parse()?,
+            other => root = Some(PathBuf::from(other)),
+        }
+    }
+    let root = root.context("home-bench needs a folder")?;
+
+    let started = Instant::now();
+    let hits = scan::scan(&root, depth, &CancelToken::new(), |_, _| {});
+    let scanned = started.elapsed();
+    let paths: Vec<PathBuf> = hits
+        .iter()
+        .filter(|h| !h.bare)
+        .take(max)
+        .map(|h| h.path.clone())
+        .collect();
+    println!(
+        "scan     {} repositories ({} not bare) under {} at depth {depth} in {:.1} ms",
+        hits.len(),
+        hits.iter().filter(|h| !h.bare).count(),
+        root.display(),
+        scanned.as_secs_f64() * 1e3
+    );
+
+    let mut config = Config::default();
+    config.auto_fetch_minutes = 0;
+    let mut rt = Runtime::with_runner(config, None, runner()?);
+    for path in &paths {
+        rt.library_add(path);
+    }
+    let started = Instant::now();
+    rt.load_summaries(&paths);
+    let (mut first, mut loaded) = (None, 0usize);
+    let deadline = started + Duration::from_secs(300);
+    while loaded < paths.len() && Instant::now() < deadline {
+        for event in rt.poll() {
+            if matches!(event, RuntimeEvent::SummaryLoaded { .. }) {
+                loaded += 1;
+                first.get_or_insert_with(|| started.elapsed());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let all = started.elapsed();
+    let first = first.unwrap_or(all);
+    println!(
+        "summary  {loaded} of {} in {:.0} ms ({SUMMARY_JOBS} at a time), first after {:.0} ms, {:.0} ms each on average",
+        paths.len(),
+        all.as_secs_f64() * 1e3,
+        first.as_secs_f64() * 1e3,
+        all.as_secs_f64() * 1e3 / loaded.max(1) as f64 * SUMMARY_JOBS as f64
+    );
+    Ok(())
+}

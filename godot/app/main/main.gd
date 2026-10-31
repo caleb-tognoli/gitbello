@@ -1,22 +1,25 @@
 class_name Main
 extends PanelContainer
 ## App shell (PLAN §4): the menu bar, one tab per repository (its worktrees
-## are chips inside it), the welcome screen, the git command log, the status
-## bar, toasts and the command palette. Every user operation is an action in
-## `Actions`.
+## are chips inside it), Home (when no tab is open, or in the Home tab the +
+## opens, always the last tab), the git command log, the status bar, toasts
+## and the command palette. Every user operation is an action in `Actions`.
 
 const MIN_WINDOW_SIZE: Vector2i = Vector2i(960, 600)
 const REPO_ARG: String = "--repo="
 const REPO_TAB: PackedScene = preload("res://app/repo_tab/repo_tab.tscn")
-const ADD_REPOSITORY: PackedScene = preload("res://app/add_repository/add_repository_dialog.tscn")
 ## Worktree chips Ctrl+1 … Ctrl+9 select.
 const CHIP_SHORTCUTS: int = 9
+## Repositories File → Open recent lists.
+const RECENT_MENU: int = 12
 
 var _pages: Array[RepoTab] = []
 var _current: int = -1
 var _feedback: Feedback = Feedback.new()
 var _settings_window: SettingsWindow = SettingsWindow.new()
-var _add_dialog: AddRepositoryDialog = ADD_REPOSITORY.instantiate() as AddRepositoryDialog
+var _library: LibraryOps = LibraryOps.new()
+## Whether the Home tab is open (it is the last tab).
+var _home_tab: bool = false
 var _remotes_dialog: RemotesDialog = RemotesDialog.new()
 var _tags_dialog: TagsDialog = TagsDialog.new()
 var _about: AcceptDialog = AcceptDialog.new()
@@ -33,7 +36,7 @@ var _fit_queued: bool = false
 @onready var _add_button: Button = %AddButton
 @onready var _tab_spacer: Control = %TabSpacer
 @onready var _content: Control = %Content
-@onready var _welcome: Welcome = %Welcome
+@onready var _home: Home = %Home
 @onready var _git_log: GitLogPanel = %GitLog
 @onready var _status_label: Label = %StatusLabel
 @onready var _version_label: Label = %VersionLabel
@@ -57,9 +60,21 @@ func _ready() -> void:
 	_feedback.toasts = _toasts
 	_feedback.busy_changed.connect(func(_session: RepoSession) -> void: _update_tab_icons())
 	add_child(_feedback)
-	for dialog: Window in [_add_dialog, _remotes_dialog, _tags_dialog, _about]:
+	for dialog: Window in [_remotes_dialog, _tags_dialog, _about]:
 		add_child(dialog)
-	_add_dialog.repository_selected.connect(open_repo)
+	_library.name = "Library"
+	_library.toasts = _toasts
+	_library.is_open = func(path: String) -> bool: return page_for(path) != null
+	_library.close_repo = func(path: String) -> void:
+		var page: RepoTab = page_for(path)
+		if page != null:
+			close_tab(_pages.find(page))
+	add_child(_library)
+	_library.open_requested.connect(_open_from_home)
+	_library.clone_finished.connect(_on_clone_finished)
+	_home.ops = _library
+	_home.is_open = _library.is_open
+	_home.chosen.connect(_open_from_home)
 	_spinner.wait_time = BigButton.SPIN_SECONDS
 	_spinner.timeout.connect(func() -> void:
 		_spin_frame = (_spin_frame + 1) % AppTheme.SPINNER_FRAMES
@@ -76,10 +91,9 @@ func _ready() -> void:
 	_tabs.active_tab_rearranged.connect(_on_tab_rearranged)
 	_tab_row.resized.connect(_queue_fit_tabs)
 	_add_button.icon = AppTheme.icon(&"Add")
-	_add_button.pressed.connect(func() -> void: Actions.run_action(&"repo.add"))
-	_welcome.open_requested.connect(func() -> void: Actions.run_action(&"repo.open"))
-	_welcome.recent_chosen.connect(open_repo)
+	_add_button.pressed.connect(func() -> void: Actions.run_action(&"home.open"))
 	_register_actions()
+	_home.refresh_texts()
 	_update_localized_actions()
 	_menu_bar.dynamic_menus["Open recent"] = _recent_entries
 	_menu_strip.visible = not _menu_bar.is_native_menu()
@@ -88,6 +102,11 @@ func _ready() -> void:
 		_toasts.show_toast("gitbello cannot run git", L10n.runtime_error(Core.start_error()))
 	if not L10n.config_error(Core.config_warning()).is_empty():
 		_toasts.show_toast("Settings file ignored", L10n.config_error(Core.config_warning()))
+	if not Core.library_warning().is_empty():
+		_toasts.show_toast("Repository list reset", L10n.config_error(Core.library_warning()))
+	Core.library_changed.connect(func(error: String) -> void:
+		if not error.is_empty():
+			_toasts.show_toast("Cannot save the repository list", L10n.config_error(error)))
 	_restore_tabs()
 	var repo: String = repo_from_args(OS.get_cmdline_user_args())
 	if not repo.is_empty():
@@ -122,7 +141,8 @@ static func repo_from_args(args: PackedStringArray) -> String:
 # --- Tabs -------------------------------------------------------------------
 
 ## Opens `path` (a repository or one of its worktrees): focuses the tab of
-## its repository and shows that worktree, or opens a new tab.
+## its repository and shows that worktree, or opens a new tab (before the
+## Home tab, which stays last).
 func open_repo(path: String) -> RepoTab:
 	for i: int in _pages.size():
 		if _pages[i].has_worktree(path):
@@ -144,18 +164,85 @@ func open_repo(path: String) -> RepoTab:
 	page.setup(session)
 	page.state_changed.connect(_on_page_state.bind(page))
 	page.notice.connect(func(title: String, message: String) -> void: _toasts.show_toast(title, message))
+	var had_home: bool = _close_home_tab()
 	_pages.append(page)
 	_tabs.add_tab(page.title())
 	_tabs.set_tab_metadata(_tabs.tab_count - 1, page)
+	if had_home:
+		_add_home_tab()
 	_tabs.current_tab = _pages.size() - 1
 	_on_page_state(page)
 	_update_view()
 	_save_tabs()
-	_welcome.refresh()
+	_home.queue_rebuild()
 	return page
 
 
+## Shows Home: the whole window without tabs, else the Home tab (opened
+## when needed). Its filter takes the keys.
+func open_home() -> void:
+	if not _pages.is_empty():
+		if not _home_tab:
+			_add_home_tab()
+		_tabs.current_tab = _pages.size()
+		_update_view()
+	_home.focus_filter()
+
+
+func home() -> Home:
+	return _home
+
+
+func library_ops() -> LibraryOps:
+	return _library
+
+
+func has_home_tab() -> bool:
+	return _home_tab
+
+
+## Whether Home is what the window shows now.
+func home_shown() -> bool:
+	return _pages.is_empty() or (_home_tab and _tabs.current_tab == _pages.size())
+
+
+## A repository chosen on Home (or added from it) opens in place of the Home
+## tab; one already open is focused and the Home tab closes.
+func _open_from_home(path: String) -> void:
+	if home_shown():
+		_close_home_tab()
+	open_repo(path)
+
+
+## A finished clone opens if Home is on screen; else a toast offers it.
+func _on_clone_finished(path: String) -> void:
+	if home_shown():
+		_open_from_home(path)
+		return
+	var shown: String = path.replace("\\", "/").get_file()
+	_toasts.show_success(tr("Cloned %s") % shown, func() -> void: open_repo(path), "Open")
+
+
+func _add_home_tab() -> void:
+	_tabs.add_tab(tr("Home"), AppTheme.icon(&"Home"))
+	_tabs.set_tab_metadata(_tabs.tab_count - 1, _home)
+	_home_tab = true
+
+
+## Closes the Home tab; returns whether there was one.
+func _close_home_tab() -> bool:
+	if not _home_tab:
+		return false
+	_home_tab = false
+	_tabs.remove_tab(_pages.size())
+	return true
+
+
 func close_tab(index: int) -> void:
+	if _home_tab and index == _pages.size():
+		_close_home_tab()
+		_update_view()
+		return
 	if index < 0 or index >= _pages.size():
 		return
 	var page: RepoTab = _pages[index]
@@ -163,10 +250,13 @@ func close_tab(index: int) -> void:
 	page.close_all()
 	page.queue_free()
 	_tabs.remove_tab(index)
+	# Without repository tabs Home fills the window.
+	if _pages.is_empty():
+		_close_home_tab()
 	_current = _tabs.current_tab if not _pages.is_empty() else -1
 	_update_view()
 	_save_tabs()
-	_welcome.refresh()
+	_home.queue_rebuild()
 
 
 func tab_count() -> int:
@@ -251,7 +341,7 @@ func _save_tabs() -> void:
 
 
 func _update_view() -> void:
-	_welcome.visible = _pages.is_empty()
+	_home.visible = home_shown()
 	_tab_strip.visible = not _pages.is_empty()
 	for i: int in _pages.size():
 		_pages[i].visible = i == _tabs.current_tab
@@ -293,10 +383,17 @@ func _on_tab_changed(index: int) -> void:
 
 
 ## TabBar reordered its tabs; rebuild the page list from the tab metadata.
+## The Home tab goes back to the end.
 func _on_tab_rearranged(_to: int) -> void:
 	_pages.clear()
 	for i: int in _tabs.tab_count:
-		_pages.append(_tabs.get_tab_metadata(i) as RepoTab)
+		var page: RepoTab = _tabs.get_tab_metadata(i) as RepoTab
+		if page != null:
+			_pages.append(page)
+		elif i != _tabs.tab_count - 1:
+			_tabs.move_tab(i, _tabs.tab_count - 1)
+			_on_tab_rearranged(_to)
+			return
 	_current = _tabs.current_tab
 	_update_view()
 	_save_tabs()
@@ -371,9 +468,11 @@ func _update_tab_icons() -> void:
 	_queue_fit_tabs()
 
 
+## A dropped repository folder opens; a folder outside any repository offers
+## Initialize or Scan (see `LibraryOps.add_folder`).
 func _on_files_dropped(files: PackedStringArray) -> void:
 	for file: String in files:
-		open_repo(file if DirAccess.dir_exists_absolute(file) else file.get_base_dir())
+		_library.add_folder(file if DirAccess.dir_exists_absolute(file) else file.get_base_dir())
 
 
 func _apply_theme() -> void:
@@ -396,9 +495,14 @@ func _register_actions() -> void:
 	Actions.register(&"app.quit", "Quit", "App",
 			func() -> void: get_tree().quit(), PackedStringArray(["Ctrl+Q"]))
 	Actions.register(&"app.about", "About gitbello", "App", _show_about)
-	Actions.register(&"repo.add", "Add repository…", "Repository", _add_dialog.open)
-	Actions.register(&"repo.open", "Open repository…", "Repository",
-			_show_open_dialog, PackedStringArray(["Ctrl+O"]))
+	Actions.register(&"home.open", "Home", "App", open_home, PackedStringArray(["Ctrl+N"]))
+	Actions.register(&"repo.clone", "Clone repository…", "Repository", func() -> void: _library.clone())
+	Actions.register(&"repo.add_existing", "Add existing folder…", "Repository", _library.add_existing,
+			PackedStringArray(["Ctrl+O"]))
+	Actions.register(&"repo.scan", "Scan folder for repositories…", "Repository",
+			func() -> void: _library.scan())
+	Actions.register(&"repo.create", "Create repository…", "Repository", _library.create)
+	Actions.register(&"repo.init", "Initialize folder…", "Repository", func() -> void: _library.init_folder())
 	Actions.register(&"repo.refresh", "Refresh", "Repository",
 			func() -> void: current_page().session.refresh(), PackedStringArray(["F5"]), has_tab, no_repo)
 	Actions.register(&"tab.close", "Close tab", "Tabs",
@@ -937,10 +1041,6 @@ func settings_window() -> SettingsWindow:
 	return _settings_window
 
 
-func add_repository_dialog() -> AddRepositoryDialog:
-	return _add_dialog
-
-
 ## Where a new branch or tag starts: `[commit-ish, label]` from the menu's
 ## ref, the history's commit, or HEAD. The history always has a commit
 ## selected, so HEAD's own commit counts as HEAD (local changes come along).
@@ -1021,20 +1121,6 @@ func _on_system_theme_changed() -> void:
 		ThemeManager.apply(self)
 
 
-func _show_open_dialog() -> void:
-	var dialog: FileDialog = FileDialog.new()
-	dialog.use_native_dialog = true
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.title = tr("Open repository")
-	dialog.dir_selected.connect(func(path: String) -> void: open_repo(path))
-	dialog.visibility_changed.connect(func() -> void:
-		if not dialog.visible:
-			dialog.queue_free())
-	add_child(dialog)
-	dialog.popup_centered_ratio(0.6)
-
-
 func _show_about() -> void:
 	_about.title = tr("About gitbello")
 	_about.dialog_text = tr("gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s") % [
@@ -1042,13 +1128,16 @@ func _show_about() -> void:
 	_about.popup_centered()
 
 
-## File → Open recent: repositories not open now.
+## File → Open recent: recently opened repositories not open now.
 func _recent_entries() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = []
-	for path: String in Core.recent_repos():
+	var recent: PackedStringArray = Core.recent_repos(RECENT_MENU)
+	var labels: PackedStringArray = Paths.short_labels(recent)
+	for i: int in recent.size():
+		var path: String = recent[i]
 		if page_for(path) != null:
 			continue
-		entries.append({"label": path.get_file(), "tooltip": path, "run": func() -> void: open_repo(path)})
+		entries.append({"label": labels[i], "tooltip": path, "run": func() -> void: open_repo(path)})
 	return entries
 
 

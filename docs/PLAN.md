@@ -40,6 +40,7 @@ GitHub, GitLab or any hosting integration (gitbello is pure git) · interactive 
 | D10 | Staging model | The Changes checkboxes and diff line picks are gitbello's own selection, seeded from the index and written to it at commit time (M6.5 P3; until then every pick staged at once) |
 | D11 | Stash model | Shelves: stashes tied to a branch, identified by commit; dedicated Shelves view, whose navigation button appears only when the repository has shelves (M6.5 P4; UI revision approved 2026-10-26) |
 | D12 | Visual style | Same family as Caleb's spritesheetbelli (surface/raised/border tokens, recoloured Godot editor icons, segmented toggles, section headers, labels-left forms), tuned for long lists, the graph and diffs |
+| D13 | Repository list | A repository library (every repo ever added, no cap, `library.toml` in the data dir) shown on the Home page, which is both the no-tab state and what the tab-strip **+** opens (M7.5, Q&A of 2026-10-31; until then a 20-entry recent list in the config) |
 
 ### Open decisions (Caleb to confirm)
 
@@ -160,7 +161,8 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 ### 3.8 Config and persistence
 
 - User config lives in the OS config dir (`gitbello_core::paths`, written by hand; the `directories` crate's Windows dependency does not build on the GNU toolchain) as TOML:
-  - known repos
+  - known repos (until M7.5; then imported once into the library below and no longer written)
+  - clone folder (M7.5; empty means the last clone's folder, `last_clone_folder`, then Documents)
   - open repo tabs, each with its selected worktree (saved worktree tabs from before M6.5 migrate to their repo's tab)
   - worktree path template
   - editor command (default `code {path}`)
@@ -169,7 +171,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - auto-fetch interval
   - keybindings
   - theme override, interface language and accent colour
-- Per-repo user state (last selected branch, panel sizes, the shared sidebar width) is stored in the app's data dir, keyed by the repo's canonical path. **Never write to the user's repo**, except the optional repo-shared `.gitbello/actions.toml` that users create themselves.
+- Per-repo user state (last selected branch, panel sizes, the shared sidebar width) is stored in the app's data dir, keyed by the repo's canonical path. The repository library (M7.5) is `library.toml` in the same dir (`repos.toml` is the per-repo state): one `[[repo]]` per repository (`path`, optional `name`, `pinned`, `added`, `opened`, `root_commit`), unknown keys kept like the config; a broken file is set aside as `library.toml.broken` and the list starts empty, with a toast. **Never write to the user's repo**, except the optional repo-shared `.gitbello/actions.toml` that users create themselves.
 
 ### 3.9 History graph
 
@@ -240,7 +242,7 @@ File  Edit  Repository  Branch  View  Help
 ```
 
 **Menu bar.** Built from the action registry; disabled items say why in their tooltip.
-- **File:** Open repository, Recent, Close tab, Settings, Quit.
+- **File:** Home, Clone…, Add existing folder…, Scan folder…, Create…, Initialize folder…, Recent (from the library), Close tab, Settings, Quit.
 - **Edit:** Undo (where available), Command palette, Keyboard shortcuts.
 - **Repository:** Fetch, Pull, Push, New task, Clean up worktrees, Open in editor / terminal / file manager, Remotes…, Tags…, Git log.
 - **Branch:** Switch…, New branch, Rename, Delete, Merge into current…, Rebase current onto…, Set upstream.
@@ -250,8 +252,49 @@ File  Edit  Repository  Branch  View  Help
 **Repo tabs.** One tab per repo, never per worktree; the title is the repo name.
 - An attention dot shows the most important state across the repo's worktrees: conflict or operation in progress (error colour), then changed files (modified colour), then ahead/behind (accent). Its tooltip lists each worktree with its state.
 - A small spinner shows while any job of the repo runs.
-- The tab-strip **+** opens one Add repository window: create a repository (name, location and initial branch), open an existing folder, or clone a URL/path. Create and clone run in the background with progress, cancellation and inline errors, then open the new tab.
+- The tab-strip **+** opens the Home page in a Home tab (see **Home** below; until M7.5 it opened one Add repository window with create, open existing and clone).
 - Opening a linked worktree's path (open dialog, recent list, command line, drag and drop, restored tabs) focuses its repo's tab and selects that worktree's chip.
+
+**Home** (M7.5, settled in the Q&A of 2026-10-31). One page for finding, opening and adding repositories. It fills the window when no tab is open (replacing the welcome screen) and opens as a Home tab from the tab-strip **+** or Ctrl+N. There is at most one Home tab: **+** focuses it when it exists. Choosing a repository turns the Home tab into that repository's tab, or focuses its tab and closes Home when it is already open. Home tabs are not saved with the open tabs.
+
+```
+[ Filter repositories…                          ]       [ + Add v ]
+
+Recent
+ +-----------+ +-----------+ +-----------+ +-----------+
+ | gitbello  | | api       | | site      | | godot-x   |
+ | main  •   | | dev  ↑2   | | main      | | ! missing |
+ | 2 min ago | | yesterday | | 3 days ago| | Locate…   |
+ +-----------+ +-----------+ +-----------+ +-----------+
+
+All repositories (34)                     Sort: Name v   Group: Folder v
+ * gitbello   C:/caleb/dev/gitbello   main •    open
+   api        C:/work/api             dev ↑2                         ...
+   > C:/caleb/oss (12)
+   cloning tokio  [#######---] 64%                              Cancel
+```
+
+- **Filter field**, focused when Home opens: matches names and paths in any case. Enter opens the first match, ↑ ↓ move through the list, so opening a repository is one keystroke away.
+- **Recent:** the 8 most recently opened repositories as cards: name (or display name), current branch, attention dot (the tab dot's rules), ↑↓ from the last fetch, and when it was last opened.
+- **All repositories:** the whole library, sortable by name, last opened or path, flat or grouped by parent folder (collapsible). Pinned repositories come first. Rows show name, path (dim), branch, dot and ↑↓, and "open" when the repository has a tab.
+- **Row actions** (the `...` button and right-click): Open, Pin / Unpin, Rename… (display name only; the folder is not touched), Change location…, Show in file manager, Open in editor, Open terminal, Copy path, Remove from list. Remove never touches files and its toast offers Undo; for a repository with an open tab it asks first ("Remove and close tab").
+- **Change location** takes a folder that must be a git repository (a worktree or subfolder resolves to its repository as everywhere else). A different root commit gets a warning ("This looks like a different repository") with Use anyway. The display name, pin and per-repo UI state move with it.
+- **Missing folders:** the row says so, with Locate… (Change location) and Remove, instead of failing on open.
+- **Status** is read lazily for visible rows and cards only, as low-priority reads with `--no-optional-locks`: branch, dirty, and ↑↓ against the upstream as last fetched. Home never fetches and never watches repositories without a tab.
+- **Drag and drop:** a repository folder is added (and opened); a folder that is not a repository but contains some offers Scan.
+- Opening a repository any other way (Ctrl+O, the command line, drop, palette, restored tabs) adds it to the library and updates its last-opened time. File → Recent and the palette read the library.
+
+**Add v** (a menu button on Home; each entry is also an action, in File and the palette):
+
+| Entry | Flow |
+|---|---|
+| **Clone…** | Repository URL, filled from the clipboard when it holds a git URL. Destination = the default clone folder (Settings) plus a folder name taken from the URL, editable. Options: branch (empty for the remote's default), with submodules. Runs in the background as a progress row on Home with Cancel and an inline error; several clones can run at once. When done the repository joins the library; a toast offers Open, and the Home tab that started it opens it if nothing else was chosen there meanwhile. |
+| **Add existing folder…** (Ctrl+O) | The native folder dialog. A subfolder resolves to its repository root, and a linked worktree to its main repository with that worktree's chip selected. A folder that is not a repository offers **Initialize here** or **Scan inside**. |
+| **Scan folder…** | Pick a root and a depth (default 3). A background job walks the folders without following links, skipping `node_modules` and the inside of `.git`, and stops descending at a repository (submodules are not listed). Linked worktrees fold into their main repository. Results stream into a checklist: repositories already in the library are shown greyed, the rest are checked; **Add selected**. |
+| **Create…** | Name, location, initial branch (`main`), an optional `.gitignore` template (bundled: Godot, Rust, Node, Python, Unity, Visual Studio; from github/gitignore, CC0) and an optional README. With either option it makes a first commit. No license picker. |
+| **Initialize folder…** | `git init` in an existing folder with files, initial branch, optional `.gitignore` template, optional first commit of everything. |
+
+Not in scope for M7.5: custom groups or tags (pin and folder groups only), listing repositories from GitHub/GitLab accounts (needs auth; later milestone), a "start on Home" setting (tabs keep being restored; Home shows when none come back), shallow clones.
 
 **Worktree strip.** One row of chips: the main worktree first, then the linked ones by folder name.
 - A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
@@ -302,7 +345,7 @@ File  Edit  Repository  Branch  View  Help
 - Row highlighting (click, Shift, Ctrl) is separate from the checkboxes. It drives the diff and the context menu: Discard…, Shelve…, Open, Show in file manager, Copy path, Ignore.
 - The diff gutter has hunk and line checkboxes.
 - The commit box sits under the list: summary, description, and a "Commit 2 files to main" button (Ctrl+Enter), disabled with a tooltip reason when nothing is included or the summary is empty. Amend is entered from the HEAD commit's History context menu ("Amend…", Ctrl+Shift+A), not a persistent checkbox. It loads that commit's message and temporarily shows "Amending “<commit summary>”", Cancel, and "Amend commit". Cancel or a successful amend restores the ordinary draft. Checked files/lines are included; with nothing checked, amend changes only the message.
-- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New worktree. The welcome screen follows the same pattern (Open repository, recent repos).
+- **Empty state:** "No local changes" with big suggested actions for what makes sense now: Push ↑N or Pull ↓N when relevant, Open in editor, Open terminal, New worktree. (Until M7.5 the welcome screen followed the same pattern; it is replaced by Home.)
 
 **New task (one click).**
 1. Open the dialog: branch name, which is slugified for the folder.
@@ -379,6 +422,8 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+B | branch popover (was the sidebar toggle) |
 | Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
 | Ctrl+T | new worktree |
+| Ctrl+N | Home tab (M7.5) |
+| Ctrl+O | Add existing folder (M7.5; was Open repository) |
 | Ctrl+Shift+Y | Sync |
 | Ctrl+Shift+B | Merge a branch into the current one (M7) |
 | Alt+O / Alt+T / Alt+B | Resolver: use ours / theirs / both for the conflict at the cursor (M7) |
@@ -590,6 +635,38 @@ Scope settled in the Q&A of 2026-10-31 (§4: Merge with preview, Operation banne
 - Merges pass git the ref's short name when it is unique, so the markers and git's messages read `topic` rather than `refs/heads/topic`.
 - Shortcuts: Ctrl+Shift+B (merge into current), Alt+O / Alt+T / Alt+B / Alt+Shift+B (use ours, theirs, both, both reversed), F8 / Shift+F8 (next / previous conflict), Ctrl+Z (undo a conflict choice; it shares the key with undo discard and the enabled action wins).
 - Fixed on the way: empty cells of side-by-side rows got a `picked` key, which broke drawing them.
+
+### M7.5 — Repository Home (≈2.5 weeks)
+
+Scope settled in the Q&A of 2026-10-31 (§4 Home, D13). Replaces the welcome screen and the Add repository window.
+
+- [x] Core repository library (`library.rs`): `library.toml` in the data dir, unknown keys kept, one-time import of `known_repos`; entries are repositories (`library_root`: a linked worktree lists its main one), remove with undo, rename, pin, relocate (root-commit check), last-opened updates from every way of opening a repository
+- [x] Core repository summaries: read jobs, at most `SUMMARY_JOBS` (2) at a time (branch, changes, conflicts, ↑↓ from tracking refs, missing, root commit once), with no watchers and no fetch
+- [x] Core scan (`scan.rs`): bounded walk without git, skip list, no link following, stops at repositories, folds worktrees, progress, cancellable
+- [x] Core create/init/clone options (`new_repo.rs`): `.gitignore` templates (bundled with `include_str!`), README, optional first commit, init of a folder with files, clone branch and submodules
+- [x] Home page (`app/home/`): filter, Recent cards, All repositories (sort, folder groups, pinned first, open marker), row menu, missing rows, clone progress rows, drop handling; summaries for visible rows only
+- [x] Home tab in the tab strip (+, Ctrl+N, one at a time, always last, turns into the chosen repository's tab), Home as the no-tab state; welcome screen removed
+- [x] Add menu and its forms (`FormDialog`): Clone, Add existing folder, Scan folder (checklist), Create, Initialize folder; the Add repository window removed
+- [x] Actions `home.open`, `repo.clone`, `repo.add_existing`, `repo.scan`, `repo.create`, `repo.init` plus the row actions; File menu, Recent and palette from the library
+- [x] Settings: clone folder
+- [x] Icons (Home, More; Pin and StatusWarning existed; `LICENSES.md`), English and Italian strings
+
+**API (approved 2026-10-31; as built).**
+- Core: `library::{RepoEntry { path, display_name, pinned, added_at, last_opened_at, root_commit }, RepoLibrary, RepoSummary { missing, error, branch, detached, changes, conflicts, upstream, ahead, behind, root_commit }, LocationCheck { path, root, same_root }, library_root, read_summary, check_location, path_key}`; `scan::{scan, ScanHit { path, worktrees, bare }}`; `new_repo::{CreateOptions { initial_branch, gitignore, readme, first_commit, existing }, CloneOptions { branch, submodules }, GITIGNORE_TEMPLATES, init_folder_error}`. `GitBackend::init` takes `existing`, `clone` takes `&CloneOptions`, new `root_commit`. `Runtime`: `load_library`, `library`, `library_add/remove/undo_remove/rename/pin/relocate`, `load_summaries`, `summary`, `scan` + `take_scan`, `check_location` + `take_location`, `create_repository(path, CreateOptions)`, `clone_repository(url, path, CloneOptions)`; events `LibraryChanged { error }` and `SummaryLoaded { repo }`; folder jobs (create, initialize, clone, scan, location) report as `Job` events (`REPOSITORY_JOB_LABELS`). Config gains `clone_folder` and `last_clone_folder`; `known_repos` is no longer written.
+- `AppCore` (gdext): `library_rows() -> [{path, name, folder_name, display_name, pinned, added_at, last_opened_at}]`, `recent_repos(count)`, signal `library_changed(error)`, `library_warning()`; `library_add/remove/undo_remove/can_undo_remove/rename/pin/relocate`; `load_repo_summaries(paths)`, `repo_summary(path)`, signal `repo_summary_ready(path)`; `scan_repositories(root, depth) -> job`, `scan_results(job) -> [{path, worktrees, bare, known}]`; `check_location(path, expected_for) -> job`, `location_result(job) -> {path, root, same_root}`; `gitignore_templates()`, `init_folder_error(path)`, `clone_folder()`; `create_repository(path, {initial_branch, gitignore, readme, first_commit, existing})` and `clone_repository(url, path, {branch, submodules})` keep the `repository_job_*` signals, which now also carry scans and location checks. `forget_repo` is gone. Changes from the proposal: `open` and `missing` are not row fields (Home asks the tabs; `missing` comes with the summary, so the main thread never touches a slow or gone drive); adding resolves the folder with a location check first; scan results arrive at the end, with progress counts while it runs.
+
+**Accept when:**
+- Core tests on temp repos cover: the library round trip with unknown keys, the `known_repos` import, add from a subfolder and from a linked worktree, remove and undo, relocate to the same and to a different repository, missing folders; summaries (clean, dirty, ahead/behind, detached, unborn, missing) without taking locks; scan with nested folders, a skipped `node_modules`, a symlink loop, a worktree folded into its repository, a depth limit and cancel; create with a template, README and first commit; init of a folder with files; clone with a branch and with submodules (local file URLs). Paths with spaces and non-ASCII characters.
+- Smoke tests: start with no tabs on Home; filter and open with the keyboard only; + opens one Home tab that becomes the chosen repository's tab; choosing an open repository focuses its tab; remove with Undo; a missing folder relocated; scan adds two of three found repositories; a clone row with progress and cancel; create with a template opens the new repository.
+- Screenshots of Home (empty library, full library, grouped, a missing row, a clone in progress) in light and dark through `shell_screenshots.tscn`; the summary load time of 50 repositories in `docs/perf.md`.
+
+*Result:* core `library.rs`, `scan.rs` and `new_repo.rs` (with `templates/gitignore/`); the runtime keeps the library, touches it on every open (`library_root`, so worktrees and subfolders list their repository) and after create, initialize and clone, and reads summaries two at a time. `tests/library.rs` (9 tests) covers the accept list above except a scan cancelled mid-walk at runtime (the walk is unit-tested with a cancelled token); `config.rs`, `ui_state.rs` and `library.rs` unit tests cover the files. In the UI: `Home` (`app/home/home.gd`), `LibraryOps` (the flows, `library_ops.gd`) and `ScanDialog`; Main keeps the Home tab last and opens Home with no tabs. `home_smoke.gd` covers the accept list except Cancel on a running clone (a local clone ends before the test can press it; the row, a failure, Retry's values and Dismiss are covered) and drag and drop. `tests/visual/home_screenshots.tscn` saves 16 screens (empty, full, grouped, filtered, missing, clone running and failed, Home tab, Add menu, forms, scan) in dark and light. `gitbello-cli home-bench` times the scan and summaries (`docs/perf.md`: 50 repositories in about 2 s, the first after 80 ms). Changes from the design:
+- `repos.toml` was taken (per-repo UI state), so the library is `library.toml`.
+- Home's filter starts empty each time Home shows; rows reached with ↑↓ scroll into view; Up on the first row goes back to the filter.
+- In a scan, repositories already listed show checked and disabled, and bare ones (remotes, mostly) start unchecked.
+- A row's menu is a ⋯ button and right-click; failed clones keep a row with Retry and Dismiss.
+- Dialogs of the flows put Cancel then OK on the right, like forms (`FormDialog.align_right`).
+- Recent cards and File → Open recent tell repositories with the same folder name apart by parent folders (`Paths.short_labels`, from the welcome screen's labels on main); Recent fills the width in equal columns clear of the scroll bar.
 
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit

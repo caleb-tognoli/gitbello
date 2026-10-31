@@ -60,6 +60,23 @@ impl UiState {
             .entry(key(repo))
             .or_default()
             .insert(name.to_owned(), value);
+        self.save()
+    }
+
+    /// Moves the values of `old` to `new` (a repository moved on disk) and
+    /// saves; values already saved for `new` win.
+    pub fn rename(&mut self, old: &Path, new: &Path) -> Result<(), ConfigError> {
+        let Some(values) = self.repos.remove(&key(old)) else {
+            return Ok(());
+        };
+        let target = self.repos.entry(key(new)).or_default();
+        for (name, value) in values {
+            target.entry(name).or_insert(value);
+        }
+        self.save()
+    }
+
+    fn save(&self) -> Result<(), ConfigError> {
         let Some(path) = &self.path else {
             return Ok(());
         };
@@ -130,6 +147,20 @@ mod tests {
         fs::write(&file, "not [toml").unwrap();
         assert!(UiState::load(Some(file)).get(&repo).is_empty());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn moves_values_with_a_relocated_repository() {
+        let mut state = UiState::load(None);
+        state.set(Path::new("/old/repo"), "w", 1).unwrap();
+        state.set(Path::new("/old/repo"), "h", 2).unwrap();
+        state.set(Path::new("/new/repo"), "h", 3).unwrap();
+        state
+            .rename(Path::new("/old/repo"), Path::new("/new/repo"))
+            .unwrap();
+        assert!(state.get(Path::new("/old/repo")).is_empty());
+        let moved = state.get(Path::new("/new/repo"));
+        assert_eq!((moved.get("w"), moved.get("h")), (Some(&1), Some(&3)));
     }
 
     #[test]

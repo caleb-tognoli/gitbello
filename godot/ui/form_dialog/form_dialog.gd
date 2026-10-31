@@ -54,13 +54,19 @@ func _ready() -> void:
 ## Right-aligns the buttons, Cancel then OK, with the ▾ joined to OK.
 func _arrange_buttons() -> void:
 	var ok: Button = get_ok_button()
-	var row: HBoxContainer = ok.get_parent() as HBoxContainer
 	_split.add_theme_constant_override(&"separation", 0)
 	ok.add_sibling(_split)
 	ok.reparent(_split, false)
 	_split.add_child(_menu_button)
-	row.move_child(get_cancel_button(), 1)
-	row.move_child(_split, 2)
+	align_right(self, _split)
+
+
+## Right-aligns `dialog`'s buttons as forms have them: Cancel, then `ok` (the
+## OK button or what holds it), then any others.
+static func align_right(dialog: ConfirmationDialog, ok: Control) -> void:
+	var row: HBoxContainer = ok.get_parent() as HBoxContainer
+	row.move_child(dialog.get_cancel_button(), 1)
+	row.move_child(ok, 2)
 	# The first spacer pushes the buttons right; the others would centre them.
 	# The dialog shows and hides them itself, so they stop expanding and move
 	# to the left end, where their gaps are taken from the first.

@@ -29,6 +29,8 @@ commands:
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
   fixture <dir> [--repos N]        create throwaway repos for UI smoke tests
+  home-bench <dir> [--depth N] [--max N]
+                                   time Home's scan and summaries (read-only)
 
 Set GITBELLO_LOG=1 to print the git commands a command ran.";
 
@@ -51,6 +53,7 @@ fn main() -> Result<()> {
         Some("watch") => repo_cmds::watch(rest),
         Some("config") => repo_cmds::config(rest),
         Some("fixture") => fixture::run(rest),
+        Some("home-bench") => repo_cmds::home_bench(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
             Ok(())

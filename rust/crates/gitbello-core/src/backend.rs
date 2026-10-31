@@ -20,6 +20,7 @@ use crate::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
     UndoMode,
 };
+use crate::new_repo::{init_folder_error, CloneOptions};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
@@ -162,17 +163,27 @@ pub trait GitBackend: Send + Sync {
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
 
-    /// Initializes a repository at `path`, which must be missing or empty.
-    fn init(&self, path: &Path, initial_branch: &str, cancel: &CancelToken)
-        -> Result<(), GitError>;
+    /// Initializes a repository at `path`, which must be missing or empty,
+    /// or with `existing`, a folder that is not a repository yet.
+    fn init(
+        &self,
+        path: &Path,
+        initial_branch: &str,
+        existing: bool,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
     /// Clones `url` to `path`, which must be missing or empty.
     fn clone(
         &self,
         url: &str,
         path: &Path,
+        options: &CloneOptions,
         progress: ProgressSink,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+    /// The first of HEAD's root commits (in name order), or `None` on an
+    /// unborn branch.
+    fn root_commit(&self, repo: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError>;
 
     /// The configured remotes with their URLs.
     fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Remote>, GitError>;
@@ -973,9 +984,15 @@ impl GitBackend for CliBackend {
         &self,
         path: &Path,
         initial_branch: &str,
+        existing: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
-        if let Some(error) = new_worktree_path_error(path) {
+        let error = if existing {
+            init_folder_error(path)
+        } else {
+            new_worktree_path_error(path)
+        };
+        if let Some(error) = error {
             return Err(GitError::new("init", GitErrorKind::AlreadyExists, error));
         }
         fs::create_dir_all(path).map_err(|err| {
@@ -998,6 +1015,7 @@ impl GitBackend for CliBackend {
         &self,
         url: &str,
         path: &Path,
+        options: &CloneOptions,
         progress: ProgressSink,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
@@ -1012,15 +1030,40 @@ impl GitBackend for CliBackend {
                 err.to_string(),
             )
         })?;
-        self.runner
+        let mut cmd = self
+            .runner
             .write(parent)
-            .args(["clone", "--progress", "--no-local", "--"])
+            .args(["clone", "--progress", "--no-local"]);
+        if let Some(branch) = &options.branch {
+            cmd = cmd.arg("--branch").arg(branch);
+        }
+        if options.submodules {
+            cmd = cmd.arg("--recurse-submodules");
+        }
+        cmd.arg("--")
             .arg(url)
             .arg(path)
             .on_progress(progress)
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    fn root_commit(&self, repo: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError> {
+        // An unborn branch has no commits.
+        if self
+            .read(repo, &["rev-parse", "--verify", "-q", "HEAD"], cancel)
+            .is_err()
+        {
+            return Ok(None);
+        }
+        let out = self.read(repo, &["rev-list", "--max-parents=0", "HEAD", "--"], cancel)?;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .min()
+            .map(str::to_owned))
     }
 
     fn remotes(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Remote>, GitError> {

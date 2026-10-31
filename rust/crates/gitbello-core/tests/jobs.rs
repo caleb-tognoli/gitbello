@@ -17,6 +17,7 @@ use gitbello_core::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
     UndoMode,
 };
+use gitbello_core::new_repo::CloneOptions;
 use gitbello_core::ops::{RefOp, SyncOp, WorktreeOp};
 use gitbello_core::repo::{Operation, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree};
 
@@ -140,11 +141,21 @@ impl GitBackend for FakeBackend {
     ) -> Result<(), GitError> {
         Ok(())
     }
-    fn init(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+    fn init(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
-    fn clone(&self, _: &str, _: &Path, _: ProgressSink, _: &CancelToken) -> Result<(), GitError> {
+    fn clone(
+        &self,
+        _: &str,
+        _: &Path,
+        _: &CloneOptions,
+        _: ProgressSink,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
         Ok(())
+    }
+    fn root_commit(&self, _: &Path, _: &CancelToken) -> Result<Option<String>, GitError> {
+        Ok(None)
     }
     fn remotes(&self, _: &Path, _: &CancelToken) -> Result<Vec<Remote>, GitError> {
         Ok(Vec::new())

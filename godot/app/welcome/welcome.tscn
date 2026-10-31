@@ -1,7 +1,0 @@
-[gd_scene load_steps=3 format=3]
-
-[ext_resource type="PackedScene" path="res://ui/empty_state/empty_state.tscn" id="1_empty"]
-[ext_resource type="Script" path="res://app/welcome/welcome.gd" id="2_welcome"]
-
-[node name="Welcome" instance=ExtResource("1_empty")]
-script = ExtResource("2_welcome")

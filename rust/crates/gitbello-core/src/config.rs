@@ -47,7 +47,8 @@ pub enum ConfigError {
 pub struct Config {
     /// Overrides the git executable found on `PATH`.
     pub git_path: Option<PathBuf>,
-    /// Repositories opened before, most recent first.
+    /// Repositories opened before, most recent first: no longer written, only
+    /// imported once into the repository library (`crate::library`).
     pub known_repos: Vec<PathBuf>,
     /// Tabs to restore on launch, in order.
     pub open_tabs: Vec<PathBuf>,
@@ -64,6 +65,11 @@ pub struct Config {
     /// Command for "Open terminal here" (`{path}` as above); `None` uses the
     /// platform's terminal.
     pub terminal_command: Option<String>,
+    /// Where Clone puts repositories (Settings); `None` uses
+    /// `last_clone_folder`, then the documents folder.
+    pub clone_folder: Option<PathBuf>,
+    /// The parent folder of the last clone.
+    pub last_clone_folder: Option<PathBuf>,
     pub theme: ThemeChoice,
     /// UI language; `System` follows the OS locale.
     pub language: LanguageChoice,
@@ -146,6 +152,8 @@ impl Default for Config {
             pull_mode: PullMode::FastForwardOnly,
             editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
             terminal_command: None,
+            clone_folder: None,
+            last_clone_folder: None,
             theme: ThemeChoice::System,
             language: LanguageChoice::System,
             accent: None,
@@ -187,6 +195,8 @@ const KEYS: &[&str] = &[
     "pull_mode",
     "editor_command",
     "terminal_command",
+    "clone_folder",
+    "last_clone_folder",
     "theme",
     "language",
     "accent",
@@ -252,6 +262,12 @@ impl Config {
                 .unwrap_or(defaults.editor_command),
             terminal_command: take_string(&mut table, "terminal_command")?
                 .filter(|c| !c.trim().is_empty()),
+            clone_folder: take_string(&mut table, "clone_folder")?
+                .filter(|c| !c.trim().is_empty())
+                .map(PathBuf::from),
+            last_clone_folder: take_string(&mut table, "last_clone_folder")?
+                .filter(|c| !c.trim().is_empty())
+                .map(PathBuf::from),
             theme: match take_string(&mut table, "theme")? {
                 None => ThemeChoice::System,
                 Some(text) => ThemeChoice::parse(&text).ok_or(ConfigError::Invalid {
@@ -310,6 +326,14 @@ impl Config {
         if let Some(terminal) = &self.terminal_command {
             table.insert("terminal_command".into(), Value::String(terminal.clone()));
         }
+        for (key, folder) in [
+            ("clone_folder", &self.clone_folder),
+            ("last_clone_folder", &self.last_clone_folder),
+        ] {
+            if let Some(folder) = folder {
+                table.insert(key.into(), path_value(folder));
+            }
+        }
         table.insert("known_repos".into(), paths_value(&self.known_repos));
         table.insert("open_tabs".into(), paths_value(&self.open_tabs));
         if let Some(active) = self.active_tab {
@@ -344,13 +368,6 @@ impl Config {
             }
         }
         table.to_string()
-    }
-
-    /// Moves `repo` to the front of the known list (capped at `max`).
-    pub fn remember_repo(&mut self, repo: &Path, max: usize) {
-        self.known_repos.retain(|known| known != repo);
-        self.known_repos.insert(0, repo.to_path_buf());
-        self.known_repos.truncate(max);
     }
 }
 
@@ -486,6 +503,8 @@ mod tests {
             pull_mode: PullMode::Rebase,
             editor_command: "subl -n {path}".into(),
             terminal_command: Some("wt -d \"{path}\"".into()),
+            clone_folder: Some(PathBuf::from("D:\\cödé")),
+            last_clone_folder: Some(PathBuf::from("/home/ädä/src")),
             theme: ThemeChoice::Dark,
             language: LanguageChoice::Italian,
             accent: Some("#e0569a".into()),
@@ -596,15 +615,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(Config::load(&path).unwrap(), Config::default());
 
-        let mut config = Config::default();
-        config.remember_repo(Path::new("/a"), 2);
-        config.remember_repo(Path::new("/b"), 2);
-        config.remember_repo(Path::new("/a"), 2);
-        config.remember_repo(Path::new("/c"), 2);
-        assert_eq!(
-            config.known_repos,
-            [PathBuf::from("/c"), PathBuf::from("/a")]
-        );
+        let config = Config {
+            known_repos: vec![PathBuf::from("/c"), PathBuf::from("/a")],
+            ..Config::default()
+        };
         config.save(&path).unwrap();
         assert!(!path.with_extension("toml.tmp").exists());
         assert_eq!(Config::load(&path).unwrap(), config);

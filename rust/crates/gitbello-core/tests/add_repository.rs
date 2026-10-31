@@ -4,6 +4,7 @@ mod support;
 
 use gitbello_core::config::Config;
 use gitbello_core::git::GitErrorKind;
+use gitbello_core::new_repo::{CloneOptions, CreateOptions};
 use gitbello_core::runtime::{JobState, Runtime, RuntimeEvent};
 use support::rt::{finish, poll_until, result, succeed};
 use support::TestRepo;
@@ -19,7 +20,7 @@ fn creates_and_opens_a_repository_on_the_requested_branch() {
     let fixture = TestRepo::init();
     let target = fixture.path().with_file_name("new répo with spaces");
     let mut rt = runtime(&fixture);
-    let job = rt.create_repository(&target, "trunk");
+    let job = rt.create_repository(&target, CreateOptions::new("trunk"));
     succeed(&mut rt, &target, Some(job));
 
     assert_eq!(
@@ -50,7 +51,11 @@ fn clones_with_progress_before_opening_a_repo_state() {
     }
     let target = fixture.path().with_file_name("cloned répo");
     let mut rt = runtime(&fixture);
-    let job = rt.clone_repository(&fixture.path().to_string_lossy(), &target);
+    let job = rt.clone_repository(
+        &fixture.path().to_string_lossy(),
+        &target,
+        CloneOptions::default(),
+    );
     let events = poll_until(&mut rt, |_, events| result(events, job).is_some());
     assert_eq!(result(&events, job), Some(None));
     assert!(rt.repo(&target).is_none());
@@ -80,17 +85,21 @@ fn rejects_nonempty_destinations_and_missing_clone_sources() {
     fixture.commit("a.txt", "a\n", "first");
     let mut rt = runtime(&fixture);
 
-    let job = rt.create_repository(fixture.path(), "main");
+    let job = rt.create_repository(fixture.path(), CreateOptions::new("main"));
     let error = finish(&mut rt, fixture.path(), Some(job)).expect("nonempty init must fail");
     assert_eq!(error.kind, GitErrorKind::AlreadyExists);
 
-    let job = rt.clone_repository(&fixture.path().to_string_lossy(), fixture.path());
+    let job = rt.clone_repository(
+        &fixture.path().to_string_lossy(),
+        fixture.path(),
+        CloneOptions::default(),
+    );
     let error = finish(&mut rt, fixture.path(), Some(job)).expect("nonempty clone must fail");
     assert_eq!(error.kind, GitErrorKind::AlreadyExists);
 
     let target = fixture.path().with_file_name("missing source target");
     let missing = fixture.path().with_file_name("missing source");
-    let job = rt.clone_repository(&missing.to_string_lossy(), &target);
+    let job = rt.clone_repository(&missing.to_string_lossy(), &target, CloneOptions::default());
     let error = finish(&mut rt, &target, Some(job)).expect("missing clone source must fail");
     assert!(!error.stderr.is_empty());
     assert!(rt.repo(&target).is_none());

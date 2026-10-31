@@ -87,7 +87,8 @@ fn opening_resolves_and_loads_everything() {
         labels,
         [("main", LabelKind::Branch), ("v1", LabelKind::Tag)]
     );
-    assert_eq!(rt.config().known_repos.first(), Some(&key));
+    let entry = &rt.library().entries()[0];
+    assert!(entry.last_opened_at.is_some() && entry.path == key);
 }
 
 #[test]
@@ -182,7 +183,7 @@ fn focus_refresh_picks_up_changes_and_close_forgets_the_repo() {
 }
 
 #[test]
-fn saves_config_with_recent_repos() {
+fn saves_config_with_open_tabs() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
     let config_path = repo.sibling("cönfig").join("config.toml");
@@ -192,6 +193,5 @@ fn saves_config_with_recent_repos() {
     rt.save_config().unwrap();
     let (loaded, error) = Runtime::load_config(Some(&config_path));
     assert!(error.is_none());
-    assert_eq!(loaded.known_repos, vec![key.clone()]);
     assert_eq!(loaded.open_tabs, vec![key]);
 }

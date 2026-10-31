@@ -45,8 +45,8 @@ func _run() -> void:
 				await get_tree().process_frame
 			_main.queue_redraw()
 			await RenderingServer.frame_post_draw
-			var name: String = "burst_%dx%d_%s.png" % [dimensions.x, dimensions.y, "light" if light else "dark"]
-			var path: String = out.path_join(name)
+			var file_name: String = "burst_%dx%d_%s.png" % [dimensions.x, dimensions.y, "light" if light else "dark"]
+			var path: String = out.path_join(file_name)
 			root.get_texture().get_image().save_png(path)
 			print("SHOT ", path)
 			for toast: Node in toasts.find_children("*", "PanelContainer", true, false):

@@ -5,7 +5,7 @@
 //! when idle) and reads repository state between polls. Nothing here blocks:
 //! opening and refreshing run as jobs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
@@ -26,10 +26,14 @@ use crate::graph::{CommitSearch, GraphLoader, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL}
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
+use crate::library::{
+    check_location, library_root, path_key, read_summary, LocationCheck, RepoLibrary, RepoSummary,
+};
 use crate::merge::{
     self as merge, BlockChoice, ConflictFile, ConflictKind, ConflictLayout, ConflictOp, FileChoice,
     HeadInfo, MergeMode, MergePreview, OperationDetails, UndoMode, UndoableCommit,
 };
+use crate::new_repo::{self, CloneOptions, CreateOptions, FIRST_COMMIT_MESSAGE};
 use crate::ops::{
     CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp,
     AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
@@ -39,6 +43,7 @@ use crate::repo::{
     shelf_message, shelves, CommitDetails, FileState, Head, Operation, Ref, RefKind, Remote,
     RepoPaths, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
+use crate::scan::{self, ScanHit};
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
@@ -47,6 +52,20 @@ use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 pub const OPEN_JOB_LABEL: &str = "open repository";
 pub const CREATE_REPOSITORY_JOB_LABEL: &str = "create repository";
 pub const CLONE_REPOSITORY_JOB_LABEL: &str = "clone repository";
+pub const INIT_REPOSITORY_JOB_LABEL: &str = "initialize folder";
+/// Labels of the Home jobs (PLAN §4 Home).
+pub const SCAN_JOB_LABEL: &str = "scan for repositories";
+pub const LOCATION_JOB_LABEL: &str = "check location";
+pub const SUMMARY_JOB_LABEL: &str = "read repository summary";
+/// Jobs about a folder rather than an open repository: they report as
+/// [`RuntimeEvent::Job`] whether or not the folder is open.
+pub const REPOSITORY_JOB_LABELS: &[&str] = &[
+    CREATE_REPOSITORY_JOB_LABEL,
+    CLONE_REPOSITORY_JOB_LABEL,
+    INIT_REPOSITORY_JOB_LABEL,
+    SCAN_JOB_LABEL,
+    LOCATION_JOB_LABEL,
+];
 
 /// Labels of the jobs the changes panel runs.
 pub const DIFF_JOB_LABEL: &str = "load diff";
@@ -96,8 +115,8 @@ pub const MAX_SHELF_UNDO: usize = 20;
 /// Discards remembered for undo, per repository.
 pub const MAX_DISCARD_UNDO: usize = 20;
 
-/// Repositories remembered for the "recent" list.
-pub const MAX_KNOWN_REPOS: usize = 20;
+/// Summary reads running at once, so Home leaves workers for the open tabs.
+pub const SUMMARY_JOBS: usize = 2;
 
 /// Label of the read that finds worktrees to clean up.
 pub const CLEANUP_SCAN_JOB_LABEL: &str = "find merged worktrees";
@@ -228,6 +247,14 @@ pub enum RuntimeEvent {
     },
     /// New entries in the git command log.
     CommandsLogged,
+    /// The repository library changed; `error` when saving it failed.
+    LibraryChanged {
+        error: Option<String>,
+    },
+    /// The summary of `repo` requested with [`Runtime::load_summaries`] arrived.
+    SummaryLoaded {
+        repo: PathBuf,
+    },
 }
 
 /// What the commit box does, after the operation in progress.
@@ -1154,6 +1181,15 @@ pub struct Runtime {
     auto_fetch_override: Option<Duration>,
     /// Events of synchronous calls, returned by the next poll.
     pending: Vec<RuntimeEvent>,
+    library: RepoLibrary,
+    /// By [`path_key`].
+    summaries: HashMap<String, RepoSummary>,
+    summary_queue: VecDeque<PathBuf>,
+    /// Keys of queued and running summary reads.
+    summary_wanted: HashSet<String>,
+    summary_running: usize,
+    scans: HashMap<JobId, Vec<ScanHit>>,
+    locations: HashMap<JobId, LocationCheck>,
 }
 
 impl Runtime {
@@ -1204,6 +1240,13 @@ impl Runtime {
             diff_generation: 0,
             auto_fetch_override: None,
             pending: Vec::new(),
+            library: RepoLibrary::default(),
+            summaries: HashMap::new(),
+            summary_queue: VecDeque::new(),
+            summary_wanted: HashSet::new(),
+            summary_running: 0,
+            scans: HashMap::new(),
+            locations: HashMap::new(),
         }
     }
 
@@ -1236,24 +1279,34 @@ impl Runtime {
         }
     }
 
-    /// Initializes a repository in the background. Open it after the job ends.
-    pub fn create_repository(&mut self, path: &Path, initial_branch: &str) -> JobId {
+    /// Initializes a repository in the background (with starter files and a
+    /// first commit as `options` asks). It joins the library when the job
+    /// succeeds; open it after.
+    pub fn create_repository(&mut self, path: &Path, options: CreateOptions) -> JobId {
         let path = normalize(path);
-        let branch = initial_branch.to_owned();
-        self.scheduler.submit(JobSpec::write(
-            path,
-            CREATE_REPOSITORY_JOB_LABEL,
-            RefreshSet::EMPTY,
-            move |ctx| {
-                ctx.backend()
-                    .init(ctx.repo(), &branch, ctx.cancel_token())
-                    .map(|()| JobOutput::Done)
-            },
-        ))
+        let label = if options.existing {
+            INIT_REPOSITORY_JOB_LABEL
+        } else {
+            CREATE_REPOSITORY_JOB_LABEL
+        };
+        self.scheduler
+            .submit(JobSpec::write(path, label, RefreshSet::EMPTY, move |ctx| {
+                let (repo, cancel, backend) = (ctx.repo(), ctx.cancel_token(), ctx.backend());
+                backend.init(repo, &options.initial_branch, options.existing, cancel)?;
+                new_repo::write_starter_files(repo, &options).map_err(|err| {
+                    GitError::new("write starter files", GitErrorKind::Io, err.to_string())
+                })?;
+                if options.first_commit && new_repo::has_files(repo) {
+                    backend.stage(repo, None, cancel)?;
+                    backend.commit(repo, FIRST_COMMIT_MESSAGE, false, cancel)?;
+                }
+                Ok(JobOutput::Done)
+            }))
     }
 
-    /// Clones a repository in the background. Open it after the job ends.
-    pub fn clone_repository(&mut self, url: &str, path: &Path) -> JobId {
+    /// Clones a repository in the background. It joins the library when the
+    /// job succeeds; open it after.
+    pub fn clone_repository(&mut self, url: &str, path: &Path, options: CloneOptions) -> JobId {
         let path = normalize(path);
         let url = url.to_owned();
         self.scheduler.submit(JobSpec::write(
@@ -1263,10 +1316,153 @@ impl Runtime {
             move |ctx| {
                 let progress = Box::new(ctx.progress_sink());
                 ctx.backend()
-                    .clone(&url, ctx.repo(), progress, ctx.cancel_token())
+                    .clone(&url, ctx.repo(), &options, progress, ctx.cancel_token())
                     .map(|()| JobOutput::Done)
             },
         ))
+    }
+
+    // --- Repository library (PLAN §4 Home) --------------------------------
+
+    /// Loads the library from `path` (`None` keeps it in memory), importing
+    /// the config's old recent list the first time. Returns a load problem.
+    pub fn load_library(&mut self, path: Option<PathBuf>) -> Option<ConfigError> {
+        let (library, error) = RepoLibrary::load(path, &self.config.known_repos);
+        self.library = library;
+        error
+    }
+
+    pub fn library(&self) -> &RepoLibrary {
+        &self.library
+    }
+
+    /// Adds `path` (a repository folder, as a [`LocationCheck`] resolved it).
+    pub fn library_add(&mut self, path: &Path) -> bool {
+        let added = self.library.add(path, crate::library::now());
+        self.library_changed(added)
+    }
+
+    pub fn library_remove(&mut self, path: &Path) -> bool {
+        let removed = self.library.remove(path);
+        self.library_changed(removed)
+    }
+
+    /// Brings the last removed repository back; returns its path.
+    pub fn library_undo_remove(&mut self) -> Option<PathBuf> {
+        let path = self.library.undo_remove();
+        self.library_changed(path.is_some());
+        path
+    }
+
+    pub fn library_rename(&mut self, path: &Path, name: &str) -> bool {
+        let renamed = self.library.rename(path, name);
+        self.library_changed(renamed)
+    }
+
+    pub fn library_pin(&mut self, path: &Path, pinned: bool) -> bool {
+        let changed = self.library.set_pinned(path, pinned);
+        self.library_changed(changed)
+    }
+
+    /// Moves the entry of `old` to `new` (see [`RepoLibrary::relocate`]);
+    /// its summary is read again.
+    pub fn library_relocate(&mut self, old: &Path, new: &Path) -> bool {
+        let moved = self.library.relocate(old, new);
+        if moved {
+            self.summaries.remove(&path_key(old));
+            self.summaries.remove(&path_key(&normalize(new)));
+        }
+        self.library_changed(moved)
+    }
+
+    /// Saves the library after a change and reports it with the next poll.
+    fn library_changed(&mut self, changed: bool) -> bool {
+        if changed {
+            let error = self.library.save().err().map(|e| e.to_string());
+            self.pending.push(RuntimeEvent::LibraryChanged { error });
+        }
+        changed
+    }
+
+    /// Reads the summaries of `paths` (library entries) in the background, a
+    /// few at a time; each arrives as [`RuntimeEvent::SummaryLoaded`].
+    /// Paths already queued are not read twice.
+    pub fn load_summaries(&mut self, paths: &[PathBuf]) {
+        for path in paths {
+            if self.summary_wanted.insert(path_key(path)) {
+                self.summary_queue.push_back(path.clone());
+            }
+        }
+        self.submit_summaries();
+    }
+
+    pub fn summary(&self, path: &Path) -> Option<&RepoSummary> {
+        self.summaries.get(&path_key(path))
+    }
+
+    fn submit_summaries(&mut self) {
+        while self.summary_running < SUMMARY_JOBS {
+            let Some(path) = self.summary_queue.pop_front() else {
+                return;
+            };
+            let root = self
+                .library
+                .get(&path)
+                .is_some_and(|e| e.root_commit.is_none());
+            self.summary_running += 1;
+            self.scheduler
+                .submit(JobSpec::read(path, SUMMARY_JOB_LABEL, move |ctx| {
+                    let summary = read_summary(ctx.backend(), ctx.repo(), root, ctx.cancel_token());
+                    Ok(JobOutput::Summary(Box::new(summary)))
+                }));
+        }
+    }
+
+    /// Looks for repositories under `root`, `depth` levels down; progress
+    /// and the end come as [`RuntimeEvent::Job`], the hits from
+    /// [`Runtime::take_scan`].
+    pub fn scan(&mut self, root: &Path, depth: usize) -> JobId {
+        self.scheduler
+            .submit(JobSpec::read(normalize(root), SCAN_JOB_LABEL, move |ctx| {
+                let mut sink = ctx.progress_sink();
+                let hits = scan::scan(ctx.repo(), depth, ctx.cancel_token(), |folders, found| {
+                    sink(scan_progress(folders, found));
+                });
+                if ctx.is_cancelled() {
+                    return Err(GitError::new("scan", GitErrorKind::Cancelled, ""));
+                }
+                Ok(JobOutput::Scan(hits))
+            }))
+    }
+
+    /// The hits of a finished scan (once).
+    pub fn take_scan(&mut self, job: JobId) -> Option<Vec<ScanHit>> {
+        self.scans.remove(&job)
+    }
+
+    /// Resolves `path` to its repository, comparing its root commit with the
+    /// one recorded for library entry `expected_for` (Change location).
+    /// The result comes from [`Runtime::take_location`].
+    pub fn check_location(&mut self, path: &Path, expected_for: Option<&Path>) -> JobId {
+        let expected = expected_for
+            .and_then(|old| self.library.get(old))
+            .and_then(|e| e.root_commit.clone());
+        let path = normalize(path);
+        self.scheduler
+            .submit(JobSpec::read(path, LOCATION_JOB_LABEL, move |ctx| {
+                check_location(
+                    ctx.backend(),
+                    ctx.repo(),
+                    expected.as_deref(),
+                    ctx.cancel_token(),
+                )
+                .map(|check| JobOutput::Location(Box::new(check)))
+            }))
+    }
+
+    /// The result of a finished [`Runtime::check_location`] (once).
+    pub fn take_location(&mut self, job: JobId) -> Option<LocationCheck> {
+        self.locations.remove(&job)
     }
 
     /// Opens `path` (any folder inside a worktree). Returns the key used for
@@ -1288,7 +1484,6 @@ impl Runtime {
                 };
                 Ok(JobOutput::Opened { toplevel, paths })
             }));
-        self.config.remember_repo(&key, MAX_KNOWN_REPOS);
         key
     }
 
@@ -2617,10 +2812,47 @@ impl Runtime {
             label,
             kind,
         } = event;
-        if [CREATE_REPOSITORY_JOB_LABEL, CLONE_REPOSITORY_JOB_LABEL].contains(&label.as_str()) {
+        if label == SUMMARY_JOB_LABEL {
+            if let EventKind::Finished(_) | EventKind::Cancelled = kind {
+                self.summary_running = self.summary_running.saturating_sub(1);
+                self.summary_wanted.remove(&path_key(&repo));
+                if let EventKind::Finished(Ok(JobOutput::Summary(summary))) = kind {
+                    if let Some(root) = &summary.root_commit {
+                        if self.library.set_root_commit(&repo, root) {
+                            let _ = self.library.save();
+                        }
+                    }
+                    self.summaries.insert(path_key(&repo), *summary);
+                    out.push(RuntimeEvent::SummaryLoaded { repo });
+                }
+                self.submit_summaries();
+            }
+            return;
+        }
+        if REPOSITORY_JOB_LABELS.contains(&label.as_str()) {
             let state = match kind {
                 EventKind::Started => JobState::Started,
                 EventKind::Progress(progress) => JobState::Progress(progress),
+                EventKind::Finished(Ok(JobOutput::Scan(hits))) => {
+                    self.scans.insert(job, hits);
+                    JobState::Finished(None)
+                }
+                EventKind::Finished(Ok(JobOutput::Location(check))) => {
+                    self.locations.insert(job, *check);
+                    JobState::Finished(None)
+                }
+                EventKind::Finished(Ok(_))
+                    if [
+                        CREATE_REPOSITORY_JOB_LABEL,
+                        CLONE_REPOSITORY_JOB_LABEL,
+                        INIT_REPOSITORY_JOB_LABEL,
+                    ]
+                    .contains(&label.as_str()) =>
+                {
+                    self.library_add(&repo);
+                    out.append(&mut self.pending);
+                    JobState::Finished(None)
+                }
                 EventKind::Finished(result) => JobState::Finished(result.err()),
                 EventKind::Cancelled => JobState::Cancelled,
             };
@@ -2649,6 +2881,10 @@ impl Runtime {
                             self.watch_error = Some(err.to_string());
                         }
                     }
+                    let root = library_root(&toplevel, &paths);
+                    self.library.touch(&root, crate::library::now());
+                    let error = self.library.save().err().map(|e| e.to_string());
+                    out.push(RuntimeEvent::LibraryChanged { error });
                     state.toplevel = Some(toplevel);
                     state.paths = Some(paths);
                     self.scheduler.request_refresh(&repo, RefreshSet::all());
@@ -3087,6 +3323,9 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         JobOutput::Opened { .. }
         | JobOutput::Cleanup(_)
         | JobOutput::Done
+        | JobOutput::Summary(_)
+        | JobOutput::Scan(_)
+        | JobOutput::Location(_)
         | JobOutput::Diff { .. }
         | JobOutput::OldFile { .. }
         | JobOutput::HeadMessage(_)
@@ -3577,6 +3816,17 @@ fn apply_diff(
         repo: repo.to_path_buf(),
         slot,
     });
+}
+
+fn scan_progress(folders: usize, found: usize) -> Progress {
+    Progress {
+        phase: "Scanning".to_owned(),
+        percent: None,
+        current: u64::try_from(folders).ok(),
+        total: None,
+        remote: false,
+        text: format!("{folders} folders, {found} repositories"),
+    }
 }
 
 /// Absolute, symlink-resolved path without Windows' `\\?\` prefix (git and

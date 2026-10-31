@@ -308,7 +308,7 @@ func _ready() -> void:
 
 	while main.tab_count() > 0:
 		main.close_tab(0)
-	await _shot(out, "welcome")
+	await _shot(out, "home")
 	get_tree().quit(0)
 
 
@@ -438,7 +438,7 @@ func _parent_wait(condition: Callable, description: String) -> bool:
 	return false
 
 
-func _parent_capture(page: RepoTab, row: int, count: int, out: String, name: String) -> bool:
+func _parent_capture(page: RepoTab, row: int, count: int, out: String, shot_name: String) -> bool:
 	var history: HistoryView = page.history()
 	var oid: String = history.commit_list().hash_at(row)
 	if oid.is_empty():
@@ -449,18 +449,18 @@ func _parent_capture(page: RepoTab, row: int, count: int, out: String, name: Str
 	history.commit_list().grab_focus()
 	history.details().show_commit(oid)
 	if not await _parent_wait(func() -> bool: return String(page.session.commit_info().get("oid", "")) == oid \
-			and history.details().diff_panel().view().row_count() > 0, "commit and diff " + name):
+			and history.details().diff_panel().view().row_count() > 0, "commit and diff " + shot_name):
 		return false
 	var info: Dictionary = page.session.commit_info()
 	var parents: PackedStringArray = info["parents"]
 	if parents.size() != count:
-		printerr("parent_details: ", name, " expected ", count, " parents, got ", parents.size())
+		printerr("parent_details: ", shot_name, " expected ", count, " parents, got ", parents.size())
 		return false
 	var parent_group: Control = history.details().get_node("%Parents") as Control
 	if parent_group.visible != (count > 0):
-		printerr("parent_details: wrong parent visibility for ", name)
+		printerr("parent_details: wrong parent visibility for ", shot_name)
 		return false
-	print("PARENT BASELINE ", name, " oid=", oid, " parents=", parents)
+	print("PARENT BASELINE ", shot_name, " oid=", oid, " parents=", parents)
 	for theme: String in ["dark", "light"]:
 		if not Actions.run_action(StringName("view.theme_" + theme)):
 			printerr("parent_details: theme action unavailable")
@@ -469,8 +469,8 @@ func _parent_capture(page: RepoTab, row: int, count: int, out: String, name: Str
 		var rects: Array[Rect2] = []
 		for link: LinkButton in history.details().parent_links():
 			rects.append(link.get_global_rect())
-		print("PARENT GEOMETRY ", name, " group=", parent_group.get_global_rect(), " links=", rects)
-		var path: String = out.path_join(name + "_" + theme + ".png")
+		print("PARENT GEOMETRY ", shot_name, " group=", parent_group.get_global_rect(), " links=", rects)
+		var path: String = out.path_join(shot_name + "_" + theme + ".png")
 		if get_viewport().get_texture().get_image().save_png(path) != OK:
 			printerr("parent_details: could not save ", path)
 			return false
