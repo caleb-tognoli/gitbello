@@ -10,12 +10,14 @@ extends MenuBar
 ## submenu filled by `dynamic_menus`.
 const MENUS: Array[Array] = [
 	["File", [&"repo.open", "Open recent", &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
-	["Edit", [&"diff.copy", &"diff.select_all", &"", &"changes.undo_discard", &"shelf.undo_discard", &"",
+	["Edit", [&"diff.copy", &"diff.select_all", &"", &"changes.undo_discard", &"shelf.undo_discard",
+		&"conflict.undo", &"commit.undo", &"",
 		&"view.find", &"history.next_match", &"history.previous_match", &"", &"app.command_palette"]],
 	["Repository", [&"sync.fetch", &"sync.pull", &"sync.push", &"", &"task.new", &"worktree.cleanup", &"",
 		&"repo.open_in_editor", &"repo.open_terminal", &"repo.show_in_file_manager", &"",
-		&"repo.remotes", &"repo.tags", &"", &"repo.refresh"]],
-	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.rename", &"branch.set_upstream", &"",
+		&"repo.remotes", &"repo.tags", &"", &"operation.continue", &"operation.open_resolver", &"operation.abort", &"",
+		&"repo.refresh"]],
+	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"", &"branch.rename", &"branch.set_upstream", &"",
 		&"changes.shelve", &"shelf.restore_left"]],
 	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_side_by_side", &"diff.toggle_whole_file", &"", &"view.theme_system",
 		&"view.theme_light", &"view.theme_dark", &"", &"view.toggle_git_log"]],
@@ -33,12 +35,12 @@ func _ready() -> void:
 	prefer_global_menu = true
 	flat = true
 	for entry: Array in MENUS:
-		var menu: PopupMenu = PopupMenu.new()
-		menu.name = String(entry[0])
-		add_child(menu)
-		_items[menu] = []
-		menu.about_to_popup.connect(_fill.bind(menu, entry[1]))
-		menu.id_pressed.connect(_on_id.bind(menu))
+		var menu_popup: PopupMenu = PopupMenu.new()
+		menu_popup.name = String(entry[0])
+		add_child(menu_popup)
+		_items[menu_popup] = []
+		menu_popup.about_to_popup.connect(_fill.bind(menu_popup, entry[1]))
+		menu_popup.id_pressed.connect(_on_id.bind(menu_popup))
 	# Filled once the shell has registered its actions, then on each opening.
 	_refresh_all.call_deferred()
 

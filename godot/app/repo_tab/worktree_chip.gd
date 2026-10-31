@@ -68,13 +68,13 @@ func _notification(what: int) -> void:
 func _show() -> void:
 	if worktree.is_empty():
 		return
-	var name: String = String(worktree["name"])
+	var folder: String = String(worktree["name"])
 	var branch: String = String(worktree["branch"])
 	if bool(worktree["detached"]):
 		branch = tr("detached %s") % String(worktree["head"]).left(7)
-	_name.text = name
+	_name.text = folder
 	_branch.text = branch
-	_branch.visible = not branch.is_empty() and branch != name
+	_branch.visible = not branch.is_empty() and branch != folder
 	var parts: PackedStringArray = PackedStringArray()
 	if int(worktree["changed"]) > 0:
 		parts.append(str(int(worktree["changed"])))

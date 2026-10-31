@@ -7,7 +7,8 @@ extends HSplitContainer
 ## check-all box then covers the files shown only. The checkboxes are the commit
 ## selection kept in core (PLAN §3.10). With no changes, suggested actions
 ## take the diff's place. The Shelves view reuses the preview pane with a
-## dedicated shelf browser and details, without commit controls.
+## dedicated shelf browser and details, without commit controls. A conflicted
+## file shows the resolver in the diff's place (PLAN §4 Conflict resolver).
 ## Keyboard: arrows move, Space or Enter toggle the checkboxes of the
 ## highlighted files or diff lines (a hunk header takes its hunk), Right and
 ## Left move between the list and the diff, Delete discards, Ctrl+Z undoes the
@@ -48,6 +49,19 @@ var _shelves_mode: bool = false
 var _shelf_oid: String = ""
 var _shelf_path: String = ""
 var _editing_shelf: Dictionary = {}
+## After a block choice, the cursor goes to the next conflict once it reloads.
+var _jump_to_block: bool = false
+## What the last block choice wrote, shown once the file reloads: `[first
+## row, rows, text]`, or [].
+var _choice: Array = []
+## Both ▾ of a conflict header: ours then theirs, or theirs then ours.
+var _both_menu: PopupMenu = PopupMenu.new()
+var _both_block: int = -1
+## `open_first_conflict` waits (until this tick count) for the status that
+## lists the conflicts; 0 when not waiting.
+var _want_conflict_until: int = 0
+## How long `open_first_conflict` waits for the conflicts to show (ms).
+const CONFLICT_WAIT_MSEC: int = 5000
 
 @onready var _files: VBoxContainer = %Files
 @onready var _switch_slot: Container = %SwitchSlot
@@ -104,6 +118,19 @@ func _ready() -> void:
 		session.pick_lines(lines, include))
 	_diff_view.gui_input.connect(_on_diff_key)
 	_diff_view.context_menu_requested.connect(_show_menu.bind(_diff_view))
+	_diff_view.block_action.connect(_on_block_action)
+	_diff_panel.card_action.connect(func(id: String) -> void:
+		if is_conflict_shown() and ops != null:
+			ops.resolve_file(conflict_path(), id))
+	_diff_panel.base_requested.connect(_on_base_requested)
+	_diff_panel.conflict_step_requested.connect(step_conflict)
+	_diff_view.undo_choice_requested.connect(func() -> void: Actions.run_action(&"conflict.undo"))
+	_diff_panel.open_file_requested.connect(func() -> void: Actions.run_action(&"changes.open_file"))
+	_both_menu.add_item("Ours first", 0)
+	_both_menu.add_item("Theirs first", 1)
+	_both_menu.id_pressed.connect(func(id: int) -> void:
+		resolve_block(_both_block, "ours_theirs" if id == 0 else "theirs_ours"))
+	add_child(_both_menu)
 	_diff_panel.clear("Select a file to see its changes.")
 	_confirm.confirmed.connect(func() -> void:
 		if _pending_discard.is_valid():
@@ -139,6 +166,7 @@ func _ready() -> void:
 func set_session(value: RepoSession) -> void:
 	if session != null:
 		session.status_changed.disconnect(reload)
+		session.operation_changed.disconnect(_on_operation_changed)
 		session.diff_changed.disconnect(_on_diff_changed)
 		session.selection_changed.disconnect(_on_selection_changed)
 		session.stashes_changed.disconnect(reload_shelves)
@@ -147,6 +175,7 @@ func set_session(value: RepoSession) -> void:
 	session = value
 	if session != null:
 		session.status_changed.connect(reload)
+		session.operation_changed.connect(_on_operation_changed)
 		session.diff_changed.connect(_on_diff_changed)
 		session.selection_changed.connect(_on_selection_changed)
 		session.stashes_changed.connect(reload_shelves)
@@ -339,12 +368,12 @@ func _finish_shelf_name(save: bool) -> void:
 	if _editing_shelf.is_empty():
 		return
 	var shelf: Dictionary = _editing_shelf
-	var name: String = _shelf_name_edit.text.strip_edges()
+	var new_name: String = _shelf_name_edit.text.strip_edges()
 	_editing_shelf = {}
 	_shelf_title.show()
 	_shelf_name_edit.hide()
-	if save and not name.is_empty() and ops != null:
-		ops.rename_shelf(shelf, name)
+	if save and not new_name.is_empty() and ops != null:
+		ops.rename_shelf(shelf, new_name)
 
 
 ## Re-reads the shelves (after every stash list change).
@@ -506,6 +535,8 @@ func reload() -> void:
 		focus_files()
 	if _list.cursor < 0 and not _showing_shelf:
 		_clear_diff()
+	if _want_conflict_until > 0:
+		_show_wanted_conflict()
 	# The branch may have changed, and with it the shelves that are its own.
 	reload_shelves()
 
@@ -625,6 +656,99 @@ func commit() -> bool:
 	return _commit_box.commit()
 
 
+# --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
+
+## Whether the diff pane shows a conflicted file's resolver.
+func is_conflict_shown() -> bool:
+	return session != null and String(session.diff_info().get("kind", "")) == "conflict"
+
+
+## The conflicted file the resolver shows, or "".
+func conflict_path() -> String:
+	return String(session.diff_info().get("path", "")) if is_conflict_shown() else ""
+
+
+## Whether the resolver shows conflict blocks (not a card).
+func has_conflict_blocks() -> bool:
+	return is_conflict_shown() and int((session.diff_info().get("conflict", {}) as Dictionary).get("blocks", 0)) > 0
+
+
+## Highlights the first conflicted file (conflicts are listed first) and
+## moves into its resolver.
+func open_first_conflict() -> void:
+	_want_conflict_until = Time.get_ticks_msec() + CONFLICT_WAIT_MSEC
+	reload()
+
+
+## Highlights the first conflicted file once the list has one.
+func _show_wanted_conflict() -> void:
+	if _list.row_count() == 0 or not bool(_list.row(0).get("conflicted", false)):
+		# The status listing the conflicts may not have arrived yet.
+		if Time.get_ticks_msec() > _want_conflict_until:
+			_want_conflict_until = 0
+		return
+	_want_conflict_until = 0
+	_list.select_only(0)
+	_list.scroll_to_row(0)
+	_diff_view.grab_focus()
+
+
+## The block the keyboard acts on: the one at the diff's cursor, else the first.
+func current_block() -> int:
+	var block: int = _diff_view.row_block(_diff_view.cursor) if _diff_view.cursor >= 0 else -1
+	return block if block >= 0 else 0
+
+
+## Resolves conflict `block` of the file shown (`ours`, `theirs`,
+## `ours_theirs`, `theirs_ours`).
+func resolve_block(block: int, choice: String) -> void:
+	if not has_conflict_blocks() or ops == null or block < 0:
+		return
+	_jump_to_block = true
+	var header: int = _diff_view.find_block_header(-1, true, block)
+	var lines: Vector2i = _diff_view.block_side_lines(block)
+	var names: PackedStringArray = _diff_view.side_names
+	var count: int = {"ours": lines.x, "theirs": lines.y}.get(choice, lines.x + lines.y)
+	var text: String = {"ours": tr("Used %s") % names[0], "theirs": tr("Used %s") % names[1]}.get(choice, tr("Used both"))
+	_choice = [header, count, text] if header >= 0 else []
+	ops.resolve_block(conflict_path(), block, choice)
+
+
+## Moves the diff's cursor to the next (or previous) conflict block.
+func step_conflict(forward: bool) -> void:
+	var row: int = _diff_view.find_block_header(_diff_view.cursor if _diff_view.cursor >= 0 else -1, forward)
+	if row >= 0:
+		_diff_view.grab_focus()
+		_diff_view.select_only(row)
+
+
+func _on_block_action(block: int, action: String) -> void:
+	if action != "both":
+		resolve_block(block, action)
+		return
+	_both_block = block
+	var names: PackedStringArray = _diff_view.side_names
+	_both_menu.set_item_text(0, tr("%s first") % names[0])
+	_both_menu.set_item_text(1, tr("%s first") % names[1])
+	# Under the header's Both ▾ button.
+	var button: Rect2 = _diff_view.block_button_rect(_diff_view.find_block_header(-1, true, block), "both")
+	_both_menu.position = Vector2i(_diff_view.get_screen_position() + button.position + Vector2(0.0, button.size.y))
+	_both_menu.reset_size()
+	_both_menu.popup()
+
+
+## Show base: shows the base between the sides, or (markers without one)
+## offers to recreate the conflicts with it.
+func _on_base_requested(shown: bool) -> void:
+	var conflict: Dictionary = session.diff_info().get("conflict", {})
+	if not shown or bool(conflict.get("has_base", false)):
+		session.show_conflict_base(shown)
+		return
+	_diff_panel.base_button().set_pressed_no_signal(false)
+	if ops != null:
+		ops.recreate_with_base(conflict_path())
+
+
 func toggle_amend() -> void:
 	_commit_box.set_amend(not _commit_box.is_amend())
 
@@ -659,8 +783,10 @@ static func _describe(paths: PackedStringArray) -> String:
 	return paths[0].get_file() if paths.size() == 1 else TranslationServer.translate("%d files") % paths.size()
 
 
-## "N changed files" ("2 of N" while filtered) and the check-all box, under
-## the filter; hidden without changes (the empty state beside the list says so).
+## "N changed files" ("2 of N" while filtered), the check-all box (dimmed
+## while a merge or cherry-pick decides what is committed) and, during an
+## operation with conflicts, "1 of 2 resolved"; under the filter, hidden
+## without changes (the empty state beside the list says so).
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
 	var shown: int = _list.row_count()
@@ -672,7 +798,28 @@ func _update_header() -> void:
 	_no_match.visible = count > 0 and shown == 0
 	var state: String = session.selection_state() if session != null else "none"
 	var what: String = tr("every shown file") if filtered else tr("every file")
-	_list_header.show_check(state, (tr("Leave out ") if state == "all" else tr("Include ")) + what)
+	var locked: bool = session != null and session.commit_mode() in ["merge", "cherry_pick"]
+	_list_header.show_check(state, tr("The commit takes every merged change") if locked
+			else (tr("Leave out ") if state == "all" else tr("Include ")) + what)
+	_list_header.check().dim = locked
+	_update_conflict_status()
+
+
+## "1 of 2 resolved" in the list header while an operation has conflicts.
+func _update_conflict_status() -> void:
+	var info: Dictionary = session.operation_info() if session != null else {}
+	var left: int = int(info.get("conflicts", 0))
+	var resolved: int = int(info.get("resolved", 0))
+	if left + resolved == 0:
+		_list_header.hide_status()
+		return
+	var text: String = tr("%d of %d resolved") % [resolved, left + resolved]
+	if left == 0:
+		_list_header.show_status(AppTheme.icon(&"StatusSuccess"), text,
+				get_theme_color(&"resolved_color", FileRowPainter.THEME_TYPE), tr("Every conflicted file is resolved"))
+	else:
+		_list_header.show_status(FileRowPainter.code_icon("U"), text, FileRowPainter.code_color(self, "U"),
+				tr("Conflicted files resolved: %d of %d") % [resolved, left + resolved])
 
 
 ## Whether including or leaving out a file can change what the filter shows.
@@ -722,9 +869,17 @@ func _update_empty() -> void:
 	_empty.show_state("No local changes", "", actions)
 
 
+## A merge or other operation started or ended: the list's order, locked
+## checkboxes and header follow it.
+func _on_operation_changed() -> void:
+	_list.reload()
+	_update_header()
+
+
 func _on_selection_changed() -> void:
-	# With "Included" or "Excluded" on, a toggled file may leave the list.
-	if _filter_uses_picks():
+	# With "Included" or "Excluded" on, a toggled file may leave the list; a
+	# file found resolved moves among the conflicts.
+	if _filter_uses_picks() or not session.operation_info().is_empty():
 		_list.reload()
 	else:
 		_list.reload_picks()
@@ -740,8 +895,12 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
 	if source == _diff_view:
 		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard"]
+		if has_conflict_blocks():
+			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
+				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
 	if source == _list:
-		ids.append_array([&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
+		ids.append_array([&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
+			&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
 	ids.append_array([&"", &"changes.undo_discard"])
 	for id: StringName in ids:
 		if id == &"":
@@ -843,4 +1002,31 @@ func _on_diff_changed() -> void:
 		var notes: PackedStringArray = info.get("notes", PackedStringArray())
 		notes.append("Staged in part outside gitbello: committed as staged")
 		info["notes"] = notes
+	if String(info.get("kind", "")) == "conflict":
+		_diff_view.side_names = _side_names(info.get("conflict", {}))
+		info["side_names"] = _diff_view.side_names
+		info["code"] = "U"
+		info["notes"] = PackedStringArray()
 	_diff_panel.show_info(info)
+	if _jump_to_block and String(info.get("state", "")) == "ready":
+		_jump_to_block = false
+		if has_conflict_blocks() and not _choice.is_empty():
+			_diff_view.show_choice(int(_choice[0]), int(_choice[1]), String(_choice[2]))
+		_choice = []
+		if has_conflict_blocks():
+			var row: int = _diff_view.find_block_header(maxi(-1, _diff_view.cursor - 1), true)
+			if row >= 0:
+				_diff_view.select_only(row)
+
+
+## The names of a conflict's sides, ours then theirs: the markers' labels, or
+## the operation's branch names where the markers say HEAD.
+func _side_names(conflict: Dictionary) -> PackedStringArray:
+	var info: Dictionary = session.operation_info()
+	var ours: String = String(conflict.get("ours_label", ""))
+	var theirs: String = String(conflict.get("theirs_label", ""))
+	if ours.is_empty() or ours == "HEAD" or ours == "ours":
+		ours = String(info.get("head_name", "")) if not String(info.get("head_name", "")).is_empty() else "HEAD"
+	if theirs.is_empty() or theirs == "theirs":
+		theirs = String(info.get("other_name", "")) if not String(info.get("other_name", "")).is_empty() else "theirs"
+	return PackedStringArray([ours, theirs.get_slice(" ", 0)])

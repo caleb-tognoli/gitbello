@@ -31,12 +31,12 @@ func run() -> void:
 	main.open_repo(repos[0])
 	expect_eq(main.tab_count(), 5, "opening an open repo focuses its tab")
 
-	var ready: bool = await _wait(func() -> bool:
+	var opened: bool = await _wait(func() -> bool:
 		for i: int in main.tab_count():
 			if main.page_at(i).worktrees().size() != 2 or int(main.page_at(i).session.badge().get("changed", 0)) != 2:
 				return false
 		return true)
-	expect(ready, "every tab knows its two worktrees and 2 changed files")
+	expect(opened, "every tab knows its two worktrees and 2 changed files")
 	expect_eq(main.tab_bar().get_tab_title(0), "repo-1", "a tab is titled by its repository")
 	expect(main.tab_bar().get_tab_icon(0) != null, "a tab with changes has an attention dot")
 	expect_eq(main.page_at(0).attention(), RepoTab.Attention.CHANGES, "changed files come first after conflicts")

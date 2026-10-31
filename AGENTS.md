@@ -91,4 +91,6 @@ Run `cargo xtask check` before declaring any task done.
 - `cargo xtask smoke` creates throwaway fixture repos (`gitbello-cli fixture`) and a scratch config (`GITBELLO_CONFIG`); smoke tests get them as `--fixtures=<dir>`. Never point tests at the real config.
 - To look at the UI, run `res://tests/visual/shell_screenshots.tscn -- --repos=<a>;<b> --out=<dir>` (windowed, with `GITBELLO_CONFIG` set to a scratch file) and read the PNGs.
 - `res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path>` times diff loads, slice fetches and paging (read-only).
+- `res://tests/visual/merge_screenshots.tscn -- --repo=<throwaway repo with a conflicting topic branch> --out=<dir>` captures the merge dialog, the resolver and the undo strip (it merges: never point it at a real repository).
+- `res://tests/visual/conflict_states_screenshots.tscn -- --repo=<a> --rebase-repo=<b> --out=<dir>` captures the cards of conflicts without text blocks, the Abort confirmation and the cherry-pick and rebase banners (see the script's header for the repos it expects; throwaway repos only).
 - Performance claims need numbers. Log timings and memory, and include them in the milestone summary.

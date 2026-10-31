@@ -287,7 +287,7 @@ File  Edit  Repository  Branch  View  Help
 - History: the graph list (graph, ref labels and subject only) on the left; on the right, the selected commit's details (subject, author, date, hash, parents, a scrollable and selectable body) above its file list, which sits beside the diff of the selected file. The diff header picks Unified or Side by side with two joined buttons.
 - Changes, History and Shelves share one saved sidebar width per repository, so switching views does not move the divider. Existing separate widths migrate to the common setting. History also remembers the details' height and the file list's width.
 
-**Operation banner.** While a merge, rebase or cherry-pick is in progress, a full-width banner sits under the Branch/Sync row, e.g. "Merging feature/login into main · 2 conflicts", with Continue (disabled until every conflict is resolved), Abort and Open resolver. It is the only red element in the UI, and the chip shows a marker too. M6.5 places it; M7 implements its behaviour.
+**Operation banner.** While a merge, rebase or cherry-pick is in progress, a full-width banner sits under the Branch/Sync row, e.g. "Merging feature/login into main · 2 conflicts", with Continue (disabled until every conflict is resolved), Abort and Open resolver. It is the only red element in the UI, and the chip shows a marker too. M6.5 places it; M7 implements its behaviour (see Operation banner under Merge with preview below).
 
 **Feedback.**
 - **In place:** the control that started a job (a big button, a chip, a row) shows its progress and is disabled until the job ends. Cancellable jobs cancel from the control's ▾ or with Esc.
@@ -315,9 +315,47 @@ This runs as a single job with rollback if any step fails.
 
 **Cleanup merged worktrees.** Lists worktrees whose branch is merged into the base branch, or whose upstream is gone. It also shows dirty or unpushed warnings. Selected worktrees are removed (`git worktree remove`), with an option to delete their branches too. Squash-merged branches are detected as "upstream gone" and labelled "probably merged".
 
-**Merge with preview.** Before merging, run `git merge-tree --write-tree` to show either "clean merge, N files" or "conflicts in: …" without touching the working tree. The user can then merge, merge with `--no-ff`, or cancel.
+**Merge with preview** (M7, Q&A 2026-10-31).
+- **Scope:** merge into the current branch only (the active worktree's branch). Rebase has no action yet; a rebase in progress (from Pull (rebase) or the CLI) gets banner support only. Dragging a branch onto another comes later.
+- **Entry points:** the branch popover's row menu (Merge into current…), Branch → Merge into current… and the palette (a filterable branch picker), and the graph menu of a commit or ref label, shown only when that commit is not in HEAD (graph rows carry `in_head`, from `rev-list --branches --remotes --tags --not HEAD`, loaded with the graph).
+- **Preview** (a read job, nothing touched): `merge-tree --write-tree --name-only -z --messages HEAD <ref>` (exit 1 means conflicts), `rev-list --count` and the first 50 commits of `HEAD..<ref>`, `merge-base --is-ancestor` for fast-forward, and the merged files intersected with the local changes. Remote-tracking refs are used as of the last fetch.
+- **Dialog:** "Merge feature/login into main", then "✓ No conflicts · 3 commits · 12 files changed" or "Conflicts in 2 files: a.rs, b.rs", a collapsible commit list, an editable message prefilled with git's default (hidden when it will fast-forward), and Cancel plus a split button whose label says what will happen:
 
-**Conflict resolver.** A three-pane view (ours, theirs, result) with base available in a toggle. Each conflict block can take ours, take theirs, take both in either order, or be edited by hand. A per-file "mark resolved" runs `git add`, and progress across files is shown. Stage content comes from `git show :1:`, `:2:` and `:3:` with the path.
+| Case | Primary | ▾ |
+|---|---|---|
+| Fast-forward possible | Fast-forward main | Always create merge commit · Squash into one commit… |
+| Diverged, clean | Create merge commit | Squash into one commit… · Fast-forward only (disabled, with the reason) |
+| Conflicts | Merge and resolve… | Squash and resolve… |
+| Nothing to merge | (Close only) "Already up to date" | — |
+
+- **Local changes:** when they overlap the merged files, the dialog warns and the primary becomes "Shelve changes and merge" (an automatic shelf, the merge, then a restore after a clean merge; after a conflicting merge the shelf stays and the Changes view offers it back once the merge is committed or aborted). Changes that don't overlap stay put and are not part of the merge commit.
+- **Running:** `merge` with `--ff` / `--no-ff` / `--squash` / `--ff-only`, the message without an editor, and `-c merge.conflictStyle=zdiff3` so the base is in the markers. It blocks the worktree (overlay). Conflicts open Changes with the first conflicted file in the resolver.
+
+**Operation banner** (M7). "Merging feature/login into main · 2 of 3 conflicts left" (cherry-pick: "Cherry-picking abc1234 'subject'"; rebase: "Rebasing fix onto main · commit 2 of 5"). Buttons:
+- **Continue**, disabled until no conflict is left. Merge and cherry-pick: the same as the commit box's button. Rebase: `rebase --continue` with no editor.
+- **Skip** (rebase only).
+- **Abort**, always confirmed; the confirmation says how many resolved files go back.
+- **Open resolver**: selects the first unresolved file in Changes.
+
+**Finishing a merge or cherry-pick in Changes.** The commit box is prefilled from `MERGE_MSG` (a cherry-pick keeps the original author) and reads "Commit merge into main" / "Commit cherry-pick". The checkboxes are locked: the commit takes the index (git's result plus resolved files), so local changes that were there before the merge stay out. During a rebase the commit box is disabled ("Use Continue in the banner"). A squash merge is not an operation: its staged result is committed like any other change, with a message built from the squashed commits prefilled.
+
+**Conflict resolver** (M7). It lives in the Changes view: conflicted files are listed first, and selecting one shows the resolver in the diff pane. Unified or Side by side follows the diff header's toggle (the same remembered setting).
+- **Unified:** the file with each conflict as a block: a header "Conflict 1 of 3 · [Ours] [Theirs] [Both ▾]" (Both: ours then theirs, or theirs then ours), then the ours lines and the theirs lines labelled with their branch.
+- **Side by side:** ours on the left and theirs on the right, aligned per block, with Take ours · Both ▾ · Take theirs in the block header.
+- **Show base:** a toggle that adds the base section to each block (full-width rows side by side). It needs zdiff3 markers. For a conflict made outside gitbello without them, it offers "Recreate conflicts with base" (`checkout --conflict=zdiff3`, confirmed if the file was edited).
+- **Choices** rewrite that block in the working file (line endings kept); Ctrl+Z undoes block choices while the file is unresolved. Hand edits go through Open in editor; the file reloads through the watcher.
+- **Resolving:** a file is staged (`git add`) as soon as no markers are left, whether that came from choices or from an outside edit. The file list shows the progress ("2 of 3 resolved"); a resolved file's menu offers Reopen conflicts (`checkout -m`, confirmed).
+- **Non-text conflicts** show a card instead of blocks:
+  - Modify/delete: Keep the file (the modified side) or Delete it.
+  - Binary: Use ours or Use theirs, with sizes.
+  - Add/add: blocks when both sides are text, otherwise pick a side.
+  - Renames: pick a side.
+- Conflicts are read from `ls-files -u -z` and the working file's markers; stage blobs come from `cat-file blob :1:<path>`, `:2:` and `:3:`.
+
+**Undo commit strip** (M7, GitHub Desktop style). Under the commit button: "<subject> · committed 3 min ago · Undo" for HEAD while it is unpushed (not on its upstream; with no upstream, not on any remote branch). It is hidden during an operation.
+- **Undo:** `reset --mixed <first parent>` after checking that HEAD is still that commit. The commit's changes join the local changes and its message fills an empty commit box. The next unpushed commit then shows, so several commits can be undone in a row into one set of changes. The first commit of a branch makes the branch unborn again (`update-ref -d`).
+- **Undoing a merge commit** asks first: **Undo, keep changes** (as above: everything merged becomes local changes and the merge is lost) or **Remove merge** (`reset --keep <first parent>`: the merged changes are not brought back, since they are still on the other branch; local changes are kept).
+- Fast-forwarded commits show as ordinary commits.
 
 **Shelves** (M6.5 P4, D11; replace the classic stash workflow).
 - A shelf is a git stash (untracked files included) whose message is `gitbello-shelf: <branch>: <name>`. It is identified by its commit, never by `stash@{n}`, because the stash stack is shared by every worktree and its indices shift.
@@ -342,6 +380,9 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
 | Ctrl+T | new worktree |
 | Ctrl+Shift+Y | Sync |
+| Ctrl+Shift+B | Merge a branch into the current one (M7) |
+| Alt+O / Alt+T / Alt+B | Resolver: use ours / theirs / both for the conflict at the cursor (M7) |
+| F8 / Shift+F8 | Resolver: next / previous conflict (M7) |
 
 The other existing shortcuts stay.
 
@@ -510,11 +551,45 @@ Later (M8): "Show only matches" as a flat list without the graph, search by path
 
 **Accept the milestone when** Caleb uses gitbello instead of GitHub Desktop for a full week (moved from M6). Collect friction notes for the next milestones.
 
-### M7 — Merge workflows (≈2 weeks)
-- [ ] Merge with `merge-tree` preview (§4)
-- [ ] Operation-in-progress banner with Continue and Abort for merge and cherry-pick (its place is set in M6.5 P2)
-- [ ] Three-pane conflict resolver (§4)
+### M7 — Merge workflows (≈3 weeks)
+
+Scope settled in the Q&A of 2026-10-31 (§4: Merge with preview, Operation banner, Conflict resolver, Undo commit strip). One milestone, no split.
+
+- [x] Core merge preview (`merge-tree`, ahead commits, fast-forward check, overlap with local changes) and the merge job (four modes, message, shelve-and-merge, zdiff3)
+- [x] `in_head` on graph rows; Merge into current… in the branch popover, Branch menu, palette and graph menus
+- [x] Merge dialog with the split button (§4 table)
+- [x] Operation info (kind, names, conflict counts, step of a rebase); banner Continue / Skip / Abort / Open resolver for merge, cherry-pick and rebase
+- [x] Commit box in merge and cherry-pick mode (`MERGE_MSG`, locked checkboxes, the index committed as is); disabled during a rebase; a suggested message after a squash
+- [x] Core conflict model (`ls-files -u`, marker parsing, stage blobs, kinds), block choices with undo, auto-staging, reopen, recreate with base
+- [x] Resolver in the Changes diff pane: unified and side-by-side layouts, Show base, cards for non-text conflicts
+- [x] Undo commit strip: unpushed check, mixed reset, message back into the box, unborn branch, the merge-commit choice
 - ~~Stash workflow~~: replaced by shelves (M6.5 P4)
+
+**API (approved 2026-10-31; as built).** `RepoSession`:
+- **Merge:** `load_merge_preview(target) -> job`, signal `merge_preview_ready(target)`, `merge_preview() -> {target, oid, up_to_date, can_ff, commit_count, commits[{oid, subject, author, time}], file_count, conflicts[{path, kind}], overlap[paths], message}`; `merge(target, mode, message, shelve) -> job` with `mode` one of `default`, `no_ff`, `squash`, `ff_only`.
+- **Operation:** `operation_info() -> {kind, head_name, other_name, other_oid, conflicts, resolved, step, steps, message, commit_mode}` (`operation()` stays); `commit_mode()` (`normal`, `merge`, `cherry_pick`, `rebase`); `continue_operation(summary, body) -> job` (a commit for merge and cherry-pick, `rebase --continue` for rebase); `skip_operation() -> job`.
+- **Conflicts:** a conflicted file selected with `select_change` shows its conflicts in the Changes slot (core `ConflictState`, not a `DiffKind`): `diff_info` has `kind` and `content` `conflict` and `conflict {kind, side, ours_label, theirs_label, has_base, show_base, blocks, ours_size, theirs_size, first_row, first_split_row}`; `diff_lines` / `diff_split_rows` give `diff_line`-style rows (ours as kind 3, theirs 2, base 4, headers 0 "Conflict 1 of 3") with `block` and `side`. Writes: `resolve_block(path, block, choice) -> job` (`ours`, `theirs`, `ours_theirs`, `theirs_ours`), `can_undo_block_choice()`, `undo_block_choice() -> job`, `resolve_file(path, choice) -> job` (`ours`, `theirs`, `keep`, `delete`), `reopen_conflicts(path) -> job`, `recreate_conflicts_with_base(path) -> job`, `show_conflict_base(show)`. `change_rows` gains `resolved` and `locked`.
+- **Undo commit:** `undoable_commit() -> {oid, subject, body, time, merge}` (empty when none); `undo_commit(oid, mode) -> job` with `mode` `keep_changes` or `remove_merge`; signals `commit_undone(summary, body)` and `head_changed()`.
+- `graph_rows` gains `in_head`.
+
+**Accept when:**
+- Core tests on temp repos cover:
+  - previews: clean, conflicting, fast-forward, up to date, overlap;
+  - each merge mode, shelve-and-merge (clean and conflicting);
+  - conflicts of each kind, block choices and their undo, auto-staging after an outside edit, reopen and recreate;
+  - merge and cherry-pick commits with locked selection (pre-existing local changes stay out);
+  - rebase continue and skip;
+  - undo of a normal commit, of several in a row, of the first commit, and both merge-commit choices; a pushed commit not offered.
+- Smoke tests drive a conflicting merge from the popover to the commit with the keyboard only, both resolver layouts, and the undo strip.
+
+*Result:* core `merge.rs` holds the models and parsers (`merge-tree` output, conflict markers and blocks, the resolver's rows, operation details, the undoable commit); `backend/merge.rs` runs git; the runtime adds the jobs (preview, merge with shelve-and-merge, continue, skip, conflict loads, block and file choices, undo, reopen, HEAD info) and a conflict scan after each status that reads the resolve-undo record and stages files whose markers are gone. `tests/merge.rs` (13 tests) covers every case in the list above. In the UI: the merge dialog (a `FormDialog` with a ▾ split menu and a custom-control row), the branch list in merge mode (Ctrl+Shift+B), Merge into current… in the branch, ref label and commit menus, the banner's Continue / Skip / Open resolver / Abort, the resolver in the diff pane (block buttons on the headers, Show base, cards), the commit box's merge mode and the undo strip. `merge_smoke.gd` drives a conflicting merge from the branch list to the commit with the keyboard only, the undo strip's Remove merge, and the side-by-side resolver with Abort; `tests/visual/merge_screenshots.tscn` captures the dialog, the resolver and the undo strip. Changes from the design:
+- Side by side, Show base shows the base lines as full-width rows inside each block rather than a middle column.
+- Abort is always confirmed (it says how many resolved files go back).
+- After a squash, the commit box gets a message built from the squashed commits' subjects instead of `SQUASH_MSG`.
+- Block choices undo even after they resolved the file (the conflict comes back from the resolve-undo record); Reopen uses `update-index --unresolve`, so modify/delete conflicts reopen too.
+- Merges pass git the ref's short name when it is unique, so the markers and git's messages read `topic` rather than `refs/heads/topic`.
+- Shortcuts: Ctrl+Shift+B (merge into current), Alt+O / Alt+T / Alt+B / Alt+Shift+B (use ours, theirs, both, both reversed), F8 / Shift+F8 (next / previous conflict), Ctrl+Z (undo a conflict choice; it shares the key with undo discard and the enabled action wins).
+- Fixed on the way: empty cells of side-by-side rows got a `picked` key, which broke drawing them.
 
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit

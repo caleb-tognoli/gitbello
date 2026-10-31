@@ -255,7 +255,7 @@ fn smoke(args: &[String]) -> Result<()> {
     fixture
         .arg("fixture")
         .arg(&fixtures)
-        .args(["--repos", "12"]);
+        .args(["--repos", "13"]);
     run_status(fixture)?;
     // No auto-fetch moving badges mid-test, and launch commands that cannot
     // start anything.

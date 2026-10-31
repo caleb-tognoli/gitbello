@@ -4,6 +4,8 @@ extends VirtualList
 ## Changes view): conflicted files first, then the rest by path. Rows come
 ## from `RepoSession.change_rows()` (the files the filter shows) for a window
 ## around the visible range only.
+## During a merge or other operation, a line under the conflicted and resolved
+## files sets them apart from the rest.
 ## Highlighting rows (click, Shift, Ctrl) drives the diff and the context menu;
 ## the checkboxes are separate: clicking one toggles its file, Space, Enter or
 ## a double-click toggles the highlighted files.
@@ -27,6 +29,7 @@ var _kept_paths: PackedStringArray = PackedStringArray()
 var _kept_cursor: String = ""
 var _reloading: bool = false
 var _painter: FileRowPainter = FileRowPainter.new()
+var _divider_color: Color = Color.WHITE
 
 
 func _ready() -> void:
@@ -78,7 +81,8 @@ func reload_picks() -> void:
 	queue_redraw()
 
 
-## `{path, original_path, code, pick, conflicted, as_staged}` of a row, or {}.
+## `{path, original_path, code, pick, conflicted, resolved, as_staged, locked}`
+## of a row (see `RepoSession.change_rows`), or {}.
 func row(index: int) -> Dictionary:
 	if index < 0 or index >= row_count():
 		return {}
@@ -188,7 +192,14 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
-	_painter.draw(self, rect, _cache.get(index, {}))
+	var data: Dictionary = _cache.get(index, {})
+	_painter.draw(self, rect, data)
+	if index + 1 < row_count() and _in_conflict_group(data) and not _in_conflict_group(_cache.get(index + 1, {})):
+		draw_line(Vector2(rect.position.x, rect.end.y - 0.5), Vector2(rect.end.x, rect.end.y - 0.5), _divider_color)
+
+
+static func _in_conflict_group(data: Dictionary) -> bool:
+	return bool(data.get("conflicted", false)) or bool(data.get("resolved", false))
 
 
 func _get_tooltip(at_position: Vector2) -> String:
@@ -198,10 +209,15 @@ func _get_tooltip(at_position: Vector2) -> String:
 	var tip: String = String(data["path"])
 	if bool(data.get("conflicted", false)):
 		tip += "\n" + tr("Conflicted: resolve it before committing.")
+	elif bool(data.get("resolved", false)):
+		tip += "\n" + tr("Conflicts resolved")
 	elif not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
 		tip += "\n" + FileRowPainter.code_name(String(data["code"]))
 	elif bool(data.get("as_staged", false)):
 		tip += "\n" + tr("Staged in part outside gitbello: committed as staged.")
+	if bool(data.get("locked", false)) and not bool(data.get("conflicted", false)):
+		tip += "\n" + (tr("Part of the commit being finished") if String(data.get("pick", "none")) != "none"
+				else tr("Not part of the commit being finished; it stays a local change"))
 	return tip
 
 
@@ -218,3 +234,4 @@ func _on_selection_changed() -> void:
 
 func _update_theme() -> void:
 	_painter.update_theme(self)
+	_divider_color = get_theme_color(&"divider_color", FileRowPainter.THEME_TYPE)

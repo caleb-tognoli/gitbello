@@ -26,6 +26,10 @@ use crate::graph::{CommitSearch, GraphLoader, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL}
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
+use crate::merge::{
+    self as merge, BlockChoice, ConflictFile, ConflictKind, ConflictLayout, ConflictOp, FileChoice,
+    HeadInfo, MergeMode, MergePreview, OperationDetails, UndoMode, UndoableCommit,
+};
 use crate::ops::{
     CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp,
     AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
@@ -69,6 +73,23 @@ pub const DISCARD_SHELF_JOB_LABEL: &str = "discard shelf";
 pub const UNDO_SHELF_DISCARD_JOB_LABEL: &str = "undo shelf discard";
 pub const SHELF_FILES_JOB_LABEL: &str = "read shelf";
 
+/// Labels of the merge workflow jobs (PLAN §4, M7).
+pub const MERGE_PREVIEW_JOB_LABEL: &str = "preview merge";
+pub const MERGE_JOB_LABEL: &str = "merge";
+pub const CONTINUE_JOB_LABEL: &str = "continue";
+pub const SKIP_JOB_LABEL: &str = "skip";
+pub const CONFLICT_JOB_LABEL: &str = "load conflict";
+pub const CONFLICT_SCAN_JOB_LABEL: &str = "scan conflicts";
+pub const RESOLVE_JOB_LABEL: &str = "resolve conflict";
+pub const UNDO_RESOLVE_JOB_LABEL: &str = "undo conflict choice";
+pub const MARK_RESOLVED_JOB_LABEL: &str = "mark resolved";
+pub const REOPEN_JOB_LABEL: &str = "reopen conflicts";
+pub const HEAD_INFO_JOB_LABEL: &str = "read HEAD";
+pub const UNDO_COMMIT_JOB_LABEL: &str = "undo commit";
+
+/// Block choices remembered for undo, per repository.
+pub const MAX_CONFLICT_UNDO: usize = 50;
+
 /// Shelf discards remembered for undo, per repository.
 pub const MAX_SHELF_UNDO: usize = 20;
 
@@ -95,6 +116,13 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     PULL_JOB_LABEL,
     "cherry-pick",
     "abort",
+    MERGE_JOB_LABEL,
+    CONTINUE_JOB_LABEL,
+    SKIP_JOB_LABEL,
+    RESOLVE_JOB_LABEL,
+    UNDO_RESOLVE_JOB_LABEL,
+    REOPEN_JOB_LABEL,
+    UNDO_COMMIT_JOB_LABEL,
     RESTORE_SHELF_JOB_LABEL,
     RESTORE_SHELF_FILE_JOB_LABEL,
     DISCARD_SHELF_FILE_JOB_LABEL,
@@ -184,8 +212,116 @@ pub enum RuntimeEvent {
         label: String,
         state: JobState,
     },
+    /// The merge preview requested with [`Runtime::load_merge_preview`].
+    MergePreviewLoaded {
+        repo: PathBuf,
+        target: String,
+    },
+    /// The undo strip's commit or the commits HEAD lacks changed.
+    HeadInfoChanged {
+        repo: PathBuf,
+    },
+    /// A commit was undone; its message goes back into the commit box.
+    CommitUndone {
+        repo: PathBuf,
+        message: String,
+    },
     /// New entries in the git command log.
     CommandsLogged,
+}
+
+/// What the commit box does, after the operation in progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitMode {
+    Normal,
+    /// Commits the merge: the index as it is, checkboxes locked.
+    Merge,
+    /// Commits the cherry-pick (or revert) the same way.
+    CherryPick,
+    /// A rebase goes on from the banner; the commit box waits.
+    Rebase,
+}
+
+impl CommitMode {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Merge => "merge",
+            Self::CherryPick => "cherry_pick",
+            Self::Rebase => "rebase",
+        }
+    }
+
+    /// The checkboxes show the index and cannot change.
+    pub fn locks_picks(self) -> bool {
+        matches!(self, Self::Merge | Self::CherryPick)
+    }
+}
+
+/// A conflicted file shown in the Changes view (instead of a diff).
+#[derive(Debug, Clone)]
+pub struct ConflictState {
+    path: PathBuf,
+    kind: ConflictKind,
+    generation: u64,
+    loading: bool,
+    file: Option<ConflictFile>,
+    layout: ConflictLayout,
+    error: Option<GitError>,
+}
+
+impl ConflictState {
+    fn new(path: PathBuf, kind: ConflictKind) -> Self {
+        Self {
+            path,
+            kind,
+            generation: 0,
+            loading: false,
+            file: None,
+            layout: ConflictLayout::default(),
+            error: None,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn kind(&self) -> ConflictKind {
+        self.file.as_ref().map_or(self.kind, |f| f.kind)
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    pub fn file(&self) -> Option<&ConflictFile> {
+        self.file.as_ref()
+    }
+
+    pub fn layout(&self) -> &ConflictLayout {
+        &self.layout
+    }
+
+    pub fn error(&self) -> Option<&GitError> {
+        self.error.as_ref()
+    }
+
+    fn relayout(&mut self, show_base: bool) {
+        self.layout = self
+            .file
+            .as_ref()
+            .map(|f| ConflictLayout::build(f, show_base))
+            .unwrap_or_default();
+    }
+}
+
+/// A block choice that can be undone: the file before and after it.
+#[derive(Debug, Clone)]
+struct ConflictUndo {
+    path: PathBuf,
+    before: Vec<u8>,
+    after: Vec<u8>,
 }
 
 /// Cached state of one open repository.
@@ -205,6 +341,17 @@ pub struct RepoState {
     /// Discarded shelves `(commit, subject)`, newest last, for undo.
     dropped_shelves: Vec<ShelfChange>,
     operation: Option<Operation>,
+    operation_details: Option<OperationDetails>,
+    /// The conflicted file selected in the Changes view.
+    conflict: Option<ConflictState>,
+    conflict_show_base: bool,
+    /// Files whose conflicts were resolved (resolve-undo).
+    resolved: Vec<PathBuf>,
+    /// Block choices, newest last, for undo.
+    conflict_undo: Vec<ConflictUndo>,
+    merge_preview: Option<MergePreview>,
+    merge_preview_requested: Option<String>,
+    head_info: HeadInfo,
     labels: HashMap<String, Vec<RefLabel>>,
     changes: ChangeList,
     change_filter: ChangeFilter,
@@ -252,6 +399,14 @@ impl RepoState {
             shelf_files: HashMap::new(),
             dropped_shelves: Vec::new(),
             operation: None,
+            operation_details: None,
+            conflict: None,
+            conflict_show_base: false,
+            resolved: Vec::new(),
+            conflict_undo: Vec::new(),
+            merge_preview: None,
+            merge_preview_requested: None,
+            head_info: HeadInfo::default(),
             labels: HashMap::new(),
             changes: ChangeList::default(),
             change_filter: ChangeFilter::default(),
@@ -385,6 +540,159 @@ impl RepoState {
         self.operation
     }
 
+    /// The operation in progress with the banner's details.
+    pub fn operation_details(&self) -> Option<&OperationDetails> {
+        self.operation_details.as_ref()
+    }
+
+    pub fn commit_mode(&self) -> CommitMode {
+        match self.operation {
+            Some(Operation::Merge) => CommitMode::Merge,
+            Some(Operation::CherryPick | Operation::Revert) => CommitMode::CherryPick,
+            Some(Operation::Rebase { .. } | Operation::ApplyMailbox) => CommitMode::Rebase,
+            Some(Operation::Bisect) | None => CommitMode::Normal,
+        }
+    }
+
+    /// The conflicted file selected in the Changes view, if any.
+    pub fn conflict(&self) -> Option<&ConflictState> {
+        self.conflict.as_ref()
+    }
+
+    pub fn conflict_shows_base(&self) -> bool {
+        self.conflict_show_base
+    }
+
+    /// Whether a block choice can be undone.
+    pub fn can_undo_block_choice(&self) -> bool {
+        !self.conflict_undo.is_empty()
+    }
+
+    fn is_unmerged(&self, path: &Path) -> bool {
+        self.status.as_ref().is_some_and(|s| {
+            s.changes
+                .iter()
+                .any(|c| c.path == path && changes::is_conflicted(c))
+        })
+    }
+
+    /// Whether `path` had conflicts that are resolved now (only while an
+    /// operation or other conflicts are in progress).
+    pub fn is_resolved(&self, path: &Path) -> bool {
+        let in_flow =
+            self.operation.is_some() || self.status.as_ref().is_some_and(RepoStatus::has_conflicts);
+        // A file resolved to HEAD's content is no longer a change at all.
+        in_flow && self.resolved.iter().any(|p| p == path) && !self.is_unmerged(path)
+    }
+
+    /// Conflicted files left, and resolved ones.
+    pub fn conflict_counts(&self) -> (usize, usize) {
+        let Some(status) = &self.status else {
+            return (0, 0);
+        };
+        let left = status
+            .changes
+            .iter()
+            .filter(|c| changes::is_conflicted(c))
+            .count();
+        let resolved = self.resolved.iter().filter(|p| self.is_resolved(p)).count();
+        (left, resolved)
+    }
+
+    /// The conflict kind of `path`, when it is conflicted.
+    fn conflict_kind(&self, path: &Path) -> Option<ConflictKind> {
+        let change = self
+            .status
+            .as_ref()?
+            .changes
+            .iter()
+            .find(|c| c.path == path)?;
+        match change.state {
+            FileState::Unmerged(conflict) => Some(ConflictKind::from_status(conflict)),
+            _ => None,
+        }
+    }
+
+    /// The full name of a ref given by full or short name (local branches
+    /// first, then remote branches and tags); anything else as it is.
+    fn full_ref_name(&self, target: &str) -> String {
+        let refs = self.refs.as_deref().unwrap_or(&[]);
+        if refs.iter().any(|r| r.name == target) {
+            return target.to_owned();
+        }
+        let rank = |r: &Ref| match r.kind {
+            RefKind::Branch => 0,
+            RefKind::RemoteBranch { .. } => 1,
+            RefKind::Tag => 2,
+            RefKind::Stash | RefKind::Other => 3,
+        };
+        refs.iter()
+            .filter(|r| r.short_name == target && rank(r) < 3)
+            .min_by_key(|r| rank(r))
+            .map_or_else(|| target.to_owned(), |r| r.name.clone())
+    }
+
+    /// The short name of full ref `full` when no other ref shares it.
+    fn unique_short_name(&self, full: &str) -> Option<String> {
+        let refs = self.refs.as_deref()?;
+        let short = &refs.iter().find(|r| r.name == full)?.short_name;
+        (refs.iter().filter(|r| &r.short_name == short).count() == 1).then(|| short.clone())
+    }
+
+    /// The merge preview last loaded, once it arrived.
+    pub fn merge_preview(&self) -> Option<&MergePreview> {
+        self.merge_preview.as_ref()
+    }
+
+    /// The commit the undo strip offers (HEAD, unpushed, on a branch, with
+    /// no operation in progress).
+    pub fn undoable_commit(&self) -> Option<&UndoableCommit> {
+        let commit = self.head_info.undoable.as_ref()?;
+        let head = self.status.as_ref()?.oid.as_deref()?;
+        (self.operation.is_none() && self.current_branch().is_some() && commit.oid == head)
+            .then_some(commit)
+    }
+
+    /// Whether commit `oid` is in HEAD (unknown commits count as in it).
+    pub fn in_head(&self, oid: &str) -> bool {
+        !self.head_info.not_in_head.contains(oid)
+    }
+
+    /// The checkbox of `path`. While a merge or cherry-pick is committed it
+    /// shows the index (a resolved file counts as included).
+    pub fn pick_state(&self, path: &Path) -> PickState {
+        if !self.commit_mode().locks_picks() {
+            return self.selection.state(path);
+        }
+        if self.is_resolved(path) {
+            return PickState::All;
+        }
+        let change = self
+            .status
+            .as_ref()
+            .and_then(|s| s.changes.iter().find(|c| c.path == path));
+        match change {
+            Some(c) if c.is_staged() && c.is_unstaged() => PickState::Partial,
+            Some(c) if c.is_staged() => PickState::All,
+            _ => PickState::None,
+        }
+    }
+
+    /// Files the next commit takes something of.
+    pub fn picked_count(&self) -> usize {
+        if !self.commit_mode().locks_picks() {
+            return self.selection.picked_count();
+        }
+        self.status.as_ref().map_or(0, |s| {
+            s.changes
+                .iter()
+                .filter(|c| {
+                    c.state != FileState::Ignored && self.pick_state(&c.path) != PickState::None
+                })
+                .count()
+        })
+    }
+
     pub fn badge(&self) -> Badge {
         Badge::new(self.status.as_ref(), self.operation)
     }
@@ -430,6 +738,22 @@ impl RepoState {
 
     /// The check-all box over the files shown.
     pub fn shown_selection_state(&self) -> PickState {
+        if self.commit_mode().locks_picks() {
+            let paths: Vec<PathBuf> = self
+                .shown_paths()
+                .into_iter()
+                .filter(|p| !self.is_unmerged(p))
+                .collect();
+            let mut states = paths.iter().map(|p| self.pick_state(p));
+            let Some(first) = states.next() else {
+                return PickState::None;
+            };
+            return if states.all(|s| s == first) {
+                first
+            } else {
+                PickState::Partial
+            };
+        }
         match (&self.status, self.change_filter.is_active()) {
             (Some(status), true) => self.selection.state_of(
                 self.changes
@@ -453,9 +777,13 @@ impl RepoState {
     }
 
     fn rebuild_changes(&mut self) {
-        if let Some(status) = &self.status {
-            self.changes = ChangeList::filtered(status, &self.selection, &self.change_filter);
-        }
+        let Some(status) = &self.status else {
+            return;
+        };
+        // Resolved files stay among the conflicts while the operation lasts.
+        let in_flow = self.operation.is_some() || status.has_conflicts();
+        let resolved: &[PathBuf] = if in_flow { &self.resolved } else { &[] };
+        self.changes = ChangeList::grouped(status, &self.selection, &self.change_filter, resolved);
     }
 
     /// The commit selection (PLAN §3.10).
@@ -479,6 +807,7 @@ impl RepoState {
             return false;
         };
         matches!(state.target.kind, DiffKind::Head | DiffKind::Untracked)
+            && !self.commit_mode().locks_picks()
             && self.selection.pick(&state.target.path).is_some()
             && diff.content == DiffContent::Text
             && !diff.hunks.is_empty()
@@ -657,8 +986,19 @@ impl RepoState {
         let Some(status) = &self.status else {
             return Some("Reading the changes");
         };
+        let mode = self.commit_mode();
+        if mode == CommitMode::Rebase {
+            return Some("Use Continue in the banner");
+        }
         if status.has_conflicts() {
             return Some("Resolve conflicts first");
+        }
+        if mode.locks_picks() {
+            return amend.then_some(if mode == CommitMode::Merge {
+                "Commit the merge first"
+            } else {
+                "Commit the cherry-pick first"
+            });
         }
         if amend {
             return status
@@ -979,6 +1319,9 @@ impl Runtime {
     /// Shows the diff of `target` (or nothing). A diff over the size limit
     /// loads only with `full`. The diff reloads after every status refresh.
     pub fn select_diff(&mut self, key: &Path, target: Option<DiffTarget>, full: bool) {
+        if let Some(state) = self.repos.get_mut(key) {
+            state.conflict = None;
+        }
         self.select_slot(key, DiffSlot::Changes, target, full);
     }
 
@@ -1084,12 +1427,27 @@ impl Runtime {
         });
     }
 
-    /// Shows the Changes view's diff of `path` (see [`changes::diff_target`]).
+    /// Shows the Changes view's diff of `path` (see [`changes::diff_target`]),
+    /// or its conflicts when it is conflicted (see [`RepoState::conflict`]).
     pub fn select_change(&mut self, key: &Path, path: &Path, full: bool) {
-        let target = self
-            .repos
-            .get(key)
-            .and_then(RepoState::status)
+        let Some(state) = self.repos.get(key) else {
+            return;
+        };
+        if let Some(kind) = state.conflict_kind(path) {
+            if state.conflict.as_ref().is_some_and(|c| c.path == path) {
+                return;
+            }
+            self.select_diff(key, None, false);
+            let Some(state) = self.repos.get_mut(key) else {
+                return;
+            };
+            state.conflict = Some(ConflictState::new(path.to_path_buf(), kind));
+            self.diff_generation += 1;
+            submit_conflict(&self.scheduler, state, self.diff_generation);
+            return;
+        }
+        let target = state
+            .status()
             .map(|status| changes::diff_target(status, path));
         if let Some(target) = target {
             self.select_diff(key, Some(target), full);
@@ -1101,6 +1459,9 @@ impl Runtime {
         let Some(state) = self.repos.get_mut(key) else {
             return false;
         };
+        if state.commit_mode().locks_picks() {
+            return false;
+        }
         let changed = state.selection.pick_files(paths, include);
         self.selection_changed(key, changed)
     }
@@ -1110,6 +1471,9 @@ impl Runtime {
         let Some(state) = self.repos.get_mut(key) else {
             return false;
         };
+        if state.commit_mode().locks_picks() {
+            return false;
+        }
         if state.change_filter.is_active() {
             let paths = state.shown_paths();
             state.selection.pick_files(&paths, include);
@@ -1130,7 +1494,11 @@ impl Runtime {
     /// Picks or unpicks lines of the Changes diff (a hunk header takes its
     /// hunk). False when its lines cannot be picked.
     pub fn pick_lines(&mut self, key: &Path, lines: &[usize], include: bool) -> bool {
-        let Some(state) = self.repos.get_mut(key).filter(|s| s.can_pick_lines()) else {
+        let Some(state) = self
+            .repos
+            .get_mut(key)
+            .filter(|s| s.can_pick_lines() && !s.commit_mode().locks_picks())
+        else {
             return false;
         };
         let changed = match &state.diff {
@@ -1318,6 +1686,25 @@ impl Runtime {
     pub fn commit(&self, key: &Path, message: String, amend: bool) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
         let state = self.repos.get(key).filter(|s| s.can_commit(amend))?;
+        if state.commit_mode().locks_picks() {
+            // A merge or cherry-pick commits the index as it is.
+            let operation = state.operation?;
+            return Some(self.scheduler.submit(JobSpec::write(
+                key,
+                COMMIT_JOB_LABEL,
+                RefreshSet::all(),
+                move |ctx| {
+                    ctx.backend()
+                        .continue_operation(
+                            &toplevel,
+                            operation,
+                            Some(&message),
+                            ctx.cancel_token(),
+                        )
+                        .map(|()| JobOutput::Done)
+                },
+            )));
+        }
         let plan = state.selection.plan(state.status()?);
         let refresh = RefreshSet::EMPTY
             .with(RefreshKind::Status)
@@ -1708,6 +2095,318 @@ impl Runtime {
         )
     }
 
+    /// Works out what merging `target` (a branch, remote branch, tag or
+    /// commit) into HEAD would do; it arrives as
+    /// [`RuntimeEvent::MergePreviewLoaded`] with the overlap with local
+    /// changes filled in.
+    pub fn load_merge_preview(&mut self, key: &Path, target: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        let full = state.full_ref_name(target);
+        let branch = state.current_branch().map(str::to_owned);
+        state.merge_preview = None;
+        state.merge_preview_requested = Some(target.to_owned());
+        let target = target.to_owned();
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, MERGE_PREVIEW_JOB_LABEL, move |ctx| {
+                    let mut preview = ctx.backend().merge_preview(
+                        &toplevel,
+                        &full,
+                        branch.as_deref(),
+                        ctx.cancel_token(),
+                    )?;
+                    preview.target = target;
+                    Ok(JobOutput::MergePreview(Box::new(preview)))
+                })),
+        )
+    }
+
+    /// Merges `target` into HEAD as `mode` says, with `message` (git's
+    /// default when empty). With `shelve`, local changes are left as an
+    /// automatic shelf first and restored after a clean merge (a
+    /// conflicting merge keeps the shelf). Label [`MERGE_JOB_LABEL`].
+    pub fn merge(
+        &self,
+        key: &Path,
+        target: &str,
+        mode: MergeMode,
+        message: Option<String>,
+        shelve: bool,
+    ) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get(key).filter(|s| s.operation.is_none())?;
+        let full = state.full_ref_name(target);
+        let branch = state.current_branch().unwrap_or("HEAD");
+        let shelf = shelf_message(branch, &format!("Left when merging {target}"), true);
+        // git labels the conflict markers with the name it is given.
+        let name = state
+            .unique_short_name(&full)
+            .unwrap_or_else(|| full.clone());
+        // git would name the full ref; say it as git does for a short name.
+        let message = message
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| merge::default_merge_message(&full, state.current_branch()));
+        let message = Some(message);
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            MERGE_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let stashed = if shelve {
+                    backend.stash_push(&toplevel, &shelf, cancel)?
+                } else {
+                    None
+                };
+                let merged = backend.merge(&toplevel, &name, mode, message.as_deref(), cancel);
+                // Putting the changes back must not be cut short by a cancel.
+                let restore = CancelToken::new();
+                match (&merged, &stashed) {
+                    // A conflicting merge keeps the shelf until it is finished.
+                    (Err(err), Some(_)) if err.kind == GitErrorKind::Conflict => {}
+                    (_, Some(oid)) => backend.restore_shelf(&toplevel, oid, &restore)?,
+                    (_, None) => {}
+                }
+                merged.map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Finishes the operation in progress after its conflicts were resolved:
+    /// commits a merge or cherry-pick with `message` (git's when `None`),
+    /// or continues a rebase. Label [`CONTINUE_JOB_LABEL`].
+    pub fn continue_operation(&self, key: &Path, message: Option<String>) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get(key)?;
+        let operation = state.operation?;
+        if state.status().is_some_and(RepoStatus::has_conflicts) {
+            return None;
+        }
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            CONTINUE_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                ctx.backend()
+                    .continue_operation(
+                        &toplevel,
+                        operation,
+                        message.as_deref(),
+                        ctx.cancel_token(),
+                    )
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Skips the commit a rebase stopped at. Label [`SKIP_JOB_LABEL`].
+    pub fn skip_operation(&self, key: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let operation = self.repos.get(key)?.operation?;
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            SKIP_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                ctx.backend()
+                    .skip_operation(&toplevel, operation, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Resolves conflict block `block` of the selected conflicted file
+    /// `path` with `choice`. The file is staged once no block is left.
+    pub fn resolve_block(
+        &mut self,
+        key: &Path,
+        path: &Path,
+        block: usize,
+        choice: BlockChoice,
+    ) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        let show_base = state.conflict_show_base;
+        let conflict = state.conflict.as_mut().filter(|c| c.path == path)?;
+        let file = conflict.file.as_ref()?;
+        let (kind, sizes) = (file.kind, (file.ours_size, file.theirs_size));
+        let before = file.content.clone();
+        let after = merge::resolve_block(&before, block, choice)?;
+        let stage = merge::parse_blocks(&merge::split_lines(&after)).is_empty();
+        // Show the result at once; the reload after the write confirms it.
+        let mut next = ConflictFile::new(path.to_path_buf(), kind, Some(after.clone()));
+        (next.ours_size, next.theirs_size) = sizes;
+        conflict.file = Some(next);
+        conflict.relayout(show_base);
+        self.pending.push(RuntimeEvent::DiffChanged {
+            repo: key.to_path_buf(),
+            slot: DiffSlot::Changes,
+        });
+        let path = path.to_path_buf();
+        let op = ConflictOp::Write {
+            path: path.clone(),
+            expected: before.clone(),
+            content: after.clone(),
+            stage,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            RESOLVE_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .conflict_op(&toplevel, &op, ctx.cancel_token())?;
+                Ok(JobOutput::ConflictWritten(Box::new((
+                    path, before, after, stage,
+                ))))
+            },
+        )))
+    }
+
+    /// Undoes the last block choice (bringing the conflict back when the
+    /// choice had resolved the file). Label [`UNDO_RESOLVE_JOB_LABEL`].
+    pub fn undo_block_choice(&mut self, key: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        let undo = state.conflict_undo.pop()?;
+        let reopen = !state.is_unmerged(&undo.path);
+        let shown = state.conflict.as_ref().map(|c| c.path.as_path()) == Some(&undo.path)
+            || state.diff.as_ref().map(|d| d.target.path.as_path()) == Some(&undo.path);
+        if shown && reopen {
+            // Keep showing the file: as its conflicts once they are back.
+            state.diff = None;
+            state.conflict = Some(ConflictState::new(undo.path.clone(), ConflictKind::Content));
+        }
+        let op = ConflictOp::Restore {
+            path: undo.path,
+            expected: undo.after,
+            content: undo.before,
+            reopen,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNDO_RESOLVE_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .conflict_op(&toplevel, &op, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Resolves conflicted file `path` whole: our or their version, keeping
+    /// the file (the side that has it) or deleting it.
+    pub fn resolve_file(&self, key: &Path, path: &Path, choice: FileChoice) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let kind = self.repos.get(key)?.conflict_kind(path)?;
+        let path = path.to_path_buf();
+        let remove = ConflictOp::Remove { path: path.clone() };
+        let side = |ours: bool| ConflictOp::TakeSide {
+            path: path.clone(),
+            ours,
+        };
+        let op = match (choice, kind) {
+            (FileChoice::Delete, _) | (_, ConflictKind::BothDeleted) => remove,
+            (
+                FileChoice::Ours,
+                ConflictKind::ModifyDelete {
+                    deleted_by_us: true,
+                },
+            )
+            | (FileChoice::Ours, ConflictKind::AddedByOne { by_us: false })
+            | (
+                FileChoice::Theirs,
+                ConflictKind::ModifyDelete {
+                    deleted_by_us: false,
+                },
+            )
+            | (FileChoice::Theirs, ConflictKind::AddedByOne { by_us: true }) => remove,
+            (FileChoice::Ours, _) => side(true),
+            (FileChoice::Theirs, _) => side(false),
+            (FileChoice::Keep, ConflictKind::ModifyDelete { deleted_by_us }) => {
+                side(!deleted_by_us)
+            }
+            (FileChoice::Keep, ConflictKind::AddedByOne { by_us }) => side(by_us),
+            (FileChoice::Keep, _) => return None,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            RESOLVE_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .conflict_op(&toplevel, &op, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Brings the conflicts of `path` back (after it was resolved), or with
+    /// `base`, recreates them with the base in the markers. Label
+    /// [`REOPEN_JOB_LABEL`].
+    pub fn reopen_conflicts(&mut self, key: &Path, path: &Path, base: bool) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        if base {
+            state.conflict_show_base = true;
+        }
+        state.conflict_undo.retain(|u| u.path != path);
+        let op = ConflictOp::Reopen {
+            path: path.to_path_buf(),
+            base,
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            REOPEN_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                ctx.backend()
+                    .conflict_op(&toplevel, &op, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
+    /// Shows the base of each conflict block in the resolver, or hides it.
+    pub fn show_conflict_base(&mut self, key: &Path, show: bool) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        state.conflict_show_base = show;
+        if let Some(conflict) = state.conflict.as_mut() {
+            conflict.relayout(show);
+            self.pending.push(RuntimeEvent::DiffChanged {
+                repo: key.to_path_buf(),
+                slot: DiffSlot::Changes,
+            });
+        }
+    }
+
+    /// Undoes HEAD commit `oid` (see [`UndoMode`]); its message arrives as
+    /// [`RuntimeEvent::CommitUndone`] (empty after removing a merge). Label [`UNDO_COMMIT_JOB_LABEL`].
+    pub fn undo_commit(&self, key: &Path, oid: &str, mode: UndoMode) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        self.repos.get(key)?.undoable_commit()?;
+        let oid = oid.to_owned();
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNDO_COMMIT_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                let message =
+                    ctx.backend()
+                        .undo_commit(&toplevel, &oid, mode, ctx.cancel_token())?;
+                // A removed merge leaves nothing to commit again.
+                Ok(JobOutput::CommitUndone(match mode {
+                    UndoMode::KeepChanges => message,
+                    UndoMode::RemoveMerge => String::new(),
+                }))
+            },
+        )))
+    }
+
     /// Adds, removes, locks, unlocks or prunes worktrees (job label
     /// [`WorktreeOp::label`]).
     pub fn worktree_op(&self, key: &Path, op: WorktreeOp) -> Option<JobId> {
@@ -1938,6 +2637,7 @@ impl Runtime {
                     state.toplevel = Some(toplevel);
                     state.paths = Some(paths);
                     self.scheduler.request_refresh(&repo, RefreshSet::all());
+                    submit_head_info(&self.scheduler, &repo);
                     state.graph = Some(
                         GraphLoader::submit(&self.scheduler, self.runner.clone(), repo.clone()).0,
                     );
@@ -2008,6 +2708,72 @@ impl Runtime {
                 return;
             }
         }
+        if label == CONFLICT_JOB_LABEL {
+            apply_conflict(&self.scheduler, state, kind, &repo, out);
+            return;
+        }
+        if label == CONFLICT_SCAN_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::ConflictScan { resolved, unmarked })) = kind {
+                let changed = state.resolved != resolved;
+                state.resolved = resolved;
+                if changed {
+                    state.rebuild_changes();
+                }
+                let unmarked: Vec<PathBuf> = unmarked
+                    .into_iter()
+                    .filter(|p| state.is_unmerged(p))
+                    .collect();
+                submit_mark_resolved(&self.scheduler, state, unmarked);
+                if changed {
+                    out.push(RuntimeEvent::SelectionChanged { repo });
+                }
+            }
+            return;
+        }
+        if label == HEAD_INFO_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::HeadInfo(info))) = kind {
+                state.head_info = *info;
+                out.push(RuntimeEvent::HeadInfoChanged { repo });
+            }
+            return;
+        }
+        if label == MERGE_PREVIEW_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::MergePreview(mut preview))) = kind {
+                if state.merge_preview_requested.as_deref() != Some(preview.target.as_str()) {
+                    return;
+                }
+                if let Some(status) = &state.status {
+                    preview.overlap = status
+                        .changes
+                        .iter()
+                        .filter(|c| {
+                            c.state != FileState::Ignored && preview.files.contains(&c.path)
+                        })
+                        .map(|c| c.path.clone())
+                        .collect();
+                }
+                let target = preview.target.clone();
+                state.merge_preview = Some(*preview);
+                out.push(RuntimeEvent::MergePreviewLoaded { repo, target });
+                return;
+            }
+        }
+        if let EventKind::Finished(Ok(JobOutput::ConflictWritten(written))) = &kind {
+            let (path, before, after, _) = written.as_ref();
+            state.conflict_undo.push(ConflictUndo {
+                path: path.clone(),
+                before: before.clone(),
+                after: after.clone(),
+            });
+            let excess = state.conflict_undo.len().saturating_sub(MAX_CONFLICT_UNDO);
+            state.conflict_undo.drain(..excess);
+        }
+        if let EventKind::Finished(Ok(JobOutput::CommitUndone(message))) = &kind {
+            out.push(RuntimeEvent::CommitUndone {
+                repo: repo.clone(),
+                message: message.clone(),
+            });
+        }
         if label == HEAD_MESSAGE_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::HeadMessage(message))) = kind {
                 out.push(RuntimeEvent::HeadMessage { repo, message });
@@ -2030,6 +2796,10 @@ impl Runtime {
                             DiffSlot::Changes,
                             self.diff_generation,
                         );
+                    }
+                    if refresh == RefreshKind::Status {
+                        self.diff_generation += 1;
+                        after_status_conflicts(&self.scheduler, state, self.diff_generation);
                     }
                     let common = state.paths.as_ref().map(|p| p.common_dir.clone());
                     // Other open worktrees of this repository show this one's badge.
@@ -2243,6 +3013,7 @@ impl Runtime {
                 GraphLoader::submit(&self.scheduler, self.runner.clone(), state.key.clone()).0,
             );
             state.restart_search();
+            submit_head_info(&self.scheduler, &state.key);
             out.push(RuntimeEvent::GraphReset {
                 repo: state.key.clone(),
             });
@@ -2280,7 +3051,12 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             state.remote_list = Some(remotes);
         }
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
-        JobOutput::Operation(operation) => state.operation = operation,
+        JobOutput::Operation(details) => {
+            state.operation = details.as_ref().map(|d| d.kind);
+            state.operation_details = details;
+            // Resolved files are grouped with the conflicts only during one.
+            state.rebuild_changes();
+        }
         JobOutput::Stashes(stashes) => {
             state.shelves = shelves(&stashes);
             let live: std::collections::HashSet<&str> =
@@ -2302,7 +3078,13 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_)
         | JobOutput::ShelfFiles(..)
-        | JobOutput::ShelfDropped { .. } => {}
+        | JobOutput::ShelfDropped { .. }
+        | JobOutput::MergePreview(_)
+        | JobOutput::Conflict { .. }
+        | JobOutput::ConflictScan { .. }
+        | JobOutput::ConflictWritten(_)
+        | JobOutput::HeadInfo(_)
+        | JobOutput::CommitUndone(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }
@@ -2386,6 +3168,162 @@ fn new_task_job(
         let _ = backend.ref_op(repo, &delete, &restore);
     }
     Err(err)
+}
+
+/// Reads what the undo strip and the graph's `in_head` need.
+fn submit_head_info(scheduler: &JobScheduler, key: &Path) {
+    scheduler.submit(JobSpec::read(key, HEAD_INFO_JOB_LABEL, |ctx| {
+        ctx.backend()
+            .head_info(ctx.repo(), ctx.cancel_token())
+            .map(|info| JobOutput::HeadInfo(Box::new(info)))
+    }));
+}
+
+/// Starts loading the selected conflicted file as `generation`.
+fn submit_conflict(scheduler: &JobScheduler, state: &mut RepoState, generation: u64) {
+    let key = state.key.clone();
+    let (Some(conflict), Some(toplevel)) = (state.conflict.as_mut(), state.toplevel.clone()) else {
+        return;
+    };
+    conflict.generation = generation;
+    conflict.loading = true;
+    let (path, kind) = (conflict.path.clone(), conflict.kind);
+    scheduler.submit(JobSpec::read(&key, CONFLICT_JOB_LABEL, move |ctx| {
+        let file = ctx
+            .backend()
+            .conflict_file(&toplevel, &path, kind, ctx.cancel_token())?;
+        Ok(JobOutput::Conflict {
+            generation,
+            file: Box::new(file),
+        })
+    }));
+}
+
+/// Stores a loaded conflicted file if it is still the current one; a text
+/// file without conflict blocks left is staged as resolved.
+fn apply_conflict(
+    scheduler: &JobScheduler,
+    state: &mut RepoState,
+    kind: EventKind,
+    repo: &Path,
+    out: &mut Vec<RuntimeEvent>,
+) {
+    let mut resolved = None;
+    let show_base = state.conflict_show_base;
+    let Some(conflict) = state.conflict.as_mut() else {
+        return;
+    };
+    match kind {
+        EventKind::Finished(Ok(JobOutput::Conflict { generation, file }))
+            if generation == conflict.generation && file.path == conflict.path =>
+        {
+            conflict.loading = false;
+            conflict.error = None;
+            if file.is_resolved_text() {
+                resolved = Some(file.path.clone());
+            }
+            conflict.kind = file.kind;
+            conflict.file = Some(*file);
+            conflict.relayout(show_base);
+        }
+        EventKind::Finished(Err(error))
+            if error.kind != GitErrorKind::Cancelled && conflict.loading =>
+        {
+            conflict.loading = false;
+            conflict.error = Some(error);
+        }
+        _ => return,
+    }
+    if let Some(path) = resolved.filter(|p| state.is_unmerged(p)) {
+        submit_mark_resolved(scheduler, state, vec![path]);
+    }
+    out.push(RuntimeEvent::DiffChanged {
+        repo: repo.to_path_buf(),
+        slot: DiffSlot::Changes,
+    });
+}
+
+/// Stages conflicted files whose markers are gone.
+fn submit_mark_resolved(scheduler: &JobScheduler, state: &RepoState, paths: Vec<PathBuf>) {
+    let Some(toplevel) = state.toplevel.clone().filter(|_| !paths.is_empty()) else {
+        return;
+    };
+    scheduler.submit(JobSpec::write(
+        &state.key,
+        MARK_RESOLVED_JOB_LABEL,
+        RefreshSet::EMPTY.with(RefreshKind::Status),
+        move |ctx| {
+            ctx.backend()
+                .conflict_op(&toplevel, &ConflictOp::Stage { paths }, ctx.cancel_token())
+                .map(|()| JobOutput::Done)
+        },
+    ));
+}
+
+/// After a status refresh: the selected conflicted file reloads, or shows
+/// as a diff once resolved (and a diff of a file that became conflicted
+/// shows its conflicts); while conflicts are around, the resolved files are
+/// read and files whose markers went away are found.
+fn after_status_conflicts(scheduler: &JobScheduler, state: &mut RepoState, generation: u64) {
+    let diff_path = state.diff.as_ref().map(|d| d.target.path.clone());
+    if let Some(kind) = diff_path.as_deref().and_then(|p| state.conflict_kind(p)) {
+        if let Some(path) = diff_path {
+            state.diff = None;
+            state.conflict = Some(ConflictState::new(path, kind));
+        }
+    }
+    if let Some(path) = state.conflict.as_ref().map(|c| c.path.clone()) {
+        if state.is_unmerged(&path) {
+            submit_conflict(scheduler, state, generation);
+        } else {
+            state.conflict = None;
+            let target = state
+                .status
+                .as_ref()
+                .filter(|s| s.changes.iter().any(|c| c.path == path))
+                .map(|s| changes::diff_target(s, &path));
+            if let Some(target) = target {
+                state.diff = Some(DiffState::new(target, false));
+                submit_diff(scheduler, state, DiffSlot::Changes, generation);
+            }
+        }
+    }
+    let Some(status) = &state.status else {
+        return;
+    };
+    if !status.has_conflicts() && state.operation.is_none() && state.resolved.is_empty() {
+        return;
+    }
+    let (Some(toplevel), key) = (state.toplevel.clone(), state.key.clone()) else {
+        return;
+    };
+    let text: Vec<PathBuf> = status
+        .changes
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.state,
+                FileState::Unmerged(conflict) if ConflictKind::from_status(conflict).is_text()
+            )
+        })
+        .map(|c| c.path.clone())
+        .collect();
+    scheduler.submit(JobSpec::read(&key, CONFLICT_SCAN_JOB_LABEL, move |ctx| {
+        let resolved = ctx
+            .backend()
+            .resolved_paths(&toplevel, ctx.cancel_token())?;
+        let unmarked = text
+            .into_iter()
+            .filter(|path| match fs::read(toplevel.join(path)) {
+                Ok(bytes) => {
+                    !crate::diff::looks_binary(&bytes)
+                        && merge::parse_blocks(&merge::split_lines(&bytes)).is_empty()
+                }
+                Err(_) => false,
+            })
+            .collect();
+        Ok(JobOutput::ConflictScan { resolved, unmarked })
+    }));
 }
 
 /// What the shelve and restore jobs refresh: the files and the stash list.

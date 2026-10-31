@@ -92,14 +92,14 @@ func add_button(icon: StringName, tooltip: String) -> Button:
 
 ## Adds the options button with a menu of check items: `[id, label]` each,
 ## "" ids for separators.
-func set_options(options: Array[Array]) -> void:
-	_options = options
+func set_options(entries: Array[Array]) -> void:
+	_options = entries
 	_menu.clear()
-	for i: int in options.size():
-		if String(options[i][0]).is_empty():
+	for i: int in entries.size():
+		if String(entries[i][0]).is_empty():
 			_menu.add_separator()
 		else:
-			_menu.add_check_item(String(options[i][1]), i)
+			_menu.add_check_item(String(entries[i][1]), i)
 	if _options_button == null:
 		_options_button = add_button(&"Filter", "Filter options")
 		_options_button.toggle_mode = true

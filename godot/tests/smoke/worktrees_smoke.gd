@@ -208,8 +208,8 @@ static func _worktree(session: RepoSession, folder: String) -> Dictionary:
 	return {}
 
 
-static func _has_branch(session: RepoSession, name: String) -> bool:
+static func _has_branch(session: RepoSession, branch: String) -> bool:
 	for ref: Dictionary in session.branch_refs():
-		if String(ref["kind"]) == "branch" and String(ref["short_name"]) == name:
+		if String(ref["kind"]) == "branch" and String(ref["short_name"]) == branch:
 			return true
 	return false

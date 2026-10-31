@@ -13,6 +13,10 @@ use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
+use gitbello_core::merge::{
+    ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
+    UndoMode,
+};
 use gitbello_core::ops::{RefOp, SyncOp, WorktreeOp};
 use gitbello_core::repo::{Operation, Ref, Remote, RepoPaths, RepoStatus, StashEntry, Worktree};
 
@@ -223,6 +227,71 @@ impl GitBackend for FakeBackend {
     }
     fn resolve(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Option<String>, GitError> {
         Ok(None)
+    }
+    fn merge_preview(
+        &self,
+        _: &Path,
+        _: &str,
+        _: Option<&str>,
+        _: &CancelToken,
+    ) -> Result<MergePreview, GitError> {
+        Ok(MergePreview::default())
+    }
+    fn merge(
+        &self,
+        _: &Path,
+        _: &str,
+        _: MergeMode,
+        _: Option<&str>,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn operation_details(
+        &self,
+        _: &Path,
+        _: &CancelToken,
+    ) -> Result<Option<OperationDetails>, GitError> {
+        Ok(None)
+    }
+    fn conflict_file(
+        &self,
+        _: &Path,
+        path: &Path,
+        kind: ConflictKind,
+        _: &CancelToken,
+    ) -> Result<ConflictFile, GitError> {
+        Ok(ConflictFile::new(path.to_path_buf(), kind, None))
+    }
+    fn resolved_paths(&self, _: &Path, _: &CancelToken) -> Result<Vec<PathBuf>, GitError> {
+        Ok(Vec::new())
+    }
+    fn conflict_op(&self, _: &Path, _: &ConflictOp, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn continue_operation(
+        &self,
+        _: &Path,
+        _: Operation,
+        _: Option<&str>,
+        _: &CancelToken,
+    ) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn skip_operation(&self, _: &Path, _: Operation, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn head_info(&self, _: &Path, _: &CancelToken) -> Result<HeadInfo, GitError> {
+        Ok(HeadInfo::default())
+    }
+    fn undo_commit(
+        &self,
+        _: &Path,
+        _: &str,
+        _: UndoMode,
+        _: &CancelToken,
+    ) -> Result<String, GitError> {
+        Ok(String::new())
     }
 }
 

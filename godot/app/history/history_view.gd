@@ -146,13 +146,14 @@ func list_header() -> ListHeader:
 	return _list_header
 
 
-## The commit under the cursor: `{hash, subject}`, or empty.
+## The commit under the cursor: `{hash, subject, in_head}`, or empty.
 func selected_commit() -> Dictionary:
 	var row: int = _commit_list.cursor
-	var hash: String = _commit_list.hash_at(row)
-	if hash.is_empty():
+	var oid: String = _commit_list.hash_at(row)
+	if oid.is_empty():
 		return {}
-	return {"hash": hash, "subject": String(_commit_list.row_data(row).get("subject", ""))}
+	var data: Dictionary = _commit_list.row_data(row)
+	return {"hash": oid, "subject": String(data.get("subject", "")), "in_head": bool(data.get("in_head", true))}
 
 
 func _on_commit_selected() -> void:
@@ -217,7 +218,8 @@ func _on_list_key(event: InputEvent) -> void:
 		_commit_list.accept_event()
 		return
 	var key: InputEventKey = event as InputEventKey
-	var menu_key: bool = key != null and key.pressed 			and (key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed))
+	var menu_key: bool = key != null and key.pressed \
+			and (key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed))
 	if menu_key and _commit_list.cursor >= 0:
 		var height: float = _commit_list.row_height()
 		var y: float = (_commit_list.cursor + 1) * height - _commit_list.scroll_offset()

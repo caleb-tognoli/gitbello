@@ -204,6 +204,25 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal("cleanup_loaded", &[]);
             }
         }
+        RuntimeEvent::MergePreviewLoaded { repo, target } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("merge_preview_ready", &[gstr(&target).to_variant()]);
+            }
+        }
+        RuntimeEvent::HeadInfoChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("head_changed", &[]);
+            }
+        }
+        RuntimeEvent::CommitUndone { repo, message } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let (summary, body) = split_message(&message);
+                session.emit_signal(
+                    "commit_undone",
+                    &[gstr(&summary).to_variant(), gstr(&body).to_variant()],
+                );
+            }
+        }
         RuntimeEvent::CommitLoaded { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("commit_loaded", &[]);

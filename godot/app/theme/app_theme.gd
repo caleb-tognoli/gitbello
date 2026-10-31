@@ -42,6 +42,10 @@ const LIGHT_ICON_GREY: Color = Color("5a5a5a")
 const ARROW_DOWN: Texture2D = preload("res://themes/icons/GuiTreeArrowDown.svg")
 const ARROW_RIGHT: Texture2D = preload("res://themes/icons/GuiTreeArrowRight.svg")
 const CLOSE: Texture2D = preload("res://themes/icons/Close.svg")
+## The ▾ part of every split button (toolbar, worktree strip, dialogs): the
+## ARROW_DOWN icon with this padding each side, so the part is
+## 12 + 2 × 8 = 28 px wide, behind a full-height 1 px line.
+const SPLIT_ARROW_PADDING: int = 8
 ## Frames of the busy spinner (see `spinner`).
 const SPINNER_FRAMES: int = 8
 ## Monospace fonts tried in order (the first one installed wins).
@@ -57,6 +61,8 @@ static var _swatches: Dictionary[Color, DPITexture] = {}
 ## Spinner frames by `(frame, light)` and dots by colour (see `spinner`, `dot`).
 static var _spinners: Dictionary[Vector2i, DPITexture] = {}
 static var _dots: Dictionary[Color, DPITexture] = {}
+## White copies of icons, by name (see `tintable_icon`).
+static var _tintable: Dictionary[StringName, DPITexture] = {}
 
 
 class Palette:
@@ -87,6 +93,9 @@ class Palette:
 	var removed: Color
 	var modified: Color
 	var renamed: Color
+	## The two sides of a conflict: ours (the checked-out branch) and theirs.
+	var ours: Color
+	var theirs: Color
 	var syntax_keyword: Color
 	var syntax_type: Color
 	var syntax_string: Color
@@ -124,6 +133,8 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
 		p.removed = Color(0.78, 0.16, 0.16)
 		p.modified = Color(0.7, 0.45, 0.0)
 		p.renamed = Color(0.13, 0.4, 0.85)
+		p.ours = Color(0.13, 0.42, 0.85)
+		p.theirs = Color(0.85, 0.45, 0.05)
 		p.syntax_keyword = Color(0.55, 0.2, 0.7)
 		p.syntax_type = Color(0.0, 0.45, 0.55)
 		p.syntax_string = Color(0.15, 0.5, 0.1)
@@ -155,6 +166,8 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
 		p.removed = Color(0.95, 0.45, 0.45)
 		p.modified = Color(0.9, 0.72, 0.35)
 		p.renamed = Color(0.45, 0.7, 1.0)
+		p.ours = Color(0.35, 0.62, 1.0)
+		p.theirs = Color(1.0, 0.62, 0.25)
 		p.syntax_keyword = Color(0.78, 0.55, 0.95)
 		p.syntax_type = Color(0.4, 0.78, 0.85)
 		p.syntax_string = Color(0.6, 0.82, 0.5)
@@ -337,8 +350,30 @@ static func _add_buttons(theme: Theme, p: Palette, focus: StyleBox) -> void:
 	theme.set_stylebox(&"hover_pressed", &"PrimaryButton", _box(p.accent.darkened(0.1), 4, margins))
 	theme.set_stylebox(&"focus", &"PrimaryButton", _box(Color.TRANSPARENT, 4, Vector4.ZERO, accent_text, 1))
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
-			&"font_pressed_color", &"font_hover_pressed_color"]:
+			&"font_pressed_color", &"font_hover_pressed_color", &"icon_normal_color", &"icon_hover_color",
+			&"icon_focus_color", &"icon_pressed_color", &"icon_hover_pressed_color"]:
 		theme.set_color(color, &"PrimaryButton", accent_text)
+	# A split button (FormDialog.set_menu): the primary button and its ▾ as one
+	# control, a thin darker line between them
+	_variation(theme, &"SplitPrimaryButton", &"PrimaryButton")
+	_variation(theme, &"SplitMenuButton", &"PrimaryButton")
+	for state: Array in [[&"normal", p.accent], [&"hover", p.accent.lightened(0.08)],
+			[&"pressed", p.accent.darkened(0.1)], [&"hover_pressed", p.accent.darkened(0.1)],
+			[&"disabled", p.raised]]:
+		var left: StyleBoxFlat = _box(state[1], 4, margins)
+		left.corner_radius_top_right = 0
+		left.corner_radius_bottom_right = 0
+		theme.set_stylebox(state[0], &"SplitPrimaryButton", left)
+		var right: StyleBoxFlat = _box(state[1], 4, Vector4(SPLIT_ARROW_PADDING, margins.y, SPLIT_ARROW_PADDING, margins.w))
+		right.corner_radius_top_left = 0
+		right.corner_radius_bottom_left = 0
+		right.border_width_left = 1
+		right.border_color = p.border if state[0] == &"disabled" else p.accent.darkened(0.3)
+		theme.set_stylebox(state[0], &"SplitMenuButton", right)
+	# No focus ring: drawn inside one half only, it made the halves look
+	# different sizes (Enter still presses the focused half)
+	theme.set_stylebox(&"focus", &"SplitPrimaryButton", StyleBoxEmpty.new())
+	theme.set_stylebox(&"focus", &"SplitMenuButton", StyleBoxEmpty.new())
 	# The main button of a dialog that deletes or discards, in the error colour
 	_variation(theme, &"DangerButton", &"PrimaryButton")
 	var danger_text: Color = readable_text([p.error, p.error.lightened(0.08), p.error.darkened(0.1)], p.text)
@@ -350,6 +385,13 @@ static func _add_buttons(theme: Theme, p: Palette, focus: StyleBox) -> void:
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
 			&"font_pressed_color", &"font_hover_pressed_color"]:
 		theme.set_color(color, &"DangerButton", danger_text)
+	# A secondary button that throws work away (the banner's Abort): text and
+	# icon in the error colour
+	_variation(theme, &"DangerTextButton", &"Button")
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
+			&"font_pressed_color", &"font_hover_pressed_color", &"icon_normal_color", &"icon_hover_color",
+			&"icon_focus_color", &"icon_pressed_color", &"icon_hover_pressed_color"]:
+		theme.set_color(color, &"DangerTextButton", p.error)
 
 
 ## Text fields: raised, outlined, in the accent colour while focused.
@@ -412,7 +454,7 @@ static func _add_menus(theme: Theme, p: Palette) -> void:
 
 ## Trees and item lists: sunk into the background, rows shaded with the text
 ## colour when hovered and in the accent colour when selected.
-static func _add_lists(theme: Theme, p: Palette, focus: StyleBox) -> void:
+static func _add_lists(theme: Theme, p: Palette, _focus: StyleBox) -> void:
 	var margins: Vector4 = Vector4(4, 3, 4, 3)
 	var hovered: StyleBoxFlat = _box(p.hovered, 3, margins)
 	var cursor: StyleBoxFlat = _box(Color.TRANSPARENT, 3, margins, p.text_muted, 1)
@@ -558,6 +600,37 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"note_width", &"FormDialog", 380)
 	theme.set_constant(&"separation", &"FormDialog", 8)
 	theme.set_constant(&"section_separation", &"FormDialog", 14)
+	theme.set_color(&"success_color", &"FormDialog", p.added)
+	theme.set_color(&"warning_color", &"FormDialog", p.modified)
+	theme.set_color(&"error_color", &"FormDialog", p.error)
+	theme.set_constant(&"icon_size", &"FormDialog", 16)
+	# A fold toggle (chevron and text) lined up with the text around it
+	_variation(theme, &"DisclosureButton", &"Button")
+	for state: StringName in [&"normal", &"hover", &"pressed", &"hover_pressed", &"focus", &"disabled"]:
+		theme.set_stylebox(state, &"DisclosureButton", _box(Color.TRANSPARENT, 0, Vector4(0, 2, 4, 2)))
+	theme.set_color(&"font_hover_color", &"DisclosureButton", p.text)
+	theme.set_color(&"font_pressed_color", &"DisclosureButton", p.text)
+	# A branch, tag or commit named in a dialog ("topic → main")
+	_variation(theme, &"RefChip", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"RefChip", _box(p.raised, 4, Vector4(8, 3, 10, 3), p.border, 1))
+	# One of a dialog's choices: a row with an icon, a title and a hint
+	_variation(theme, &"ChoiceRow", &"Button")
+	theme.set_stylebox(&"normal", &"ChoiceRow", _box(p.raised, 6, Vector4.ZERO, p.border, 1))
+	theme.set_stylebox(&"hover", &"ChoiceRow", _box(p.hover, 6, Vector4.ZERO, p.border, 1))
+	theme.set_stylebox(&"pressed", &"ChoiceRow", _box(p.hover, 6, Vector4.ZERO, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"ChoiceRow", _box(p.hover, 6, Vector4.ZERO, p.accent, 1))
+	theme.set_stylebox(&"focus", &"ChoiceRow", _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 1))
+	_variation(theme, &"ChoiceRowBox", &"MarginContainer")
+	for side: String in ["left", "right"]:
+		theme.set_constant(&"margin_" + side, &"ChoiceRowBox", 12)
+	for side: String in ["top", "bottom"]:
+		theme.set_constant(&"margin_" + side, &"ChoiceRowBox", 8)
+	_variation(theme, &"ChoiceRowLines", &"VBoxContainer")
+	theme.set_constant(&"separation", &"ChoiceRowLines", 0)
+	# A one-line warning in a dialog, tinted
+	_variation(theme, &"Callout", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"Callout", _box(p.background.blend(Color(p.modified, 0.12)), 4,
+			Vector4(8, 6, 8, 6), Color(p.modified, 0.5), 1))
 	theme.set_constant(&"width", &"SettingsDialog", 840)
 	theme.set_constant(&"height", &"SettingsDialog", 540)
 	theme.set_constant(&"label_width", &"SettingsDialog", 220)
@@ -653,6 +726,8 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	for entry: Array in [[&"added", p.added], [&"modified", p.modified], [&"deleted", p.removed],
 			[&"renamed", p.renamed], [&"untracked", p.added], [&"conflict", p.error]]:
 		theme.set_color(StringName("%s_color" % entry[0]), &"ChangeList", entry[1])
+	theme.set_color(&"resolved_color", &"ChangeList", p.added)
+	theme.set_color(&"divider_color", &"ChangeList", p.border)
 	theme.set_constant(&"padding", &"ChangeList", 8)
 	theme.set_constant(&"code_width", &"ChangeList", 22)
 	theme.set_constant(&"icon_size", &"ChangeList", 14)
@@ -683,6 +758,27 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"expander_color", &"DiffView", p.text_muted)
 	theme.set_color(&"expander_hover_color", &"DiffView", p.text)
 	theme.set_color(&"expander_hover_bg", &"DiffView", p.hover)
+	# Conflict blocks (the resolver): ours and theirs in their own colours (not
+	# the diff's red and green), the base between them, block buttons
+	theme.set_color(&"ours_bg", &"DiffView", p.background.blend(Color(p.ours, 0.16)))
+	theme.set_color(&"theirs_bg", &"DiffView", p.background.blend(Color(p.theirs, 0.14)))
+	theme.set_color(&"ours_mark", &"DiffView", p.ours)
+	theme.set_color(&"theirs_mark", &"DiffView", p.theirs)
+	theme.set_color(&"base_bg", &"DiffView", p.background.blend(Color(p.text_muted, 0.12)))
+	theme.set_color(&"base_mark", &"DiffView", p.text_muted)
+	theme.set_color(&"block_header_bg", &"DiffView", p.surface)
+	theme.set_color(&"block_header_color", &"DiffView", p.text_muted)
+	theme.set_color(&"block_icon_color", &"DiffView", p.error)
+	theme.set_color(&"choice_flash", &"DiffView", Color(p.added, 0.3))
+	theme.set_color(&"block_button_bg", &"DiffView", p.raised)
+	theme.set_color(&"block_button_hover_bg", &"DiffView", p.hover)
+	theme.set_color(&"block_button_color", &"DiffView", p.text)
+	theme.set_font_size(&"header_font_size", &"DiffView", 13)
+	# A conflict without blocks: its icon and the binary sides' sizes
+	theme.set_constant(&"card_icon_size", &"DiffView", 32)
+	_variation(theme, &"ConflictCardTable", &"GridContainer")
+	theme.set_constant(&"h_separation", &"ConflictCardTable", 8)
+	theme.set_constant(&"v_separation", &"ConflictCardTable", 2)
 	theme.set_constant(&"row_height", &"DiffView", 20)
 	theme.set_constant(&"padding", &"DiffView", 8)
 
@@ -717,7 +813,8 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	# quieter than a chip until hovered; the all-worktrees ▾ as a round chip
 	_variation(theme, &"ChipSplit", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ChipSplit", 0)
-	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1], [&"ChipActionMenu", Vector4(5, 4, 7, 4), 2],
+	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1],
+			[&"ChipActionMenu", Vector4(SPLIT_ARROW_PADDING, 4, SPLIT_ARROW_PADDING, 4), 2],
 			[&"ChipIconButton", Vector4(5, 4, 5, 4), 0]]:
 		_variation(theme, entry[0], &"Button")
 		for state: Array in [[&"normal", Color.TRANSPARENT, p.border], [&"hover", p.hover, p.border],
@@ -741,7 +838,8 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"separation", &"HeaderRow", 8)
 	_variation(theme, &"BigButton", &"Button")
 	_variation(theme, &"BigMenuButton", &"BigButton")
-	for entry: Array in [[&"BigButton", Vector4(12, 7, 14, 7)], [&"BigMenuButton", Vector4(12, 7, 40, 7)]]:
+	var big_arrow: float = ARROW_DOWN.get_width() + 2 * SPLIT_ARROW_PADDING
+	for entry: Array in [[&"BigButton", Vector4(12, 7, 14, 7)], [&"BigMenuButton", Vector4(12, 7, 12 + big_arrow, 7)]]:
 		var margins: Vector4 = entry[1]
 		theme.set_stylebox(&"normal", entry[0], _box(p.raised, 6, margins, p.border, 1))
 		theme.set_stylebox(&"hover", entry[0], _box(p.hover, 6, margins, p.border, 1))
@@ -751,7 +849,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 1))
 	theme.set_font_size(&"font_size", &"BigButton", 15)
 	theme.set_constant(&"h_separation", &"BigButton", 8)
-	theme.set_constant(&"arrow_width", &"BigButton", 28)
+	theme.set_constant(&"arrow_width", &"BigButton", ARROW_DOWN.get_width() + 2 * SPLIT_ARROW_PADDING)
 	theme.set_color(&"separator_color", &"BigButton", p.border)
 	theme.set_color(&"progress_color", &"BigButton", p.accent)
 	# The Changes | History switch: joined buttons, the shown one in the accent
@@ -804,6 +902,18 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	banner.border_color = p.error
 	banner.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"OperationBanner", banner)
+	theme.set_color(&"icon_color", &"OperationBanner", p.error)
+	# The rebase step in the banner, "2 / 5"
+	_variation(theme, &"StepPill", &"Label")
+	theme.set_stylebox(&"normal", &"StepPill", _box(Color(p.text, 0.12), 9, Vector4(7, 0, 7, 1)))
+	theme.set_font_size(&"font_size", &"StepPill", 12)
+	# Once every conflict is resolved, it turns green: ready to commit
+	_variation(theme, &"OperationBannerReady", &"PanelContainer")
+	var ready_banner: StyleBoxFlat = _box(p.background.blend(Color(p.added, 0.16)), 0, Vector4(12, 6, 8, 6))
+	ready_banner.border_color = p.added
+	ready_banner.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"OperationBannerReady", ready_banner)
+	theme.set_color(&"icon_color", &"OperationBannerReady", p.added)
 	# The busy overlay dims one worktree's panes
 	_variation(theme, &"BusyOverlay", &"Panel")
 	theme.set_stylebox(&"panel", &"BusyOverlay", _box(Color(p.background, 0.7)))
@@ -815,6 +925,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"section_color", &"BranchPopover", p.text_muted)
 	theme.set_color(&"badge_color", &"BranchPopover", p.text_muted)
 	theme.set_color(&"head_color", &"BranchPopover", p.head)
+	theme.set_color(&"icon_color", &"BranchPopover", Color(1, 1, 1, 0.6))
 	# Remotes… and Tags…
 	theme.set_constant(&"width", &"ManageDialog", 620)
 	theme.set_constant(&"height", &"ManageDialog", 380)
@@ -836,6 +947,7 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"border_color", &"PickBox", p.text_muted)
 	theme.set_color(&"fill_color", &"PickBox", p.accent)
 	theme.set_color(&"mark_color", &"PickBox", readable_text([p.accent], DARK_TEXT))
+	theme.set_constant(&"dim_percent", &"PickBox", 40)
 	# The line above every list (changed files, commits, a commit's files):
 	# one height and one text style, with or without the check-all box. A
 	# tinted band with a divider, so it stays apart from a selected first row.
@@ -853,6 +965,10 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	for entry: Array in [[&"ListHeaderAdded", &"StatAdded"], [&"ListHeaderRemoved", &"StatRemoved"]]:
 		_variation(theme, entry[0], entry[1])
 		theme.set_font_size(&"font_size", entry[0], 13)
+	# A short status on the right of a list header ("1 of 2 resolved").
+	_variation(theme, &"ListHeaderStatus", &"Label")
+	theme.set_font_size(&"font_size", &"ListHeaderStatus", 13)
+	theme.set_constant(&"icon_size", &"ListHeaderStatus", 14)
 	# The filter over the changed files: one field (outlined like a text box,
 	# in the accent colour while focused) with a search icon, a flat text box,
 	# a divider and the options button
@@ -1031,6 +1147,18 @@ static func recolor_icons(light: bool) -> void:
 ## The icon `name` (an SVG in `ICON_DIR` without its extension).
 static func icon(name: StringName) -> Texture2D:
 	return load(ICON_DIR.path_join("%s.svg" % name)) as Texture2D
+
+
+## The icon `name` in white, for a colour given by `modulate`: the shared
+## icon is grey, darker in the light theme, which would darken the colour.
+static func tintable_icon(name: StringName) -> Texture2D:
+	if name in ICON_EXCEPTIONS:
+		return icon(name)
+	if not _tintable.has(name):
+		var copy: DPITexture = (icon(name) as DPITexture).duplicate() as DPITexture
+		copy.color_map = {DARK_ICON_GREY: Color.WHITE}
+		_tintable[name] = copy
+	return _tintable[name]
 
 
 ## A dot of `color` the size of an icon, such as an accent colour to pick.

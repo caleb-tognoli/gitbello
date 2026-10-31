@@ -2,17 +2,20 @@
 
 use std::path::Path;
 
-use gitbello_core::changes::{change_code, is_conflicted, FilePick, Selection};
+use gitbello_core::changes::{change_code, is_conflicted, FilePick};
 use gitbello_core::diff::{
     changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LayoutRow, LineKind,
 };
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
+use gitbello_core::merge::{
+    ConflictFile, ConflictKind, ConflictRow, ConflictRowKind, MergePreview,
+};
 use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
     RefKind, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
-use gitbello_core::runtime::DiffState;
+use gitbello_core::runtime::{ConflictState, DiffState, RepoState};
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
 use godot::prelude::*;
 
@@ -383,14 +386,263 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
 }
 
 /// A Changes view row: `{path, original_path, code, pick, conflicted, as_staged}`.
-pub fn change_row(change: &FileChange, selection: &Selection) -> VarDictionary {
+/// `{path, original_path, code, pick, conflicted, resolved, as_staged,
+/// locked}`; `resolved` marks a file whose conflicts were resolved during
+/// the operation, `locked` a checkbox that shows the index (a merge or
+/// cherry-pick is being committed).
+pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
+    let selection = state.selection();
     vdict! {
         "path" => &path_str(&change.path),
         "original_path" => &change.original_path.as_deref().map_or_else(GString::new, path_str),
         "code" => change_code(change),
-        "pick" => selection.state(&change.path).id(),
+        "pick" => state.pick_state(&change.path).id(),
         "conflicted" => is_conflicted(change),
+        "resolved" => state.is_resolved(&change.path),
         "as_staged" => selection.pick(&change.path) == Some(&FilePick::AsStaged),
+        "locked" => state.commit_mode().locks_picks(),
+    }
+}
+
+/// The resolver's `diff_info` (see [`diff_info`]): `kind` and `content` are
+/// `conflict`, plus `conflict` = `{kind, side, ours_label, theirs_label, has_base,
+/// show_base, blocks, ours_size, theirs_size, first_row, first_split_row}`
+/// (the rows of the first block's header; sizes -1 when a side is missing).
+pub fn conflict_info(state: &ConflictState, show_base: bool) -> VarDictionary {
+    let mut info = vdict! {
+        "path" => &path_str(state.path()),
+        "kind" => "conflict",
+        "content" => "conflict",
+        "pickable" => false,
+        "as_staged" => false,
+        "can_expand" => false,
+        "whole" => false,
+    };
+    let size = |s: Option<u64>| s.map_or(-1, |s| i64::try_from(s).unwrap_or(i64::MAX));
+    match (state.file(), state.error()) {
+        (_, Some(error)) if !state.is_loading() => {
+            info.set("state", "error");
+            info.set("error", &error_dict(error));
+        }
+        (None, _) => info.set("state", "loading"),
+        (Some(file), _) => {
+            info.set(
+                "state",
+                if state.is_loading() {
+                    "loading"
+                } else {
+                    "ready"
+                },
+            );
+            let layout = state.layout();
+            let first = |mut rows: Box<dyn Iterator<Item = bool> + '_>| {
+                rows.position(|header| header).map_or(-1, to_i64)
+            };
+            let header = |r: &ConflictRow| r.kind == ConflictRowKind::Header;
+            let first_row = first(Box::new(layout.unified.iter().map(header)));
+            let first_split_row = first(Box::new(
+                layout
+                    .split
+                    .iter()
+                    .map(|(l, _)| l.is_some_and(|r| header(&r))),
+            ));
+            let block = file.blocks.first();
+            info.set("line_count", to_i64(layout.unified.len()));
+            info.set("split_count", to_i64(layout.split.len()));
+            info.set("max_line", to_i64(file.line_count()));
+            info.set(
+                "conflict",
+                &vdict! {
+                    "kind" => state.kind().id(),
+                    "side" => conflict_side(state.kind()),
+                    "ours_label" => &gstr(block.map_or("", |b| b.ours_label.as_str())),
+                    "theirs_label" => &gstr(block.map_or("", |b| b.theirs_label.as_str())),
+                    "has_base" => file.has_base(),
+                    "show_base" => show_base,
+                    "blocks" => to_i64(file.blocks.len()),
+                    "ours_size" => size(file.ours_size),
+                    "theirs_size" => size(file.theirs_size),
+                    "first_row" => first_row,
+                    "first_split_row" => first_split_row,
+                },
+            );
+        }
+    }
+    info
+}
+
+/// The side a non-text conflict is about: `ours` or `theirs` deleted a
+/// modified file (`modify_delete`), or is the only one with it
+/// (`added_by_one`); "" otherwise.
+fn conflict_side(kind: ConflictKind) -> &'static str {
+    match kind {
+        ConflictKind::ModifyDelete {
+            deleted_by_us: true,
+        }
+        | ConflictKind::AddedByOne { by_us: true } => "ours",
+        ConflictKind::ModifyDelete {
+            deleted_by_us: false,
+        }
+        | ConflictKind::AddedByOne { by_us: false } => "theirs",
+        _ => "",
+    }
+}
+
+/// One resolver row as a `diff_line`-style line (`index` -1, no picks):
+/// context `kind` 1, ours 3 (drawn as removed), theirs 2 (as added), base 4,
+/// a block header 0 with `text` "Conflict 1 of 3"; with `block` and `side`
+/// (`context`, `header`, `ours`, `base`, `theirs`).
+fn conflict_line(
+    file: &ConflictFile,
+    row: &ConflictRow,
+    language: Option<Language>,
+) -> VarDictionary {
+    let number = row.line.map_or(0, |l| to_i64(l + 1));
+    let text = row
+        .line
+        .and_then(|l| file.line(l))
+        .map(display_text)
+        .unwrap_or_default();
+    let (kind, old, new): (i64, i64, i64) = match row.kind {
+        ConflictRowKind::Context => (1, number, number),
+        ConflictRowKind::Header => (0, 0, 0),
+        ConflictRowKind::Ours => (3, number, 0),
+        ConflictRowKind::Base => (4, number, 0),
+        ConflictRowKind::Theirs => (2, 0, number),
+    };
+    let block = row.block.map_or(-1, to_i64);
+    let text = if row.kind == ConflictRowKind::Header {
+        format!("Conflict {} of {}", block + 1, file.blocks.len())
+    } else {
+        text
+    };
+    let syntax = if row.kind == ConflictRowKind::Header {
+        PackedInt32Array::new()
+    } else {
+        syntax_of(language, &text)
+    };
+    vdict! {
+        "index" => -1,
+        "kind" => kind,
+        "old" => old,
+        "new" => new,
+        "text" => &gstr(&text),
+        "no_newline" => false,
+        "hl" => &PackedInt32Array::new(),
+        "syntax" => &syntax,
+        "block" => block,
+        "side" => row.kind.id(),
+    }
+}
+
+/// Rows `start..start + count` of the resolver, unified (a line per row) or
+/// side by side (`{left, right}`: ours left, theirs right; context, headers
+/// and base lines on both). See [`conflict_line`].
+pub fn conflict_rows(
+    state: &ConflictState,
+    split: bool,
+    start: usize,
+    count: usize,
+) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    let Some(file) = state.file() else {
+        return out;
+    };
+    let language = diff_language(state.path());
+    let layout = state.layout();
+    if split {
+        for (left, right) in layout.split.iter().skip(start).take(count) {
+            let side = |row: &Option<ConflictRow>| {
+                row.as_ref()
+                    .map(|r| conflict_line(file, r, language))
+                    .unwrap_or_default()
+            };
+            out.push(&vdict! { "left" => &side(left), "right" => &side(right) });
+        }
+    } else {
+        for row in layout.unified.iter().skip(start).take(count) {
+            out.push(&conflict_line(file, row, language));
+        }
+    }
+    out
+}
+
+/// `{target, oid, up_to_date, can_ff, commit_count, commits, file_count,
+/// conflicts, overlap, message}`: `commits` are `{oid, subject, author,
+/// time}` (the first 50), `conflicts` `{path, kind}` with git's conflict
+/// type, `overlap` the local changes the merge touches.
+pub fn merge_preview(preview: &MergePreview) -> VarDictionary {
+    let mut commits = Array::<VarDictionary>::new();
+    for commit in &preview.commits {
+        commits.push(&vdict! {
+            "oid" => &gstr(&commit.oid),
+            "subject" => &gstr(&commit.subject),
+            "author" => &gstr(&commit.author),
+            "time" => commit.time,
+        });
+    }
+    let mut conflicts = Array::<VarDictionary>::new();
+    for conflict in &preview.conflicts {
+        conflicts.push(&vdict! {
+            "path" => &path_str(&conflict.path),
+            "kind" => &gstr(&conflict.kind),
+        });
+    }
+    let overlap: PackedStringArray = preview.overlap.iter().map(|p| path_str(p)).collect();
+    vdict! {
+        "target" => &gstr(&preview.target),
+        "oid" => &gstr(&preview.oid),
+        "up_to_date" => preview.up_to_date,
+        "can_ff" => preview.can_ff,
+        "commit_count" => to_i64(preview.commit_count),
+        "commits" => &commits,
+        "file_count" => to_i64(preview.files.len()),
+        "conflicts" => &conflicts,
+        "overlap" => &overlap,
+        "message" => &gstr(&preview.message),
+    }
+}
+
+/// `{kind, head_name, other_name, other_oid, conflicts, resolved, step,
+/// steps, message, commit_mode}`, or empty with no operation. `kind` as in
+/// [`operation_id`]; `conflicts` counts the files left, `step` and `steps`
+/// are 0 outside a rebase.
+pub fn operation_info(state: &RepoState) -> VarDictionary {
+    let Some(details) = state.operation_details() else {
+        return VarDictionary::new();
+    };
+    let (left, resolved) = state.conflict_counts();
+    let (step, steps) = details.step.unwrap_or((0, 0));
+    let head = details
+        .head_name
+        .clone()
+        .or_else(|| state.current_branch().map(str::to_owned))
+        .unwrap_or_default();
+    vdict! {
+        "kind" => operation_id(Some(details.kind)),
+        "head_name" => &gstr(&head),
+        "other_name" => &gstr(details.other_name.as_deref().unwrap_or_default()),
+        "other_oid" => &gstr(details.other_oid.as_deref().unwrap_or_default()),
+        "conflicts" => to_i64(left),
+        "resolved" => to_i64(resolved),
+        "step" => i64::from(step),
+        "steps" => i64::from(steps),
+        "message" => &gstr(&details.message),
+        "commit_mode" => state.commit_mode().id(),
+    }
+}
+
+/// `{oid, subject, body, time, merge}`, or empty when nothing can be undone.
+pub fn undoable_commit(state: &RepoState) -> VarDictionary {
+    let Some(commit) = state.undoable_commit() else {
+        return VarDictionary::new();
+    };
+    vdict! {
+        "oid" => &gstr(&commit.oid),
+        "subject" => &gstr(&commit.subject),
+        "body" => &gstr(&commit.body),
+        "time" => commit.time,
+        "merge" => commit.is_merge(),
     }
 }
 

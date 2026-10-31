@@ -9,9 +9,9 @@ func _ready() -> void:
 	apply(String(Core.settings().get("language", "system")))
 
 
-static func resolved(choice: String, os_locale: String = "") -> String:
-	if choice != "system":
-		return choice if choice in ["en", "it"] else "en"
+func resolved(value: String, os_locale: String = "") -> String:
+	if value != "system":
+		return value if value in ["en", "it"] else "en"
 	var locale: String = OS.get_locale() if os_locale.is_empty() else os_locale
 	return "it" if locale.to_lower().begins_with("it") else "en"
 
@@ -33,7 +33,7 @@ func set_choice(value: String) -> String:
 	return config_error(error)
 
 
-static func launch_error(error: String) -> String:
+func launch_error(error: String) -> String:
 	if error == "the command is empty":
 		return TranslationServer.translate("The command is empty.")
 	if error == "no terminal program found; set `terminal_command` in the settings":
@@ -50,7 +50,7 @@ static func launch_error(error: String) -> String:
 	return runtime_error(error)
 
 
-static func runtime_error(error: String) -> String:
+func runtime_error(error: String) -> String:
 	var kinds: PackedStringArray = [
 		"git executable not found", "git is older than the supported minimum", "could not start git",
 		"I/O error while talking to git", "not a git repository", "authentication failed",
@@ -68,7 +68,7 @@ static func runtime_error(error: String) -> String:
 	return error
 
 
-static func config_error(error: String) -> String:
+func config_error(error: String) -> String:
 	var prefixes: Dictionary = {
 		"cannot read ": "Cannot read %s: %s",
 		"cannot write ": "Cannot write %s: %s",

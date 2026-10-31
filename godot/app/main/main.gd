@@ -35,7 +35,6 @@ var _fit_queued: bool = false
 @onready var _content: Control = %Content
 @onready var _welcome: Welcome = %Welcome
 @onready var _git_log: GitLogPanel = %GitLog
-@onready var _status_bar: Control = %StatusBar
 @onready var _status_label: Label = %StatusLabel
 @onready var _version_label: Label = %VersionLabel
 @onready var _toasts: Toasts = %Toasts
@@ -433,6 +432,7 @@ func _register_actions() -> void:
 	_register_change_actions()
 	_register_sync_actions()
 	_register_branch_actions()
+	_register_merge_actions()
 	_register_worktree_actions()
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings)
 	Actions.register(&"diff.toggle_side_by_side", "Side-by-side diff", "View",
@@ -731,6 +731,98 @@ func _register_branch_actions() -> void:
 			func() -> bool: return not target_commit.call().is_empty())
 
 
+## Merge workflows (PLAN §4): merging into the current branch, the operation
+## banner, the conflict resolver and the undo strip.
+func _register_merge_actions() -> void:
+	var page: Callable = func() -> RepoTab: return current_page()
+	var is_ready: Callable = func() -> bool:
+		return page.call() != null and page.call().session != null and page.call().session.is_ready()
+	var session: Callable = func() -> RepoSession: return page.call().session
+	var ops: Callable = func() -> RepoOps: return page.call().ops()
+	var changes: Callable = func() -> ChangesView: return page.call().changes()
+	var idle: Callable = func() -> bool: return is_ready.call() and session.call().operation().is_empty()
+	var has_head: Callable = func() -> bool:
+		return idle.call() and not String(session.call().status().get("oid", "")).is_empty()
+	var ref: Callable = func() -> Dictionary: return page.call().ref_target() if is_ready.call() else {}
+	Actions.register(&"branch.merge", "Merge into current branch…", "Branches",
+			func() -> void:
+				var target: Dictionary = ref.call()
+				if target.is_empty():
+					current_view().open_merge_picker()
+				else:
+					ops.call().merge_into_current(String(target["name"]), String(target["short"])),
+			PackedStringArray(["Ctrl+Shift+B"]),
+			func() -> bool:
+				var target: Dictionary = ref.call()
+				return has_head.call() and (target.is_empty() or (String(target["type"]) in ["branch", "remote", "tag"]
+						and not bool(target.get("is_head", false)))),
+			func() -> String:
+				return "Finish the operation in progress first." if is_ready.call() and not idle.call() \
+						else "There is no commit to merge into yet.")
+	Actions.register(&"commit.merge", "Merge commit into current branch…", "History",
+			func() -> void:
+				var target: Dictionary = page.call().commit_target()
+				ops.call().merge_into_current(String(target["hash"]), String(target["hash"]).left(7)),
+			PackedStringArray(),
+			func() -> bool:
+				var target: Dictionary = page.call().commit_target() if is_ready.call() else {}
+				return has_head.call() and not target.is_empty() and not bool(target.get("in_head", true)))
+	var operation: Callable = func() -> String: return session.call().operation() if is_ready.call() else ""
+	var conflicts: Callable = func() -> int:
+		return int(session.call().operation_info().get("conflicts", 0)) if is_ready.call() else 0
+	Actions.register(&"operation.continue", "Continue the operation in progress", "Repository",
+			func() -> void: current_view().continue_operation(), PackedStringArray(),
+			func() -> bool: return not String(operation.call()).is_empty() and String(operation.call()) != "bisect" \
+					and int(conflicts.call()) == 0,
+			func() -> String:
+				return "Resolve the conflicts first." if int(conflicts.call()) > 0 else "Nothing is in progress.")
+	Actions.register(&"operation.skip", "Skip this commit of the rebase", "Repository",
+			func() -> void: ops.call().skip_operation(), PackedStringArray(),
+			func() -> bool: return String(operation.call()) == "rebase")
+	Actions.register(&"operation.open_resolver", "Open the conflict resolver", "Repository",
+			func() -> void: current_view().open_resolver(), PackedStringArray(),
+			func() -> bool: return int(conflicts.call()) > 0, _says("There are no conflicts."))
+	# The resolver: the block at the diff's cursor, else the first one.
+	var blocks: Callable = func() -> bool:
+		return is_ready.call() and page.call().view == WorktreeView.View.CHANGES and changes.call().has_conflict_blocks()
+	var no_blocks: Callable = _says("Select a conflicted file first.")
+	for entry: Array in [[&"conflict.use_ours", "Use ours for this conflict", "ours", "Alt+O"],
+			[&"conflict.use_theirs", "Use theirs for this conflict", "theirs", "Alt+T"],
+			[&"conflict.use_both", "Use both (ours, then theirs)", "ours_theirs", "Alt+B"],
+			[&"conflict.use_both_reversed", "Use both (theirs, then ours)", "theirs_ours", "Alt+Shift+B"]]:
+		var choice: String = entry[2]
+		Actions.register(entry[0], entry[1], "Conflicts",
+				func() -> void: changes.call().resolve_block(changes.call().current_block(), choice),
+				PackedStringArray([entry[3]]), blocks, no_blocks)
+	Actions.register(&"conflict.next", "Next conflict", "Conflicts",
+			func() -> void: changes.call().step_conflict(true), PackedStringArray(["F8"]), blocks, no_blocks)
+	Actions.register(&"conflict.previous", "Previous conflict", "Conflicts",
+			func() -> void: changes.call().step_conflict(false), PackedStringArray(["Shift+F8"]), blocks, no_blocks)
+	Actions.register(&"conflict.undo", "Undo last conflict choice", "Conflicts",
+			func() -> void: ops.call().undo_block_choice(), PackedStringArray(["Ctrl+Z"]),
+			func() -> bool: return is_ready.call() and session.call().can_undo_block_choice(),
+			_says("There is no conflict choice to undo."))
+	# Whole files, from the changed files' menu.
+	var row: Callable = func() -> Dictionary:
+		if not is_ready.call() or page.call().view != WorktreeView.View.CHANGES:
+			return {}
+		var list: ChangeList = changes.call().list()
+		return list.row(list.cursor)
+	for entry: Array in [[&"conflict.file_ours", "Use ours for the whole file", "ours"],
+			[&"conflict.file_theirs", "Use theirs for the whole file", "theirs"]]:
+		var choice: String = entry[2]
+		Actions.register(entry[0], entry[1], "Conflicts",
+				func() -> void: ops.call().resolve_file(String(row.call()["path"]), choice), PackedStringArray(),
+				func() -> bool: return bool(row.call().get("conflicted", false)))
+	Actions.register(&"conflict.reopen", "Reopen conflicts…", "Conflicts",
+			func() -> void: ops.call().reopen_conflicts(String(row.call()["path"])), PackedStringArray(),
+			func() -> bool: return bool(row.call().get("resolved", false)))
+	Actions.register(&"commit.undo", "Undo last commit", "Changes",
+			func() -> void: ops.call().undo_commit(), PackedStringArray(),
+			func() -> bool: return is_ready.call() and not session.call().undoable_commit().is_empty(),
+			_says("There is no unpushed commit to undo."))
+
+
 ## Worktree actions: the new-task and cleanup flows, and a chip's show,
 ## open, lock, remove and prune.
 func _register_worktree_actions() -> void:
@@ -820,8 +912,8 @@ func _start_point(ref: Dictionary, commit: Dictionary) -> Array:
 		return [String(ref["name"]), String(ref["short"])]
 	var head_oid: String = String(current_page().session.status().get("oid", ""))
 	if not commit.is_empty() and String(commit["hash"]) != head_oid:
-		var hash: String = String(commit["hash"])
-		return [hash, "%s “%s”" % [hash.left(7), String(commit["subject"])]]
+		var oid: String = String(commit["hash"])
+		return [oid, "%s “%s”" % [oid.left(7), String(commit["subject"])]]
 	var head: String = current_page().session.current_branch()
 	return ["HEAD", head if not head.is_empty() else "HEAD"]
 
@@ -844,7 +936,7 @@ func _error_fixes(repo_path: String, error: Dictionary) -> Array[Dictionary]:
 			fixes.append({"label": "Pull (merge)", "run": func() -> void: ops.pull("merge")})
 			fixes.append({"label": "Pull (rebase)", "run": func() -> void: ops.pull("rebase")})
 		"conflict":
-			if command.begins_with("cherry-pick") or command.begins_with("pull"):
+			if command.begins_with("pull"):
 				fixes.append({"label": "Abort", "run": func() -> void: view.session.abort_operation()})
 		"checked_out_elsewhere":
 			var stderr: String = String(error.get("stderr", ""))
@@ -933,13 +1025,13 @@ func _palette_entries() -> Array[Dictionary]:
 			if bool(ref["is_head"]):
 				continue
 			var local: bool = String(ref["kind"]) == "branch"
-			var name: String = String(ref["short_name"])
+			var branch_name: String = String(ref["short_name"])
 			var full: String = String(ref["name"])
 			var ops: RepoOps = page.ops()
 			entries.append({
-				"label": tr("Check out: %s") % name,
+				"label": tr("Check out: %s") % branch_name,
 				"detail": tr("branch") if local else tr("remote branch"),
-				"run": (func() -> void: ops.checkout_branch(name)) if local
+				"run": (func() -> void: ops.checkout_branch(branch_name)) if local
 						else (func() -> void: ops.checkout_remote(full)),
 			})
 	for i: int in _pages.size():

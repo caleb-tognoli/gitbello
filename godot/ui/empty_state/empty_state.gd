@@ -13,8 +13,8 @@ extends CenterContainer
 ## Shows `title`, `hint` and one button per entry of `actions`:
 ## `{id: StringName, label: String (else the action's), icon: StringName}`.
 ## Disabled actions are left out.
-func show_state(title: String, hint: String, actions: Array[Dictionary]) -> void:
-	_title.text = tr(title)
+func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> void:
+	_title.text = tr(heading)
 	_hint.text = tr(hint)
 	_hint.visible = not hint.is_empty()
 	clear_buttons()

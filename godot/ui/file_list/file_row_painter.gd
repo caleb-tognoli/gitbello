@@ -5,8 +5,9 @@ extends RefCounted
 ## with everything but the file name muted. When the row is too narrow the
 ## folder is cut first, so the file name stays visible as long as it can.
 ## With `show_picks`, a commit-selection checkbox comes first (from the row's
-## `pick`; conflicted rows have none). Colors and sizes come from the
-## `ChangeList` theme type.
+## `pick`), dimmed where it cannot be changed: a conflicted file (empty) or a
+## `locked` row. A `resolved` file shows a tick instead of its status icon.
+## Colors and sizes come from the `ChangeList` theme type.
 
 const THEME_TYPE: StringName = &"ChangeList"
 const CODE_COLORS: Dictionary[String, StringName] = {
@@ -49,6 +50,7 @@ var _icon_size: float = 0.0
 var _path_color: Color = Color.WHITE
 var _dir_color: Color = Color.WHITE
 var _code_colors: Dictionary[String, Color] = {}
+var _resolved_color: Color = Color.WHITE
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
 var _picks: PickPainter = PickPainter.new()
@@ -66,6 +68,7 @@ func update_theme(control: Control) -> void:
 	_path_color = control.get_theme_color(&"path_color", THEME_TYPE)
 	_dir_color = control.get_theme_color(&"dir_color", THEME_TYPE)
 	_picks.update_theme(control)
+	_resolved_color = control.get_theme_color(&"resolved_color", THEME_TYPE)
 	_code_colors.clear()
 	for code: String in CODE_COLORS:
 		_code_colors[code] = control.get_theme_color(CODE_COLORS[code], THEME_TYPE)
@@ -77,15 +80,17 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	var baseline: float = rect.position.y + (rect.size.y + _font.get_ascent(_font_size) - _font.get_descent(_font_size)) / 2.0
 	var x: float = rect.position.x + _padding
 	if show_picks:
-		if not bool(data.get("conflicted", false)):
-			_picks.draw(canvas, _picks.box_rect(rect, x), String(data.get("pick", "none")))
+		var conflicted: bool = bool(data.get("conflicted", false))
+		_picks.draw(canvas, _picks.box_rect(rect, x), "none" if conflicted else String(data.get("pick", "none")),
+				conflicted or bool(data.get("locked", false)))
 		x += pick_width()
 	var code: String = String(data.get("code", ""))
-	var icon: Texture2D = code_icon(code)
+	var resolved: bool = bool(data.get("resolved", false))
+	var icon: Texture2D = AppTheme.icon(&"StatusSuccess") if resolved else code_icon(code)
 	if icon != null:
 		var top: float = rect.position.y + (rect.size.y - _icon_size) / 2.0
 		canvas.draw_texture_rect(icon, Rect2(x, top, _icon_size, _icon_size), false,
-				_code_colors.get(code, _dir_color))
+				_resolved_color if resolved else _code_colors.get(code, _dir_color))
 	x += _code_width
 	var path: String = String(data["path"])
 	var name: String = path.get_file()

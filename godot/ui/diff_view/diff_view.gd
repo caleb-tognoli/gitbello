@@ -22,12 +22,21 @@ extends VirtualList
 ## With `pickable`, a gutter of commit checkboxes comes first, from each
 ## line's `picked` (`all`, `none`, `partial`, or empty for no box); clicking
 ## one emits `pick_clicked`.
+## Conflicted files (the resolver) use the same rows: ours as removed lines,
+## theirs as added ones, the base as kind 4, and a header per conflict block
+## (`block` >= 0) with buttons that emit `block_action`. Their `side` (`ours`,
+## `theirs`, `base`) draws them in the sides' own colours, with a bar at the
+## gutter's edge instead of a +/− mark.
 
 ## A checkbox was clicked: the line indices of its row, and whether to pick
 ## them (the box was not `all`).
 signal pick_clicked(lines: PackedInt32Array, include: bool)
 ## An expander was clicked: show more of gap `gap` (`up`, `down` or `all`).
 signal expand_requested(gap: int, how: String)
+## A conflict block's button was clicked: `ours`, `theirs` or `both`.
+signal block_action(block: int, action: String)
+## The Undo beside lines that a block choice just wrote was clicked.
+signal undo_choice_requested()
 
 const DIFF_THEME_TYPE: StringName = &"DiffView"
 const FETCH_MARGIN: int = 128
@@ -35,6 +44,26 @@ const KIND_HUNK: int = 0
 const KIND_CONTEXT: int = 1
 const KIND_ADDED: int = 2
 const KIND_REMOVED: int = 3
+## The base of a conflict block (between ours and theirs).
+const KIND_BASE: int = 4
+## A conflict header's buttons: what each keeps (`%s` is the side's name)
+## and the action whose shortcut its tooltip names.
+const BLOCK_TIPS: Dictionary[String, String] = {
+	"ours": "Keep the lines of %s (ours)",
+	"theirs": "Keep the lines of %s (theirs)",
+	"both": "Keep both, in either order",
+}
+const BLOCK_ACTIONS: Dictionary[String, StringName] = {
+	"ours": &"conflict.use_ours", "theirs": &"conflict.use_theirs", "both": &"conflict.use_both",
+}
+## The arrows of the side-by-side block buttons, pointing at their side.
+const SPLIT_ARROWS: PackedStringArray = ["◀  ", "  ▶"]
+## How long the lines a block choice wrote stay highlighted, and how long
+## their Undo shows (ms).
+const FLASH_MSEC: int = 1200
+const CHOICE_UNDO_MSEC: int = 6000
+## Longest side name a block button shows before it is shortened with "…".
+const BLOCK_NAME_CHARS: int = 18
 const NO_NEWLINE_MARK: String = "   \\ no newline at end of file"
 ## Theme colors of `highlight::TokenKind` ids 0..4.
 const SYNTAX_COLORS: Array[StringName] = [
@@ -52,6 +81,8 @@ const EXPANDER_TIPS: Dictionary[String, String] = {
 	"down": "Show more lines below",
 	"all": "Show the hidden lines",
 }
+## Width of the bar that marks a conflict side's lines in the gutter.
+const CONFLICT_BAR_WIDTH: float = 3.0
 ## Expander buttons are this many rows wide.
 const EXPANDER_WIDTH: float = 1.6
 ## What a drag extends by after the click that started it.
@@ -70,6 +101,17 @@ var split_source: Callable = Callable()
 ## Show the old and new sides next to each other.
 var side_by_side: bool = false:
 	set = set_side_by_side
+## Names of the two sides of a conflict (ours, theirs), such as the branches,
+## for the block buttons ("Use main").
+var side_names: PackedStringArray = PackedStringArray(["ours", "theirs"]):
+	set(value):
+		side_names = value
+		queue_redraw()
+## Conflict blocks in the file shown, for the headers ("Conflict 1 of 2").
+var block_count: int = 0:
+	set(value):
+		block_count = value
+		queue_redraw()
 ## Show the commit checkboxes' gutter.
 var pickable: bool = false:
 	set(value):
@@ -103,11 +145,29 @@ var _last_click_at: Vector2 = Vector2.ZERO
 var _keyboard_caret: bool = false
 ## `[row, how]` of the expander under the mouse, or [].
 var _hover: Array = []
+## `[row, action]` of the block button under the mouse, or [].
+var _block_hover: Array = []
 ## Gap whose expander was pressed, until the rows change; -1 for none.
 var _expanding_gap: int = -1
+## Rows a block choice just wrote (`x` first, `y` count), what they say
+## ("Used main"), how strongly they are highlighted (fading to 0) and until
+## when their Undo shows; `x` -1 for none.
+var _choice_rows: Vector2i = Vector2i(-1, 0)
+var _choice_text: String = ""
+var _choice_until: int = 0
+var _choice_hover: bool = false
+var flash_strength: float = 0.0:
+	set(value):
+		flash_strength = value
+		queue_redraw()
 
 var _font: Font = null
 var _font_size: int = 0
+## The UI font, for conflict headers and their buttons.
+var _ui_font: Font = null
+var _ui_font_size: int = 0
+var _button_box: StyleBoxFlat = StyleBoxFlat.new()
+var _button_hover_box: StyleBoxFlat = StyleBoxFlat.new()
 var _char_width: float = 0.0
 var _padding: float = 0.0
 var _colors: Dictionary[StringName, Color] = {}
@@ -126,7 +186,9 @@ func _ready() -> void:
 	_h_scroll.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_h_scroll.value_changed.connect(func(_v: float) -> void: queue_redraw())
 	resized.connect(_update_h_range)
-	mouse_exited.connect(func() -> void: _set_hover([]))
+	mouse_exited.connect(func() -> void:
+		_set_hover([])
+		_block_hover = [])
 	set_process(false)
 	_update_theme()
 
@@ -156,6 +218,7 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool, split_
 	_cache.clear()
 	if rows_changed or not keep_scroll:
 		_expanding_gap = -1
+		_choice_rows = Vector2i(-1, 0)
 	if not keep_scroll:
 		_widest = 0.0
 		_h_scroll.value = 0.0
@@ -209,6 +272,7 @@ func set_side_by_side(value: bool) -> void:
 	if value == side_by_side:
 		return
 	side_by_side = value
+	_choice_rows = Vector2i(-1, 0)
 	_cache.clear()
 	set_scroll_offset(0.0)
 	refresh()
@@ -341,14 +405,112 @@ func expander_label(row: int) -> String:
 		return ""
 	if int(data.get("gap", -1)) == _expanding_gap:
 		return tr("Loading…")
-	var hidden: int = int(data.get("hidden", -1))
+	var hidden_count: int = int(data.get("hidden", -1))
 	if String(data.get("text", "")).is_empty():
-		if hidden <= 0:
+		if hidden_count <= 0:
 			return tr("Show more lines")
-		return tr("Show %d more line") % hidden if hidden == 1 else tr("Show %d more lines") % hidden
-	if hidden <= 0:
+		return tr("Show %d more line") % hidden_count if hidden_count == 1 else tr("Show %d more lines") % hidden_count
+	if hidden_count <= 0:
 		return ""
-	return tr("1 line hidden") if hidden == 1 else tr("%d lines hidden") % hidden
+	return tr("1 line hidden") if hidden_count == 1 else tr("%d lines hidden") % hidden_count
+
+
+
+## The conflict block a row belongs to (its header, a side or the base), or -1.
+func row_block(row: int) -> int:
+	for data: Dictionary in _row_lines(row):
+		var block: int = int(data.get("block", -1))
+		if block >= 0:
+			return block
+	return -1
+
+
+## The header row of the next (or previous) conflict block from `from`,
+## wrapping around; only block `block` when it is >= 0. -1 when none.
+func find_block_header(from: int, forward: bool, block: int = -1) -> int:
+	var count: int = row_count()
+	for step: int in range(1, count + 1):
+		var row: int = posmod(from + (step if forward else -step), count)
+		var data: Dictionary = _side_line(row, 0)
+		var found: int = int(data.get("block", -1))
+		if int(data.get("kind", -1)) == KIND_HUNK and found >= 0 and (block < 0 or found == block):
+			return row
+	return -1
+
+
+## Where button `action` of the conflict header on `row` is, in this
+## control's coordinates (empty when the row is not a header).
+func block_button_rect(row: int, action: String) -> Rect2:
+	var data: Dictionary = _side_line(row, 0)
+	if int(data.get("block", -1)) < 0 or int(data.get("kind", -1)) != KIND_HUNK:
+		return Rect2()
+	var top: float = row * row_height() - scroll_offset()
+	var rect: Rect2 = Rect2(_pick_width(), top, content_width() - _pick_width(), row_height())
+	for entry: Array in _block_rects(rect):
+		if String(entry[0]) == action:
+			return entry[1]
+	return Rect2()
+
+
+## Lines of block `block` on each side (`x` ours, `y` theirs).
+func block_side_lines(block: int) -> Vector2i:
+	var header: int = find_block_header(-1, true, block)
+	var lines: Vector2i = Vector2i.ZERO
+	if header < 0:
+		return lines
+	for row: int in range(header + 1, row_count()):
+		if row_block(row) != block:
+			break
+		for data: Dictionary in _row_lines(row):
+			match String(data.get("side", "")):
+				"ours":
+					lines.x += 1
+				"theirs":
+					lines.y += 1
+	return lines
+
+
+## Highlights `count` rows from `first` (what a block choice wrote, saying
+## `text`) for a moment, with an Undo beside them for a few seconds.
+func show_choice(first: int, count: int, text: String) -> void:
+	_choice_rows = Vector2i(first, maxi(1, count))
+	_choice_text = text
+	_choice_until = Time.get_ticks_msec() + CHOICE_UNDO_MSEC
+	flash_strength = 1.0
+	create_tween().tween_property(self, "flash_strength", 0.0, FLASH_MSEC / 1000.0) \
+			.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	get_tree().create_timer(CHOICE_UNDO_MSEC / 1000.0).timeout.connect(queue_redraw)
+
+
+## Drops the Undo of the last block choice.
+func clear_choice() -> void:
+	_choice_rows = Vector2i(-1, 0)
+	_choice_hover = false
+	queue_redraw()
+
+
+## Whether the Undo of the last block choice shows (for tests).
+func choice_undo_shown() -> bool:
+	return _choice_rows.x >= 0 and _choice_rows.x < row_count() and Time.get_ticks_msec() < _choice_until
+
+
+## Where the choice's Undo button is, in this control's coordinates (empty
+## when it does not show).
+func choice_undo_rect() -> Rect2:
+	if not choice_undo_shown():
+		return Rect2()
+	var label: String = tr("Undo")
+	var width: float = _ui_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, _ui_font_size).x \
+			+ _icon_side() + _padding * 2.5
+	var top: float = _choice_rows.x * row_height() - scroll_offset()
+	return Rect2(content_width() - width - _padding * 0.5, top + 1.0, width, row_height() - 2.0)
+
+
+## Clicks a conflict header's button, as the mouse would.
+func press_block(row: int, action: String) -> void:
+	var data: Dictionary = _side_line(row, 0)
+	if int(data.get("block", -1)) >= 0 and int(data.get("kind", -1)) == KIND_HUNK:
+		block_action.emit(int(data["block"]), action)
 
 
 ## Copies the selected text; false when nothing is selected.
@@ -465,9 +627,9 @@ func _step(at: Vector2i, forward: bool, by_word: bool) -> Vector2i:
 			return Vector2i(at.x, column + 1)
 		while column < length and _char_class(text[column]) == 1:
 			column += 1
-		var kind: int = _char_class(text[mini(column, length - 1)])
+		var start_kind: int = _char_class(text[mini(column, length - 1)])
 		column += 1
-		while column < length and _char_class(text[column]) == kind and kind != 2:
+		while column < length and _char_class(text[column]) == start_kind and start_kind != 2:
 			column += 1
 		return Vector2i(at.x, column)
 	if column <= 0:
@@ -530,7 +692,12 @@ func _side_span(side: int) -> Vector2:
 	return Vector2(left + half, width - half) if side == 1 else Vector2(left, half)
 
 
-## Where column 0 of `side`'s text is drawn, before scrolling sideways.
+## Where column 0 of `side`'s text is drawn (0 = unified or left, 1 = right),
+## before scrolling sideways.
+func text_left(side: int) -> float:
+	return _text_left(side)
+
+
 func _text_left(side: int) -> float:
 	return _side_span(side).x + _gutter_width(1 if side_by_side else 2)
 
@@ -572,6 +739,80 @@ func _expander_rects(data: Dictionary, left: float, rect: Rect2) -> Array:
 		out.append([how, Rect2(x, rect.position.y, width, rect.size.y)])
 		x += width
 	return out
+
+
+## `[action, rect, label]` per button of a conflict header drawn in `rect`:
+## right-aligned unified; side by side, each side's button next to the
+## divider on its own half ("◀ Use main" | "Use topic ▶") and Both at the end.
+func _block_rects(rect: Rect2) -> Array:
+	var out: Array = []
+	var top: float = rect.position.y + 1.0
+	var height: float = rect.size.y - 2.0
+	var gap: float = _padding * 0.5
+	if side_by_side:
+		var middle: float = _side_span(1).x
+		var ours: String = SPLIT_ARROWS[0] + block_label("ours")
+		var ours_width: float = _block_button_width(ours, false)
+		out.append(["ours", Rect2(middle - gap - ours_width, top, ours_width, height), ours])
+		var theirs: String = block_label("theirs") + SPLIT_ARROWS[1]
+		out.append(["theirs", Rect2(middle + gap, top, _block_button_width(theirs, false), height), theirs])
+		var both_width: float = _block_button_width(block_label("both"), true)
+		out.append(["both", Rect2(rect.end.x - gap - both_width, top, both_width, height), block_label("both")])
+		return out
+	var x: float = rect.end.x - gap
+	for action: String in ["both", "theirs", "ours"]:
+		var label: String = block_label(action)
+		var width: float = _block_button_width(label, action == "both")
+		x -= width
+		out.push_front([action, Rect2(x, top, width, height), label])
+		x -= gap
+	return out
+
+
+## What a conflict header's button says: "Use main", "Use topic", "Both".
+func block_label(action: String) -> String:
+	if action == "both":
+		return tr("Both")
+	var side_name: String = side_names[0 if action == "ours" else 1] if side_names.size() == 2 else action
+	if side_name.length() > BLOCK_NAME_CHARS:
+		side_name = side_name.left(BLOCK_NAME_CHARS - 1) + "…"
+	return tr("Use %s") % side_name
+
+
+## Width of a block button showing `label` (and a ▾ when `menu`, else a swatch).
+func _block_button_width(label: String, menu: bool) -> float:
+	var width: float = _ui_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, _ui_font_size).x + _padding * 2.0
+	if menu:
+		width += _icon_side() + _padding * 0.25
+	else:
+		width += _swatch_side() + _padding * 0.5
+	return roundf(width)
+
+
+## Diameter of a block button's colour dot.
+func _swatch_side() -> float:
+	return roundf(row_height() * 0.4)
+
+
+## Side of the icons drawn in a row.
+func _icon_side() -> float:
+	return minf(16.0, row_height() - 4.0)
+
+
+## `[row, action]` of the conflict header button at `at`, or [].
+func _block_at(at: Vector2) -> Array:
+	var row: int = row_at(at)
+	if row < 0:
+		return []
+	var data: Dictionary = _side_line(row, 0)
+	if data.is_empty() or int(data.get("kind", -1)) != KIND_HUNK or int(data.get("block", -1)) < 0:
+		return []
+	var top: float = row * row_height() - scroll_offset()
+	var rect: Rect2 = Rect2(_pick_width(), top, content_width() - _pick_width(), row_height())
+	for entry: Array in _block_rects(rect):
+		if (entry[1] as Rect2).has_point(at):
+			return [row, entry[0]]
+	return []
 
 
 ## `[row, how]` of the expander at `at`, or [].
@@ -657,12 +898,20 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 		if not state.is_empty():
 			_picks.draw(self, _picks.box_rect(rect, rect.position.x + _padding * 0.5), state)
 		rect = Rect2(rect.position + Vector2(gutter, 0.0), Vector2(rect.size.x - gutter, rect.size.y))
+	if _choice_rows.x >= 0 and index >= _choice_rows.x and index < _choice_rows.x + _choice_rows.y:
+		_draw_choice(index, rect)
+		return
+	_draw_line_row(data, index, rect)
+
+
+## A row of the diff (after the checkbox gutter).
+func _draw_line_row(data: Dictionary, index: int, rect: Rect2) -> void:
 	if not side_by_side:
 		_draw_side(data, index, 0, rect, 2)
 		return
 	var left: Dictionary = data["left"]
 	var right: Dictionary = data["right"]
-	if int(left.get("kind", -1)) == KIND_HUNK:
+	if int(left.get("kind", -1)) in [KIND_HUNK, KIND_BASE]:
 		_draw_side(left, index, 0, rect, 1)
 		return
 	var half: float = floorf(rect.size.x / 2.0)
@@ -670,19 +919,53 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 	_draw_side(right, index, 1, Rect2(rect.position + Vector2(half, 0.0), Vector2(rect.size.x - half, rect.size.y)), 1)
 
 
+## A row a block choice just wrote: the row, a fading highlight, and on the
+## first one "✓ Used main" and Undo while they show.
+func _draw_choice(index: int, rect: Rect2) -> void:
+	_draw_line_row(_cache.get(index, {}), index, rect)
+	if flash_strength > 0.0:
+		var flash: Color = _colors[&"choice_flash"]
+		draw_rect(rect, Color(flash, flash.a * flash_strength))
+	if index != _choice_rows.x or not choice_undo_shown():
+		return
+	var button: Rect2 = choice_undo_rect()
+	var icon_side: float = _icon_side()
+	var font_size: int = _ui_font_size
+	var label_width: float = _ui_font.get_string_size(_choice_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var pill: Rect2 = Rect2(button.position.x - label_width - icon_side - _padding * 2.0, button.position.y,
+			button.end.x - button.position.x + label_width + icon_side + _padding * 2.0, button.size.y)
+	draw_rect(pill.grow(2.0), _colors[&"empty_bg"])
+	var baseline: float = rect.position.y + (rect.size.y + _ui_font.get_ascent(font_size) - _ui_font.get_descent(font_size)) / 2.0
+	var x: float = pill.position.x + _padding * 0.5
+	draw_texture_rect(AppTheme.icon(&"StatusSuccess"), Rect2(x, rect.get_center().y - icon_side / 2.0, icon_side, icon_side),
+			false)
+	x += icon_side + _padding * 0.5
+	draw_string(_ui_font, Vector2(x, baseline), _choice_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, _colors[&"block_header_color"])
+	draw_style_box(_button_hover_box if _choice_hover else _button_box, button)
+	x = button.position.x + _padding
+	draw_texture_rect(AppTheme.icon(&"Undo"), Rect2(x, rect.get_center().y - icon_side / 2.0, icon_side, icon_side), false,
+			_colors[&"block_button_color"])
+	draw_string(_ui_font, Vector2(x + icon_side + _padding * 0.5, baseline), tr("Undo"), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size,
+			_colors[&"block_button_color"])
+
+
 ## Draws one line of `row` in `rect`: background, number gutter (`columns`
 ## 2 = old and new numbers; 1 = the side's own number; a header's expanders
-## instead), mark and text.
+## instead), mark (a conflict side's bar) and text.
 func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int) -> void:
 	var gutter: float = _gutter_width(columns)
 	if data.is_empty():
 		draw_rect(rect, _colors[&"empty_bg"])
 		return
 	var kind: int = int(data["kind"])
-	var bg: Color = _row_bg(kind)
+	var conflict_side: String = String(data.get("side", "")) if int(data.get("block", -1)) >= 0 else ""
+	var bg: Color = _row_bg(kind, conflict_side)
 	if bg.a > 0.0:
 		draw_rect(rect, bg)
 	var baseline: float = _baseline(rect)
+	if kind == KIND_HUNK and int(data.get("block", -1)) >= 0:
+		_draw_block_header(data, row, rect)
+		return
 	if kind == KIND_HUNK:
 		var span: Vector2 = _draw_expanders(data, row, rect)
 		var text_rect: Rect2 = Rect2(rect.position, Vector2(span.y - rect.position.x, rect.size.y))
@@ -701,9 +984,21 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 			var right: float = x + column * (i + 1) + _char_width * i
 			draw_string(_font, Vector2(right - text.length() * _char_width, baseline), text,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, _colors[&"line_number_color"])
-	var mark: String = "+" if kind == KIND_ADDED else ("-" if kind == KIND_REMOVED else "")
+	if conflict_side in ["ours", "theirs", "base"]:
+		draw_rect(Rect2(rect.position, Vector2(CONFLICT_BAR_WIDTH, rect.size.y)), _colors[StringName(conflict_side + "_mark")])
+		_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
+		# Side by side, the column says the side; only the base gets a tag.
+		if (conflict_side == "base" or not side_by_side) \
+				and String(_side_line(row - 1, side).get("side", "")) != conflict_side:
+			_draw_side_tag(conflict_side, rect, bg)
+		return
+	var mark: String = String({KIND_ADDED: "+", KIND_REMOVED: "-", KIND_BASE: "|"}.get(kind, ""))
 	if not mark.is_empty():
-		var mark_color: Color = _colors[&"added_mark"] if kind == KIND_ADDED else _colors[&"removed_mark"]
+		var mark_color: Color = _colors[&"base_mark"]
+		if kind == KIND_ADDED:
+			mark_color = _colors[&"added_mark"]
+		elif kind == KIND_REMOVED:
+			mark_color = _colors[&"removed_mark"]
 		draw_string(_font, Vector2(x + (column + _char_width) * columns, baseline), mark,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, mark_color)
 	_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
@@ -743,6 +1038,50 @@ func _draw_expanders(data: Dictionary, row: int, rect: Rect2) -> Vector2:
 		return Vector2(end, rect.end.x)
 	draw_string(_font, Vector2(x, _baseline(rect)), label, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, color)
 	return Vector2(end, x - _padding)
+
+
+## A conflict header across `rect`: the conflict icon and "Conflict 1 of 3"
+## in the UI font, then the block's buttons (each side's with its colour).
+func _draw_block_header(data: Dictionary, row: int, rect: Rect2) -> void:
+	var icon_side: float = _icon_side()
+	var x: float = rect.position.x + _padding
+	var icon_rect: Rect2 = Rect2(x, rect.get_center().y - icon_side / 2.0, icon_side, icon_side)
+	draw_texture_rect(AppTheme.tintable_icon(&"GitConflict"), icon_rect, false, _colors[&"block_icon_color"])
+	x += icon_side + _padding * 0.5
+	var baseline: float = rect.position.y \
+			+ (rect.size.y + _ui_font.get_ascent(_ui_font_size) - _ui_font.get_descent(_ui_font_size)) / 2.0
+	var buttons: Array = _block_rects(rect)
+	var limit: float = (buttons[0][1] as Rect2).position.x - _padding
+	var title: String = tr("Conflict %d of %d") % [int(data["block"]) + 1, block_count] if block_count > 0 \
+			else String(data.get("text", ""))
+	draw_string(_ui_font, Vector2(x, baseline), title, HORIZONTAL_ALIGNMENT_LEFT,
+			maxf(0.0, limit - x), _ui_font_size, _colors[&"block_header_color"])
+	if caret_shown() and row == _sel_to.x:
+		draw_rect(Rect2(rect.position + Vector2(0.0, 1.0), Vector2(2.0, rect.size.y - 2.0)), _colors[&"caret_color"])
+	var color: Color = _colors[&"block_button_color"]
+	for entry: Array in buttons:
+		var action: String = entry[0]
+		var button: Rect2 = entry[1]
+		draw_style_box(_button_hover_box if _block_hover == [row, action] else _button_box, button)
+		var text_x: float = button.position.x + _padding
+		var label: String = entry[2]
+		if action == "both":
+			draw_string(_ui_font, Vector2(text_x, baseline), label, HORIZONTAL_ALIGNMENT_LEFT, -1, _ui_font_size, color)
+			var arrow: Rect2 = Rect2(button.end.x - _padding * 0.75 - icon_side, button.get_center().y - icon_side / 2.0,
+					icon_side, icon_side)
+			draw_texture_rect(AppTheme.icon(&"ChevronDown"), arrow, false, color)
+			continue
+		# The swatch goes right before the name, after a leading arrow.
+		if label.begins_with(SPLIT_ARROWS[0]):
+			draw_string(_ui_font, Vector2(text_x, baseline), SPLIT_ARROWS[0], HORIZONTAL_ALIGNMENT_LEFT, -1,
+					_ui_font_size, color)
+			text_x += _ui_font.get_string_size(SPLIT_ARROWS[0], HORIZONTAL_ALIGNMENT_LEFT, -1, _ui_font_size).x
+			label = label.trim_prefix(SPLIT_ARROWS[0])
+		var swatch: float = _swatch_side()
+		draw_circle(Vector2(text_x + swatch / 2.0, button.get_center().y), swatch / 2.0, _colors[StringName(action + "_mark")],
+				true, -1.0, true)
+		text_x += swatch + _padding * 0.5
+		draw_string(_ui_font, Vector2(text_x, baseline), label, HORIZONTAL_ALIGNMENT_LEFT, -1, _ui_font_size, color)
 
 
 ## The line's text from `left`, scrolled sideways: changed-word background,
@@ -804,14 +1143,20 @@ func _segments(length: int, syntax: PackedInt32Array, base: Color) -> Array:
 	return out
 
 
-func _row_bg(kind: int) -> Color:
+## The background of a line of `kind`; a conflict's ours and theirs (`side`)
+## have their own.
+func _row_bg(kind: int, side: String = "") -> Color:
+	if side == "ours" or side == "theirs":
+		return _colors[StringName(side + "_bg")]
 	match kind:
 		KIND_HUNK:
-			return _colors[&"hunk_bg"]
+			return _colors[&"block_header_bg"] if side == "header" else _colors[&"hunk_bg"]
 		KIND_ADDED:
 			return _colors[&"added_bg"]
 		KIND_REMOVED:
 			return _colors[&"removed_bg"]
+		KIND_BASE:
+			return _colors[&"base_bg"]
 	return Color(0, 0, 0, 0)
 
 
@@ -879,6 +1224,15 @@ func _on_left_press(mouse: InputEventMouseButton) -> void:
 	if not expander.is_empty():
 		press_expander(int(expander[0]), String(expander[1]))
 		return
+	var block_button: Array = _block_at(at)
+	if not block_button.is_empty():
+		select_only(int(block_button[0]))
+		press_block(int(block_button[0]), String(block_button[1]))
+		return
+	if choice_undo_rect().has_point(at):
+		clear_choice()
+		undo_choice_requested.emit()
+		return
 	_keyboard_caret = false
 	var now: int = Time.get_ticks_msec()
 	var repeated: bool = now - _last_click_msec < MULTI_CLICK_MSEC \
@@ -936,6 +1290,23 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 	_dragging = false
 	var expander: Array = _expander_at(motion.position)
 	_set_hover(expander)
+	var block_button: Array = _block_at(motion.position)
+	if block_button != _block_hover:
+		_block_hover = block_button
+		if expander.is_empty():
+			tooltip_text = _block_tip(String(block_button[1])) if not block_button.is_empty() else ""
+		queue_redraw()
+	if not block_button.is_empty():
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		return
+	var over_undo: bool = choice_undo_rect().has_point(motion.position)
+	if over_undo != _choice_hover:
+		_choice_hover = over_undo
+		tooltip_text = tr("Undo this choice (%s)") % Actions.shortcut_label(&"conflict.undo") if over_undo else ""
+		queue_redraw()
+	if over_undo:
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		return
 	var over_box: bool = pickable and motion.position.x < _pick_width() \
 			and row_at(motion.position) >= 0 and not row_pick(row_at(motion.position)).is_empty()
 	if not expander.is_empty() or over_box:
@@ -944,6 +1315,30 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 		mouse_default_cursor_shape = Control.CURSOR_IBEAM
 	else:
 		mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+
+## The name of a conflict side (`ours`, `theirs`, `base`) at the right of
+## `rect`, on its first line, over a pill of the line's background `bg`.
+func _draw_side_tag(conflict_side: String, rect: Rect2, bg: Color) -> void:
+	var text: String = "base"
+	if conflict_side != "base":
+		text = side_names[0 if conflict_side == "ours" else 1] if side_names.size() == 2 else conflict_side
+	var tag_size: int = _ui_font_size - 2
+	var width: float = _ui_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, tag_size).x + _padding
+	var pill: Rect2 = Rect2(rect.end.x - width - _padding * 0.5, rect.position.y + 2.0, width, rect.size.y - 4.0)
+	draw_rect(pill.grow_individual(_padding * 0.5, 2.0, _padding * 0.5, 2.0), bg if bg.a > 0.0 else _colors[&"empty_bg"])
+	var baseline: float = pill.position.y + (pill.size.y + _ui_font.get_ascent(tag_size) - _ui_font.get_descent(tag_size)) / 2.0
+	draw_string(_ui_font, Vector2(pill.position.x + _padding * 0.5, baseline), text, HORIZONTAL_ALIGNMENT_LEFT, -1, tag_size,
+			_colors[StringName(conflict_side + "_mark")])
+
+
+## A block button's tooltip: what it keeps and its shortcut.
+func _block_tip(action: String) -> String:
+	var tip: String = tr(BLOCK_TIPS.get(action, ""))
+	if action != "both":
+		tip = tip % (side_names[0 if action == "ours" else 1] if side_names.size() == 2 else action)
+	var shortcut: String = Actions.shortcut_label(BLOCK_ACTIONS.get(action, &""))
+	return tip if shortcut.is_empty() else "%s (%s)" % [tip, shortcut]
 
 
 func _set_hover(expander: Array) -> void:
@@ -1033,8 +1428,16 @@ func _update_theme() -> void:
 	for color_name: StringName in [&"text_color", &"line_number_color", &"hunk_color", &"hunk_bg",
 			&"added_bg", &"removed_bg", &"added_mark", &"removed_mark", &"gutter_bg", &"empty_bg",
 			&"added_hl_bg", &"removed_hl_bg", &"selection_bg", &"caret_color", &"expander_color",
-			&"expander_hover_color", &"expander_hover_bg"]:
+			&"expander_hover_color", &"expander_hover_bg", &"base_bg", &"base_mark", &"ours_bg", &"ours_mark", &"theirs_bg", &"theirs_mark", &"block_button_bg",
+			&"block_button_hover_bg", &"block_button_color", &"block_header_bg", &"block_header_color",
+			&"block_icon_color", &"choice_flash"]:
 		_colors[color_name] = get_theme_color(color_name, DIFF_THEME_TYPE)
+	_ui_font = get_theme_font(&"font", &"Label")
+	_ui_font_size = get_theme_font_size(&"header_font_size", DIFF_THEME_TYPE)
+	for entry: Array in [[_button_box, &"block_button_bg"], [_button_hover_box, &"block_button_hover_bg"]]:
+		var box: StyleBoxFlat = entry[0]
+		box.bg_color = _colors[entry[1]]
+		box.set_corner_radius_all(3)
 	_picks.update_theme(self)
 	_syntax.clear()
 	for color_name: StringName in SYNTAX_COLORS:

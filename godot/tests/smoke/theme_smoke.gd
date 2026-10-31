@@ -9,18 +9,18 @@ const EXTRA_ACCENTS: Array[Color] = [Color.WHITE, Color.BLACK, Color("ffee00"), 
 func run() -> void:
 	var accents: Array[Color] = AppTheme.ACCENT_PRESETS + EXTRA_ACCENTS
 	for light: bool in [false, true]:
-		var name: String = "light" if light else "dark"
+		var theme_name: String = "light" if light else "dark"
 		for accent: Color in accents:
-			var p: AppTheme.Palette = AppTheme.palette(light, accent)
-			for background: Color in [p.selected, p.selected_focus, p.selected.blend(p.hovered),
-					p.selected_focus.blend(p.hovered)]:
-				_expect_readable(p.selected_text, background,
-						"%s, accent %s: selected-row text" % [name, accent.to_html(false)])
+			var accented: AppTheme.Palette = AppTheme.palette(light, accent)
+			for background: Color in [accented.selected, accented.selected_focus, accented.selected.blend(accented.hovered),
+					accented.selected_focus.blend(accented.hovered)]:
+				_expect_readable(accented.selected_text, background,
+						"%s, accent %s: selected-row text" % [theme_name, accent.to_html(false)])
 		var p: AppTheme.Palette = AppTheme.palette(light)
 		for background: Color in [p.background, p.surface, p.raised, p.hover]:
-			_expect_readable(p.text, background, "%s: text" % name)
+			_expect_readable(p.text, background, "%s: text" % theme_name)
 		for background: Color in [p.background, p.surface, p.raised]:
-			_expect_readable(p.text_muted, background, "%s: muted text" % name)
+			_expect_readable(p.text_muted, background, "%s: muted text" % theme_name)
 		var theme: Theme = AppTheme.build(light)
 		var discard: Button = Button.new()
 		discard.theme = theme
@@ -28,16 +28,16 @@ func run() -> void:
 		var padding: Vector2 = discard.get_theme_stylebox(&"normal").get_minimum_size()
 		for state: StringName in [&"hover", &"pressed", &"hover_pressed"]:
 			expect_eq(discard.get_theme_stylebox(state).get_minimum_size(), padding,
-					"%s: Discard padding stays stable in %s" % [name, state])
+					"%s: Discard padding stays stable in %s" % [theme_name, state])
 		discard.free()
 		var label_text: Color = theme.get_color(&"label_color", &"CommitList")
 		for label: StringName in [&"label_head", &"label_branch", &"label_remote", &"label_tag"]:
 			var box: StyleBoxFlat = theme.get_stylebox(label, &"CommitList") as StyleBoxFlat
-			_expect_readable(label_text, box.bg_color, "%s: ref label %s" % [name, label])
+			_expect_readable(label_text, box.bg_color, "%s: ref label %s" % [theme_name, label])
 		var close: DPITexture = AppTheme.CLOSE as DPITexture
 		expect(close != null, "icons are DPITextures")
 		if close != null:
-			expect_eq(close.color_map.is_empty(), not light, "%s: icons recoloured" % name)
+			expect_eq(close.color_map.is_empty(), not light, "%s: icons recoloured" % theme_name)
 		for icon: StringName in [&"GitBranch", &"GitPush", &"GitPull", &"GitFetch", &"GitWorktree",
 				&"GitShelf", &"GitTag", &"Terminal"]:
 			expect(AppTheme.icon(icon) is DPITexture, "icon %s loads" % icon)

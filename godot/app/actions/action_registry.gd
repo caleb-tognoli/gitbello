@@ -77,6 +77,16 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"tag.delete": &"Remove",
 	&"commit.checkout": &"GitCommit",
 	&"commit.copy_hash": &"ActionCopy",
+	&"commit.merge": &"GitMerge",
+	&"commit.undo": &"Undo",
+	&"branch.merge": &"GitMerge",
+	&"operation.continue": &"StatusSuccess",
+	&"operation.abort": &"Close",
+	&"operation.open_resolver": &"GitConflict",
+	&"conflict.undo": &"Undo",
+	&"conflict.next": &"ChevronDown",
+	&"conflict.previous": &"ChevronUp",
+	&"conflict.reopen": &"GitConflict",
 	&"task.new": &"GitWorktree",
 	&"worktree.add_existing": &"GitWorktree",
 	&"worktree.open": &"GitWorktree",
@@ -141,7 +151,7 @@ func _ready() -> void:
 ## Registers (or replaces) an action. `shortcuts` are defaults like "Ctrl+K".
 ## `reason` returns why it is disabled (see `Action.reason`).
 func register(id: StringName, label: String, category: String, run: Callable,
-		shortcuts: PackedStringArray = PackedStringArray(),
+		default_shortcuts: PackedStringArray = PackedStringArray(),
 		enabled: Callable = Callable(), reason: Callable = Callable()) -> Action:
 	var action: Action = Action.new()
 	action.reason = reason
@@ -150,7 +160,7 @@ func register(id: StringName, label: String, category: String, run: Callable,
 	action.category = category
 	action.run = run
 	action.enabled = enabled
-	action.default_shortcuts = shortcuts
+	action.default_shortcuts = default_shortcuts
 	_actions[id] = action
 	_parsed.erase(id)
 	actions_changed.emit()
@@ -165,8 +175,8 @@ func unregister(id: StringName) -> void:
 
 ## The same themed icon wherever an action appears.
 func icon(id: StringName) -> Texture2D:
-	var name: StringName = ICONS.get(id, &"")
-	return AppTheme.icon(name) if name != &"" else null
+	var icon_name: StringName = ICONS.get(id, &"")
+	return AppTheme.icon(icon_name) if icon_name != &"" else null
 
 
 func get_action(id: StringName) -> Action:
@@ -191,12 +201,12 @@ func is_enabled(id: StringName) -> bool:
 
 ## Runs `id` if it exists and is enabled. Returns whether it ran. `origin` is
 ## the control that started it, if any (see `origin()`).
-func run_action(id: StringName, origin: Control = null) -> bool:
+func run_action(id: StringName, source: Control = null) -> bool:
 	var action: Action = _actions.get(id)
 	if action == null or not action.is_enabled():
 		return false
 	var outer: Control = _origin
-	_origin = origin
+	_origin = source
 	action.run.call()
 	_origin = outer
 	action_ran.emit(id)
@@ -254,11 +264,17 @@ func set_shortcut(id: StringName, text: String) -> void:
 
 ## The action whose shortcut `event` presses, or &"".
 func action_for_event(event: InputEventKey) -> StringName:
+	# Actions may share a key (Ctrl+Z undoes a discard or a conflict choice):
+	# the first enabled one wins.
+	var first: StringName = &""
 	for id: StringName in _actions:
 		for shortcut: InputEventKey in _shortcut_events(id):
 			if Shortcuts.matches(event, shortcut):
-				return id
-	return &""
+				if _actions[id].is_enabled():
+					return id
+				if first == &"":
+					first = id
+	return first
 
 
 ## Text fields swallow most keys. Before the focused one sees a key, run the

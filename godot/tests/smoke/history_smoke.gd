@@ -137,8 +137,8 @@ func _check_search(session: RepoSession, list: CommitList) -> void:
 	expect_eq(session.next_match(2, false), 1, "from a row that is not a match")
 	expect_eq(session.search_match_index(1), 1, "row 1 is the second match")
 	expect_eq(session.search_match_index(2), -1, "row 2 is no match")
-	var hash: String = list.hash_at(2)
-	session.search_commits(hash.left(7))
+	var oid: String = list.hash_at(2)
+	session.search_commits(oid.left(7))
 	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
 			"the hash search finishes")
 	expect_eq(session.next_match(0, true), 2, "a hash prefix finds its commit")

@@ -22,8 +22,9 @@ use std::thread::{self, JoinHandle};
 use crate::backend::{GitBackend, ShelfChange};
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
+use crate::merge::{ConflictFile, HeadInfo, MergePreview, OperationDetails};
 use crate::repo::{
-    CommitDetails, Operation, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
+    CommitDetails, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
 };
 use crate::sidebar::Badge;
 use crate::worktrees::CleanupCandidate;
@@ -139,7 +140,8 @@ pub enum JobOutput {
     /// Refs and the configured remote names.
     Refs(Vec<Ref>, Vec<Remote>),
     Worktrees(Vec<Worktree>),
-    Operation(Option<Operation>),
+    /// The operation in progress, with what the banner shows.
+    Operation(Option<OperationDetails>),
     Stashes(Vec<StashEntry>),
     /// Badge per linked worktree path.
     WorktreeBadges(Vec<(PathBuf, Badge)>),
@@ -175,6 +177,25 @@ pub enum JobOutput {
         remember: bool,
     },
     ShelfUndone(ShelfChange),
+    /// What merging a branch would do (see `Runtime::load_merge_preview`).
+    MergePreview(Box<MergePreview>),
+    /// A conflicted file loaded; `generation` as for diffs.
+    Conflict {
+        generation: u64,
+        file: Box<ConflictFile>,
+    },
+    /// The resolved files (resolve-undo) and the conflicted text files
+    /// whose markers are gone (to stage).
+    ConflictScan {
+        resolved: Vec<PathBuf>,
+        unmarked: Vec<PathBuf>,
+    },
+    /// A block choice was written: `(path, before, after, staged)`, to undo it.
+    ConflictWritten(Box<(PathBuf, Vec<u8>, Vec<u8>, bool)>),
+    /// The commit the undo strip offers and the commits HEAD lacks.
+    HeadInfo(Box<HeadInfo>),
+    /// A commit was undone; its message.
+    CommitUndone(String),
     /// A repository was opened: its worktree root and git directories.
     Opened {
         toplevel: PathBuf,
@@ -373,7 +394,9 @@ impl Inner {
                         .map(|refs| JobOutput::Refs(refs, remotes))
                 }
                 RefreshKind::Worktrees => backend.worktrees(repo, cancel).map(JobOutput::Worktrees),
-                RefreshKind::Operation => backend.operation(repo, cancel).map(JobOutput::Operation),
+                RefreshKind::Operation => backend
+                    .operation_details(repo, cancel)
+                    .map(JobOutput::Operation),
                 RefreshKind::Stashes => backend.stashes(repo, cancel).map(JobOutput::Stashes),
                 RefreshKind::WorktreeBadges => {
                     worktree_badges(backend, repo, cancel).map(JobOutput::WorktreeBadges)

@@ -5,6 +5,8 @@ extends ConfirmationDialog
 ## as the user types. Enter in a line submits when the form is valid.
 ## Labels sit in a column left of their fields; notes added before the first
 ## field introduce the form, later ones are hints under the field above.
+## `set_menu` joins a ▾ to OK with other ways to submit (a split button).
+## The buttons sit on the right, Cancel then OK.
 
 ## The user changed field `key` (code setting a value does not count).
 signal field_changed(key: String)
@@ -25,6 +27,12 @@ var _pickers: Dictionary[String, Callable] = {}
 var _error: String = ""
 ## `func(values: Dictionary) -> void`, called with the submitted values.
 var _on_submit: Callable = Callable()
+## The ▾ joined to OK (see `set_menu`), what its entries run and their labels.
+var _menu_button: MenuButton = MenuButton.new()
+var _menu_runs: Array[Callable] = []
+var _menu_labels: PackedStringArray = PackedStringArray()
+## OK and the ▾, joined.
+var _split: HBoxContainer = HBoxContainer.new()
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
@@ -33,7 +41,36 @@ var _on_submit: Callable = Callable()
 func _ready() -> void:
 	get_ok_button().theme_type_variation = &"PrimaryButton"
 	confirmed.connect(_submit)
+	_menu_button.icon = AppTheme.ARROW_DOWN
+	_menu_button.flat = false
+	_menu_button.theme_type_variation = &"SplitMenuButton"
+	_menu_button.tooltip_text = "More ways to do this"
+	_menu_button.get_popup().id_pressed.connect(_on_menu_id)
+	_arrange_buttons()
+	_menu_button.hide()
 	_apply_theme()
+
+
+## Right-aligns the buttons, Cancel then OK, with the ▾ joined to OK.
+func _arrange_buttons() -> void:
+	var ok: Button = get_ok_button()
+	var row: HBoxContainer = ok.get_parent() as HBoxContainer
+	_split.add_theme_constant_override(&"separation", 0)
+	ok.add_sibling(_split)
+	ok.reparent(_split, false)
+	_split.add_child(_menu_button)
+	row.move_child(get_cancel_button(), 1)
+	row.move_child(_split, 2)
+	# The first spacer pushes the buttons right; the others would centre them.
+	# The dialog shows and hides them itself, so they stop expanding and move
+	# to the left end, where their gaps are taken from the first.
+	var spacers: Array[Control] = []
+	for child: Node in row.get_children(true):
+		if child.get_class() == "Control":
+			spacers.append(child as Control)
+	for i: int in range(1, spacers.size()):
+		spacers[i].size_flags_horizontal = Control.SIZE_FILL
+		row.move_child(spacers[i], 0)
 
 
 func _notification(what: int) -> void:
@@ -45,7 +82,9 @@ func _notification(what: int) -> void:
 func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	title = tr(title_text)
 	ok_button_text = tr(ok_text)
+	cancel_button_text = tr("Cancel")
 	get_ok_button().theme_type_variation = &"PrimaryButton"
+	get_ok_button().icon = null
 	_on_submit = on_submit
 	validator = Callable()
 	for parent: Node in [_intro, _box]:
@@ -57,6 +96,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_ref_names.clear()
 	_pickers.clear()
 	_error = ""
+	set_menu([])
 
 
 ## A one-line text field. `ref_name` turns typed spaces into dashes.
@@ -96,6 +136,81 @@ func add_folder(key: String, label: String, value: String = "", placeholder: Str
 	if on_pick.is_valid():
 		_pickers[key] = on_pick
 	return line
+
+
+## Any control as a field, with a label (empty for none).
+func add_control(key: String, label: String, control: Control) -> Control:
+	_add_label(label, true)
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_box.add_child(control)
+	_fields[key] = control
+	return control
+
+
+## Other ways to submit, in a ▾ joined to OK: `{label, run, icon, disabled,
+## tooltip}` entries; `run` gets the values like `on_submit`, a disabled
+## entry shows its tooltip after the label. An empty list hides it.
+func set_menu(entries: Array) -> void:
+	var entries_menu: PopupMenu = _menu_button.get_popup()
+	entries_menu.clear()
+	_menu_runs.clear()
+	_menu_labels.clear()
+	for entry: Dictionary in entries:
+		var label: String = String(entry["label"])
+		var disabled: bool = bool(entry.get("disabled", false))
+		var tooltip: String = tr(String(entry.get("tooltip", "")))
+		var shown: String = "%s  ·  %s" % [tr(label), tooltip] if disabled and not tooltip.is_empty() else tr(label)
+		var icon: StringName = entry.get("icon", &"")
+		if icon.is_empty():
+			entries_menu.add_item(shown, _menu_runs.size())
+		else:
+			entries_menu.add_icon_item(AppTheme.icon(icon), shown, _menu_runs.size())
+		var index: int = entries_menu.item_count - 1
+		entries_menu.set_item_disabled(index, disabled)
+		entries_menu.set_item_tooltip(index, tooltip)
+		_menu_runs.append(entry["run"])
+		_menu_labels.append(label)
+	_menu_button.visible = not entries.is_empty()
+	get_ok_button().theme_type_variation = &"SplitPrimaryButton" if not entries.is_empty() else &"PrimaryButton"
+
+
+## The icon before OK's text (until the next `begin`).
+func set_ok_icon(icon: Texture2D) -> void:
+	get_ok_button().icon = icon
+
+
+## The ▾ joined to OK (for tests).
+func menu_button() -> MenuButton:
+	return _menu_button
+
+
+## Labels of the ▾ entries (for tests).
+func menu_labels() -> PackedStringArray:
+	return _menu_labels.duplicate()
+
+
+## Runs the ▾ entry labelled `label`, as a click would. Returns whether it ran.
+func press_menu(label: String) -> bool:
+	var entries_menu: PopupMenu = _menu_button.get_popup()
+	for i: int in entries_menu.item_count:
+		if _menu_labels[i] == label and not entries_menu.is_item_disabled(i):
+			_on_menu_id(entries_menu.get_item_id(i))
+			return true
+	return false
+
+
+## Checks the values again (after the form's state changed from outside).
+func revalidate() -> void:
+	_validate()
+
+
+func _on_menu_id(id: int) -> void:
+	if id < 0 or id >= _menu_runs.size() or not _validate():
+		return
+	var run: Callable = _menu_runs[id]
+	var current: Dictionary = values()
+	hide()
+	run.call(current)
 
 
 ## Makes OK the red button of a delete or discard (until the next `begin`).
@@ -308,6 +423,7 @@ func _validate() -> bool:
 	_error = tr(String(validator.call(values()))) if validator.is_valid() else ""
 	get_ok_button().disabled = not _error.is_empty()
 	get_ok_button().tooltip_text = _error
+	_menu_button.disabled = not _error.is_empty()
 	return _error.is_empty()
 
 

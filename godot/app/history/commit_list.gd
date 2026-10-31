@@ -248,12 +248,12 @@ func _draw_match(line: TextLine, subject: String, origin: Vector2, width: float)
 ## Draws one ref label pill at `x`; returns its width.
 func _draw_label(canvas: RID, line: TextLine, style: StringName, x: float, rect: Rect2) -> float:
 	var box: StyleBox = _label_boxes[style]
-	var size: Vector2 = line.get_size()
+	var label_size: Vector2 = line.get_size()
 	var pill: Rect2 = Rect2(
 			x,
-			rect.position.y + (rect.size.y - size.y - box.get_minimum_size().y) * 0.5,
-			size.x + box.get_minimum_size().x,
-			size.y + box.get_minimum_size().y)
+			rect.position.y + (rect.size.y - label_size.y - box.get_minimum_size().y) * 0.5,
+			label_size.x + box.get_minimum_size().x,
+			label_size.y + box.get_minimum_size().y)
 	draw_style_box(box, pill)
 	line.draw(canvas, pill.position + Vector2(box.get_margin(SIDE_LEFT), box.get_margin(SIDE_TOP)), _label_color)
 	return pill.size.x

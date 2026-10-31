@@ -177,12 +177,12 @@ func run() -> void:
 ## Enter; returns whether the list opened and the first row is `name`.
 ## When the switch asks about local changes, it gets `answer` (`bring`; ""
 ## leaves the dialog open).
-func _choose_branch(popover: BranchPopover, name: String, answer: String = "bring") -> bool:
+func _choose_branch(popover: BranchPopover, branch: String, answer: String = "bring") -> bool:
 	press("Ctrl+B")
 	if not await wait_until(func() -> bool: return popover.visible):
 		return false
-	popover.set_filter(name)
-	var found: bool = not popover.row_names().is_empty() and popover.row_names()[0] == name
+	popover.set_filter(branch)
+	var found: bool = not popover.row_names().is_empty() and popover.row_names()[0] == branch
 	press("Enter", popover)
 	var dialog: ConfirmationDialog = _ops.switch_dialog()
 	var asked: bool = _ops.session.change_count() > 0 and await wait_until(func() -> bool: return dialog.visible, 3000)
@@ -223,16 +223,16 @@ static func _find_row(session: RepoSession, subject: String) -> int:
 	return -1
 
 
-static func _has_branch(session: RepoSession, name: String) -> bool:
+static func _has_branch(session: RepoSession, branch: String) -> bool:
 	for ref: Dictionary in session.branch_refs():
-		if String(ref["kind"]) == "branch" and String(ref["short_name"]) == name:
+		if String(ref["kind"]) == "branch" and String(ref["short_name"]) == branch:
 			return true
 	return false
 
 
-static func _has_tag(session: RepoSession, name: String) -> bool:
+static func _has_tag(session: RepoSession, tag_name: String) -> bool:
 	for tag: Dictionary in session.tags():
-		if String(tag["name"]) == name:
+		if String(tag["name"]) == tag_name:
 			return true
 	return false
 

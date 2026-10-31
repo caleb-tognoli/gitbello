@@ -86,7 +86,8 @@ func _draw() -> void:
 		var width: float = _arrow_width()
 		var x: float = size.x - width
 		var line: Color = get_theme_color(&"separator_color", THEME_TYPE)
-		draw_line(Vector2(x, 6.0), Vector2(x, size.y - 6.0), line, 1.0)
+		# Full height, like the line of every split button.
+		draw_line(Vector2(x, 0.0), Vector2(x, size.y), line, 1.0)
 		var at: Vector2 = Vector2(x + (width - arrow.get_width()) * 0.5, (size.y - arrow.get_height()) * 0.5)
 		draw_texture(arrow, at, Color(1, 1, 1, 0.5 if disabled and not _busy else 1.0))
 	if _busy and _percent >= 0:

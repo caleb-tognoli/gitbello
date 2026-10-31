@@ -264,15 +264,15 @@ func _settle() -> void:
 
 
 ## Popups may be windows of their own; this saves one's content.
-func _shot_window(window: Window, dir: String, name: String) -> void:
+func _shot_window(window: Window, dir: String, file_name: String) -> void:
 	await _settle()
-	var path: String = dir.path_join(name + ".png")
+	var path: String = dir.path_join(file_name + ".png")
 	window.get_texture().get_image().save_png(path)
 	print("SHOT ", path)
 
 
-func _shot(dir: String, name: String) -> void:
+func _shot(dir: String, file_name: String) -> void:
 	await _settle()
-	var path: String = dir.path_join(name + ".png")
+	var path: String = dir.path_join(file_name + ".png")
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)

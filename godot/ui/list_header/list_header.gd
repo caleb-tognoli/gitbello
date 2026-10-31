@@ -2,7 +2,8 @@ class_name ListHeader
 extends PanelContainer
 ## The line above a list, the same over every list: an optional check-all
 ## box, what the list holds ("3 changed files", "1,204 commits") and, on the
-## right, its line totals (`+12 −3`, hidden while both are zero). Every
+## right, an optional status (icon and text) and its line totals (`+12 −3`,
+## hidden while both are zero). Every
 ## header has the same height, with or without the box. Clicking the text
 ## beside the box clicks the box. Sizes and colours come from the
 ## `ListHeader` theme type.
@@ -18,6 +19,9 @@ const THEME_TYPE: StringName = &"ListHeader"
 @onready var _label: Label = %Label
 @onready var _added: Label = %Added
 @onready var _removed: Label = %Removed
+@onready var _status: HBoxContainer = %Status
+@onready var _status_icon: TextureRect = %StatusIcon
+@onready var _status_label: Label = %StatusLabel
 
 
 func _ready() -> void:
@@ -35,8 +39,8 @@ func _notification(what: int) -> void:
 		_apply_theme()
 
 
-func set_text(text: String) -> void:
-	_label.text = text
+func set_text(value: String) -> void:
+	_label.text = value
 
 
 func text() -> String:
@@ -62,6 +66,26 @@ func hide_check() -> void:
 
 func check() -> PickBox:
 	return _check
+
+
+## `status` after `icon`, both in `color`, on the right.
+func show_status(icon: Texture2D, status: String, color: Color, tooltip: String = "") -> void:
+	_status_icon.texture = icon
+	_status_icon.modulate = color
+	_status_label.text = status
+	_status_label.add_theme_color_override(&"font_color", color)
+	_status.tooltip_text = tooltip
+	_status.mouse_filter = Control.MOUSE_FILTER_PASS if not tooltip.is_empty() else Control.MOUSE_FILTER_IGNORE
+	_status.show()
+
+
+func hide_status() -> void:
+	_status.hide()
+
+
+## The status shown, or "".
+func status_text() -> String:
+	return _status_label.text if _status.visible else ""
 
 
 ## `+12` and `−3` on the right (hidden while both are zero).
@@ -95,6 +119,8 @@ func _on_label_input(event: InputEvent) -> void:
 
 func _apply_theme() -> void:
 	custom_minimum_size.y = float(get_theme_constant(&"height", THEME_TYPE))
+	var icon_size: float = float(get_theme_constant(&"icon_size", &"ListHeaderStatus"))
+	_status_icon.custom_minimum_size = Vector2(icon_size, icon_size)
 
 
 func _on_context_input(event: InputEvent, source: Control) -> void:

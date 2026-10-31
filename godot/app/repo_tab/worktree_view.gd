@@ -22,21 +22,21 @@ enum View { HISTORY, CHANGES, SHELVES }
 
 ## Context menu entries per ref type; &"" is a separator.
 const REF_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"", &"branch.new", &"tag.new", &"",
+	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.new", &"tag.new", &"",
 		&"branch.rename", &"branch.set_upstream", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.new", &"tag.new"],
-	"tag": [&"commit.checkout", &"branch.new", &"", &"tag.push", &"tag.delete"],
+	"remote": [&"branch.checkout", &"branch.merge", &"branch.new", &"tag.new"],
+	"tag": [&"commit.checkout", &"branch.merge", &"branch.new", &"", &"tag.push", &"tag.delete"],
 	"worktree": [&"worktree.open_in_editor", &"worktree.open_terminal", &"worktree.show_in_file_manager",
 		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.remove"],
 }
 ## A ref label in the graph offers fewer actions than the branch list.
 const LABEL_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"", &"branch.delete"],
-	"remote": [&"branch.checkout"],
-	"tag": [&"tag.push", &"tag.delete"],
+	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.delete"],
+	"remote": [&"branch.checkout", &"branch.merge"],
+	"tag": [&"branch.merge", &"", &"tag.push", &"tag.delete"],
 }
 const COMMIT_MENU: Array[StringName] = [&"commit.checkout", &"branch.new", &"tag.new", &"",
-	&"commit.cherry_pick", &"", &"commit.copy_hash"]
+	&"commit.cherry_pick", &"commit.merge", &"", &"commit.copy_hash"]
 const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"sync.pull_merge", &"sync.pull_rebase", &"sync.push",
 	&"", &"sync.force_push"]
 ## Jobs that change the worktree's files: its panes dim while they run.
@@ -48,6 +48,15 @@ const BLOCKING: Dictionary[String, String] = {
 	"pull": "Pulling",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
+	"merge": "Merging",
+	"continue": "Continuing",
+	"skip": "Skipping the commit",
+	"undo commit": "Undoing the commit",
+}
+## What the banner says an operation does.
+const DOING: Dictionary[String, String] = {
+	"merge": "Merging", "rebase": "Rebasing", "cherry_pick": "Cherry-picking",
+	"revert": "Reverting", "bisect": "Bisecting", "am": "Applying patches",
 }
 ## How long a blocking job runs before the panes dim.
 const OVERLAY_DELAY: float = 0.3
@@ -94,7 +103,17 @@ var _sidebar_width: int = 0
 @onready var _banner: Control = %Banner
 @onready var _banner_icon: TextureRect = %BannerIcon
 @onready var _banner_label: Label = %BannerLabel
+## The banner's text: what runs, the rebase step as a pill, the commit's
+## subject (dimmed) and what is left; laid out by hand so the subject shortens
+## first, then what runs.
+var _banner_text: Control = Control.new()
+var _banner_step: Label = Label.new()
+var _banner_subject: Label = Label.new()
+var _banner_status: Label = Label.new()
 @onready var _abort_button: Button = %AbortButton
+var _continue_button: Button = Button.new()
+var _skip_button: Button = Button.new()
+var _resolver_button: Button = Button.new()
 @onready var _overlay: Control = %Overlay
 @onready var _overlay_label: Label = %OverlayLabel
 @onready var _overlay_progress: ProgressBar = %OverlayProgress
@@ -104,6 +123,7 @@ var _sidebar_width: int = 0
 
 
 func _ready() -> void:
+	_build_banner_text()
 	_switch.theme_type_variation = &"ViewSwitch"
 	var group: ButtonGroup = ButtonGroup.new()
 	for entry: Array in [[_changes_button, "Changes", &"FileList", View.CHANGES, &"view.changes"],
@@ -149,8 +169,27 @@ func _ready() -> void:
 	_branch_button.menu_requested.connect(open_branches)
 	_sync_button.pressed.connect(func() -> void: Actions.run_action(&"sync.sync", _sync_button))
 	_sync_button.menu_requested.connect(_open_sync_menu)
-	_banner_icon.texture = AppTheme.icon(&"GitConflict")
+	_abort_button.icon = Actions.icon(&"operation.abort")
+	_abort_button.theme_type_variation = &"DangerTextButton"
 	_abort_button.pressed.connect(func() -> void: Actions.run_action(&"operation.abort", _abort_button))
+	for entry: Array in [[_resolver_button, "Open resolver", &"operation.open_resolver"],
+			[_skip_button, "Skip", &"operation.skip"], [_continue_button, "Continue", &"operation.continue"]]:
+		var button: Button = entry[0]
+		var id: StringName = entry[2]
+		button.text = entry[1]
+		button.icon = Actions.icon(id)
+		button.pressed.connect(func() -> void: Actions.run_action(id, button))
+		_abort_button.add_sibling(button)
+		_abort_button.get_parent().move_child(button, _abort_button.get_index())
+	_continue_button.theme_type_variation = &"PrimaryButton"
+	_popover.merge_chosen.connect(func(ref: Dictionary) -> void:
+		_ops.merge_into_current(String(ref["name"]), String(ref["short"])))
+	_ops.changes_requested.connect(func(conflicts: bool) -> void:
+		show_view(View.CHANGES)
+		if conflicts:
+			_changes.open_first_conflict())
+	_ops.message_suggested.connect(func(summary: String, body: String) -> void:
+		_changes.commit_box().suggest_message(summary, body))
 	_overlay_cancel.pressed.connect(func() -> void:
 		if _overlay_job >= 0:
 			session.cancel_job(_overlay_job))
@@ -176,6 +215,10 @@ func setup(value: RepoSession) -> void:
 	for sig: Signal in [session.opened, session.badge_changed, session.status_changed, session.refs_changed,
 			session.worktrees_changed, session.operation_changed, session.stashes_changed]:
 		sig.connect(_on_state)
+	# Resolved files are counted after the status that staged them; Open
+	# resolver hides while a conflict is shown.
+	session.selection_changed.connect(_update_banner)
+	session.diff_changed.connect(_update_banner)
 	session.open_failed.connect(_on_open_failed)
 	session.missing.connect(_on_missing)
 	session.job_started.connect(_on_job_started)
@@ -252,6 +295,102 @@ func has_error() -> bool:
 func open_branches() -> void:
 	if session != null and session.is_ready():
 		_popover.open_below(_branch_button)
+
+
+## Opens the branch list to pick a branch to merge into the current one.
+func open_merge_picker() -> void:
+	if session != null and session.is_ready():
+		_popover.open_below(_branch_button, true)
+
+
+## The banner's Continue: the commit box commits a merge or cherry-pick
+## (with its message); anything else continues as git does.
+func continue_operation() -> void:
+	var mode: String = session.commit_mode()
+	var box: CommitBox = _changes.commit_box()
+	if mode in ["merge", "cherry_pick"] and box.can_commit():
+		box.commit(Actions.origin())
+		return
+	_ops.continue_operation(box.summary(), box.body())
+
+
+## Shows the Changes view at the first unresolved conflict.
+func open_resolver() -> void:
+	show_view(View.CHANGES)
+	_changes.open_first_conflict()
+
+
+func continue_button() -> Button:
+	return _continue_button
+
+
+func skip_button() -> Button:
+	return _skip_button
+
+
+func resolver_button() -> Button:
+	return _resolver_button
+
+
+func banner_text() -> String:
+	if not _banner.visible:
+		return ""
+	var parts: PackedStringArray = PackedStringArray()
+	for label: Label in [_banner_label, _banner_step, _banner_subject, _banner_status]:
+		if label.visible and not label.text.is_empty():
+			parts.append(label.text)
+	return " ".join(parts)
+
+
+func _build_banner_text() -> void:
+	_banner_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_banner_text.clip_contents = true
+	_banner_text.mouse_filter = Control.MOUSE_FILTER_PASS
+	_banner_label.add_sibling(_banner_text)
+	_banner_label.reparent(_banner_text)
+	_banner_step.theme_type_variation = &"StepPill"
+	_banner_step.tooltip_text = "Commit being applied, of all the commits to apply"
+	_banner_step.mouse_filter = Control.MOUSE_FILTER_PASS
+	_banner_subject.theme_type_variation = &"DimLabel"
+	_banner_subject.mouse_filter = Control.MOUSE_FILTER_PASS
+	for label: Label in [_banner_label, _banner_subject]:
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.clip_text = true
+	for label: Label in [_banner_step, _banner_subject, _banner_status]:
+		_banner_text.add_child(label)
+	_banner_text.resized.connect(_place_banner_text)
+
+
+## Places the banner's labels in a row: the subject gives way first, then
+## what runs; the step and what is left keep their width.
+func _place_banner_text() -> void:
+	var labels: Array[Label] = [_banner_label, _banner_step, _banner_subject, _banner_status]
+	var widths: Array[float] = []
+	var height: float = 0.0
+	for label: Label in labels:
+		var shown: bool = label.visible and not label.text.is_empty()
+		var font: Font = label.get_theme_font(&"font")
+		var text_width: float = font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+				label.get_theme_font_size(&"font_size")).x
+		widths.append(ceilf(text_width + label.get_theme_stylebox(&"normal").get_minimum_size().x) if shown else 0.0)
+		height = maxf(height, label.get_combined_minimum_size().y)
+	var gap: float = float(_banner_label.get_parent().get_parent().get_theme_constant(&"separation", &"HBoxContainer"))
+	var used: float = 0.0
+	for width: float in widths:
+		used += width + (gap if width > 0.0 else 0.0)
+	var excess: float = maxf(0.0, used - gap - _banner_text.size.x)
+	for i: int in [2, 0]:
+		var cut: float = minf(excess, widths[i])
+		widths[i] -= cut
+		excess -= cut
+	_banner_text.custom_minimum_size.y = height
+	var x: float = 0.0
+	for i: int in labels.size():
+		var label_height: float = labels[i].get_combined_minimum_size().y
+		labels[i].position = Vector2(x, (maxf(height, _banner_text.size.y) - label_height) / 2.0)
+		labels[i].size = Vector2(widths[i], label_height)
+		if widths[i] > 0.0:
+			x += widths[i] + gap
 
 
 # --- Context menus --------------------------------------------------------------
@@ -409,6 +548,8 @@ func show_view(which: View) -> void:
 		slot.add_child(_switch)
 	if _sidebar_width > 0:
 		_set_sidebar_width(_sidebar_width)
+	if session != null:
+		_update_banner()
 	focus_view()
 
 
@@ -524,31 +665,85 @@ func _update_header() -> void:
 	_sync_button.tooltip_text = tooltip
 
 
+## "Merging feature/login into main · 2 files to resolve", "Cherry-picking
+## abc1234 Fix it", "Rebasing topic onto main (2 / 5) Fix it", with the
+## subject dimmed and the step as a pill. Red while
+## conflicts are left, green ("ready to commit") once all are resolved.
 func _update_banner() -> void:
 	var operation: String = session.operation()
 	_banner.visible = not operation.is_empty()
 	if operation.is_empty():
 		return
-	var doing: String = {
-		"merge": tr("Merging"), "rebase": tr("Rebasing"), "cherry-pick": tr("Cherry-picking"),
-		"revert": tr("Reverting"), "bisect": tr("Bisecting"),
-	}.get(operation, operation.capitalize())
-	var conflicts: int = int(session.badge().get("conflicts", 0))
-	var where: String = session.current_branch()
-	var banner_text: String = doing
-	if not where.is_empty() and operation == "merge":
-		banner_text += tr(" into ") + where
-	if conflicts > 0:
-		banner_text += tr(" · %d conflict") % conflicts if conflicts == 1 else tr(" · %d conflicts") % conflicts
-	_banner_label.text = banner_text
+	var info: Dictionary = session.operation_info()
+	var doing: String = tr(DOING.get(operation, operation.capitalize()))
+	var head: String = String(info.get("head_name", ""))
+	var other: String = String(info.get("other_name", ""))
+	var oid: String = String(info.get("other_oid", ""))
+	var text: String = doing
+	match operation:
+		"merge":
+			var merged: String = other if not other.is_empty() else oid.left(7)
+			text = tr("Merging %s into %s") % [merged, head] if not head.is_empty() else tr("Merging %s") % merged
+		"cherry_pick":
+			text = tr("Cherry-picking %s") % oid.left(7)
+		"revert":
+			text = tr("Reverting %s") % oid.left(7)
+		"rebase":
+			text = tr("Rebasing %s onto %s") % [head if not head.is_empty() else "HEAD", _onto_name(oid)]
+	var steps: int = int(info.get("steps", 0)) if operation == "rebase" else 0
+	_banner_step.visible = steps > 0
+	_banner_step.text = "%d / %d" % [int(info.get("step", 0)), steps] if steps > 0 else ""
+	var subject: String = ""
+	if operation in ["cherry_pick", "revert"]:
+		subject = other
+	elif operation == "rebase":
+		subject = String(info.get("message", "")).strip_edges().get_slice("\n", 0)
+	_banner_subject.text = subject
+	_banner_subject.tooltip_text = subject
+	var left: int = int(info.get("conflicts", 0))
+	var resolved: int = int(info.get("resolved", 0))
+	var mode: String = String(info.get("commit_mode", ""))
+	var all_resolved: bool = left == 0 and resolved > 0
+	var status: String = ""
+	if left > 0:
+		status = tr("· 1 file to resolve") if left == 1 else tr("· %d files to resolve") % left
+	elif all_resolved:
+		status = tr("· ready to commit") if mode in ["merge", "cherry_pick"] else tr("· ready to continue")
+	_banner_label.text = text
+	_banner_label.tooltip_text = text
+	_banner_status.text = status
+	_place_banner_text.call_deferred()
+	_banner.theme_type_variation = &"OperationBannerReady" if all_resolved else &"OperationBanner"
+	_banner_icon.texture = AppTheme.tintable_icon(&"StatusSuccess" if all_resolved else &"GitConflict")
+	_banner_icon.modulate = _banner.get_theme_color(&"icon_color", _banner.theme_type_variation)
+	_skip_button.visible = operation == "rebase"
+	# Not while the conflict is already open in the Changes view.
+	_resolver_button.visible = left > 0 and not (view == View.CHANGES and _changes.is_conflict_shown())
+	# A merge or cherry-pick is committed with the commit box: the banner
+	# offers it only where that box is not shown.
+	var box_commits: bool = mode in ["merge", "cherry_pick"] and view == View.CHANGES
+	_continue_button.visible = operation in ["merge", "cherry_pick", "revert", "rebase", "am"] and not box_commits
+	var commit_text: String = {"merge": tr("Commit merge"), "revert": tr("Commit revert")}.get(operation, tr("Commit cherry-pick"))
+	_continue_button.text = commit_text if mode in ["merge", "cherry_pick"] else tr("Continue")
+	_continue_button.icon = AppTheme.icon(&"GitMerge") if mode == "merge" else Actions.icon(&"operation.continue")
+	_continue_button.disabled = not Actions.is_enabled(&"operation.continue")
+	_continue_button.tooltip_text = Actions.tooltip(&"operation.continue")
+
+
+## A branch at `oid`, else its short hash.
+func _onto_name(oid: String) -> String:
+	for ref: Dictionary in session.branch_refs():
+		if String(ref["commit"]) == oid and String(ref["kind"]) == "branch":
+			return String(ref["short_name"])
+	return oid.left(7)
 
 
 static func _ago(seconds: int) -> String:
 	if seconds < 60:
 		return TranslationServer.translate("just now")
 	if seconds < 3600:
-		return TranslationServer.translate("%d min ago") % (seconds / 60)
-	return TranslationServer.translate("%d h ago") % (seconds / 3600)
+		return TranslationServer.translate("%d min ago") % floori(seconds / 60.0)
+	return TranslationServer.translate("%d h ago") % floori(seconds / 3600.0)
 
 
 # --- Blocking jobs --------------------------------------------------------------

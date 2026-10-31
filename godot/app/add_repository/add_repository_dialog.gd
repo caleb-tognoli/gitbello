@@ -56,8 +56,8 @@ func open() -> void:
 	super.open()
 
 
-func show_mode(mode: int) -> void:
-	_mode = clampi(mode, CREATE, CLONE)
+func show_mode(which: int) -> void:
+	_mode = clampi(which, CREATE, CLONE)
 	(field("action") as OptionButton).selected = _mode
 	_show_mode(_mode)
 	_validate()
@@ -77,39 +77,39 @@ func job_status() -> String:
 	return _status.text
 
 
-func _show_mode(mode: int) -> void:
-	_mode = mode
+func _show_mode(which: int) -> void:
+	_mode = which
 	for key: String in ["name", "location", "branch"]:
-		set_field_visible(key, mode == CREATE)
-	set_field_visible("existing", mode == OPEN)
+		set_field_visible(key, which == CREATE)
+	set_field_visible("existing", which == OPEN)
 	for key: String in ["url", "destination"]:
-		set_field_visible(key, mode == CLONE)
-	ok_button_text = ["Create repository", "Open repository", "Clone repository"][mode] as String
+		set_field_visible(key, which == CLONE)
+	ok_button_text = ["Create repository", "Open repository", "Clone repository"][which] as String
 
 
-func _validate_form(values: Dictionary) -> String:
+func _validate_form(fields: Dictionary) -> String:
 	if running():
 		return ""
 	match _mode:
 		CREATE:
-			if String(values["name"]).is_empty():
+			if String(fields["name"]).is_empty():
 				return tr("Enter a repository name.")
-			if String(values["location"]).is_empty():
+			if String(fields["location"]).is_empty():
 				return tr("Choose a location.")
-			var branch_error: String = Core.ref_name_error(String(values["branch"]))
+			var branch_error: String = Core.ref_name_error(String(fields["branch"]))
 			if not branch_error.is_empty():
 				return tr(branch_error)
-			return tr(Core.new_repository_path_error(_create_path(values)))
+			return tr(Core.new_repository_path_error(_create_path(fields)))
 		OPEN:
-			var path: String = String(values["existing"])
+			var path: String = String(fields["existing"])
 			if path.is_empty():
 				return tr("Choose a repository folder.")
 			if not DirAccess.dir_exists_absolute(path):
 				return tr("Choose an existing folder.")
 		CLONE:
-			if String(values["url"]).is_empty():
+			if String(fields["url"]).is_empty():
 				return tr("Enter a repository URL or path.")
-			return tr(Core.new_repository_path_error(String(values["destination"])))
+			return tr(Core.new_repository_path_error(String(fields["destination"])))
 	return ""
 
 
@@ -146,10 +146,10 @@ func _on_field_changed(key: String) -> void:
 	elif key == "destination":
 		_clone_destination_edited = true
 	elif key == "url" and not _clone_destination_edited:
-		var name: String = _clone_name(String(values()["url"]))
-		if not name.is_empty():
+		var repo_name: String = _clone_name(String(values()["url"]))
+		if not repo_name.is_empty():
 			var destination: LineEdit = field("destination") as LineEdit
-			destination.text = destination.text.get_base_dir().path_join(name)
+			destination.text = destination.text.get_base_dir().path_join(repo_name)
 			_validate()
 
 
@@ -161,10 +161,10 @@ static func _clone_name(url: String) -> String:
 	var source: String = url.strip_edges().replace("\\", "/")
 	while source.ends_with("/"):
 		source = source.left(-1)
-	var name: String = source.get_file()
-	if name == ".git":
-		name = source.get_base_dir().get_file()
-	return name.trim_suffix(".git")
+	var repo_name: String = source.get_file()
+	if repo_name == ".git":
+		repo_name = source.get_base_dir().get_file()
+	return repo_name.trim_suffix(".git")
 
 
 func _set_busy(busy: bool) -> void:

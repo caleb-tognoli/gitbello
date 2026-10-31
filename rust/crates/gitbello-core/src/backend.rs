@@ -1,7 +1,7 @@
 //! The `GitBackend` trait and its git CLI implementation (PLAN §3.3).
 //!
 //! Reads, plus the writes of the milestones so far (staging, commits,
-//! discards, sync, branches, tags and cherry-picks).
+//! discards, sync, branches, tags, cherry-picks and merges).
 //! Commands that take paths run in the worktree root with literal pathspecs,
 //! so status paths can be passed back unchanged.
 
@@ -16,6 +16,10 @@ use crate::diff::{
 use crate::git::{
     CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, GitStream, Progress,
 };
+use crate::merge::{
+    ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
+    UndoMode,
+};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
@@ -26,6 +30,7 @@ use crate::repo::{
 };
 use crate::worktrees::new_worktree_path_error;
 
+mod merge;
 mod shelf_files;
 
 /// A shelf replacement, retained to undo a per-file discard.
@@ -289,6 +294,81 @@ pub trait GitBackend: Send + Sync {
         rev: &str,
         cancel: &CancelToken,
     ) -> Result<Option<String>, GitError>;
+
+    /// What merging `target` (a full ref name or a commit) into HEAD would
+    /// do, without touching the working tree. `branch` is the current branch
+    /// (for the default message); the overlap with local changes is left empty.
+    fn merge_preview(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        branch: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<MergePreview, GitError>;
+    /// Merges `target` into HEAD, with `message` where `mode` takes one and
+    /// the base in the conflict markers (zdiff3). Conflicts fail with
+    /// [`GitErrorKind::Conflict`] and leave the merge in progress.
+    fn merge(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        mode: MergeMode,
+        message: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// The operation in progress with the banner's details, if any.
+    fn operation_details(
+        &self,
+        repo: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Option<OperationDetails>, GitError>;
+    /// A conflicted file's working-tree content and conflict blocks.
+    fn conflict_file(
+        &self,
+        toplevel: &Path,
+        path: &Path,
+        kind: ConflictKind,
+        cancel: &CancelToken,
+    ) -> Result<ConflictFile, GitError>;
+    /// Files whose conflicts were resolved (git's resolve-undo record).
+    fn resolved_paths(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError>;
+    fn conflict_op(
+        &self,
+        toplevel: &Path,
+        op: &ConflictOp,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Finishes `operation` after its conflicts were resolved: restages the
+    /// resolved files, then commits with `message` (git's when `None`) for a
+    /// merge or cherry-pick, or continues a rebase.
+    fn continue_operation(
+        &self,
+        toplevel: &Path,
+        operation: Operation,
+        message: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// Skips the commit a rebase (or cherry-pick) stopped at.
+    fn skip_operation(
+        &self,
+        toplevel: &Path,
+        operation: Operation,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// The commit the undo strip offers and the commits HEAD lacks.
+    fn head_info(&self, repo: &Path, cancel: &CancelToken) -> Result<HeadInfo, GitError>;
+    /// Undoes HEAD, which must still be `oid`; returns its message.
+    fn undo_commit(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        mode: UndoMode,
+        cancel: &CancelToken,
+    ) -> Result<String, GitError>;
 }
 
 /// Receives `--progress` updates of a running fetch, pull or push.
@@ -1419,6 +1499,95 @@ impl GitBackend for CliBackend {
             Err(err) if err.exit_code == Some(1) => Ok(None),
             Err(err) => Err(err),
         }
+    }
+
+    fn merge_preview(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        branch: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<MergePreview, GitError> {
+        self.merge_preview_impl(toplevel, target, branch, cancel)
+    }
+
+    fn merge(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        mode: MergeMode,
+        message: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.merge_impl(toplevel, target, mode, message, cancel)
+    }
+
+    fn operation_details(
+        &self,
+        repo: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Option<OperationDetails>, GitError> {
+        self.operation_details_impl(repo, cancel)
+    }
+
+    fn conflict_file(
+        &self,
+        toplevel: &Path,
+        path: &Path,
+        kind: ConflictKind,
+        cancel: &CancelToken,
+    ) -> Result<ConflictFile, GitError> {
+        self.conflict_file_impl(toplevel, path, kind, cancel)
+    }
+
+    fn resolved_paths(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.resolved_paths_impl(toplevel, cancel)
+    }
+
+    fn conflict_op(
+        &self,
+        toplevel: &Path,
+        op: &ConflictOp,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.conflict_op_impl(toplevel, op, cancel)
+    }
+
+    fn continue_operation(
+        &self,
+        toplevel: &Path,
+        operation: Operation,
+        message: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.continue_operation_impl(toplevel, operation, message, cancel)
+    }
+
+    fn skip_operation(
+        &self,
+        toplevel: &Path,
+        operation: Operation,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.skip_operation_impl(toplevel, operation, cancel)
+    }
+
+    fn head_info(&self, repo: &Path, cancel: &CancelToken) -> Result<HeadInfo, GitError> {
+        self.head_info_impl(repo, cancel)
+    }
+
+    fn undo_commit(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        mode: UndoMode,
+        cancel: &CancelToken,
+    ) -> Result<String, GitError> {
+        self.undo_commit_impl(toplevel, oid, mode, cancel)
     }
 }
 

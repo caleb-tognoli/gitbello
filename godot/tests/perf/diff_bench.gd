@@ -52,9 +52,9 @@ func _ready() -> void:
 				session.diff_lines(start, WINDOW)
 			times.append(float(Time.get_ticks_usec() - t))
 		times.sort()
-		var name: String = "split" if split else "unified"
-		print("BENCH %s_fetch_%d_us_p50 %.0f" % [name, WINDOW, times[times.size() / 2]])
-		print("BENCH %s_fetch_%d_us_max %.0f" % [name, WINDOW, times[times.size() - 1]])
+		var layout_name: String = "split" if split else "unified"
+		print("BENCH %s_fetch_%d_us_p50 %.0f" % [layout_name, WINDOW, times[floori(times.size() / 2.0)]])
+		print("BENCH %s_fetch_%d_us_max %.0f" % [layout_name, WINDOW, times[times.size() - 1]])
 
 	var panel: DiffPanel = PANEL.instantiate() as DiffPanel
 	add_child(panel)
@@ -72,7 +72,7 @@ func _ready() -> void:
 		await get_tree().process_frame
 		frames.append(float(Time.get_ticks_usec() - t) / 1000.0)
 	frames.sort()
-	print("BENCH page_frame_ms_p50 %.2f" % frames[frames.size() / 2])
+	print("BENCH page_frame_ms_p50 %.2f" % frames[floori(frames.size() / 2.0)])
 	print("BENCH page_frame_ms_p99 %.2f" % frames[int(frames.size() * 0.99)])
 	print("BENCH page_frame_ms_max %.2f" % frames[frames.size() - 1])
 	get_tree().quit(0)

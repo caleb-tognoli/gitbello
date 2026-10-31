@@ -93,9 +93,9 @@ func _update_tooltips() -> void:
 func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void:
 	_worktrees = _ordered(worktrees)
 	_selected = selected_path
-	var chips: Array[Node] = _chips.get_children()
+	var existing: Array[Node] = _chips.get_children()
 	for i: int in _worktrees.size():
-		var chip: WorktreeChip = chips[i] as WorktreeChip if i < chips.size() else null
+		var chip: WorktreeChip = existing[i] as WorktreeChip if i < existing.size() else null
 		if chip == null:
 			chip = WorktreeChip.new()
 			chip.chosen.connect(func() -> void: worktree_chosen.emit(chip.path()))
@@ -104,8 +104,8 @@ func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void
 			_chips.add_child(chip)
 		chip.set_worktree(_worktrees[i])
 		chip.selected = Paths.same(chip.path(), selected_path)
-	for i: int in range(_worktrees.size(), chips.size()):
-		chips[i].queue_free()
+	for i: int in range(_worktrees.size(), existing.size()):
+		existing[i].queue_free()
 	_update_overflow()
 
 

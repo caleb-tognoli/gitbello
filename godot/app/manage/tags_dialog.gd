@@ -101,14 +101,14 @@ func _update_buttons() -> void:
 
 
 func _run(button: String) -> void:
-	var name: String = _selected()
+	var tag_name: String = _selected()
 	match button:
 		"new":
 			var head: String = _session.current_branch()
 			_ops.new_tag("HEAD", head if not head.is_empty() else "HEAD")
 		"push":
-			if not name.is_empty():
-				_ops.push_tag(name)
+			if not tag_name.is_empty():
+				_ops.push_tag(tag_name)
 		"delete":
-			if not name.is_empty():
-				_ops.delete_tag(name)
+			if not tag_name.is_empty():
+				_ops.delete_tag(tag_name)

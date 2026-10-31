@@ -73,12 +73,12 @@ func rows() -> PackedStringArray:
 	return out
 
 
-func select(name: String) -> void:
+func select(remote_name: String) -> void:
 	var root: TreeItem = _tree.get_root()
 	if root == null:
 		return
 	for item: TreeItem in root.get_children():
-		if item.get_text(0) == name:
+		if item.get_text(0) == remote_name:
 			item.select(0)
 	_update_buttons()
 
@@ -115,16 +115,16 @@ func _update_buttons() -> void:
 
 
 func _run(button: String) -> void:
-	var name: String = _selected()
+	var remote_name: String = _selected()
 	match button:
 		"add":
 			_ops.add_remote()
 		"url":
-			if not name.is_empty():
-				_ops.edit_remote_url(name)
+			if not remote_name.is_empty():
+				_ops.edit_remote_url(remote_name)
 		"rename":
-			if not name.is_empty():
-				_ops.rename_remote(name)
+			if not remote_name.is_empty():
+				_ops.rename_remote(remote_name)
 		"remove":
-			if not name.is_empty():
-				_ops.remove_remote(name)
+			if not remote_name.is_empty():
+				_ops.remove_remote(remote_name)

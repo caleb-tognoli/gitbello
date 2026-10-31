@@ -4,6 +4,7 @@ use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
 use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
+use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
 use gitbello_core::runtime::{DiffSlot, RepoState};
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
@@ -108,6 +109,17 @@ impl RepoSession {
     /// (`search_info`, `match` in `graph_rows`).
     #[signal]
     fn search_changed();
+    /// The preview requested with `load_merge_preview(target)` arrived
+    /// (`merge_preview`).
+    #[signal]
+    fn merge_preview_ready(target: GString);
+    /// HEAD's undoable commit or the commits HEAD lacks changed
+    /// (`undoable_commit`, `in_head` in `graph_rows`).
+    #[signal]
+    fn head_changed();
+    /// `undo_commit` finished; the undone commit's message.
+    #[signal]
+    fn commit_undone(summary: GString, body: GString);
 
     /// The key passed to every core call (the opened path, normalized).
     #[func]
@@ -571,6 +583,146 @@ impl RepoSession {
         }
     }
 
+    // --- Merge workflows (PLAN §4, M7) ---------------------------------------
+
+    /// Works out what merging `target` (branch, remote branch, tag or commit)
+    /// into HEAD would do; `merge_preview_ready(target)` follows.
+    #[func]
+    fn load_merge_preview(&self, target: GString) -> i64 {
+        let target = target.to_string();
+        job_id(runtime_cell::with(|rt| rt.load_merge_preview(&self.key, &target)).flatten())
+    }
+
+    /// See `convert::merge_preview`; empty until it arrived.
+    #[func]
+    fn merge_preview(&self) -> VarDictionary {
+        self.read(|s| s.merge_preview().map(convert::merge_preview))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Merges `target` into HEAD. `mode` is `default`, `no_ff`, `squash` or
+    /// `ff_only`; an empty `message` means git's. With `shelve`, local
+    /// changes are shelved first and restored after a clean merge. Label
+    /// `merge`; conflicts fail with the `conflict` kind and leave the merge
+    /// in progress.
+    #[func]
+    fn merge(&self, target: GString, mode: GString, message: GString, shelve: bool) -> i64 {
+        let Some(mode) = MergeMode::from_id(&mode.to_string()) else {
+            return -1;
+        };
+        let (target, message) = (target.to_string(), message.to_string());
+        let message = (!message.trim().is_empty()).then_some(message);
+        job_id(
+            runtime_cell::with(|rt| rt.merge(&self.key, &target, mode, message, shelve)).flatten(),
+        )
+    }
+
+    /// See `convert::operation_info`; empty with no operation in progress.
+    #[func]
+    fn operation_info(&self) -> VarDictionary {
+        self.read(convert::operation_info).unwrap_or_default()
+    }
+
+    /// What the commit box does: `normal`, `merge`, `cherry_pick` or `rebase`.
+    #[func]
+    fn commit_mode(&self) -> GString {
+        self.read(|s| GString::from(s.commit_mode().id()))
+            .unwrap_or_else(|| GString::from("normal"))
+    }
+
+    /// Finishes the operation once no conflict is left: commits a merge or
+    /// cherry-pick with the message (git's when the summary is empty), or
+    /// continues a rebase. Label `continue`; -1 when it cannot.
+    #[func]
+    fn continue_operation(&self, summary: GString, body: GString) -> i64 {
+        let message = commit_message(&summary.to_string(), &body.to_string());
+        job_id(runtime_cell::with(|rt| rt.continue_operation(&self.key, message)).flatten())
+    }
+
+    /// Skips the commit a rebase stopped at. Label `skip`.
+    #[func]
+    fn skip_operation(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.skip_operation(&self.key)).flatten())
+    }
+
+    /// Resolves block `block` of the conflicted file shown (`choice`:
+    /// `ours`, `theirs`, `ours_theirs`, `theirs_ours`). Label `resolve
+    /// conflict`; the file is staged once no block is left.
+    #[func]
+    fn resolve_block(&self, path: GString, block: i64, choice: GString) -> i64 {
+        let (Some(choice), Ok(block)) = (
+            BlockChoice::from_id(&choice.to_string()),
+            usize::try_from(block),
+        ) else {
+            return -1;
+        };
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.resolve_block(&self.key, &path, block, choice)).flatten())
+    }
+
+    /// Whether a block choice can be undone.
+    #[func]
+    fn can_undo_block_choice(&self) -> bool {
+        self.read(RepoState::can_undo_block_choice).unwrap_or(false)
+    }
+
+    /// Undoes the last block choice. Label `undo conflict choice`.
+    #[func]
+    fn undo_block_choice(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_block_choice(&self.key)).flatten())
+    }
+
+    /// Resolves conflicted `path` whole (`choice`: `ours`, `theirs`, `keep`
+    /// or `delete`). Label `resolve conflict`.
+    #[func]
+    fn resolve_file(&self, path: GString, choice: GString) -> i64 {
+        let Some(choice) = FileChoice::from_id(&choice.to_string()) else {
+            return -1;
+        };
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.resolve_file(&self.key, &path, choice)).flatten())
+    }
+
+    /// Brings back the conflicts of a resolved file. Label `reopen conflicts`.
+    #[func]
+    fn reopen_conflicts(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.reopen_conflicts(&self.key, &path, false)).flatten())
+    }
+
+    /// Recreates the conflicts of `path` with the base in the markers (and
+    /// shows the base). Label `reopen conflicts`.
+    #[func]
+    fn recreate_conflicts_with_base(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.reopen_conflicts(&self.key, &path, true)).flatten())
+    }
+
+    /// Shows or hides the base of each conflict in the resolver;
+    /// `diff_changed` follows.
+    #[func]
+    fn show_conflict_base(&self, show: bool) {
+        runtime_cell::with(|rt| rt.show_conflict_base(&self.key, show));
+    }
+
+    /// See `convert::undoable_commit`.
+    #[func]
+    fn undoable_commit(&self) -> VarDictionary {
+        self.read(convert::undoable_commit).unwrap_or_default()
+    }
+
+    /// Undoes HEAD commit `oid` (`mode`: `keep_changes`, or `remove_merge`
+    /// for a merge commit). Label `undo commit`; `commit_undone` follows.
+    #[func]
+    fn undo_commit(&self, oid: GString, mode: GString) -> i64 {
+        let Some(mode) = UndoMode::from_id(&mode.to_string()) else {
+            return -1;
+        };
+        let oid = oid.to_string();
+        job_id(runtime_cell::with(|rt| rt.undo_commit(&self.key, &oid, mode)).flatten())
+    }
+
     /// Cancels a running or queued job; returns whether it was found.
     #[func]
     fn cancel_job(&self, job: i64) -> bool {
@@ -781,7 +933,7 @@ impl RepoSession {
                 return rows;
             };
             for &i in s.changes().indices().iter().skip(start).take(count) {
-                rows.push(&convert::change_row(&status.changes[i], s.selection()));
+                rows.push(&convert::change_row(&status.changes[i], s));
             }
             rows
         })
@@ -827,8 +979,7 @@ impl RepoSession {
     /// Files the next commit takes something of.
     #[func]
     fn picked_count(&self) -> i64 {
-        self.read(|s| to_i64(s.selection().picked_count()))
-            .unwrap_or(0)
+        self.read(|s| to_i64(s.picked_count())).unwrap_or(0)
     }
 
     /// Includes or excludes whole files in the commit. `selection_changed`
@@ -892,9 +1043,14 @@ impl RepoSession {
     /// See `convert::diff_info`: `{state, path, kind, content, notes, ...}`,
     /// plus `pickable` (lines can be picked) and `as_staged` (the file is
     /// committed exactly as staged outside gitbello).
+    /// A conflicted file shows its conflicts instead: see
+    /// `convert::conflict_info`.
     #[func]
     fn diff_info(&self) -> VarDictionary {
         self.read(|s| {
+            if let Some(conflict) = s.conflict() {
+                return convert::conflict_info(conflict, s.conflict_shows_base());
+            }
             let mut info = convert::diff_info(s.diff());
             info.set("pickable", s.can_pick_lines());
             info.set("as_staged", s.diff_as_staged());
@@ -913,6 +1069,9 @@ impl RepoSession {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
+            if let Some(conflict) = s.conflict() {
+                return Some(convert::conflict_rows(conflict, false, start, count));
+            }
             let lines = convert::diff_rows(s.diff()?, false, start, count);
             for mut line in lines.iter_shared() {
                 mark_picked(&mut line, s.diff_picks());
@@ -932,6 +1091,9 @@ impl RepoSession {
         let count = usize::try_from(count).unwrap_or(0);
         let commit = slot == "commit";
         self.read(|s| {
+            if let (false, Some(conflict)) = (commit, s.conflict()) {
+                return Some(convert::conflict_rows(conflict, true, start, count));
+            }
             let state = if commit { s.commit_diff() } else { s.diff() }?;
             let rows = convert::diff_rows(state, true, start, count);
             if !commit {
@@ -1167,6 +1329,7 @@ impl RepoSession {
                     "segments" => &segments,
                     "refs" => &convert::labels(state.labels(&hash)),
                     "match" => search.is_some_and(|s| s.is_match(row)),
+                    "in_head" => state.in_head(&hash),
                 });
             }
             rows
@@ -1276,6 +1439,10 @@ fn parse_mode(id: &GString) -> Option<PatchMode> {
 
 /// Sets `picked` on a `diff_lines` row from the diff's line picks.
 fn mark_picked(line: &mut VarDictionary, picks: &[PickState]) {
+    // An empty side of a side-by-side row stays empty.
+    if line.is_empty() {
+        return;
+    }
     let picked = line
         .get("index")
         .and_then(|v| v.try_to::<i64>().ok())

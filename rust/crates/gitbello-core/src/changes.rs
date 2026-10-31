@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use crate::diff::{build_patch, DiffKind, DiffTarget, FileDiff, LineKind, PatchMode};
 use crate::repo::{Change, FileChange, FileState, RepoStatus};
 
-/// Indices into [`RepoStatus::changes`]: conflicted files first, then the
+/// Indices into [`RepoStatus::changes`]: conflicted files first (with the
+/// ones resolved during the operation, so they keep their place), then the
 /// rest, each sorted by path. Ignored files are left out, and so are the
 /// files a [`ChangeFilter`] hides (`total` still counts them).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -25,6 +26,17 @@ impl ChangeList {
 
     /// The files `filter` shows (`selection` answers its pick options).
     pub fn filtered(status: &RepoStatus, selection: &Selection, filter: &ChangeFilter) -> Self {
+        Self::grouped(status, selection, filter, &[])
+    }
+
+    /// [`Self::filtered`], with the files in `resolved` listed among the
+    /// conflicted ones.
+    pub fn grouped(
+        status: &RepoStatus,
+        selection: &Selection,
+        filter: &ChangeFilter,
+        resolved: &[PathBuf],
+    ) -> Self {
         let mut indices: Vec<usize> = (0..status.changes.len())
             .filter(|&i| status.changes[i].state != FileState::Ignored)
             .collect();
@@ -32,7 +44,8 @@ impl ChangeList {
         indices.retain(|&i| filter.matches(&status.changes[i], selection));
         indices.sort_by(|&a, &b| {
             let (a, b) = (&status.changes[a], &status.changes[b]);
-            (!is_conflicted(a), &a.path).cmp(&(!is_conflicted(b), &b.path))
+            let first = |c: &FileChange| is_conflicted(c) || resolved.contains(&c.path);
+            (!first(a), &a.path).cmp(&(!first(b), &b.path))
         });
         Self { indices, total }
     }
@@ -714,6 +727,34 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
                 "R new.txt",
                 "? notes.txt",
                 "M z.txt"
+            ]
+        );
+    }
+
+    #[test]
+    fn lists_resolved_files_with_the_conflicts() {
+        let status = status();
+        let resolved = [PathBuf::from("z.txt")];
+        let list = ChangeList::grouped(
+            &status,
+            &Selection::default(),
+            &ChangeFilter::default(),
+            &resolved,
+        );
+        let paths: Vec<String> = list
+            .indices()
+            .iter()
+            .map(|&i| status.changes[i].path.display().to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "clash.txt",
+                "z.txt",
+                "added.txt",
+                "both.txt",
+                "new.txt",
+                "notes.txt"
             ]
         );
     }

@@ -13,6 +13,7 @@ pub mod graph;
 pub mod highlight;
 pub mod jobs;
 pub mod launch;
+pub mod merge;
 
 pub mod ops;
 pub mod paths;
