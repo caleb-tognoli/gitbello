@@ -321,9 +321,13 @@ func run() -> void:
 	expect_eq(String(session.status().get("oid", "")), pushed_head, "asking for confirmation leaves HEAD untouched")
 	box._amend_confirm.hide()
 	box._amend_confirm.confirmed.emit()
-	expect(await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend() \
+	var amended: bool = await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend() \
 			and String(session.status().get("oid", "")) != pushed_head and session.graph_row_count() > 0 \
-			and box.can_amend()), "confirming saves and refreshes the amended pushed commit locally")
+			and box.can_amend())
+	expect(amended, "confirming saves and refreshes the amended pushed commit locally" + ("" if amended else \
+			" (busy=%s amend=%s head_moved=%s graph_rows=%d can_amend=%s output=%s)" % [box.is_busy(),
+			box.is_amend(), String(session.status().get("oid", "")) != pushed_head, session.graph_row_count(),
+			box.can_amend(), box.output_text().replace("\n", " ")]))
 
 	var old_head: String = String(session.status().get("oid", ""))
 	box.begin_amend({"hash": old_head, "subject": "Add notes (amended)"})
