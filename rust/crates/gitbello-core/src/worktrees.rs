@@ -77,6 +77,31 @@ pub fn new_worktree_path_error(path: &Path) -> Option<&'static str> {
     }
 }
 
+/// What the worktree strip calls the worktree at `path`: its folder name,
+/// without `main`'s name (less a `.git` suffix) and one `-`, `_` or `.` in
+/// front, ignoring ASCII case (`shop-login` next to `shop` → `login`). The
+/// main worktree, and a name that would end up empty, keep the folder name.
+pub fn short_name(path: &Path, main: Option<&Path>) -> String {
+    let folder = folder_name(path);
+    let Some(main) = main.filter(|m| !m.components().eq(path.components())) else {
+        return folder;
+    };
+    let repo = folder_name(main);
+    let repo = repo.strip_suffix(".git").unwrap_or(&repo);
+    let rest = folder
+        .get(..repo.len())
+        .filter(|head| !repo.is_empty() && head.eq_ignore_ascii_case(repo))
+        .and_then(|_| folder[repo.len()..].strip_prefix(['-', '_', '.']))
+        .filter(|rest| !rest.is_empty());
+    rest.map_or_else(|| folder.clone(), str::to_owned)
+}
+
+fn folder_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy())
+        .into_owned()
+}
+
 /// Where new tasks start and what cleanup compares against, as a short ref
 /// name: `remote`'s default branch (its `HEAD`, else `main` or `master`),
 /// else a local `main` or `master`.
@@ -181,6 +206,23 @@ mod tests {
         assert_eq!(branch_slug("wörk_1.2"), "wörk_1.2");
         assert_eq!(branch_slug("/.-x-./"), "x");
         assert_eq!(branch_slug("///"), "worktree");
+    }
+
+    #[test]
+    fn short_names_drop_the_repo_prefix() {
+        let main = Path::new("/dev/shop");
+        let short = |path: &str| short_name(Path::new(path), Some(main));
+        assert_eq!(short("/dev/shop"), "shop");
+        assert_eq!(short("/dev/shop-feature-login"), "feature-login");
+        assert_eq!(short("/dev/Shop_fix"), "fix");
+        assert_eq!(short("/dev/shop.wörk"), "wörk");
+        assert_eq!(short("/dev/.worktrees/docs"), "docs");
+        assert_eq!(short("/dev/shopping"), "shopping");
+        assert_eq!(short("/dev/shop-"), "shop-");
+        assert_eq!(short("/dev/sh"), "sh");
+        let bare = Path::new("/srv/proj.git");
+        assert_eq!(short_name(Path::new("/w/proj-b"), Some(bare)), "b");
+        assert_eq!(short_name(Path::new("/w/my repo x"), None), "my repo x");
     }
 
     #[test]

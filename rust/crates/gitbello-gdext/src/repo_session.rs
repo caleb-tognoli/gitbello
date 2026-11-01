@@ -208,10 +208,12 @@ impl RepoSession {
             .unwrap_or_default()
     }
 
-    /// `{path, name, branch, head, detached, bare, locked, prunable, is_main,
-    /// is_current, badge, changed, conflicts, ahead, behind, operation}`;
-    /// `badge` is the summary text (`3 ↑1`), `changed` is -1 until the
-    /// worktree's status is known and `operation` an id as in `operation()`.
+    /// `{path, name, short_name, branch, head, detached, bare, locked,
+    /// prunable, is_main, is_current, badge, changed, conflicts, ahead, behind,
+    /// operation}`; `short_name` is the folder name without the repository's
+    /// (see `worktrees::short_name`), `badge` the summary text (`3 ↑1`),
+    /// `changed` is -1 until the worktree's status is known and `operation`
+    /// an id as in `operation()`.
     #[func]
     fn worktrees(&self) -> Array<VarDictionary> {
         self.read(|s| {

@@ -329,6 +329,10 @@ pub fn worktrees(
     badge: impl Fn(&Worktree, bool) -> Option<Badge>,
 ) -> Array<VarDictionary> {
     let mut out = Array::new();
+    let main = list
+        .iter()
+        .find(|wt| wt.is_main)
+        .map(|wt| wt.path.as_path());
     for wt in list {
         let is_current = current.is_some_and(|c| same_path(c, &wt.path));
         let badge = badge(wt, is_current);
@@ -341,6 +345,7 @@ pub fn worktrees(
             "operation" => &gstr(operation_id(badge.as_ref().and_then(|b| b.operation))),
             "path" => &path_str(&wt.path),
             "name" => &gstr(&wt.path.file_name().map_or_else(|| wt.path.to_string_lossy(), |n| n.to_string_lossy())),
+            "short_name" => &gstr(&gitbello_core::worktrees::short_name(&wt.path, main)),
             "branch" => &gstr(wt.branch_name().unwrap_or_default()),
             "head" => &gstr(wt.head.as_deref().unwrap_or_default()),
             "detached" => wt.detached,
