@@ -202,7 +202,7 @@ keys,en,it
 "Recent","Recent","Recenti"
 "Remote","Remote","Remote"
 "gone","gone","rimossa"
-"in %s ↗","in %s ↗","in %s ↗"
+"Checked out in %s","Checked out in %s","Estratto in %s"
 "tracks %s","tracks %s","segue %s"
 "No local changes","No local changes","Nessuna modifica locale"
 "Select a file to see its changes.","Select a file to see its changes.","Seleziona un file per vederne le modifiche."

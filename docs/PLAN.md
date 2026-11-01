@@ -304,8 +304,8 @@ Not in scope for M7.5: custom groups or tags (pin and folder groups only), listi
 - When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees. Selection and chip-layout changes reveal the selected chip with minimal scrolling; unchanged refreshes preserve manual scrolling.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
-- A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Each branch row has a branch icon, except the current branch uses a checkmark instead. Enter or a click checks out. An unmatched search shows a quiet "No matching branches" message in the list area; changing or clearing the search restores the matching rows.
-- A branch checked out in another worktree shows "in fix-login ↗"; choosing it selects that worktree's chip instead of checking out.
+- A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Each branch row has a branch icon, except the current branch uses a checkmark instead. Section arrows line up with top-level rows. The list opens with the current branch selected (nothing when it is not listed); while filtering, the first match is. Enter or a single click checks out. An unmatched search shows a quiet "No matching branches" message in the list area; changing or clearing the search restores the matching rows.
+- A branch checked out in another worktree has a worktree icon instead (its tooltip names the folder); choosing it selects that worktree's chip instead of checking out.
 - A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge into current… and Rebase current onto… come with M7.
 - **Remotes and tags** are a couple of steps away: Repository → Remotes… and Tags… open management dialogs (add, rename, remove; create, delete, push tags).
 - **Graph menus keep a few actions:** a commit offers Check out, Create branch here, Tag here, Cherry-pick and Copy SHA; a ref label offers check out, push tag and delete.

@@ -77,6 +77,19 @@ func run() -> void:
 	var no_match: Label = popover._empty
 	expect(not no_match.visible, "the empty message is hidden while branches are listed")
 	_expect_branch_icons(popover, "topic-one")
+	var opened_on: TreeItem = popover._tree.get_selected()
+	expect(opened_on != null and String((opened_on.get_metadata(0) as Dictionary)["short"]) == "topic-one",
+			"the list opens on the current branch")
+	# Section arrows are their icons, so they line up with top-level branches;
+	# a click folds them.
+	var folder: TreeItem = _row(popover, "feature/")
+	expect(popover._tree.hide_folding, "Tree's own arrows, in a margin left of the rows, are hidden")
+	expect_eq(folder.get_icon(0), AppTheme.icon(&"GuiTreeArrowDown"), "an open section shows a down arrow")
+	await _click(popover, folder)
+	expect(folder.collapsed and folder.get_icon(0) == AppTheme.icon(&"GuiTreeArrowRight"), "a click folds the section")
+	expect(popover.visible, "folding keeps the list open")
+	await _click(popover, folder)
+	expect(not folder.collapsed, "a second click unfolds it")
 	popover.set_filter("TOPIC")
 	_expect_branch_icons(popover, "topic-one")
 	popover.set_filter("main")
@@ -109,8 +122,18 @@ func run() -> void:
 	expect(popover.visible and not no_match.visible and not popover.first_ref().is_empty(), "reopening resets the query and empty state")
 	popover.branch_chosen.disconnect(on_chosen)
 	popover.hide()
-	expect(await _choose_branch(popover, "main"), "the branch list finds main")
-	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "Enter checked out main")
+	# Reopened in the frame it was hidden, the popup closes again a frame
+	# later: let the hide settle so the click finds it open.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "the branch list opens to click a branch")
+	var main_row: TreeItem = _row(popover, "main")
+	expect(main_row != null, "the branch list shows main")
+	await _click(popover, main_row)
+	expect(not popover.visible, "a single click chooses the branch")
+	await _bring_changes()
+	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "the click checked out main")
 	expect(await wait_until(func() -> bool:
 		return session.branch_refs().any(func(ref: Dictionary) -> bool:
 			return String(ref["short_name"]) == "main" and bool(ref["is_head"]))),
@@ -232,7 +255,8 @@ func _check_branch_icon_rows(parent: TreeItem, current: String) -> int:
 		if item.get_metadata(0) is Dictionary:
 			var ref: Dictionary = item.get_metadata(0) as Dictionary
 			var is_current: bool = String(ref["short"]) == current
-			var icon_name: StringName = &"StatusSuccess" if is_current else &"GitBranch"
+			var icon_name: StringName = &"StatusSuccess" if is_current \
+					else &"GitWorktree" if not String(ref["worktree"]).is_empty() else &"GitBranch"
 			expect_eq(item.get_icon(0), AppTheme.icon(icon_name),
 					"%s has the %s icon" % [ref["short"], icon_name])
 			expect(not item.get_text(1).contains("Current"), "no redundant Current badge")
@@ -240,6 +264,33 @@ func _check_branch_icon_rows(parent: TreeItem, current: String) -> int:
 				current_count += 1
 		current_count += _check_branch_icon_rows(item, current)
 	return current_count
+
+
+## The visible row labelled `label`, or null.
+func _row(popover: BranchPopover, label: String) -> TreeItem:
+	var item: TreeItem = popover._tree.get_root()
+	while item != null:
+		item = item.get_next_visible()
+		if item != null and item.get_text(0) == label:
+			return item
+	return null
+
+
+## A left click (press and release) in the middle of `item`'s row.
+func _click(popover: BranchPopover, item: TreeItem) -> void:
+	var tree: Tree = popover._tree
+	# A list that just opened lays its rows out on the next frame.
+	await get_tree().process_frame
+	var at: Vector2 = tree.get_global_rect().position + tree.get_item_area_rect(item).get_center()
+	for pressed: bool in [true, false]:
+		var event: InputEventMouseButton = InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+		event.pressed = pressed
+		event.position = at
+		event.global_position = at
+		popover.push_input(event, true)
+		await get_tree().process_frame
 
 
 ## Opens the branch list with Ctrl+B, filters it by `name` and presses
@@ -253,11 +304,16 @@ func _choose_branch(popover: BranchPopover, branch: String, answer: String = "br
 	popover.set_filter(branch)
 	var found: bool = not popover.row_names().is_empty() and popover.row_names()[0] == branch
 	press("Enter", popover)
-	var dialog: ConfirmationDialog = _ops.switch_dialog()
-	var asked: bool = _ops.session.change_count() > 0 and await wait_until(func() -> bool: return dialog.visible, 3000)
-	if answer == "bring" and asked:
-		dialog.get_ok_button().pressed.emit()
+	if answer == "bring":
+		await _bring_changes()
 	return found
+
+
+## When a switch asks about local changes, brings them along.
+func _bring_changes() -> void:
+	var dialog: ConfirmationDialog = _ops.switch_dialog()
+	if _ops.session.change_count() > 0 and await wait_until(func() -> bool: return dialog.visible, 3000):
+		dialog.get_ok_button().pressed.emit()
 
 
 ## Commits `path` alone (the only file included); returns whether that worked.

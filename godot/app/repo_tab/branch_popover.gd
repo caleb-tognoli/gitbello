@@ -1,13 +1,13 @@
 class_name BranchPopover
 extends PopupPanel
 ## The Branch button's list (PLAN §4): a filter, then Recent, local branches
-## (grouped by prefix such as `feature/`) and Remote branches with ↑↓. Enter or
-## a click chooses a branch; one checked out in another worktree says so ("in
-## fix-login ↗") and choosing it shows that worktree. Right-click opens the
-## branch's menu. Opened to pick a branch to merge, it says so in a header,
-## leaves out the current branch, shows how old each branch's last commit is
-## and emits `merge_chosen` instead. It fits its rows, up to the theme's
-## `height`.
+## (grouped by prefix such as `feature/`) and Remote branches with ↑↓. It opens
+## on the current branch. Enter or a single click chooses a branch; one checked
+## out in another worktree has a worktree icon and choosing it shows that
+## worktree. Right-click opens the branch's menu. Opened to pick a branch to
+## merge, it says so in a header, leaves out the current branch, shows how old
+## each branch's last commit is and emits `merge_chosen` instead. It fits its
+## rows, up to the theme's `height`.
 
 ## A branch was chosen: a ref like `{type, name, short, commit, is_head,
 ## upstream, worktree}` (`type` is `branch` or `remote`).
@@ -50,10 +50,13 @@ func _ready() -> void:
 	box.add_child(_header)
 	_filter.placeholder = tr("Filter branches")
 	_filter.changed.connect(_rebuild)
-	_filter.submitted.connect(func(_backwards: bool) -> void: _activate_first())
+	_filter.submitted.connect(func(_backwards: bool) -> void: _choose(_tree.get_selected()))
 	_filter.done.connect(_on_filter_done)
 	box.add_child(_filter)
 	_tree.hide_root = true
+	# Sections draw their own arrow as their icon, so top-level branches and
+	# section arrows line up (Tree's arrows sit in a margin left of the rows).
+	_tree.hide_folding = true
 	_tree.columns = 2
 	_tree.set_column_expand(1, false)
 	_tree.select_mode = Tree.SELECT_ROW
@@ -62,8 +65,10 @@ func _ready() -> void:
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_activated.connect(func() -> void: _choose(_tree.get_selected()))
 	_tree.item_mouse_selected.connect(_on_mouse_selected)
-	_tree.gui_input.connect(_on_tree_key)
-	_tree.item_collapsed.connect(func(_item: TreeItem) -> void: _fit.call_deferred())
+	_tree.gui_input.connect(_on_tree_input)
+	_tree.item_collapsed.connect(func(item: TreeItem) -> void:
+		_set_arrow(item)
+		_fit.call_deferred())
 	box.add_child(_tree)
 	_empty.theme_type_variation = &"DimLabel"
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -132,13 +137,6 @@ func set_filter(text: String) -> void:
 	_filter.set_text(text)
 
 
-## Chooses the first branch row (what Enter in the filter does).
-func _activate_first() -> void:
-	var first: TreeItem = _first_ref(_tree.get_root())
-	if first != null:
-		_choose(first)
-
-
 func _rebuild() -> void:
 	_tree.clear()
 	_empty.hide()
@@ -203,7 +201,7 @@ func _rebuild() -> void:
 		remotes.collapsed = true
 		for ref: Dictionary in remote:
 			_add_ref(remotes, ref, String(ref["short_name"]))
-	_select_first()
+	_select_current()
 	_fit()
 
 
@@ -221,7 +219,9 @@ func _fit() -> void:
 	var rows: float = 0.0
 	if last != null:
 		var panel: StyleBox = _tree.get_theme_stylebox(&"panel")
-		rows = _tree.get_item_area_rect(last).end.y + panel.get_margin(SIDE_TOP) + panel.get_margin(SIDE_BOTTOM)
+		# Item rects are relative to the scroll, which `_select_first` may have moved.
+		rows = _tree.get_item_area_rect(last).end.y + _tree.get_scroll().y \
+				+ panel.get_margin(SIDE_TOP) + panel.get_margin(SIDE_BOTTOM)
 	var chrome: float = get_contents_minimum_size().y - _tree.get_combined_minimum_size().y * float(_tree.visible)
 	var tree_height: float = minf(rows, get_theme_constant(&"height", THEME_TYPE) - chrome)
 	_tree.custom_minimum_size.y = tree_height
@@ -251,9 +251,22 @@ func _section(parent: TreeItem, text: String, header: bool = true) -> TreeItem:
 	item.set_text(0, tr(text) if header else text)
 	item.set_selectable(0, false)
 	item.set_selectable(1, false)
+	_set_arrow(item)
 	if header:
 		item.set_custom_color(0, get_theme_color(&"section_color", THEME_TYPE))
+		item.set_icon_modulate(0, get_theme_color(&"section_color", THEME_TYPE))
 	return item
+
+
+## A section's arrow, which is its icon (see `_ready`), centred in a branch
+## icon's width so section and branch names line up too.
+func _set_arrow(item: TreeItem) -> void:
+	if item.get_metadata(0) is Dictionary:
+		return
+	var arrow: Texture2D = AppTheme.icon(&"GuiTreeArrowRight" if item.collapsed else &"GuiTreeArrowDown")
+	var pad: Vector2 = (AppTheme.icon(&"GitBranch").get_size() - arrow.get_size()) / 2.0
+	item.set_icon(0, arrow)
+	item.set_icon_region(0, Rect2(-pad, arrow.get_size() + pad * 2.0))
 
 
 func _notification(what: int) -> void:
@@ -277,8 +290,6 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 		badge.append("↑%d" % int(ref["ahead"]))
 	if int(ref["behind"]) > 0:
 		badge.append("↓%d" % int(ref["behind"]))
-	if elsewhere:
-		badge.append(tr("in %s ↗") % worktree.replace("\\", "/").get_file())
 	if _merging:
 		badge.clear()
 		if ref.has("committed_at") and int(ref["committed_at"]) > 0:
@@ -286,17 +297,26 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 		item.set_icon_modulate(0, get_theme_color(&"icon_color", THEME_TYPE))
 	item.set_text(0, text)
 	item.set_text(1, " ".join(badge))
-	# A column that doesn't expand keeps its minimum width: widen it to fit.
+	# A column that doesn't expand keeps its minimum width: widen it to fit, up
+	# to a third of the list so a badge can't squeeze the branch names away.
 	var font: Font = _tree.get_theme_font(&"font")
 	var badge_width: int = ceili(font.get_string_size(item.get_text(1), HORIZONTAL_ALIGNMENT_LEFT, -1,
 			_tree.get_theme_font_size(&"font_size")).x) + _tree.get_theme_constant(&"inner_item_margin_left") \
 			+ _tree.get_theme_constant(&"inner_item_margin_right") + _tree.get_theme_constant(&"h_separation") * 2
+	badge_width = mini(badge_width, floori(get_theme_constant(&"width", THEME_TYPE) / 3.0))
 	if badge_width > _tree.get_column_width(1):
 		_tree.set_column_custom_minimum_width(1, badge_width)
 	item.set_custom_color(1, get_theme_color(&"badge_color", THEME_TYPE))
-	item.set_tooltip_text(0, String(ref["short_name"]) + (
-			"\n" + tr("tracks %s") % String(ref["upstream"]) if not String(ref["upstream"]).is_empty() else ""))
-	item.set_icon(0, AppTheme.icon(&"StatusSuccess" if bool(ref["is_head"]) else &"GitBranch"))
+	var tooltip: String = String(ref["short_name"])
+	if not String(ref["upstream"]).is_empty():
+		tooltip += "\n" + tr("tracks %s") % String(ref["upstream"])
+	if elsewhere:
+		tooltip += "\n" + tr("Checked out in %s") % worktree
+	item.set_tooltip_text(0, tooltip)
+	item.set_icon(0, AppTheme.icon(&"StatusSuccess" if bool(ref["is_head"])
+			else &"GitWorktree" if elsewhere else &"GitBranch"))
+	if bool(ref["is_head"]):
+		item.set_icon_modulate(0, get_theme_color(&"head_color", THEME_TYPE))
 	item.set_metadata(0, {
 		"type": "branch" if String(ref["kind"]) == "branch" else "remote",
 		"name": String(ref["name"]),
@@ -313,6 +333,26 @@ func _select_first() -> void:
 	if first != null:
 		first.select(0)
 		_tree.scroll_to_item(first)
+
+
+## Selects the current branch, or nothing when it isn't listed.
+func _select_current() -> void:
+	_tree.deselect_all()
+	var current: TreeItem = _find_head(_tree.get_root())
+	if current != null:
+		current.select(0)
+		_tree.scroll_to_item(current)
+
+
+func _find_head(item: TreeItem) -> TreeItem:
+	for child: TreeItem in item.get_children():
+		if child.get_metadata(0) is Dictionary and bool((child.get_metadata(0) as Dictionary)["is_head"]):
+			return child
+		if not child.collapsed:
+			var found: TreeItem = _find_head(child)
+			if found != null:
+				return found
+	return null
 
 
 func _first_ref(item: TreeItem) -> TreeItem:
@@ -366,7 +406,19 @@ func _on_filter_done() -> void:
 	_select_first()
 
 
-func _on_tree_key(event: InputEvent) -> void:
+## A click on a section folds it; a click on a branch chooses it once the
+## button is released over the row it pressed (the press selects it).
+func _on_tree_input(event: InputEvent) -> void:
+	var button: InputEventMouseButton = event as InputEventMouseButton
+	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		var at: TreeItem = _tree.get_item_at_position(button.position)
+		if at != null and not at.get_metadata(0) is Dictionary:
+			if button.pressed:
+				at.collapsed = not at.collapsed
+			_tree.accept_event()
+		elif at != null and not button.pressed and at == _tree.get_selected():
+			_choose(at)
+		return
 	var item: TreeItem = _tree.get_selected()
 	if event.is_action_pressed("ui_up", false, true) and item != null and item == _first_ref(_tree.get_root()):
 		_filter.focus_text()
