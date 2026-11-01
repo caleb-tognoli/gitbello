@@ -40,15 +40,19 @@ pub enum DiffKind {
     /// Working tree against HEAD (the empty tree before the first commit):
     /// what the Changes view shows and commit selections pick from.
     Head,
+    /// Working tree against the amend baseline in `commit.parent`.
+    Amend,
+    /// The amend selection snapshot (`commit.oid`) against `commit.parent`.
+    AmendStaged,
     /// A file in a commit, against the commit's first parent.
     Commit,
 }
 
-/// The commit a [`DiffKind::Commit`] diff shows.
+/// The commit or amend selection snapshot a diff reads.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CommitSide {
     pub oid: String,
-    /// First parent; `None` for a root commit.
+    /// First parent; `None` for a root commit. Amend diffs use their baseline.
     pub parent: Option<String>,
 }
 
@@ -60,7 +64,7 @@ pub struct DiffTarget {
     pub path: PathBuf,
     /// Source of a staged rename or copy.
     pub original_path: Option<PathBuf>,
-    /// Set for [`DiffKind::Commit`].
+    /// Set for [`DiffKind::Commit`], [`DiffKind::Amend`] and [`DiffKind::AmendStaged`].
     pub commit: Option<CommitSide>,
 }
 

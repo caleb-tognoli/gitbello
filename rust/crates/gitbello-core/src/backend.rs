@@ -31,8 +31,11 @@ use crate::repo::{
 };
 use crate::worktrees::new_worktree_path_error;
 
+mod amend;
 mod merge;
 mod shelf_files;
+
+pub use amend::AmendSnapshot;
 
 /// A shelf replacement, retained to undo a per-file discard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,9 +110,9 @@ pub trait GitBackend: Send + Sync {
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
     /// Commits `write` (or amends HEAD with it) through a temporary index
-    /// that starts as HEAD's tree, so a failure or a rejecting hook leaves
-    /// the real index untouched. After the commit, `write.paths` are reset
-    /// to it in the real index.
+    /// that starts as `write.base` or HEAD's tree, so a failure or a rejecting
+    /// hook leaves the real index untouched. After the commit, `write.paths`
+    /// are reset to it in the real index.
     fn commit_selection(
         &self,
         toplevel: &Path,
@@ -118,6 +121,33 @@ pub trait GitBackend: Send + Sync {
         amend: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+
+    fn prepare_amend(
+        &self,
+        _repo: &Path,
+        _head: &str,
+        _write: &IndexWrite,
+        _cancel: &CancelToken,
+    ) -> Result<AmendSnapshot, GitError> {
+        Err(GitError::new(
+            "amend",
+            GitErrorKind::Other,
+            "amend is not supported by this backend",
+        ))
+    }
+
+    fn amend_changes(
+        &self,
+        _repo: &Path,
+        _snapshot: &AmendSnapshot,
+        _cancel: &CancelToken,
+    ) -> Result<RepoStatus, GitError> {
+        Err(GitError::new(
+            "amend",
+            GitErrorKind::Other,
+            "amend is not supported by this backend",
+        ))
+    }
 
     /// A commit's header and changed files (against its first parent).
     fn commit_details(
@@ -400,6 +430,10 @@ pub struct PatchGuard {
 /// in this order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexWrite {
+    /// Tree to start from instead of HEAD, for an amend session.
+    pub base: Option<String>,
+    /// Commit and branch that an amend must still be on when it commits.
+    pub expected_head: Option<(String, crate::repo::Head)>,
     /// Taken whole from the working tree (`git add -A`).
     pub whole: Vec<PathBuf>,
     /// Index entries copied as they are (mode `0` removes the path).
@@ -648,7 +682,37 @@ impl GitBackend for CliBackend {
         if target.kind == DiffKind::Untracked {
             return read_untracked(&toplevel.join(&target.path), limit);
         }
+        let amend_index = if target.kind == DiffKind::Amend {
+            let base = target
+                .commit
+                .as_ref()
+                .and_then(|s| s.parent.as_deref())
+                .ok_or_else(|| {
+                    GitError::new(
+                        "diff",
+                        GitErrorKind::UnexpectedOutput,
+                        "missing amend baseline",
+                    )
+                })?;
+            let entry = self
+                .runner
+                .read(toplevel)
+                .env("GIT_LITERAL_PATHSPECS", "1")
+                .args(["ls-tree", "-z", base, "--"])
+                .arg(&target.path)
+                .cancel_token(cancel)
+                .run()?;
+            if entry.stdout.is_empty() && toplevel.join(&target.path).is_file() {
+                return read_untracked(&toplevel.join(&target.path), limit);
+            }
+            Some(self.amend_read_index(toplevel, base, cancel)?)
+        } else {
+            None
+        };
         let mut cmd = self.runner.read(toplevel).env("GIT_LITERAL_PATHSPECS", "1");
+        if let Some(index) = &amend_index {
+            cmd = cmd.env("GIT_INDEX_FILE", &index.0);
+        }
         if let (DiffKind::Commit, Some(commit)) = (target.kind, &target.commit) {
             cmd = cmd.args(DIFF_TREE_ARGS);
             cmd = match &commit.parent {
@@ -660,6 +724,26 @@ impl GitBackend for CliBackend {
         }
         if target.kind == DiffKind::Staged {
             cmd = cmd.args(["--cached", "-M"]);
+        }
+        if matches!(target.kind, DiffKind::Amend | DiffKind::AmendStaged) {
+            let side = target.commit.as_ref().ok_or_else(|| {
+                GitError::new(
+                    "diff",
+                    GitErrorKind::UnexpectedOutput,
+                    "missing amend baseline",
+                )
+            })?;
+            let base = side.parent.as_deref().ok_or_else(|| {
+                GitError::new(
+                    "diff",
+                    GitErrorKind::UnexpectedOutput,
+                    "missing amend parent",
+                )
+            })?;
+            cmd = cmd.args(["--no-renames", base]);
+            if target.kind == DiffKind::AmendStaged {
+                cmd = cmd.arg(&side.oid);
+            }
         }
         if target.kind == DiffKind::Head {
             let base = match self.resolve(toplevel, "HEAD", cancel)? {
@@ -785,6 +869,25 @@ impl GitBackend for CliBackend {
         committed?;
         // The commit exists: bring the real index along, whatever happens.
         self.unstage(toplevel, Some(&write.paths), &CancelToken::new())
+    }
+
+    fn prepare_amend(
+        &self,
+        repo: &Path,
+        head: &str,
+        write: &IndexWrite,
+        cancel: &CancelToken,
+    ) -> Result<AmendSnapshot, GitError> {
+        self.prepare_amend_snapshot(repo, head, write, cancel)
+    }
+
+    fn amend_changes(
+        &self,
+        repo: &Path,
+        snapshot: &AmendSnapshot,
+        cancel: &CancelToken,
+    ) -> Result<RepoStatus, GitError> {
+        self.read_amend_changes(repo, snapshot, cancel)
     }
 
     fn commit_details(
@@ -1732,16 +1835,60 @@ impl CliBackend {
         amend: bool,
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
+        if let Some((head, branch)) = &write.expected_head {
+            self.check_amend_head(toplevel, head, cancel)?;
+            if self.status(toplevel, cancel)?.head != *branch {
+                return Err(GitError::new(
+                    "amend",
+                    GitErrorKind::Stale,
+                    "The last commit changed. Start amend again.",
+                ));
+            }
+        }
+        let base = match &write.base {
+            Some(base) => base.as_str(),
+            None if self.resolve(toplevel, "HEAD", cancel)?.is_some() => "HEAD",
+            None => "--empty",
+        };
+        self.write_selection_index(toplevel, index, base, write, cancel)?;
+        if let Some((head, branch)) = &write.expected_head {
+            self.check_amend_head(toplevel, head, cancel)?;
+            if self.status(toplevel, cancel)?.head != *branch {
+                return Err(GitError::new(
+                    "amend",
+                    GitErrorKind::Stale,
+                    "The last commit changed. Start amend again.",
+                ));
+            }
+        }
+        let mut commit = self
+            .runner
+            .write(toplevel)
+            .env("GIT_INDEX_FILE", index)
+            .cancel_token(cancel)
+            .args(["commit", "-F", "-"]);
+        if amend {
+            commit = commit.arg("--amend");
+            if write.base.is_some() {
+                commit = commit.arg("--allow-empty");
+            }
+        }
+        commit.stdin(message.as_bytes().to_vec()).run().map(drop)
+    }
+
+    fn write_selection_index(
+        &self,
+        toplevel: &Path,
+        index: &Path,
+        base: &str,
+        write: &IndexWrite,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
         let git = || {
             self.runner
                 .write(toplevel)
                 .env("GIT_INDEX_FILE", index)
                 .cancel_token(cancel)
-        };
-        let base = if self.resolve(toplevel, "HEAD", cancel)?.is_some() {
-            "HEAD"
-        } else {
-            "--empty"
         };
         git().args(["read-tree", base]).run()?;
         run_with_paths(git().args(["add", "-A"]), Some(&write.whole), cancel)?;
@@ -1763,11 +1910,7 @@ impl CliBackend {
                 .stdin(patch.clone())
                 .run()?;
         }
-        let mut commit = git().args(["commit", "-F", "-"]);
-        if amend {
-            commit = commit.arg("--amend");
-        }
-        commit.stdin(message.as_bytes().to_vec()).run().map(drop)
+        Ok(())
     }
 
     /// Id of the empty tree in this repository's hash format (not written).
@@ -1810,6 +1953,18 @@ impl CliBackend {
         let (old_spec, new_spec) = match target.kind {
             DiffKind::Staged => (format!("HEAD:{old_path}"), Some(format!(":{path}"))),
             DiffKind::Head => (format!("HEAD:{old_path}"), None),
+            DiffKind::Amend | DiffKind::AmendStaged => {
+                let side = target.commit.as_ref();
+                let base = side.and_then(|s| s.parent.as_deref()).unwrap_or("HEAD");
+                (
+                    format!("{base}:{old_path}"),
+                    if target.kind == DiffKind::AmendStaged {
+                        side.map(|s| format!("{}:{path}", s.oid))
+                    } else {
+                        None
+                    },
+                )
+            }
             DiffKind::Unstaged | DiffKind::Untracked => (format!(":{path}"), None),
             DiffKind::Commit => {
                 let oid = target.commit.as_ref().map_or("HEAD", |c| c.oid.as_str());

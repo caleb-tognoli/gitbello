@@ -7,6 +7,7 @@ extends RefCounted
 ## With `show_picks`, a commit-selection checkbox comes first (from the row's
 ## `pick`), dimmed where it cannot be changed: a conflicted file (empty) or a
 ## `locked` row. A `resolved` file shows a tick instead of its status icon.
+## During amend, files already in the original commit also have a commit icon.
 ## Colors and sizes come from the `ChangeList` theme type.
 
 const THEME_TYPE: StringName = &"ChangeList"
@@ -96,6 +97,12 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	var name: String = path.get_file()
 	var lead: PackedStringArray = _lead(path, String(data.get("original_path", "")))
 	var room: float = rect.end.x - _padding - x
+	if bool(data.get("amending", false)) and bool(data.get("in_original_commit", false)):
+		var commit_icon: Texture2D = AppTheme.icon(&"GitCommit")
+		if commit_icon != null:
+			room -= _icon_size + _padding
+			canvas.draw_texture_rect(commit_icon, Rect2(rect.end.x - _padding - _icon_size,
+					rect.position.y + (rect.size.y - _icon_size) / 2.0, _icon_size, _icon_size), false, _dir_color)
 	var name_width: float = _text_width(name)
 	var lead_width: float = _text_width(lead[0] + lead[1])
 	var text_top: float = rect.position.y + (rect.size.y - _font.get_height(_font_size)) / 2.0

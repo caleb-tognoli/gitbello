@@ -213,8 +213,10 @@ func _get_tooltip(at_position: Vector2) -> String:
 		tip += "\n" + tr("Conflicts resolved")
 	elif not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
 		tip += "\n" + FileRowPainter.code_name(String(data["code"]))
-	elif bool(data.get("as_staged", false)):
-		tip += "\n" + tr("Staged in part outside gitbello: committed as staged.")
+	if bool(data.get("amending", false)):
+		tip += "\n" + (tr("Already in the original commit") if bool(data.get("in_original_commit", false)) else tr("Additional working changes"))
+	if bool(data.get("as_staged", false)):
+		tip += "\n" + (tr("Included content is preserved from when amend started. Check the file to include its current contents.") if bool(data.get("amending", false)) else tr("Staged in part outside gitbello: committed as staged."))
 	if bool(data.get("locked", false)) and not bool(data.get("conflicted", false)):
 		tip += "\n" + (tr("Part of the commit being finished") if String(data.get("pick", "none")) != "none"
 				else tr("Not part of the commit being finished; it stays a local change"))

@@ -390,11 +390,10 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
     }
 }
 
-/// A Changes view row: `{path, original_path, code, pick, conflicted, as_staged}`.
-/// `{path, original_path, code, pick, conflicted, resolved, as_staged,
-/// locked}`; `resolved` marks a file whose conflicts were resolved during
-/// the operation, `locked` a checkbox that shows the index (a merge or
-/// cherry-pick is being committed).
+/// A Changes view row: `{path, original_path, code, pick, conflicted,
+/// resolved, as_staged, amending, in_original_commit, locked}`. `resolved`
+/// marks a file whose conflicts were resolved during the operation, `locked`
+/// a checkbox that shows the index (a merge or cherry-pick is being committed).
 pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
     let selection = state.selection();
     vdict! {
@@ -405,6 +404,8 @@ pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
         "conflicted" => is_conflicted(change),
         "resolved" => state.is_resolved(&change.path),
         "as_staged" => selection.pick(&change.path) == Some(&FilePick::AsStaged),
+        "amending" => state.is_amending(),
+        "in_original_commit" => state.in_amended_commit(&change.path),
         "locked" => state.commit_mode().locks_picks(),
     }
 }
@@ -677,6 +678,8 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
         DiffKind::Staged => "staged",
         DiffKind::Untracked => "untracked",
         DiffKind::Head => "head",
+        DiffKind::Amend => "amend",
+        DiffKind::AmendStaged => "staged",
         DiffKind::Commit => "commit",
     };
     let mut info = vdict! {

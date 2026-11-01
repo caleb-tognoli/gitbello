@@ -48,6 +48,9 @@ use crate::sidebar::{labels_by_commit, Badge, RefLabel};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
+mod amend;
+use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
+
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
 pub const CREATE_REPOSITORY_JOB_LABEL: &str = "create repository";
@@ -383,6 +386,7 @@ pub struct RepoState {
     changes: ChangeList,
     change_filter: ChangeFilter,
     selection: Selection,
+    amend: Option<AmendSession>,
     /// [`Selection::line_states`] of the Changes diff, per line.
     diff_picks: Vec<PickState>,
     worktree_badges: HashMap<PathBuf, Badge>,
@@ -439,6 +443,7 @@ impl RepoState {
             changes: ChangeList::default(),
             change_filter: ChangeFilter::default(),
             selection: Selection::default(),
+            amend: None,
             diff_picks: Vec::new(),
             worktree_badges: HashMap::new(),
             diff: None,
@@ -801,7 +806,7 @@ impl RepoState {
                 PickState::Partial
             };
         }
-        match (&self.status, self.change_filter.is_active()) {
+        match (self.changes_status(), self.change_filter.is_active()) {
             (Some(status), true) => self.selection.state_of(
                 self.changes
                     .indices()
@@ -814,7 +819,7 @@ impl RepoState {
 
     /// Paths of the files shown.
     fn shown_paths(&self) -> Vec<PathBuf> {
-        self.status.as_ref().map_or_else(Vec::new, |status| {
+        self.changes_status().map_or_else(Vec::new, |status| {
             self.changes
                 .indices()
                 .iter()
@@ -824,10 +829,9 @@ impl RepoState {
     }
 
     fn rebuild_changes(&mut self) {
-        let Some(status) = &self.status else {
+        let Some(status) = self.changes_status() else {
             return;
         };
-        // Resolved files stay among the conflicts while the operation lasts.
         let in_flow = self.operation.is_some() || status.has_conflicts();
         let resolved: &[PathBuf] = if in_flow { &self.resolved } else { &[] };
         self.changes = ChangeList::grouped(status, &self.selection, &self.change_filter, resolved);
@@ -853,8 +857,10 @@ impl RepoState {
         let Some(diff) = &state.diff else {
             return false;
         };
-        matches!(state.target.kind, DiffKind::Head | DiffKind::Untracked)
-            && !self.commit_mode().locks_picks()
+        matches!(
+            state.target.kind,
+            DiffKind::Head | DiffKind::Untracked | DiffKind::Amend
+        ) && !self.commit_mode().locks_picks()
             && self.selection.pick(&state.target.path).is_some()
             && diff.content == DiffContent::Text
             && !diff.hunks.is_empty()
@@ -1030,6 +1036,9 @@ impl RepoState {
     /// Why the selection cannot be committed now, or `None`. Amending
     /// needs a commit but may take nothing new.
     pub fn commit_block_reason(&self, amend: bool) -> Option<&'static str> {
+        if let Some(reason) = self.amend_block_reason(amend) {
+            return Some(reason);
+        }
         let Some(status) = &self.status else {
             return Some("Reading the changes");
         };
@@ -1689,9 +1698,7 @@ impl Runtime {
             submit_conflict(&self.scheduler, state, self.diff_generation);
             return;
         }
-        let target = state
-            .status()
-            .map(|status| changes::diff_target(status, path));
+        let target = state.change_target(path);
         if let Some(target) = target {
             self.select_diff(key, Some(target), full);
         }
@@ -1948,7 +1955,20 @@ impl Runtime {
                 },
             )));
         }
-        let plan = state.selection.plan(state.status()?);
+        let mut plan = state.selection.plan(state.changes_status()?);
+        let snapshot = state.amend.as_ref().and_then(|a| a.snapshot.as_ref());
+        for (target, _) in &mut plan.lines {
+            if let Some(amend_target) = state.change_target(&target.path) {
+                *target = amend_target;
+            }
+        }
+        let context = snapshot.map(|s| {
+            (
+                s.base.clone(),
+                (s.head.clone(), s.status.head.clone()),
+                s.original_paths.clone(),
+            )
+        });
         let refresh = RefreshSet::EMPTY
             .with(RefreshKind::Status)
             .with(RefreshKind::Refs);
@@ -1956,21 +1976,14 @@ impl Runtime {
             self.scheduler
                 .submit(JobSpec::write(key, COMMIT_JOB_LABEL, refresh, move |ctx| {
                     let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
-                    let paths = plan.paths();
-                    let mut patches = Vec::with_capacity(plan.lines.len());
-                    for (target, keys) in &plan.lines {
-                        let diff = backend.diff(&toplevel, target, None, cancel)?;
-                        let git_path = target.path.to_string_lossy().replace('\\', "/");
-                        let patch = changes::lines_patch(&diff, &git_path, keys)
-                            .ok_or_else(|| picks_stale(&target.path))?;
-                        patches.push(patch);
+                    let mut write = selection_write(backend, &toplevel, plan, cancel)?;
+                    if let Some((base, head, original)) = context {
+                        write.base = Some(base);
+                        write.expected_head = Some(head);
+                        write.paths.extend(original);
+                        write.paths.sort();
+                        write.paths.dedup();
                     }
-                    let write = IndexWrite {
-                        whole: plan.whole,
-                        staged: plan.staged,
-                        patches,
-                        paths,
-                    };
                     backend
                         .commit_selection(&toplevel, &write, &message, amend, cancel)
                         .map(|()| JobOutput::Done)
@@ -2943,6 +2956,9 @@ impl Runtime {
             }
             return;
         }
+        if apply_amend(state, &label, job, &kind, &repo, out) {
+            return;
+        }
         if label == DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
             refresh_diff_picks(state);
@@ -3075,6 +3091,7 @@ impl Runtime {
                 EventKind::Finished(Ok(output)) => {
                     apply_refresh(state, output);
                     if refresh == RefreshKind::Status {
+                        refresh_amend(&self.scheduler, state);
                         out.push(RuntimeEvent::SelectionChanged { repo: repo.clone() });
                     }
                     // Staging, edits and commits all show up as a status change.
@@ -3332,7 +3349,14 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
             if moved {
                 state.graph_dirty_since = Some(Instant::now());
             }
-            state.selection.reconcile(&status);
+            if moved {
+                state.end_amend();
+            }
+            if let Some(session) = &mut state.amend {
+                session.saved_selection.reconcile(&status);
+            } else {
+                state.selection.reconcile(&status);
+            }
             state.status = Some(status);
             state.rebuild_changes();
             refresh_diff_picks(state);
@@ -3348,6 +3372,9 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         }
         JobOutput::Worktrees(worktrees) => state.worktrees = Some(worktrees),
         JobOutput::Operation(details) => {
+            if details.is_some() {
+                state.end_amend();
+            }
             state.operation = details.as_ref().map(|d| d.kind);
             state.operation_details = details;
             // Resolved files are grouped with the conflicts only during one.
@@ -3374,6 +3401,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Diff { .. }
         | JobOutput::OldFile { .. }
         | JobOutput::HeadMessage(_)
+        | JobOutput::Amend(_)
+        | JobOutput::AmendChanges { .. }
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_)
         | JobOutput::ShelfFiles(..)
@@ -3712,7 +3741,11 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
         let diff = backend.diff(&toplevel, &target, limit, cancel)?;
         let staged = if as_staged {
             let staged = DiffTarget {
-                kind: DiffKind::Staged,
+                kind: if target.kind == DiffKind::Amend {
+                    DiffKind::AmendStaged
+                } else {
+                    DiffKind::Staged
+                },
                 ..target.clone()
             };
             Some(Box::new(backend.diff(&toplevel, &staged, limit, cancel)?))

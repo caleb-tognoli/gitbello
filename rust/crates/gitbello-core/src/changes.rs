@@ -625,7 +625,7 @@ pub struct CommitPlan {
     pub whole: Vec<PathBuf>,
     /// Taken as the index holds them (mode `0` removes the path).
     pub staged: Vec<IndexEntry>,
-    /// Taken in part: the file's diff against HEAD and the picked lines.
+    /// Taken in part: the file's diff against the applicable baseline and the picked lines.
     pub lines: Vec<(DiffTarget, Vec<LineKey>)>,
 }
 

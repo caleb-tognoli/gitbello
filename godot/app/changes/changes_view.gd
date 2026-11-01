@@ -629,8 +629,10 @@ func discard_selection() -> void:
 func _discard_paths(paths: PackedStringArray) -> void:
 	if paths.is_empty():
 		return
-	_ask(tr("Discard the changes in %s? They go back to the last commit. You can undo this with %s.") % [
-		_describe(paths), Actions.shortcut_label(&"changes.undo_discard")], func() -> void:
+	var question: String = tr("Discard the changes in %s? They go back to the last commit. You can undo this with %s.")
+	if _commit_box.is_amend():
+		question = tr("Discard working edits in %s? Files return to the original commit being amended. To leave changes out of the amended commit, uncheck them instead. You can undo this with %s.")
+	_ask(question % [_describe(paths), Actions.shortcut_label(&"changes.undo_discard")], func() -> void:
 		var job: int = session.discard_paths(paths)
 		if feedback != null:
 			feedback.track(session, job, "Discarding", tr("Discarded the changes in %s") % _describe(paths),
@@ -1014,7 +1016,7 @@ func _on_diff_changed() -> void:
 	_diff_view.pickable = bool(info.get("pickable", false))
 	if bool(info.get("as_staged", false)):
 		var notes: PackedStringArray = info.get("notes", PackedStringArray())
-		notes.append("Staged in part outside gitbello: committed as staged")
+		notes.append("Included content is preserved from when amend started. Check the file to include its current contents." if _commit_box.is_amend() else "Staged in part outside gitbello: committed as staged")
 		info["notes"] = notes
 	if String(info.get("kind", "")) == "conflict":
 		_diff_view.side_names = _side_names(info.get("conflict", {}))

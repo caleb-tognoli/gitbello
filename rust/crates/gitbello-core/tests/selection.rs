@@ -289,6 +289,235 @@ fn amend_with_and_without_new_picks() {
     );
 }
 
+fn begin_amend(rt: &mut Runtime, key: &Path) {
+    let head = rt
+        .repo(key)
+        .expect("open repository")
+        .status()
+        .expect("loaded status")
+        .oid
+        .clone()
+        .expect("existing commit");
+    let job = rt.begin_amend(key, &head);
+    succeed(rt, key, job);
+    assert!(rt.repo(key).expect("open repository").is_amending());
+}
+
+#[test]
+fn amend_session_reopens_original_changes_without_moving_head_or_index() {
+    let repo = TestRepo::init();
+    repo.commit("original.txt", "original\n", "base");
+    repo.commit("original.txt", "changed\n", "last");
+    let head = repo.head();
+    let before = index(&repo);
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    assert_eq!(repo.head(), head);
+    assert_eq!(index(&repo), before);
+    assert_eq!(rt.repo(&key).unwrap().changes().len(), 1);
+    let diff = show(&mut rt, &key, "original.txt");
+    line(&diff, LineKind::Removed, "original");
+    line(&diff, LineKind::Added, "changed");
+    rt.pick_all(&key, false);
+    commit(&mut rt, &key, "remove original changes", true);
+    assert_eq!(committed(&repo, "original.txt"), "original");
+    assert_eq!(
+        fs::read_to_string(repo.path().join("original.txt")).unwrap(),
+        "changed\n"
+    );
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
+}
+
+#[test]
+fn amend_session_preserves_excluded_overlapping_edits_and_cancel_selection() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "base\n", "base");
+    repo.commit("a.txt", "committed\n", "last");
+    repo.write("a.txt", "working\n");
+    repo.write("excluded.txt", "excluded\n");
+    let (mut rt, key) = open(&repo);
+    rt.pick_all(&key, false);
+    let before = index(&repo);
+    begin_amend(&mut rt, &key);
+    show(&mut rt, &key, "a.txt");
+    assert_eq!(pick(&rt, &key, "a.txt"), Some(FilePick::AsStaged));
+    rt.cancel_amend(&key);
+    assert_eq!(state(&rt, &key, "a.txt"), PickState::None);
+    assert_eq!(state(&rt, &key, "excluded.txt"), PickState::None);
+    assert_eq!(index(&repo), before);
+    begin_amend(&mut rt, &key);
+    commit(&mut rt, &key, "reword", true);
+    assert_eq!(committed(&repo, "a.txt"), "committed");
+    assert_eq!(
+        fs::read_to_string(repo.path().join("a.txt")).unwrap(),
+        "working\n"
+    );
+    assert!(!repo
+        .git(&["ls-tree", "--name-only", "HEAD"])
+        .contains("excluded.txt"));
+}
+
+#[test]
+fn amend_session_can_exclude_original_lines_and_handle_root_additions() {
+    let repo = TestRepo::init();
+    repo.commit("a file è.txt", "one\ntwo\nthree\n", "root");
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    let diff = show(&mut rt, &key, "a file è.txt");
+    assert!(rt.repo(&key).unwrap().can_pick_lines());
+    rt.pick_lines(&key, &[line(&diff, LineKind::Added, "two")], false);
+    commit(&mut rt, &key, "root edited", true);
+    assert_eq!(committed(&repo, "a file è.txt"), "one\nthree");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1");
+    assert_eq!(
+        fs::read_to_string(repo.path().join("a file è.txt")).unwrap(),
+        "one\ntwo\nthree\n"
+    );
+}
+
+#[test]
+fn amend_session_includes_new_untracked_lines_and_refreshes_edits() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "base\n", "base");
+    repo.commit("a.txt", "last\n", "last");
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    repo.write("new.txt", "one\ntwo\n");
+    repo.write("a.txt", "edited\n");
+    settle(&mut rt, &key);
+    let diff = show(&mut rt, &key, "a.txt");
+    line(&diff, LineKind::Added, "edited");
+    let diff = show(&mut rt, &key, "new.txt");
+    assert!(rt.repo(&key).unwrap().can_pick_lines());
+    rt.pick_files(&key, &paths(&["new.txt"]), true);
+    rt.pick_lines(&key, &[line(&diff, LineKind::Added, "two")], false);
+    commit(&mut rt, &key, "amended", true);
+    assert_eq!(committed(&repo, "new.txt"), "one");
+    assert_eq!(committed(&repo, "a.txt"), "edited");
+}
+
+#[test]
+fn amend_session_preserves_partial_working_selection_and_unrelated_staging() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "base");
+    repo.commit("a.txt", "one\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "last");
+    repo.write("a.txt", "one\n2\n3\n4\n5\n6\n7\n8\n9\nten\n");
+    repo.write("unrelated.txt", "staged\n");
+    repo.git(&["add", "unrelated.txt"]);
+    let (mut rt, key) = open(&repo);
+    rt.pick_all(&key, false);
+    let diff = show(&mut rt, &key, "a.txt");
+    rt.pick_lines(
+        &key,
+        &[
+            line(&diff, LineKind::Added, "ten"),
+            line(&diff, LineKind::Removed, "10"),
+        ],
+        true,
+    );
+    begin_amend(&mut rt, &key);
+    commit(&mut rt, &key, "amended", true);
+    assert_eq!(
+        committed(&repo, "a.txt"),
+        "one\n2\n3\n4\n5\n6\n7\n8\n9\nten"
+    );
+    assert!(repo
+        .git(&["diff", "--cached", "--name-only"])
+        .contains("unrelated.txt"));
+}
+
+#[test]
+fn amend_session_handles_renames_deletions_and_recreated_deleted_files() {
+    let repo = TestRepo::init();
+    repo.commit("old.txt", "content\n", "base");
+    repo.commit("deleted.txt", "before\n", "more");
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    repo.git(&["rm", "deleted.txt"]);
+    repo.git(&["commit", "-m", "rename and delete"]);
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    show(&mut rt, &key, "old.txt");
+    show(&mut rt, &key, "new.txt");
+    repo.write("deleted.txt", "restored with edits\n");
+    settle(&mut rt, &key);
+    let diff = show(&mut rt, &key, "deleted.txt");
+    line(&diff, LineKind::Added, "restored with edits");
+    rt.pick_all(&key, true);
+    commit(&mut rt, &key, "amended", true);
+    assert_eq!(committed(&repo, "deleted.txt"), "restored with edits");
+    assert_eq!(committed(&repo, "new.txt"), "content");
+    assert!(!repo
+        .git(&["ls-tree", "--name-only", "HEAD"])
+        .contains("old.txt"));
+}
+
+#[test]
+fn amend_session_keeps_merge_parents_and_author() {
+    let repo = TestRepo::init();
+    repo.commit("base.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    repo.commit("topic.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    repo.commit("main.txt", "main\n", "main");
+    repo.git(&["merge", "--no-ff", "--no-edit", "topic"]);
+    let parents = repo.git(&["show", "-s", "--format=%P", "HEAD"]);
+    let author = repo.git(&["show", "-s", "--format=%an <%ae> %at", "HEAD"]);
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    commit(&mut rt, &key, "amended merge", true);
+    assert_eq!(repo.git(&["show", "-s", "--format=%P", "HEAD"]), parents);
+    assert_eq!(
+        repo.git(&["show", "-s", "--format=%an <%ae> %at", "HEAD"]),
+        author
+    );
+    assert_eq!(committed(&repo, "topic.txt"), "topic");
+}
+
+#[test]
+fn amend_session_rejects_stale_head_and_preserves_failed_hook_state() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "base\n", "base");
+    repo.commit("a.txt", "last\n", "last");
+    let (mut rt, key) = open(&repo);
+    begin_amend(&mut rt, &key);
+    let before = index(&repo);
+    let head = repo.head();
+    hook(&repo, "pre-commit", "echo rejected >&2\nexit 1");
+    let job = rt.commit(&key, "blocked\n".into(), true);
+    assert!(finish(&mut rt, &key, job).is_some());
+    assert_eq!(index(&repo), before);
+    assert_eq!(repo.head(), head);
+    assert!(rt.repo(&key).unwrap().is_amending());
+    fs::remove_file(repo.path().join(".git/hooks/pre-commit")).unwrap();
+
+    repo.git(&["checkout", "--detach", "HEAD"]);
+    settle(&mut rt, &key);
+    assert!(!rt.repo(&key).unwrap().is_amending());
+    repo.git(&["checkout", "main"]);
+    settle(&mut rt, &key);
+    begin_amend(&mut rt, &key);
+    repo.git(&["checkout", "--detach", "HEAD"]);
+    let job = rt.commit(&key, "detached\n".into(), true);
+    assert_eq!(
+        finish(&mut rt, &key, job).unwrap().kind,
+        GitErrorKind::Stale
+    );
+    settle(&mut rt, &key);
+    repo.git(&["checkout", "main"]);
+    settle(&mut rt, &key);
+    begin_amend(&mut rt, &key);
+
+    repo.git(&["commit", "--allow-empty", "-m", "outside"]);
+    let job = rt.commit(&key, "stale\n".into(), true);
+    assert_eq!(
+        finish(&mut rt, &key, job).unwrap().kind,
+        GitErrorKind::Stale
+    );
+    settle(&mut rt, &key);
+    assert!(!rt.repo(&key).unwrap().is_amending());
+    assert_eq!(repo.git(&["show", "-s", "--format=%s", "HEAD"]), "outside");
+}
+
 #[test]
 fn a_failing_hook_leaves_the_index_alone() {
     let repo = TestRepo::init();

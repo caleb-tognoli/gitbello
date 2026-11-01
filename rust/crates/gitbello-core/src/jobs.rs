@@ -161,6 +161,11 @@ pub enum JobOutput {
     },
     /// The HEAD commit's message.
     HeadMessage(String),
+    Amend(Box<crate::backend::AmendSnapshot>),
+    AmendChanges {
+        generation: u64,
+        status: RepoStatus,
+    },
     /// One commit's details.
     Commit(Box<CommitDetails>),
     /// Worktrees the cleanup flow can offer.

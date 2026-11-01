@@ -32,6 +32,10 @@ var _filled_for: String = ""
 ## when the operation ends (unless the user changed it).
 var _filled_message: PackedStringArray = PackedStringArray(["", ""])
 var _reason: Label = Label.new()
+var _amend_hint: Label = Label.new()
+var _amend_warning: Label = Label.new()
+var _amend_confirm: ConfirmationDialog = ConfirmationDialog.new()
+var _confirm_origin: Control = null
 var _undo_strip: HBoxContainer = HBoxContainer.new()
 var _undo_icon: TextureRect = TextureRect.new()
 var _undo_label: Label = Label.new()
@@ -54,6 +58,14 @@ func _ready() -> void:
 	_body.text_changed.connect(update_state)
 	_cancel_amend.pressed.connect(func() -> void: Actions.run_action(&"changes.cancel_amend", _cancel_amend))
 	_commit_button.pressed.connect(commit)
+	_amend_hint.theme_type_variation = &"DimLabel"
+	_amend_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_amend_header.add_sibling(_amend_hint)
+	_amend_warning.theme_type_variation = &"ErrorLabel"
+	_amend_warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_amend_hint.add_sibling(_amend_warning)
+	_amend_confirm.confirmed.connect(func() -> void: _submit_commit(_confirm_origin))
+	add_child(_amend_confirm)
 	_undo_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	_undo_icon.modulate.a = 0.6
 	_undo_label.theme_type_variation = &"DimLabel"
@@ -157,7 +169,7 @@ func begin_amend(target: Dictionary) -> void:
 	_amend_subject = String(target.get("subject", ""))
 	_amending = true
 	_output.hide()
-	_message_job = session.load_head_message()
+	_message_job = session.begin_amend(_amend_head)
 	if _message_job < 0:
 		cancel_amend()
 		_show_error({"title": "Could not load the commit message"})
@@ -168,6 +180,9 @@ func cancel_amend() -> void:
 	if not _amending or is_busy():
 		return
 	_amending = false
+	_amend_confirm.hide()
+	if session != null:
+		session.cancel_amend()
 	_amend_head = ""
 	_amend_subject = ""
 	set_message(_draft_summary, _draft_body)
@@ -209,7 +224,7 @@ func block_reason() -> String:
 	return ""
 
 
-## What the button commits: "Commit 2 files to main", "Amend commit",
+## What the button commits: "Commit 2 files to main", "Save amended commit",
 ## "Commit merge into main"...
 func button_text() -> String:
 	var mode: String = session.commit_mode() if session != null else "normal"
@@ -219,7 +234,7 @@ func button_text() -> String:
 	if mode == "cherry_pick":
 		return tr("Commit cherry-pick") if session.operation() == "cherry_pick" else tr("Commit revert")
 	if _amending:
-		return tr("Amend commit")
+		return tr("Save amended commit")
 	var count: int = session.picked_count() if session != null else 0
 	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
 	var branch: String = session.current_branch() if session != null else ""
@@ -259,6 +274,10 @@ func update_state() -> void:
 		cancel_amend()
 		return
 	_amend_header.visible = _amending
+	_amend_hint.visible = _amending
+	_amend_hint.text = tr("Unchecked changes will remain uncommitted. Cancel keeps your file edits.")
+	_amend_warning.visible = _amending and session != null and session.amend_requires_force_push()
+	_amend_warning.text = tr("This commit has been pushed. Amending rewrites history and will require a force push.")
 	_amend_title.text = tr("Amending “%s”") % _amend_subject
 	_amend_title.tooltip_text = _amend_title.text
 	_cancel_amend.text = tr("Cancel")
@@ -289,6 +308,20 @@ func update_state() -> void:
 ## The progress shows on `origin`, else on the button.
 func commit(origin: Control = null) -> bool:
 	if not can_commit():
+		return false
+	if _amending and session.amend_requires_force_push():
+		_confirm_origin = origin
+		_amend_confirm.title = tr("Amend a pushed commit?")
+		_amend_confirm.dialog_text = tr("This commit has been pushed. Amending rewrites history and will require a force push.")
+		_amend_confirm.ok_button_text = tr("Save amended commit")
+		_amend_confirm.cancel_button_text = tr("Cancel")
+		_amend_confirm.popup_centered()
+		return false
+	return _submit_commit(origin)
+
+
+func _submit_commit(origin: Control = null) -> bool:
+	if not can_commit() or (_amending and not session.is_amending()):
 		return false
 	_output.hide()
 	_job = session.commit(_summary.text, _body.text, _amending)

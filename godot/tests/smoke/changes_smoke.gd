@@ -197,7 +197,16 @@ func run() -> void:
 	expect(amend_header.visible, "the temporary amend header shows")
 	expect_eq(amend_title.text, "Amending “Add notes”", "the indicator names the commit, not its hash")
 	expect_eq(cancel.text, "Cancel", "the exit is labelled Cancel")
-	expect_eq(box.button_text(), "Amend commit", "the primary button is explicit")
+	expect_eq(box.button_text(), "Save amended commit", "the primary button is explicit")
+	expect_eq(session.change_count(), 2, "amend reopens both original committed files")
+	expect_eq(session.picked_count(), 2, "original committed changes start included")
+	expect(session.is_amending(), "the core amend session is active")
+	expect(box._amend_hint.visible, "amend explains that unchecked changes stay uncommitted")
+	expect(not empty.visible, "the empty state yields to the original commit's changes")
+	var original_row: Dictionary = session.change_rows(session.change_index("notes.txt"), 1)[0]
+	expect(bool(original_row.get("in_original_commit", false)), "original files are identified")
+	expect(await wait_until(func() -> bool: return session.diff_info().get("kind", "") == "amend"), "the Changes diff uses the amend baseline")
+	expect(not session.can_apply_lines("discard"), "parent-relative lines cannot accidentally be discarded")
 	box.set_message("An edited amend", "Not the ordinary draft")
 	cancel.pressed.emit()
 	expect(not box.is_amend() and not amend_header.visible, "Cancel returns to normal mode")
@@ -267,22 +276,59 @@ func run() -> void:
 	cancel.pressed.emit()
 	expect_eq(box.summary(), "Next task", "cancelling a failed amend restores the draft")
 
-	var message_received: Array[bool] = [false]
-	session.head_message_loaded.connect(func(_summary: String, _body: String) -> void:
-		message_received[0] = true, CONNECT_ONE_SHOT)
+	var prepare_finished: Array[bool] = [false]
+	session.job_finished.connect(func(_job: int, label: String, _ok: bool, _error: Dictionary) -> void:
+		if label == "prepare amend":
+			prepare_finished[0] = true)
 	box.begin_amend({"hash": String(session.status().get("oid", "")), "subject": "Add notes (amended)"})
 	var message_job: int = box._message_job
-	expect(message_job >= 0, "a message read started")
-	box._on_job_finished(message_job, "read HEAD message", false, {"title": "Message read failed"})
-	expect(not box.is_amend(), "a failed message read exits amend mode")
-	expect_eq(box.summary(), "Next task", "a failed message read preserves the draft")
-	expect_eq(box.output_text(), "Message read failed", "a failed message read is explained")
-	expect(await wait_until(func() -> bool: return message_received[0]), "the obsolete message result arrives")
-	expect_eq(box.summary(), "Next task", "the obsolete message result does not overwrite the draft")
+	expect(message_job >= 0, "amend preparation started")
+	box._on_job_finished(message_job, "prepare amend", false, {"title": "Message read failed"})
+	expect(not box.is_amend(), "a failed preparation exits amend mode")
+	expect_eq(box.summary(), "Next task", "a failed preparation preserves the draft")
+	expect_eq(box.output_text(), "Message read failed", "a failed preparation is explained")
+	expect(await wait_until(func() -> bool: return prepare_finished[0]), "the cancelled preparation finishes")
+	expect(not session.is_amending(), "an obsolete preparation cannot reopen amend")
+	expect_eq(box.summary(), "Next task", "the obsolete result does not overwrite the draft")
+
+	box.begin_amend({"hash": String(session.status().get("oid", "")), "subject": "Add notes (amended)"})
+	expect(await wait_until(func() -> bool: return box.can_commit()), "amend is ready to remove an original file")
+	session.pick_files(PackedStringArray(["notes.txt"]), false)
+	expect(box.commit(), "saving an original-file exclusion starts")
+	expect(await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend() and session.change_count() == 2), "excluded original content returns as an ordinary working change")
+	expect(FileAccess.file_exists(repo.path_join("notes.txt")), "excluding an original file does not delete it")
+	expect("notes.txt" in session.change_paths(0, session.change_count()), "the original file is now uncommitted")
+
+	var fetched: Array[bool] = [false]
+	var pushed: Array[bool] = [false]
+	session.job_finished.connect(func(_job: int, label: String, ok: bool, _error: Dictionary) -> void:
+		if label == "fetch":
+			fetched[0] = ok
+		elif label == "push":
+			pushed[0] = ok)
+	expect(session.fetch() >= 0, "fetch starts against the fixture's local-only remote")
+	expect(await wait_until(func() -> bool: return fetched[0]), "the local remote is fetched before the lease-protected fixture push")
+	expect(session.push(true) >= 0, "push starts against the throwaway local remote")
+	expect(await wait_until(func() -> bool: return pushed[0] and session.amend_requires_force_push()), "the fixture HEAD is known to be pushed")
+	session.pick_all(false)
+	box.begin_amend({"hash": String(session.status().get("oid", "")), "subject": "Add notes (amended)"})
+	expect(await wait_until(func() -> bool: return box.can_commit()), "pushed commit loads for amend")
+	expect(box._amend_warning.visible, "a pushed commit has a persistent warning")
+	var pushed_head: String = String(session.status().get("oid", ""))
+	expect(not box.commit(), "saving a pushed commit first asks for confirmation")
+	expect(box._amend_confirm.visible, "the pushed-commit confirmation is visible")
+	expect(not box.is_busy(), "no write starts before confirmation")
+	expect_eq(String(session.status().get("oid", "")), pushed_head, "asking for confirmation leaves HEAD untouched")
+	box._amend_confirm.hide()
+	box._amend_confirm.confirmed.emit()
+	expect(await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend() \
+			and String(session.status().get("oid", "")) != pushed_head and session.graph_row_count() > 0 \
+			and box.can_amend()), "confirming saves and refreshes the amended pushed commit locally")
 
 	var old_head: String = String(session.status().get("oid", ""))
 	box.begin_amend({"hash": old_head, "subject": "Add notes (amended)"})
-	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)"), "amend loads before HEAD changes")
+	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)" \
+			and _head_subject(session) == "Add notes (amended)"), "amend and the graph load before HEAD changes")
 	var oldest: Dictionary = session.graph_rows(session.graph_row_count() - 1, 1)[0]
 	expect(session.checkout_commit(String(oldest["hash"]), "keep") >= 0, "another checkout starts on the fixture")
 	expect(await wait_until(func() -> bool:

@@ -931,7 +931,7 @@ impl RepoSession {
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
             let mut rows = Array::new();
-            let Some(status) = s.status() else {
+            let Some(status) = s.changes_status() else {
                 return rows;
             };
             for &i in s.changes().indices().iter().skip(start).take(count) {
@@ -948,7 +948,7 @@ impl RepoSession {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| {
-            let Some(status) = s.status() else {
+            let Some(status) = s.changes_status() else {
                 return PackedStringArray::new();
             };
             s.changes()
@@ -967,7 +967,7 @@ impl RepoSession {
     fn change_index(&self, path: GString) -> i64 {
         let path = PathBuf::from(path.to_string());
         self.read(|s| {
-            let status = s.status()?;
+            let status = s.changes_status()?;
             s.changes()
                 .indices()
                 .iter()
@@ -1274,7 +1274,28 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.commit(&self.key, message, amend)).flatten())
     }
 
-    /// Reads HEAD's message for amending; arrives as `head_message_loaded`.
+    #[func]
+    fn begin_amend(&self, head: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.begin_amend(&self.key, &head.to_string())).flatten())
+    }
+
+    #[func]
+    fn cancel_amend(&self) {
+        runtime_cell::with(|rt| rt.cancel_amend(&self.key));
+    }
+
+    #[func]
+    fn is_amending(&self) -> bool {
+        self.read(|s| s.is_amending()).unwrap_or(false)
+    }
+
+    #[func]
+    fn amend_requires_force_push(&self) -> bool {
+        self.read(|s| s.amend_requires_force_push())
+            .unwrap_or(false)
+    }
+
+    /// Reads HEAD's message; arrives as `head_message_loaded`.
     #[func]
     fn load_head_message(&self) -> i64 {
         job_id(runtime_cell::with(|rt| rt.load_head_message(&self.key)).flatten())
