@@ -44,6 +44,9 @@ static func apply(root: Node) -> void:
 	var previous: Theme = project_theme.duplicate() as Theme
 	project_theme.clear()
 	project_theme.merge_with(AppTheme.build(light, accent))
+	# What Windows fills newly exposed window area with until the next frame
+	# (while the border is dragged), instead of Godot's default grey.
+	RenderingServer.set_default_clear_color(AppTheme.palette(light, accent).background)
 	root.get_tree().root.propagate_notification(Control.NOTIFICATION_THEME_CHANGED)
 	previous.clear()
 
