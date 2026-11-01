@@ -209,9 +209,10 @@ func run() -> void:
 	await get_tree().process_frame
 
 
-## Windows: deleting a worktree a program runs from (a copy of `ping`, like
-## an app built there) deletes nothing and says which program; once it
-## exits, the toast's Try again deletes the worktree and its branch.
+## Windows: deleting a worktree a program runs from (a copy of `findstr`
+## waiting on its input, like an app built there) deletes nothing and says
+## which program; once it exits, the toast's Try again deletes the worktree
+## and its branch.
 func _delete_while_in_use(main: Main, page: RepoTab, session: RepoSession, repo: String, busy: String) -> void:
 	var count: int = session.worktrees().size()
 	session.add_worktree(busy, "busy", "main")
@@ -223,8 +224,12 @@ func _delete_while_in_use(main: Main, page: RepoTab, session: RepoSession, repo:
 	exclude.close()
 	var exe: String = busy.path_join("bin/held.exe")
 	DirAccess.make_dir_recursive_absolute(exe.get_base_dir())
-	DirAccess.copy_absolute(OS.get_environment("SystemRoot").path_join("System32/PING.EXE"), exe)
-	var pid: int = OS.create_process(exe, ["-n", "60", "127.0.0.1"])
+	# CI runners cannot start a copy of PING.EXE; findstr works everywhere.
+	var copied: Error = DirAccess.copy_absolute(OS.get_environment("SystemRoot").path_join("System32/findstr.exe"), exe)
+	expect_eq(copied, OK, "the program was copied into the worktree")
+	# It reads its open input until killed.
+	var held: Dictionary = OS.execute_with_pipe(exe, ["x"])
+	var pid: int = int(held.get("pid", -1))
 	expect(pid > 0, "a program runs from the worktree")
 	expect(await _menu_for(page, session, "repo-10-busy", "Delete…"), "the menu offers delete")
 	var form: FormDialog = page.ops().form()
