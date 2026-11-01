@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange};
@@ -23,6 +23,7 @@ use crate::git::{
     CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
 };
 use crate::graph::{CommitSearch, GraphLoader, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL};
+use crate::in_use::{processes_using, ProcessUse};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
@@ -1219,6 +1220,9 @@ pub struct Runtime {
     summary_running: usize,
     scans: HashMap<JobId, Vec<ScanHit>>,
     locations: HashMap<JobId, LocationCheck>,
+    /// Folders (normalized) of removed worktrees that git could not fully
+    /// delete; removing one again deletes the rest.
+    leftover_worktrees: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl Runtime {
@@ -1276,6 +1280,7 @@ impl Runtime {
             summary_running: 0,
             scans: HashMap::new(),
             locations: HashMap::new(),
+            leftover_worktrees: Arc::default(),
         }
     }
 
@@ -2664,17 +2669,23 @@ impl Runtime {
     }
 
     /// Adds, removes, locks, unlocks or prunes worktrees (job label
-    /// [`WorktreeOp::label`]).
+    /// [`WorktreeOp::label`]). Removing goes through [`remove_worktree`].
     pub fn worktree_op(&self, key: &Path, op: WorktreeOp) -> Option<JobId> {
         self.repos.get(key).filter(|s| s.is_ready())?;
+        let leftovers = self.leftover_worktrees.clone();
         Some(self.scheduler.submit(JobSpec::write(
             key,
             op.label(),
             worktree_refresh(),
             move |ctx| {
-                ctx.backend()
-                    .worktree_op(ctx.repo(), &op, ctx.cancel_token())
-                    .map(|()| JobOutput::Done)
+                let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
+                match &op {
+                    WorktreeOp::Remove { path, force } => {
+                        remove_worktree(backend, repo, path, *force, &leftovers, cancel)
+                    }
+                    _ => backend.worktree_op(repo, &op, cancel),
+                }
+                .map(|()| JobOutput::Done)
             },
         )))
     }
@@ -2734,6 +2745,7 @@ impl Runtime {
         delete_branches: bool,
     ) -> Option<JobId> {
         self.repos.get(key).filter(|s| s.is_ready())?;
+        let leftovers = self.leftover_worktrees.clone();
         Some(self.scheduler.submit(JobSpec::write(
             key,
             CLEANUP_JOB_LABEL,
@@ -2742,8 +2754,8 @@ impl Runtime {
                 let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
                 let mut first_error = None;
                 for (path, branch, force) in items {
-                    let remove = WorktreeOp::Remove { path, force };
-                    let mut result = backend.worktree_op(repo, &remove, cancel);
+                    let mut result =
+                        remove_worktree(backend, repo, &path, force, &leftovers, cancel);
                     if result.is_ok() && delete_branches {
                         let delete = RefOp::DeleteBranch {
                             name: branch,
@@ -3427,6 +3439,120 @@ fn worktree_refresh() -> RefreshSet {
     ]
     .into_iter()
     .collect()
+}
+
+/// How long a removal keeps trying to delete what git left of a worktree's
+/// folder: files held briefly (an indexer, a refresh still running there)
+/// are freed within it.
+const LEFTOVER_RETRY: Duration = Duration::from_secs(2);
+
+/// Removes worktree `path` with `git worktree remove`, or deletes the rest of
+/// its folder when an earlier removal left part of it (`leftovers`).
+///
+/// On Windows git cannot delete a running executable or a loaded library, and
+/// stops partway through the folder after it has already unregistered the
+/// worktree. So a program running files from the folder stops the removal
+/// before anything is deleted ([`GitErrorKind::InUse`]). Files held otherwise
+/// (a terminal or editor in the folder) still stop git partway: the rest is
+/// retried briefly, then reported as [`GitErrorKind::FolderLeft`].
+fn remove_worktree(
+    backend: &dyn GitBackend,
+    repo: &Path,
+    path: &Path,
+    force: bool,
+    leftovers: &Mutex<HashSet<PathBuf>>,
+    cancel: &CancelToken,
+) -> Result<(), GitError> {
+    let users = processes_using(path);
+    if !users.is_empty() {
+        return Err(folder_error(path, GitErrorKind::InUse, &users, None));
+    }
+    let key = normalize(path);
+    let left = leftovers
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(&key);
+    if left {
+        return delete_leftover(path, &key, leftovers, None);
+    }
+    // Only a worktree that git unregistered counts as left behind; when the
+    // list cannot be read, nothing does.
+    let registered = |cancel: &CancelToken| {
+        backend
+            .worktrees(repo, cancel)
+            .map(|list| list.iter().any(|wt| normalize(&wt.path) == key))
+    };
+    let was_registered = registered(cancel).unwrap_or(false);
+    let remove = WorktreeOp::Remove {
+        path: path.to_path_buf(),
+        force,
+    };
+    let Err(err) = backend.worktree_op(repo, &remove, cancel) else {
+        return Ok(());
+    };
+    if !was_registered || !path.exists() || registered(&CancelToken::new()).unwrap_or(true) {
+        return Err(err);
+    }
+    leftovers
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key.clone());
+    delete_leftover(path, &key, leftovers, Some(&err.stderr))
+}
+
+/// Deletes what is left of a removed worktree's folder, retrying for
+/// [`LEFTOVER_RETRY`]. `git_stderr` is the failed removal's, for the details.
+fn delete_leftover(
+    path: &Path,
+    key: &Path,
+    leftovers: &Mutex<HashSet<PathBuf>>,
+    git_stderr: Option<&str>,
+) -> Result<(), GitError> {
+    let started = Instant::now();
+    loop {
+        match fs::remove_dir_all(path) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                if started.elapsed() < LEFTOVER_RETRY {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                let users = processes_using(path);
+                let cause = users.is_empty().then(|| err.to_string());
+                let mut error = folder_error(path, GitErrorKind::FolderLeft, &users, cause);
+                if let Some(stderr) = git_stderr {
+                    error.stderr = format!("{}\n\n{}", error.stderr, stderr.trim_end());
+                }
+                return Err(error);
+            }
+            _ => {
+                leftovers
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(key);
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// An error about worktree folder `path`: its first line names `users` (or
+/// `cause`), the next ones what each has loaded from the folder.
+fn folder_error(
+    path: &Path,
+    kind: GitErrorKind,
+    users: &[ProcessUse],
+    cause: Option<String>,
+) -> GitError {
+    let names: Vec<String> = users.iter().map(ToString::to_string).collect();
+    let mut stderr = format!("error: {}", cause.unwrap_or_else(|| names.join(", ")));
+    for user in users {
+        stderr.push_str(&format!("\n{user}: {}", user.file.display()));
+    }
+    let command = format!(
+        "worktree remove {}",
+        path.to_string_lossy().replace('\\', "/")
+    );
+    GitError::new(command, kind, stderr)
 }
 
 /// Fetches `task`'s remote, then adds the worktree with its new branch. On

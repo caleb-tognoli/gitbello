@@ -334,6 +334,97 @@ fn cleanup_finds_merged_and_gone_worktrees_and_removes_them() {
     assert!(state.branch("dirty").is_some() && state.branch("active").is_some());
 }
 
+/// A program started from inside the worktree (a copy of `findstr`, which
+/// runs until its stdin closes), like an app built and launched there.
+#[cfg(windows)]
+fn run_from(folder: &Path) -> std::process::Child {
+    let system =
+        PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot")).join("System32");
+    let bin = folder.join("bin");
+    fs::create_dir_all(&bin).expect("bin folder");
+    let exe = bin.join("held.exe");
+    fs::copy(system.join("findstr.exe"), &exe).expect("copy findstr");
+    std::process::Command::new(&exe)
+        .arg("x")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("start the copy")
+}
+
+#[cfg(windows)]
+#[test]
+fn a_program_running_from_a_worktree_stops_its_removal() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let linked = repo.add_worktree("linked", "in üse");
+    let (mut rt, key) = open(&repo);
+    let mut child = run_from(&linked);
+    let remove = || WorktreeOp::Remove {
+        path: linked.clone(),
+        force: true,
+    };
+
+    let err = outcome(&mut rt, &key, |rt| rt.worktree_op(&key, remove())).expect("in use");
+    assert_eq!(err.kind, GitErrorKind::InUse, "{err}");
+    assert!(
+        err.stderr
+            .starts_with(&format!("error: held.exe (PID {})", child.id())),
+        "{err}"
+    );
+    settle_worktrees(&mut rt, &key);
+    assert!(listed(&rt, &key, &linked), "still a worktree");
+    assert!(linked.join("a.txt").is_file(), "nothing was deleted");
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    ok(&mut rt, &key, |rt| rt.worktree_op(&key, remove()));
+    assert!(!linked.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_folder_git_could_not_fully_delete_is_deleted_by_removing_again() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let linked = repo.add_worktree("linked", "held");
+    let (mut rt, key) = open(&repo);
+    // Open without sharing, as some editors do: git deletes the files
+    // before it, unregisters the worktree, and leaves the rest.
+    fs::create_dir_all(linked.join("sub")).unwrap();
+    fs::write(linked.join("sub").join("held.txt"), "x\n").unwrap();
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(linked.join("sub").join("held.txt"))
+        .unwrap();
+    let remove = || WorktreeOp::Remove {
+        path: linked.clone(),
+        force: true,
+    };
+
+    let err = outcome(&mut rt, &key, |rt| rt.worktree_op(&key, remove())).expect("left");
+    assert_eq!(err.kind, GitErrorKind::FolderLeft, "{err}");
+    assert!(
+        err.stderr.contains("failed to delete"),
+        "git's error too: {err}"
+    );
+    settle_worktrees(&mut rt, &key);
+    assert!(!listed(&rt, &key, &linked), "git unregistered it");
+    assert!(linked.join("sub").join("held.txt").exists());
+
+    drop(held);
+    ok(&mut rt, &key, |rt| rt.worktree_op(&key, remove()));
+    assert!(!linked.exists(), "the rest is deleted");
+    // Without a leftover to finish, an unknown folder is git's to refuse.
+    fs::create_dir_all(&linked).unwrap();
+    let err = outcome(&mut rt, &key, |rt| rt.worktree_op(&key, remove())).expect("unknown");
+    assert!(err.stderr.contains("is not a working tree"), "{err}");
+    assert!(linked.exists());
+}
+
 #[test]
 fn a_deleted_worktree_folder_is_reported_once() {
     let repo = TestRepo::init();

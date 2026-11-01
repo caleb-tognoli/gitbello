@@ -3,7 +3,8 @@ extends SmokeTest
 ## shows its worktree; a branch checked out in another worktree jumps there
 ## from the branch list and cannot be deleted; Ctrl+T runs the new-task flow
 ## (the folder follows the branch name) and shows the result; a chip's menu
-## locks, unlocks and removes; cleanup removes merged worktrees with their
+## locks, unlocks and removes (on Windows, not while a program runs from the
+## worktree); cleanup removes merged worktrees with their
 ## branches and closes their views; the Settings dialog saves. Uses fixture
 ## `repo-10`. Skipped without `--fixtures`.
 
@@ -179,6 +180,8 @@ func run() -> void:
 	expect(not DirAccess.dir_exists_absolute(spare), "its folder is gone")
 	expect(Paths.same(page.active_view().worktree_path(), repo), "the main worktree shows")
 	expect(await wait_until(func() -> bool: return not _has_branch(session, "spare")), "its branch was deleted")
+	if OS.get_name() == "Windows":
+		await _delete_while_in_use(main, page, session, repo, fixtures.path_join("repo-10-busy"))
 
 	# Cleanup: feature/login and task-one are both merged into origin/main.
 	expect(Actions.run_action(&"worktree.cleanup"), "cleanup runs")
@@ -204,6 +207,48 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## Windows: deleting a worktree a program runs from (a copy of `ping`, like
+## an app built there) deletes nothing and says which program; once it
+## exits, the toast's Try again deletes the worktree and its branch.
+func _delete_while_in_use(main: Main, page: RepoTab, session: RepoSession, repo: String, busy: String) -> void:
+	var count: int = session.worktrees().size()
+	session.add_worktree(busy, "busy", "main")
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == count + 1), "a busy worktree was added")
+	# Like build output, the program's folder is ignored.
+	var exclude: FileAccess = FileAccess.open(repo.path_join(".git/info/exclude"), FileAccess.READ_WRITE)
+	exclude.seek_end()
+	exclude.store_string("/bin/\n")
+	exclude.close()
+	var exe: String = busy.path_join("bin/held.exe")
+	DirAccess.make_dir_recursive_absolute(exe.get_base_dir())
+	DirAccess.copy_absolute(OS.get_environment("SystemRoot").path_join("System32/PING.EXE"), exe)
+	var pid: int = OS.create_process(exe, ["-n", "60", "127.0.0.1"])
+	expect(pid > 0, "a program runs from the worktree")
+	expect(await _menu_for(page, session, "repo-10-busy", "Delete…"), "the menu offers delete")
+	var form: FormDialog = page.ops().form()
+	expect(await wait_until(func() -> bool: return form.visible), "delete asks first")
+	press("Enter")
+	var retry: Array[Button] = []
+	expect(await wait_until(func() -> bool:
+		retry.assign(main.toasts().find_children("*", "Button", true, false).filter(
+				func(b: Node) -> bool: return (b as Button).text == "Try again"))
+		return not retry.is_empty()), "a toast offers to try again")
+	var toast_text: String = "\n".join(main.toasts().find_children("*", "Label", true, false).map(
+			func(l: Node) -> String: return (l as Label).text))
+	expect(toast_text.contains("a program is running files from the worktree"), "the toast says why: %s" % toast_text)
+	expect(toast_text.contains("held.exe (PID %d)" % pid), "and names the program: %s" % toast_text)
+	expect_eq(session.worktrees().size(), count + 1, "the worktree is still there")
+	expect(FileAccess.file_exists(busy.path_join("README.md")), "nothing was deleted")
+	OS.kill(pid)
+	expect(await wait_until(func() -> bool: return not OS.is_process_running(pid)), "the program exits")
+	if retry.is_empty():
+		return
+	retry[0].pressed.emit()
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == count), "try again deletes the worktree")
+	expect(not DirAccess.dir_exists_absolute(busy), "its folder is gone")
+	expect(await wait_until(func() -> bool: return not _has_branch(session, "busy")), "with its branch, as chosen")
 
 
 func _overflow_selection() -> void:

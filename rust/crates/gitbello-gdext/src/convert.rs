@@ -53,6 +53,8 @@ pub fn error_kind_id(kind: GitErrorKind) -> &'static str {
         GitErrorKind::NotFullyMerged => "not_fully_merged",
         GitErrorKind::CheckedOutElsewhere => "checked_out_elsewhere",
         GitErrorKind::AlreadyExists => "already_exists",
+        GitErrorKind::InUse => "in_use",
+        GitErrorKind::FolderLeft => "folder_left",
         _ => "other",
     }
 }

@@ -46,6 +46,9 @@ var _deletes: Dictionary[int, String] = {}
 var _tag_pushes: Dictionary[int, String] = {}
 ## Branches to delete once their worktree is deleted: job id -> branch.
 var _worktree_branches: Dictionary[int, String] = {}
+## Worktree deletions started here, to try again with the same choices:
+## path (forward slashes) -> `{force, branch}`.
+var _worktree_deletes: Dictionary[String, Dictionary] = {}
 ## New tasks and added worktrees started here, shown once created: job id -> path.
 var _tasks: Dictionary[int, String] = {}
 ## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
@@ -1291,9 +1294,26 @@ func remove_worktree(worktree: Dictionary) -> void:
 ## Deletes worktree `path` from this worktree, then `branch` unless empty
 ## (asking again if it has commits merged nowhere else).
 func delete_worktree(path: String, force: bool, branch: String) -> void:
+	_worktree_deletes[path.replace("\\", "/")] = {"force": force, "branch": branch}
 	var job: int = _track(session.remove_worktree(path, force), tr("Deleting %s") % path.get_file())
 	if job >= 0 and not branch.is_empty():
 		_worktree_branches[job] = branch
+
+
+## Deletes again the worktree whose deletion failed with `error` (a program
+## was using its folder), with the same choices.
+func retry_worktree_delete(error: Dictionary) -> void:
+	var path: String = removed_worktree(error)
+	var choice: Dictionary = _worktree_deletes.get(path, {})
+	delete_worktree(path, bool(choice.get("force", false)), String(choice.get("branch", "")))
+
+
+## The worktree a failed `git worktree remove` was deleting, or "".
+static func removed_worktree(error: Dictionary) -> String:
+	var command: String = String(error.get("command", ""))
+	if not command.begins_with("worktree remove "):
+		return ""
+	return command.trim_prefix("worktree remove ").trim_prefix("-f -f ")
 
 
 func prune_worktrees() -> int:
@@ -1356,6 +1376,10 @@ func _run_cleanup(values: Dictionary) -> void:
 			continue
 		var item: Dictionary = _cleanup_list[i]
 		close_requested.emit(String(item["path"]))
+		_worktree_deletes[String(item["path"]).replace("\\", "/")] = {
+			"force": int(item["changed"]) > 0 or bool(item["locked"]),
+			"branch": String(item["branch"]) if bool(values["delete_branches"]) else "",
+		}
 		items.append({
 			"path": String(item["path"]),
 			"branch": String(item["branch"]),

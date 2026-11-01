@@ -54,6 +54,13 @@ pub enum GitErrorKind {
     CheckedOutElsewhere,
     #[error("already exists")]
     AlreadyExists,
+    /// A program runs files from a worktree being deleted; nothing was
+    /// deleted (Windows only).
+    #[error("a program is running files from the worktree")]
+    InUse,
+    /// git unregistered a worktree but could not delete all of its folder.
+    #[error("the worktree's folder could not be fully deleted")]
+    FolderLeft,
     #[error("git failed")]
     Other,
 }

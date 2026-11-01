@@ -57,7 +57,8 @@ func runtime_error(error: String) -> String:
 		"rejected: not a fast-forward", "conflict", "another git process holds a lock", "cancelled",
 		"unexpected git output", "the file changed since it was shown", "local changes would be overwritten",
 		"branches have diverged", "no upstream branch", "no remote configured", "branch is not fully merged",
-		"branch is checked out in another worktree", "already exists", "git failed",
+		"branch is checked out in another worktree", "already exists",
+		"a program is running files from the worktree", "the worktree's folder could not be fully deleted", "git failed",
 	]
 	for kind: String in kinds:
 		if error == kind:

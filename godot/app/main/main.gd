@@ -1105,6 +1105,9 @@ func _error_fixes(repo_path: String, error: Dictionary) -> Array[Dictionary]:
 			if at >= 0:
 				var path: String = stderr.substr(at + 5).get_slice("'", 0)
 				fixes.append({"label": "Show that worktree", "run": func() -> void: open_repo(path)})
+		"in_use", "folder_left":
+			if not RepoOps.removed_worktree(error).is_empty():
+				fixes.append({"label": "Try again", "run": func() -> void: ops.retry_worktree_delete(error)})
 	return fixes
 
 

@@ -11,6 +11,7 @@ pub mod fuzzy;
 pub mod git;
 pub mod graph;
 pub mod highlight;
+pub mod in_use;
 pub mod jobs;
 pub mod launch;
 pub mod library;

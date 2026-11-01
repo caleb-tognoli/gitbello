@@ -31,6 +31,8 @@ commands:
   fixture <dir> [--repos N]        create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
+  in-use <dir>                     programs running files from a folder
+                                   (Windows; what blocks deleting it)
 
 Set GITBELLO_LOG=1 to print the git commands a command ran.";
 
@@ -54,12 +56,30 @@ fn main() -> Result<()> {
         Some("config") => repo_cmds::config(rest),
         Some("fixture") => fixture::run(rest),
         Some("home-bench") => repo_cmds::home_bench(rest),
+        Some("in-use") => in_use(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
             Ok(())
         }
         Some(other) => bail!("unknown command `{other}`\n\n{USAGE}"),
     }
+}
+
+fn in_use(args: &[String]) -> Result<()> {
+    let [dir] = args else {
+        bail!("in-use needs exactly one folder");
+    };
+    let started = Instant::now();
+    let found = gitbello_core::in_use::processes_using(PathBuf::from(dir).as_path());
+    for process in &found {
+        println!("{process}  {}", process.file.display());
+    }
+    eprintln!(
+        "{} process(es) in {:.0} ms",
+        found.len(),
+        started.elapsed().as_secs_f64() * 1e3
+    );
+    Ok(())
 }
 
 fn load(path: PathBuf) -> Result<(GraphLoader, Duration)> {
