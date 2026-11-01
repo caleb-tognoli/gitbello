@@ -8,8 +8,8 @@ func run() -> void:
 	add_child(host)
 	var toasts: Toasts = Toasts.new()
 	host.add_child(toasts)
-	toasts.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	toasts.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	toasts.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	toasts.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	toasts.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	host.theme.set_constant(&"seconds", &"Toasts", 1)
 	host.theme.set_constant(&"undo_seconds", &"Toasts", 1)
@@ -24,6 +24,8 @@ func run() -> void:
 	var overflow: Label = toasts.get_node("Overflow") as Label
 	expect(toasts.size.y <= host.size.y / 3.0 + 1.0, "burst stays inside one-third of available height: %s" % toasts.size)
 	expect(host.get_global_rect().encloses(toasts.get_global_rect()), "bounded stack remains inside the shell")
+	expect(toasts.get_rect().end.x > host.size.x - 40.0 and toasts.position.x > host.size.x / 2.0,
+			"the stack sits at the bottom right: %s" % toasts.get_rect())
 	expect_eq(toasts.toast_count(), 10, "capacity retains every notification")
 	expect(overflow.visible and overflow.text.contains("10"), "overflow visibly reports retained count")
 	expect(stack.size.y > scroll.size.y, "overflow is scrollable rather than expanding the shell")
@@ -40,7 +42,7 @@ func run() -> void:
 	toasts.finish_progress(progress)
 	await _settle()
 	expect(not toasts.toast_texts().has("Fetching objects"), "offscreen progress can finish")
-	var undo_button: Button = undo.find_children("*", "Button", true, false)[-1] as Button
+	var undo_button: Button = (undo.find_child("Actions", true, false) as Node).get_child(0) as Button
 	undo_button.grab_focus()
 	await _settle()
 	expect(scroll.get_global_rect().intersects(undo_button.get_global_rect()), "keyboard navigation reveals an overflow action")

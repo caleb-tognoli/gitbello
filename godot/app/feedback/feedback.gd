@@ -6,8 +6,9 @@ extends Node
 ##   progress and is disabled until the job ends;
 ## - started from a shortcut, the palette or a menu, a progress toast shows it
 ##   and turns into the result;
-## - a success ends with a short toast; errors get their own toast from
-##   `Core.git_error`.
+## - a success ends with a short toast only when it offers Undo or nothing
+##   on screen shows the result (callers pass no `done` text otherwise);
+##   errors get their own toast from `Core.git_error`.
 ## It also knows which repositories are busy (for the tab spinner) and when
 ## each was last fetched.
 
@@ -76,8 +77,9 @@ func watch(session: RepoSession) -> void:
 
 
 ## Reports job `job` of `session` (no-op when it did not start, -1). `doing`
-## shows while it runs ("Pushing main…"), `done` when it succeeded ("Pushed
-## main to origin"; empty for no success toast). The progress goes to
+## shows while it runs ("Pushing tag v1…"), `done` when it succeeded
+## ("Pushed tag v1 to origin"; empty for no success toast, when the result
+## shows elsewhere). The progress goes to
 ## `origin`, else to `Actions.origin()`, else to a toast.
 func track(session: RepoSession, job: int, doing: String, done: String = "",
 		origin: Control = null, then: Callable = Callable(), undo: Callable = Callable()) -> void:
@@ -170,7 +172,7 @@ func _end(session: RepoSession, id: int, ok: bool) -> void:
 		_set_busy(item.origin, false, "", -1)
 	var text: String = item.done if ok else ""
 	if item.toast != null:
-		toasts.finish_progress(item.toast, text)
+		toasts.finish_progress(item.toast, text, item.undo)
 	elif not text.is_empty() and toasts != null:
 		toasts.show_success(text, item.undo)
 	if item.then.is_valid():

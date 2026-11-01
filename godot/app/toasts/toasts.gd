@@ -1,12 +1,14 @@
 class_name Toasts
 extends VBoxContainer
-## Notifications stacked at the bottom centre of the content area (PLAN §4
-## Feedback). Three kinds:
+## Notifications stacked at the bottom right of the content area (PLAN §4
+## Feedback): compact cards with an icon for their kind. Three kinds:
 ## - errors (`show_toast`, mainly classified git errors from `Core.git_error`):
 ##   they stay until dismissed, with "Details" (the full command and stderr)
 ##   and buttons that fix known errors (a rejected push offers Pull);
 ## - successes (`show_success`): short, hidden after a few seconds unless
-##   hovered or focused, with Undo when the operation can really be undone;
+##   hovered or focused (a thin line shows the time left), with Undo when the
+##   operation can really be undone. Callers show one only when it offers an
+##   action or nothing else on screen shows the result;
 ## - progress (`show_progress`): a job started without a button to show it,
 ##   turned into its result by `finish_progress`.
 
@@ -15,6 +17,8 @@ const THEME_TYPE: StringName = &"Toasts"
 const REPEAT_WINDOW_MSEC: int = 10_000
 ## Fix and Undo buttons are in this group (for tests and `fix_labels`).
 const ACTION_GROUP: StringName = &"toast_actions"
+## Seconds of the fade in, and of the fade out of an expiring success.
+const FADE_SECONDS: float = 0.12
 
 ## `func(repo_path: String, error: Dictionary) -> Array[Dictionary]`: fixes
 ## for an error, each `{label, run: Callable}`.
@@ -28,6 +32,9 @@ var _scroll: ScrollContainer = ScrollContainer.new()
 var _stack: VBoxContainer = VBoxContainer.new()
 var _overflow: Label = Label.new()
 var _layout_queued: bool = false
+## Turns the spinners of progress toasts while there are any.
+var _spin: Timer = Timer.new()
+var _frame: int = 0
 
 
 func _ready() -> void:
@@ -42,19 +49,25 @@ func _ready() -> void:
 	_scroll.add_child(_stack)
 	_overflow.name = "Overflow"
 	_overflow.theme_type_variation = &"DimLabel"
-	_overflow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_overflow.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_overflow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_overflow)
 	_stack.minimum_size_changed.connect(_queue_layout)
 	_stack.child_exiting_tree.connect(func(_node: Node) -> void: _queue_layout())
 	(get_parent() as Control).resized.connect(_queue_layout)
 	Core.git_error.connect(_on_git_error)
+	_spin.wait_time = BigButton.SPIN_SECONDS
+	_spin.timeout.connect(_turn_spinners)
+	add_child(_spin)
 	_queue_layout()
 
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_THEME_CHANGED, NOTIFICATION_TRANSLATION_CHANGED] and is_node_ready():
 		_queue_layout()
+		if what == NOTIFICATION_THEME_CHANGED:
+			for panel: Node in _stack.get_children():
+				_set_icon(panel as PanelContainer)
 		if what == NOTIFICATION_TRANSLATION_CHANGED:
 			for child: Node in get_children():
 				if child is AcceptDialog:
@@ -72,8 +85,8 @@ func _queue_layout() -> void:
 func _layout() -> void:
 	_layout_queued = false
 	var available: Vector2 = (get_parent() as Control).size
-	var width: float = minf(float(get_theme_constant(&"width", THEME_TYPE)),
-			maxf(1.0, available.x - 2.0 * float(get_theme_constant(&"edge_margin", THEME_TYPE))))
+	var edge: float = float(get_theme_constant(&"edge_margin", THEME_TYPE))
+	var width: float = minf(float(get_theme_constant(&"width", THEME_TYPE)), maxf(1.0, available.x - 2.0 * edge))
 	var limit: float = minf(float(get_theme_constant(&"max_height", THEME_TYPE)),
 			available.y * float(get_theme_constant(&"height_percent", THEME_TYPE)) / 100.0)
 	var height: float = _stack.get_combined_minimum_size().y
@@ -86,7 +99,7 @@ func _layout() -> void:
 	custom_minimum_size.x = width
 	size = Vector2(width, 0.0)
 	reset_size()
-	position = Vector2((available.x - size.x) / 2.0,
+	position = Vector2(maxf(0.0, available.x - edge - size.x),
 			available.y - float(get_theme_constant(&"bottom_margin", THEME_TYPE)) - size.y)
 
 
@@ -94,19 +107,21 @@ func _layout() -> void:
 ## `fixes` (`{label, run}`) is a button that runs it and closes the toast.
 func show_toast(title: String, message: String, details: String = "", fixes: Array[Dictionary] = []) -> void:
 	var panel: PanelContainer = _panel(&"ToastPanel", title, message)
-	var row: HBoxContainer = panel.get_child(0).get_child(0) as HBoxContainer
 	if not details.is_empty():
 		var more: Button = Button.new()
+		more.name = "Details"
 		more.icon = AppTheme.icon(&"Info")
 		more.tooltip_text = tr("Show error details")
 		more.theme_type_variation = &"ToolbarButton"
 		more.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		more.pressed.connect(func() -> void: _show_details(title, details))
+		var row: HBoxContainer = _row(panel)
 		row.add_child(more)
 		row.move_child(more, row.get_child_count() - 2)
-	_add_actions(panel, fixes)
-	_stack.add_child(panel)
-	_queue_layout()
+	# Fixes go along the bottom, on the right like a success's Undo: there can
+	# be several, with longer labels.
+	_add_actions(panel, fixes, panel.get_child(0) as VBoxContainer)
+	_add(panel)
 
 
 ## Shows a short success message, pausing its remaining lifetime while
@@ -118,8 +133,7 @@ func show_success(text: String, undo: Callable = Callable(), label: String = "Un
 	if undo.is_valid():
 		actions.append({"label": label, "run": undo})
 	_add_actions(panel, actions)
-	_stack.add_child(panel)
-	_queue_layout()
+	_add(panel)
 	_expire(panel, undo.is_valid())
 	return panel
 
@@ -129,15 +143,17 @@ func show_success(text: String, undo: Callable = Callable(), label: String = "Un
 func show_progress(text: String, cancel: Callable = Callable()) -> PanelContainer:
 	var panel: PanelContainer = _panel(&"ProgressToastPanel", text, "", false)
 	var bar: ProgressBar = ProgressBar.new()
+	bar.name = "Progress"
+	bar.theme_type_variation = &"ToastProgress"
 	bar.indeterminate = true
 	bar.show_percentage = false
-	bar.name = "Progress"
 	(panel.get_child(0) as VBoxContainer).add_child(bar)
 	if cancel.is_valid():
 		var actions: Array[Dictionary] = [{"label": "Cancel", "run": cancel}]
 		_add_actions(panel, actions)
-	_stack.add_child(panel)
-	_queue_layout()
+	_add(panel)
+	if _spin.is_stopped():
+		_spin.start()
 	return panel
 
 
@@ -151,8 +167,9 @@ func update_progress(panel: PanelContainer, text: String, percent: int) -> void:
 
 
 ## Ends a progress toast: with `text`, it becomes a success toast (and goes
-## after a few seconds); without, it closes (errors get their own toast).
-func finish_progress(panel: PanelContainer, text: String = "") -> void:
+## after a few seconds), with `undo` as in `show_success`; without, it closes
+## (errors get their own toast).
+func finish_progress(panel: PanelContainer, text: String = "", undo: Callable = Callable()) -> void:
 	if not is_instance_valid(panel):
 		return
 	if text.is_empty():
@@ -160,7 +177,9 @@ func finish_progress(panel: PanelContainer, text: String = "") -> void:
 		return
 	var at: int = panel.get_index()
 	panel.queue_free()
-	var done: PanelContainer = show_success(text)
+	var done: PanelContainer = show_success(text, undo)
+	# The progress card was already showing: no second fade in.
+	done.modulate.a = 1.0
 	_stack.move_child(done, at)
 
 
@@ -209,16 +228,27 @@ func _action_buttons() -> Array[Button]:
 	return out
 
 
-## A toast panel: a row with the title (and message) and a close button.
+## A toast panel: a row with the kind's icon, the title (and message) and a
+## close button.
 func _panel(variation: StringName, title: String, message: String, closable: bool = true) -> PanelContainer:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.theme_type_variation = variation
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	var box: VBoxContainer = VBoxContainer.new()
+	box.theme_type_variation = &"ToastBox"
 	panel.add_child(box)
 	var row: HBoxContainer = HBoxContainer.new()
+	row.name = "Row"
+	row.theme_type_variation = &"ToastRow"
 	box.add_child(row)
+	var icon: TextureRect = TextureRect.new()
+	icon.name = "Icon"
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(icon)
 	var texts: VBoxContainer = VBoxContainer.new()
+	texts.name = "Texts"
+	texts.theme_type_variation = &"ToastTexts"
 	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(texts)
 	var title_label: Label = Label.new()
@@ -228,12 +258,14 @@ func _panel(variation: StringName, title: String, message: String, closable: boo
 	texts.add_child(title_label)
 	if not message.is_empty():
 		var message_label: Label = Label.new()
+		message_label.name = "Message"
 		message_label.text = tr(message)
 		message_label.theme_type_variation = &"DimLabel"
 		message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		texts.add_child(message_label)
 	if closable:
 		var close: Button = Button.new()
+		close.name = "Close"
 		close.icon = AppTheme.CLOSE
 		close.tooltip_text = tr("Dismiss")
 		close.theme_type_variation = &"ToolbarButton"
@@ -243,25 +275,91 @@ func _panel(variation: StringName, title: String, message: String, closable: boo
 	return panel
 
 
-## Buttons along the bottom of a toast; each runs its action and closes it.
-func _add_actions(panel: PanelContainer, actions: Array[Dictionary]) -> void:
+func _row(panel: PanelContainer) -> HBoxContainer:
+	return panel.get_child(0).get_child(0) as HBoxContainer
+
+
+## Adds `panel` to the stack, fading it in.
+func _add(panel: PanelContainer) -> void:
+	_stack.add_child(panel)
+	_set_icon(panel)
+	_queue_layout()
+	panel.modulate.a = 0.0
+	panel.create_tween().tween_property(panel, ^"modulate:a", 1.0, FADE_SECONDS)
+
+
+## The kind's icon: a check for successes, a warning for errors, a spinner
+## for progress.
+func _set_icon(panel: PanelContainer) -> void:
+	var icon: TextureRect = panel.find_child("Icon", true, false) as TextureRect
+	if icon == null:
+		return
+	# As tall as the title's first line, so the icon centres on it.
+	var title: Label = panel.find_child("Title", true, false) as Label
+	icon.custom_minimum_size.y = title.get_theme_font(&"font").get_height(title.get_theme_font_size(&"font_size"))
+	match panel.theme_type_variation:
+		&"SuccessToastPanel":
+			icon.texture = AppTheme.tintable_icon(&"StatusSuccess")
+			icon.modulate = get_theme_color(&"success_color", THEME_TYPE)
+		&"ToastPanel":
+			icon.texture = AppTheme.tintable_icon(&"StatusWarning")
+			icon.modulate = get_theme_color(&"error_color", THEME_TYPE)
+		_:
+			icon.texture = AppTheme.spinner(_frame, ThemeManager.light)
+			icon.modulate = Color.WHITE
+
+
+func _turn_spinners() -> void:
+	_frame += 1
+	var spinning: bool = false
+	for node: Node in _stack.get_children():
+		var panel: PanelContainer = node as PanelContainer
+		if panel.theme_type_variation == &"ProgressToastPanel" and not panel.is_queued_for_deletion():
+			_set_icon(panel)
+			spinning = true
+	if not spinning:
+		_spin.stop()
+
+
+## Buttons for the actions, at the end of the title row (or on the right of a
+## row in `parent`); each runs its action and closes the toast.
+func _add_actions(panel: PanelContainer, actions: Array[Dictionary], parent: Container = null) -> void:
 	if actions.is_empty():
 		return
 	var row: HBoxContainer = HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
+	row.name = "Actions"
+	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	for action: Dictionary in actions:
 		var button: Button = Button.new()
 		button.text = tr(String(action["label"]))
+		button.theme_type_variation = &"ToastActionButton"
 		button.add_to_group(ACTION_GROUP)
 		button.pressed.connect(_run_action.bind(action["run"], panel))
 		row.add_child(button)
-	(panel.get_child(0) as VBoxContainer).add_child(row)
+	if parent != null:
+		row.alignment = BoxContainer.ALIGNMENT_END
+		parent.add_child(row)
+		return
+	var title_row: HBoxContainer = _row(panel)
+	title_row.add_child(row)
+	var close: Node = title_row.get_node_or_null(^"Close")
+	if close != null:
+		title_row.move_child(close, -1)
 
 
 func _expire(panel: PanelContainer, has_undo: bool) -> void:
 	var duration: StringName = &"undo_seconds" if has_undo else &"seconds"
+	var countdown: ProgressBar = ProgressBar.new()
+	countdown.name = "Countdown"
+	countdown.theme_type_variation = &"ToastCountdown"
+	countdown.show_percentage = false
+	countdown.value = 100.0
+	countdown.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	(panel.get_child(0) as VBoxContainer).add_child(countdown)
 	var timer: ToastLifetime = ToastLifetime.new()
 	timer.wait_time = float(get_theme_constant(duration, THEME_TYPE))
+	timer.countdown = countdown
+	timer.fade_seconds = FADE_SECONDS
 	timer.visibility_guard = _capacity_hides_actions.bind(panel)
 	_scroll.get_v_scroll_bar().value_changed.connect(timer._queue_refresh.unbind(1))
 	_scroll.resized.connect(timer._queue_refresh)

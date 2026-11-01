@@ -46,13 +46,6 @@ func _ready() -> void:
 	add_child(_scan)
 	_form.field_changed.connect(_on_field_changed)
 	_form.canceled.connect(_on_form_canceled)
-	_scan.added.connect(func(paths: PackedStringArray) -> void:
-		if toasts == null or paths.is_empty():
-			return
-		if paths.size() == 1:
-			toasts.show_success(tr("Added %s") % paths[0].replace("\\", "/").get_file())
-		else:
-			toasts.show_success(tr("Added %d repositories") % paths.size()))
 	Core.repository_job_progress.connect(_on_job_progress)
 	Core.repository_job_finished.connect(_on_job_finished)
 	Core.repository_job_cancelled.connect(_on_job_cancelled)
@@ -419,8 +412,8 @@ func _remove(path: String) -> void:
 
 
 func _relocate(old: String, new: String) -> void:
-	if Core.library_relocate(old, new) and toasts != null:
-		toasts.show_success(tr("%s now points at %s") % [old.replace("\\", "/").get_file(), new])
+	# The card shows the new folder.
+	Core.library_relocate(old, new)
 
 
 # --- Helpers ----------------------------------------------------------------

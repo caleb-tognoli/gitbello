@@ -3,9 +3,10 @@ extends SmokeTest
 ## commit `repo-8` has not fetched, so after a fetch `main` has diverged:
 ## Sync (with the default ff-only pulls) offers merge or rebase on a toast,
 ## the rebase choice pulls then pushes, showing its progress on the button,
-## and ends with a success toast. Also: a fetch from the keyboard shows a
-## progress toast, branches in the palette, and a missing editor reported as
-## a toast. Uses fixture `repo-8`. Skipped without `--fixtures`.
+## and ends without a success toast (the button shows the result). Also: a
+## fetch from the keyboard shows a progress toast, branches in the palette,
+## and a missing editor reported as a toast. Uses fixture `repo-8`. Skipped
+## without `--fixtures`.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 
@@ -53,10 +54,9 @@ func run() -> void:
 	session.job_started.disconnect(watch)
 	expect(FileAccess.file_exists(repo.path_join("remote.txt")), "the remote's file arrived")
 	expect_eq(read_file(repo.path_join("app.txt")), "local edit\n", "local changes survived the pull")
-	expect(await wait_until(func() -> bool: return toasts.toast_texts().has("Synced main with origin")),
-			"a success toast says so: %s" % [toasts.toast_texts()])
 	expect(await wait_until(func() -> bool: return not button.is_busy() and button.text == "Fetch"),
 			"Sync has nothing left but fetching: %s" % button.text)
+	expect_eq(toasts.toast_count(), 0, "the button shows the result, so no success toast repeats it")
 
 	# The palette lists branches to check out.
 	press("Ctrl+K")

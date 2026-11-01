@@ -48,7 +48,7 @@ func run() -> void:
 	await _wait(2.2)
 	expect(is_instance_valid(undo) and button.has_focus(), "focused Undo survives its deadline")
 	expect(absf(timer.time_left - remaining) < 0.1, "keyboard focus preserves remaining time")
-	var close: Button = undo.find_children("*", "Button", true, false)[0] as Button
+	var close: Button = undo.find_child("Close", true, false) as Button
 	close.grab_focus()
 	await get_tree().process_frame
 	expect(timer.paused, "moving focus to Dismiss stays paused")
@@ -98,7 +98,7 @@ func run() -> void:
 	expect_eq(calls[0], 1, "keyboard activation runs Undo once")
 	expect(not is_instance_valid(undo), "activation dismisses its toast")
 	plain = _toasts.show_success("Dismiss early")
-	(plain.find_children("*", "Button", true, false)[0] as Button).pressed.emit()
+	(plain.find_child("Close", true, false) as Button).pressed.emit()
 	_toasts.show_toast("Error", "Persistent")
 	var progress: PanelContainer = _toasts.show_progress("Working")
 	await _wait(2.2)
@@ -108,6 +108,11 @@ func run() -> void:
 	await get_tree().process_frame
 	await _wait(1.2)
 	expect_eq(_toasts.toast_count(), 1, "progress result uses ordinary expiry")
+	progress = _toasts.show_progress("Discarding")
+	_toasts.finish_progress(progress, "Discarded", func() -> void: calls[0] += 1)
+	await get_tree().process_frame
+	expect(_toasts.press_fix("Undo"), "a progress result keeps its Undo")
+	expect_eq(calls[0], 2, "the progress result's Undo runs")
 	_root.queue_free()
 	await get_tree().process_frame
 

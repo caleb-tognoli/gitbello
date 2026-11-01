@@ -278,8 +278,7 @@ func _pull_then_push(mode: String, origin: Control) -> void:
 	var branch: String = session.current_branch()
 	var then_push: Callable = func(ok: bool) -> void:
 		if ok:
-			_track(session.push(false), tr("Pushing %s") % branch,
-					tr("Synced %s with %s") % [branch, session.default_remote()], Callable(), origin)
+			_track(session.push(false), tr("Pushing %s") % branch, "", Callable(), origin)
 	_track(session.pull(mode), tr("Pulling %s") % branch, "", then_push, origin)
 
 
@@ -290,15 +289,14 @@ func fetch() -> int:
 ## `mode` is `ff-only`, `merge`, `rebase`, or empty for the configured one.
 func pull(mode: String = "") -> int:
 	var branch: String = session.current_branch()
-	return _track(session.pull(mode), tr("Pulling %s") % branch, tr("Pulled into %s") % branch)
+	return _track(session.pull(mode), tr("Pulling %s") % branch)
 
 
 ## Pushes the current branch; one without an upstream is published (the push
 ## sets it).
 func push() -> int:
 	var branch: String = session.current_branch()
-	var remote: String = session.default_remote()
-	return _track(session.push(false), tr("Pushing %s") % branch, tr("Pushed %s to %s") % [branch, remote])
+	return _track(session.push(false), tr("Pushing %s") % branch)
 
 
 func force_push() -> void:
@@ -306,7 +304,7 @@ func force_push() -> void:
 	var origin: Control = Actions.origin()
 	_ask("Force push", tr("Replace %s on %s with your local branch?\nThis is refused if the remote branch has commits you have not fetched.") % [
 		branch, session.default_remote()], "Force push", func() -> void:
-			_track(session.push(true), tr("Force pushing %s") % branch, tr("Force pushed %s") % branch, Callable(), origin))
+			_track(session.push(true), tr("Force pushing %s") % branch, "", Callable(), origin))
 
 
 # --- Checkout -------------------------------------------------------------------
@@ -363,12 +361,7 @@ func _start_checkout(shown: String, start: Callable, changes: String, origin: Co
 	var job: int = start.call(changes)
 	if job >= 0:
 		_checkouts[job] = {"name": shown, "start": start, "origin": origin}
-	var done: String = tr("Switched to %s") % shown
-	if changes == "bring":
-		done = tr("Switched to %s with your changes") % shown
-	elif changes == "leave":
-		done = tr("Switched to %s; your changes stay on %s") % [shown, _here()]
-	return _track(job, tr("Switching to %s") % shown, done, Callable(), origin)
+	return _track(job, tr("Switching to %s") % shown, "", Callable(), origin)
 
 
 ## The current branch's name, or "this commit" when detached.
@@ -400,17 +393,17 @@ func _shelve(values: Dictionary, paths: PackedStringArray) -> void:
 ## `shelf` as in `RepoSession.shelves()`.
 func restore_shelf(shelf: Dictionary) -> int:
 	var shelf_name: String = String(shelf["name"])
-	return _track(session.restore_shelf(String(shelf["oid"])), tr("Restoring “%s”") % shelf_name, tr("Restored “%s”") % shelf_name)
+	return _track(session.restore_shelf(String(shelf["oid"])), tr("Restoring “%s”") % shelf_name)
 
 
 func rename_shelf(shelf: Dictionary, shelf_name: String) -> void:
 	if not shelf_name.is_empty() and shelf_name != String(shelf["name"]):
-		_track(session.rename_shelf(String(shelf["oid"]), shelf_name), "Renaming the shelf", tr("Renamed the shelf to “%s”") % shelf_name)
+		_track(session.rename_shelf(String(shelf["oid"]), shelf_name), "Renaming the shelf")
 
 
 func restore_shelf_file(shelf: Dictionary, path: String) -> void:
 	_track(session.restore_shelf_file(String(shelf["oid"]), path),
-			tr("Restoring %s") % path.get_file(), tr("Restored %s") % path.get_file())
+			tr("Restoring %s") % path.get_file())
 
 
 func discard_shelf_file(shelf: Dictionary, path: String) -> void:
@@ -430,7 +423,7 @@ func discard_shelf(shelf: Dictionary) -> void:
 
 func undo_shelf_discard() -> void:
 	if session.can_undo_shelf_discard():
-		_track(session.undo_shelf_discard(), "Restoring the shelf", "The shelf is back")
+		_track(session.undo_shelf_discard(), "Restoring the shelf")
 
 
 # --- Branches -----------------------------------------------------------------
@@ -553,7 +546,7 @@ func _create_tag(values: Dictionary, target: String) -> void:
 	var job: int = session.create_tag(tag_name, target, String(values["message"]))
 	if job >= 0 and bool(values.get("push", false)):
 		_tag_pushes[job] = tag_name
-	_track(job, tr("Creating tag %s") % tag_name, tr("Created tag %s") % tag_name)
+	_track(job, tr("Creating tag %s") % tag_name)
 
 
 func _check_tag_name(values: Dictionary) -> String:
@@ -569,7 +562,7 @@ func _check_tag_name(values: Dictionary) -> String:
 
 func delete_tag(tag_name: String) -> void:
 	_ask("Delete tag", tr("Delete tag %s? Copies already pushed to a remote stay there.") % tag_name, "Delete",
-			func() -> void: _track(session.delete_tag(tag_name), tr("Deleting tag %s") % tag_name, tr("Deleted tag %s") % tag_name), true)
+			func() -> void: _track(session.delete_tag(tag_name), tr("Deleting tag %s") % tag_name), true)
 
 
 func push_tag(tag_name: String) -> int:
@@ -582,7 +575,7 @@ func push_tag(tag_name: String) -> int:
 func add_remote() -> void:
 	_begin_form("remote", "Add remote", "Add", func(values: Dictionary) -> void:
 		var remote_name: String = String(values["name"])
-		_track(session.add_remote(remote_name, String(values["url"])), tr("Adding %s") % remote_name, tr("Added remote %s") % remote_name))
+		_track(session.add_remote(remote_name, String(values["url"])), tr("Adding %s") % remote_name))
 	_form.add_line("name", "Name", "origin" if session.remotes().is_empty() else "", true)
 	_form.add_line("url", "URL", "", false, "https://… or git@…")
 	_form.validator = _check_remote.bind("", true)
@@ -595,8 +588,7 @@ func edit_remote_url(remote_name: String) -> void:
 		if String(remote["name"]) == remote_name:
 			current = String(remote["fetch_url"])
 	_begin_form("remote_url", "Change URL", "Save", func(values: Dictionary) -> void:
-		_track(session.set_remote_url(remote_name, String(values["url"])), tr("Updating %s") % remote_name,
-				tr("Updated the URL of %s") % remote_name))
+		_track(session.set_remote_url(remote_name, String(values["url"])), tr("Updating %s") % remote_name))
 	_form.add_note(tr("Where %s fetches from and pushes to.") % remote_name)
 	_form.add_line("url", "URL", current)
 	_form.validator = func(values: Dictionary) -> String:
@@ -608,7 +600,7 @@ func rename_remote(remote_name: String) -> void:
 	_begin_form("remote_rename", "Rename remote", "Rename", func(values: Dictionary) -> void:
 		var new: String = String(values["name"])
 		if new != remote_name:
-			_track(session.rename_remote(remote_name, new), tr("Renaming %s") % remote_name, tr("Renamed remote %s to %s") % [remote_name, new]))
+			_track(session.rename_remote(remote_name, new), tr("Renaming %s") % remote_name))
 	_form.add_note(tr("Renaming %s; branches that follow it keep following it.") % remote_name)
 	_form.add_line("name", "New name", remote_name, true)
 	_form.validator = _check_remote.bind(remote_name, false)
@@ -617,7 +609,7 @@ func rename_remote(remote_name: String) -> void:
 
 func remove_remote(remote_name: String) -> void:
 	_ask("Remove remote", tr("Remove %s? Its remote-tracking branches go too, and local branches stop following it. Nothing changes on the remote itself.") % remote_name,
-			"Remove", func() -> void: _track(session.remove_remote(remote_name), tr("Removing %s") % remote_name, tr("Removed remote %s") % remote_name),
+			"Remove", func() -> void: _track(session.remove_remote(remote_name), tr("Removing %s") % remote_name),
 			true)
 
 
@@ -921,19 +913,13 @@ func _start_merge(values: Dictionary, mode: String) -> void:
 	var shown: String = String(_merge["shown"])
 	var shelve_first: bool = not (p.get("overlap", PackedStringArray()) as PackedStringArray).is_empty()
 	var message: String = String(values.get("message", "")) if mode in ["default", "no_ff"] else ""
-	var into: String = _here()
 	var job: int = session.merge(target, mode, message, shelve_first)
 	var subjects: PackedStringArray = PackedStringArray()
 	for commit: Dictionary in p.get("commits", []):
 		subjects.append(String(commit["subject"]))
 	if job >= 0:
 		_merges[job] = {"target": target, "shown": shown, "mode": mode, "commits": subjects}
-	var done: String = tr("Merged %s into %s") % [shown, into]
-	if mode == "squash":
-		done = tr("Squashed %s: review the changes and commit them") % shown
-	elif mode != "no_ff" and bool(p.get("can_ff", false)):
-		done = tr("Fast-forwarded %s to %s") % [into, shown]
-	_track(job, tr("Merging %s") % shown, done, Callable(), _merge.get("origin") as Control)
+	_track(job, tr("Merging %s") % shown, "", Callable(), _merge.get("origin") as Control)
 
 
 ## "1 file", "3 files".
@@ -952,15 +938,11 @@ func _commits(n: int) -> String:
 ## cherry-pick with `summary` and `body` (git's message when empty), or
 ## continues a rebase.
 func continue_operation(summary: String = "", body: String = "") -> int:
-	var info: Dictionary = session.operation_info()
-	var kind: String = String(info.get("kind", ""))
-	# A merge or cherry-pick commit shows in the commit box's undo strip.
-	var done: String = {"merge": "", "cherry_pick": "", "revert": "", "rebase": "Rebase continued"}.get(kind, "Continued")
-	return _track(session.continue_operation(summary, body), "Continuing", done)
+	return _track(session.continue_operation(summary, body), "Continuing")
 
 
 func skip_operation() -> int:
-	return _track(session.skip_operation(), "Skipping the commit", "Skipped the commit")
+	return _track(session.skip_operation(), "Skipping the commit")
 
 
 # --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
@@ -973,9 +955,7 @@ func resolve_block(path: String, block: int, choice: String) -> int:
 
 ## Resolves conflicted `path` whole (`ours`, `theirs`, `keep`, `delete`).
 func resolve_file(path: String, choice: String) -> int:
-	var done: String = tr({"ours": "Took our %s", "theirs": "Took their %s", "keep": "Kept %s",
-		"delete": "Deleted %s"}.get(choice, "Resolved %s")) % path.get_file()
-	return _track(session.resolve_file(path, choice), tr("Resolving %s") % path.get_file(), done)
+	return _track(session.resolve_file(path, choice), tr("Resolving %s") % path.get_file())
 
 
 func undo_block_choice() -> int:
@@ -985,7 +965,7 @@ func undo_block_choice() -> int:
 func reopen_conflicts(path: String) -> void:
 	_ask("Reopen conflicts", tr("Bring back the conflicts of %s? How you resolved it is lost.") % path.get_file(),
 			"Reopen", func() -> void:
-				_track(session.reopen_conflicts(path), tr("Reopening %s") % path.get_file(), tr("%s has its conflicts again") % path.get_file()))
+				_track(session.reopen_conflicts(path), tr("Reopening %s") % path.get_file()))
 
 
 ## Recreates the conflicts of `path` with the base between the markers.
@@ -1027,9 +1007,7 @@ func _answer_undo(mode: String) -> void:
 
 
 func _run_undo(commit: Dictionary, mode: String, origin: Control) -> void:
-	var subject: String = String(commit["subject"])
-	var done: String = tr("Removed the merge “%s”") % subject if mode == "remove_merge" else tr("Undid “%s”") % subject
-	_track(session.undo_commit(String(commit["oid"]), mode), "Undoing the commit", done, Callable(), origin)
+	_track(session.undo_commit(String(commit["oid"]), mode), "Undoing the commit", "", Callable(), origin)
 
 
 # --- Commits and operations -------------------------------------------------
@@ -1039,7 +1017,7 @@ func cherry_pick(oid: String, subject: String) -> void:
 	var origin: Control = Actions.origin()
 	_ask("Cherry-pick", tr("Apply %s “%s” on top of %s?") % [oid.left(7), subject, onto if not onto.is_empty() else "HEAD"],
 			"Cherry-pick", func() -> void:
-				_track(session.cherry_pick(oid), tr("Cherry-picking %s") % oid.left(7), tr("Cherry-picked %s") % oid.left(7),
+				_track(session.cherry_pick(oid), tr("Cherry-picking %s") % oid.left(7), "",
 						Callable(), origin))
 
 
@@ -1062,7 +1040,7 @@ func abort_operation() -> void:
 	var question: String = tr("Stop %s and discard its changes?") % stopping if resolved == 0 \
 			else tr("Stop %s and discard its changes, with the %s you resolved?") % [stopping, _files(resolved)]
 	_ask("Abort", question, "Abort", func() -> void:
-			_track(session.abort_operation(), "Aborting", tr("Aborted %s") % what), true)
+			_track(session.abort_operation(), "Aborting"), true)
 
 
 func copy_hash(oid: String) -> void:
@@ -1216,9 +1194,9 @@ func _create_task(values: Dictionary) -> void:
 	if job >= 0:
 		_tasks[job] = folder
 	if track:
-		_track(job, tr("Checking out %s") % base, tr("Checked out %s in a new worktree") % base)
+		_track(job, tr("Checking out %s") % base)
 	else:
-		_track(job, tr("Creating the worktree %s") % name, tr("Created the worktree %s") % name)
+		_track(job, tr("Creating the worktree %s") % name)
 
 
 ## A worktree for an existing local branch that no worktree has checked out.
@@ -1236,7 +1214,7 @@ func add_existing_worktree() -> void:
 		var job: int = session.add_worktree(path, branch, "")
 		if job >= 0:
 			_tasks[job] = path
-		_track(job, tr("Adding a worktree for %s") % branch, tr("Added a worktree for %s") % branch))
+		_track(job, tr("Adding a worktree for %s") % branch))
 	_form.add_choice("branch", "Branch", branches, 0)
 	_form.add_folder("folder", "Folder", _shown_folder(session.worktree_path_for(branches[0])), "", _shown_folder)
 	_form.validator = func(values: Dictionary) -> String:
@@ -1268,14 +1246,14 @@ func open_worktree(path: String) -> void:
 
 func lock_worktree(path: String) -> void:
 	_begin_form("lock", "Lock worktree", "Lock", func(values: Dictionary) -> void:
-		_track(session.lock_worktree(path, String(values["reason"])), "Locking", tr("Locked %s") % path.get_file()))
+		_track(session.lock_worktree(path, String(values["reason"])), "Locking"))
 	_form.add_note("A locked worktree is kept by prune and cleanup, for example while its folder is on a removable disk.")
 	_form.add_line("reason", "Reason", "", false, "Optional")
 	_form.open()
 
 
 func unlock_worktree(path: String) -> void:
-	_track(session.unlock_worktree(path), "Unlocking", tr("Unlocked %s") % path.get_file())
+	_track(session.unlock_worktree(path), "Unlocking")
 
 
 ## Asks before deleting `worktree` (a chip's ref: `path`, `short`, `branch`,
@@ -1302,14 +1280,13 @@ func remove_worktree(worktree: Dictionary) -> void:
 ## Deletes worktree `path` from this worktree, then `branch` unless empty
 ## (asking again if it has commits merged nowhere else).
 func delete_worktree(path: String, force: bool, branch: String) -> void:
-	var job: int = _track(session.remove_worktree(path, force), tr("Deleting %s") % path.get_file(),
-			tr("Deleted the worktree %s") % path.get_file())
+	var job: int = _track(session.remove_worktree(path, force), tr("Deleting %s") % path.get_file())
 	if job >= 0 and not branch.is_empty():
 		_worktree_branches[job] = branch
 
 
 func prune_worktrees() -> int:
-	return _track(session.prune_worktrees(), "Pruning worktrees", "Pruned missing worktrees")
+	return _track(session.prune_worktrees(), "Pruning worktrees")
 
 
 ## The cleanup flow (PLAN §4): lists worktrees whose branch is merged or
@@ -1373,8 +1350,7 @@ func _run_cleanup(values: Dictionary) -> void:
 			"branch": String(item["branch"]),
 			"force": int(item["changed"]) > 0 or bool(item["locked"]),
 		})
-	_track(session.cleanup(items, bool(values["delete_branches"])), "Cleaning up",
-			tr("Deleted %d worktree") % items.size() if items.size() == 1 else tr("Deleted %d worktrees") % items.size())
+	_track(session.cleanup(items, bool(values["delete_branches"])), "Cleaning up")
 
 
 # --- Follow-ups ---------------------------------------------------------------

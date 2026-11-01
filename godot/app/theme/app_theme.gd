@@ -577,18 +577,43 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"width", &"CommandPalette", 640)
 	theme.set_constant(&"height", &"CommandPalette", 380)
 	theme.set_constant(&"top", &"CommandPalette", 56)
-	# Toasts report problems (M6.5 P2 adds other kinds): raised, with the error
-	# colour along their left edge.
-	_variation(theme, &"ToastPanel", &"PanelContainer")
-	var toast: StyleBoxFlat = _box(p.raised, 6, Vector4(14, 8, 8, 8), p.border, 1)
-	toast.border_color = p.error
-	toast.border_width_left = 3
-	toast.shadow_color = Color(0, 0, 0, 0.25 if p.light else 0.4)
-	toast.shadow_size = 6
-	theme.set_stylebox(&"panel", &"ToastPanel", toast)
+	# Toasts: compact raised cards, the same for every kind; the icon's colour
+	# tells errors (ToastPanel), successes and progress apart.
+	var toast: StyleBoxFlat = _box(p.raised, 8, Vector4(10, 8, 6, 8), p.border, 1)
+	toast.shadow_color = Color(0, 0, 0, 0.18 if p.light else 0.35)
+	toast.shadow_size = 8
+	toast.shadow_offset = Vector2(0, 2)
+	for variation: StringName in [&"ToastPanel", &"SuccessToastPanel", &"ProgressToastPanel"]:
+		_variation(theme, variation, &"PanelContainer")
+		theme.set_stylebox(&"panel", variation, toast)
+	theme.set_color(&"success_color", &"Toasts", p.added)
+	theme.set_color(&"error_color", &"Toasts", p.error)
+	_variation(theme, &"ToastBox", &"VBoxContainer")
+	theme.set_constant(&"separation", &"ToastBox", 6)
+	_variation(theme, &"ToastRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ToastRow", 8)
+	_variation(theme, &"ToastTexts", &"VBoxContainer")
+	theme.set_constant(&"separation", &"ToastTexts", 2)
+	# Undo, Open, Cancel and fixes: text buttons in the accent colour.
+	_variation(theme, &"ToastActionButton", &"Button")
+	var action_margins: Vector4 = Vector4(8, 2, 8, 2)
+	theme.set_stylebox(&"normal", &"ToastActionButton", _box(Color.TRANSPARENT, 4, action_margins))
+	theme.set_stylebox(&"hover", &"ToastActionButton", _box(p.hover, 4, action_margins))
+	theme.set_stylebox(&"pressed", &"ToastActionButton", _box(Color(p.accent, 0.25), 4, action_margins))
+	theme.set_stylebox(&"hover_pressed", &"ToastActionButton", _box(Color(p.accent, 0.35), 4, action_margins))
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color",
+			&"font_pressed_color", &"font_hover_pressed_color"]:
+		theme.set_color(color, &"ToastActionButton", p.accent_text)
+	# The time left of a success, and a job's progress: thin lines.
+	_variation(theme, &"ToastCountdown", &"ProgressBar")
+	theme.set_stylebox(&"background", &"ToastCountdown", _box(Color.TRANSPARENT, 1, Vector4(0, 1, 0, 1)))
+	theme.set_stylebox(&"fill", &"ToastCountdown", _box(Color(p.accent, 0.55), 1))
+	_variation(theme, &"ToastProgress", &"ProgressBar")
+	theme.set_stylebox(&"background", &"ToastProgress", _box(p.hover, 2, Vector4(0, 2, 0, 2)))
+	theme.set_stylebox(&"fill", &"ToastProgress", _box(p.accent, 2))
 	theme.set_constant(&"seconds", &"Toasts", 6)
 	theme.set_constant(&"undo_seconds", &"Toasts", 12)
-	theme.set_constant(&"width", &"Toasts", 380)
+	theme.set_constant(&"width", &"Toasts", 340)
 	theme.set_constant(&"max_height", &"Toasts", 280)
 	theme.set_constant(&"height_percent", &"Toasts", 33)
 	theme.set_constant(&"edge_margin", &"Toasts", 16)
@@ -981,14 +1006,6 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	# Remotes… and Tags…
 	theme.set_constant(&"width", &"ManageDialog", 620)
 	theme.set_constant(&"height", &"ManageDialog", 380)
-	# Toasts of successes and progress (errors are ToastPanel)
-	for entry: Array in [[&"SuccessToastPanel", p.accent], [&"ProgressToastPanel", p.border]]:
-		_variation(theme, entry[0], &"PanelContainer")
-		var toast: StyleBoxFlat = _box(p.raised, 6, Vector4(14, 8, 8, 8), entry[1], 1)
-		toast.border_width_left = 3
-		toast.shadow_color = Color(0, 0, 0, 0.25 if p.light else 0.4)
-		toast.shadow_size = 6
-		theme.set_stylebox(&"panel", entry[0], toast)
 	theme.set_constant(&"bottom_margin", &"Toasts", 40)
 
 

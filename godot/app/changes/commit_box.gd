@@ -291,10 +291,9 @@ func commit(origin: Control = null) -> bool:
 	if not can_commit():
 		return false
 	_output.hide()
-	var done: String = _done_text()
 	_job = session.commit(_summary.text, _body.text, _amending)
 	if feedback != null:
-		feedback.track(session, _job, "Amending" if _amending else "Committing", done,
+		feedback.track(session, _job, "Amending" if _amending else "Committing", "",
 				origin if origin != null else _commit_button, func(_ok: bool) -> void: update_state())
 	update_state()
 	return _job >= 0
@@ -342,20 +341,6 @@ func _update_undo_strip() -> void:
 	_undo_label.text = String(commit_info["subject"])
 	_undo_label.tooltip_text = String(commit_info["subject"])
 	_undo_button.tooltip_text = Actions.tooltip(&"commit.undo")
-
-
-## The success toast of the commit about to start: none for a merge or
-## cherry-pick, which the undo strip shows.
-func _done_text() -> String:
-	var mode: String = session.commit_mode()
-	if mode in ["merge", "cherry_pick"]:
-		return ""
-	var count: int = session.picked_count()
-	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
-	var branch: String = session.current_branch()
-	if _amending:
-		return tr("Amended “%s”") % _amend_subject
-	return tr("Committed %s to %s") % [files, branch] if not branch.is_empty() else tr("Committed %s") % files
 
 
 func _on_head_message_loaded(summary_text: String, body_text: String) -> void:
