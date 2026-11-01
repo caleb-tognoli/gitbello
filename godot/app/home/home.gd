@@ -765,6 +765,7 @@ func refresh_texts() -> void:
 		for text: String in pair[1]:
 			choice.add_item(text)
 		choice.select(int(pair[2]))
+	_empty.set_logo(AppTheme.logo())
 	_empty.show_state("No repositories yet",
 			"Clone one, add a folder you already have, or create a new one. You can also drop a folder here.", [
 		{"id": &"repo.clone", "icon": &"GitFetch"},

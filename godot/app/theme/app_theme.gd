@@ -19,6 +19,9 @@ const LIGHT_TEXT: Color = Color("1f2329")
 const MIN_CONTRAST: float = 4.5
 ## Every SVG in here is imported as a DPITexture and recoloured with the theme.
 const ICON_DIR: String = "res://themes/icons"
+## The app logo. It keeps its own colours in both themes, so it lives outside
+## `ICON_DIR` and is never recoloured.
+const LOGO: String = "res://themes/branding/logo.svg"
 ## Icon colours in the light theme, from the Godot editor's
 ## (editor_color_map.cpp).
 const LIGHT_ICON_COLORS: Dictionary[String, String] = {
@@ -1041,6 +1044,11 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_font_size(&"font_size", &"SuggestionButton", 15)
 	theme.set_constant(&"h_separation", &"SuggestionButton", 10)
 	theme.set_constant(&"button_width", &"EmptyState", 340)
+	theme.set_constant(&"logo_size", &"EmptyState", 96)
+	_variation(theme, &"AboutRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"AboutRow", 18)
+	theme.set_constant(&"logo_size", &"AboutDialog", 72)
+	theme.set_constant(&"text_width", &"AboutDialog", 380)
 	# M6.5 P4: the Shelved section and the offer to restore left changes
 	_variation(theme, &"OfferBar", &"PanelContainer")
 	var offer: StyleBoxFlat = _box(p.background.blend(Color(p.accent, 0.18)), 0, Vector4(10, 6, 8, 6))
@@ -1212,6 +1220,11 @@ static func recolor_icons(light: bool) -> void:
 			continue
 		if _icons[file].color_map != colors:
 			_icons[file].color_map = colors
+
+
+## The gitbello logo, drawn from its SVG at the interface's scale.
+static func logo() -> Texture2D:
+	return load(LOGO) as Texture2D
 
 
 ## The icon `name` (an SVG in `ICON_DIR` without its extension).

@@ -685,6 +685,8 @@ Scope settled in the Q&A of 2026-10-31 (§4 Home, D13). Replaces the welcome scr
 - [ ] Copy and paste, scrollback, resize, theme colors
 
 ### M11 — Packaging and first release (≈1.5 weeks)
+- [x] Logo and app icon (pulled forward 2026-11-01): `themes/branding/logo.svg` (a shared-stem "gb" drawn as a branch on a deep blue squircle with amber commit dots, for contrast on the taskbar) and a heavier `logo_small.svg` for 24 px and below; `tools/export_branding.gd` draws `icon.png` (window icon, boot splash) and `icon.ico` (Windows); the logo shows on Home's welcome screen and in About
+- [ ] macOS `.icns` from `icon.png` when the macOS export is set up
 - [ ] Custom slim export templates; release builds in CI
 - [ ] Windows: zip plus installer (Inno Setup or similar). Linux: AppImage (Flatpak later). macOS: `.app` zip, documenting the unsigned-app steps (signing and notarization later)
 - [ ] README with screenshots, CONTRIBUTING, issue templates; tag v0.1.0

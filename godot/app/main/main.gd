@@ -22,7 +22,7 @@ var _library: LibraryOps = LibraryOps.new()
 var _home_tab: bool = false
 var _remotes_dialog: RemotesDialog = RemotesDialog.new()
 var _tags_dialog: TagsDialog = TagsDialog.new()
-var _about: AcceptDialog = AcceptDialog.new()
+var _about: AboutDialog = AboutDialog.new()
 ## Spins the busy tabs' icons.
 var _spinner: Timer = Timer.new()
 var _spin_frame: int = 0
@@ -291,6 +291,10 @@ func git_log() -> GitLogPanel:
 
 func toasts() -> Toasts:
 	return _toasts
+
+
+func about_dialog() -> AboutDialog:
+	return _about
 
 
 func feedback() -> Feedback:
@@ -1136,10 +1140,7 @@ func _on_system_theme_changed() -> void:
 
 
 func _show_about() -> void:
-	_about.title = tr("About gitbello")
-	_about.dialog_text = tr("gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s") % [
-		Core.core_version(), Core.git_version(), Engine.get_version_info()["string"]]
-	_about.popup_centered()
+	_about.show_about()
 
 
 ## File → Open recent: recently opened repositories not open now.

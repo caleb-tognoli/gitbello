@@ -1,6 +1,6 @@
 # gitbello
 
-A fast, open-source, cross-platform Git GUI for people who work across many repositories and worktrees. Native Rust core, Godot 4 UI, system `git` underneath.
+A fast, open-source Git GUI that keeps every repository and worktree you're juggling within reach. Runs on Windows, Linux and macOS, with a native Rust core, a Godot 4 UI and system `git` underneath.
 
 > **Status:** early development (milestone M0, skeleton). Not usable yet. See [docs/PLAN.md](docs/PLAN.md) for the design and roadmap.
 

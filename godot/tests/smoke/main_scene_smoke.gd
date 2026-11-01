@@ -22,4 +22,24 @@ func run() -> void:
 	expect(label != null, "main scene has %VersionLabel")
 	if label != null:
 		expect(label.text.contains(Core.core_version()), "version label shows the core version")
+
+	# Branding: the icons exist, Home's welcome and About show the logo.
+	for setting: String in ["application/config/icon", "application/config/windows_native_icon",
+			"application/boot_splash/image"]:
+		var path: String = ProjectSettings.get_setting(setting)
+		expect(FileAccess.file_exists(path), "%s exists (%s)" % [setting, path])
+	expect(AppTheme.logo() != null, "the logo loads")
+	var shell: Main = main as Main
+	expect(shell.home().empty_state().has_logo(), "the welcome screen shows the logo")
+	Actions.run_action(&"app.about")
+	var about: AboutDialog = shell.about_dialog()
+	expect(about.visible and about.has_logo(), "About shows the logo")
+	expect(about.text().contains(Core.core_version()), "About shows the version")
+	expect(about.text().contains(tr(AboutDialog.TAGLINE)), "About shows the tagline")
+	expect_eq(ProjectSettings.get_setting("application/config/description"), AboutDialog.TAGLINE,
+			"the project description is the tagline")
+	var italian: Translation = TranslationServer.get_translation_object("it")
+	expect(italian != null and String(italian.get_message(AboutDialog.TAGLINE)).begins_with("Una GUI Git"),
+			"the tagline has an Italian translation")
+	about.hide()
 	main.queue_free()

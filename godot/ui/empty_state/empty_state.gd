@@ -5,6 +5,7 @@ extends CenterContainer
 ## while they can run; plain buttons can be added for other choices (recent
 ## repositories).
 
+@onready var _logo: TextureRect = %Logo
 @onready var _title: Label = %Title
 @onready var _hint: Label = %Hint
 @onready var _actions: VBoxContainer = %Actions
@@ -26,6 +27,19 @@ func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> vo
 		var button: Button = add_button(String(entry.get("label", action.label)), entry.get("icon", &""), Callable())
 		button.pressed.connect(func() -> void: Actions.run_action(id, button))
 		button.tooltip_text = Actions.tooltip(id)
+
+
+## Shows `texture` above the title, such as the logo on the welcome screen;
+## null hides it.
+func set_logo(texture: Texture2D) -> void:
+	_logo.texture = texture
+	_logo.visible = texture != null
+	var side: float = float(get_theme_constant(&"logo_size", &"EmptyState"))
+	_logo.custom_minimum_size = Vector2(side, side)
+
+
+func has_logo() -> bool:
+	return _logo.visible
 
 
 ## Adds a big button that calls `pressed` (when valid). Returns it.

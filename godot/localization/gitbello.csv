@@ -148,7 +148,7 @@ keys,en,it
 "Cannot save settings","Cannot save settings","Impossibile salvare le impostazioni"
 "Settings file ignored","Settings file ignored","File delle impostazioni ignorato"
 "gitbello cannot run git","gitbello cannot run git","gitbello non può eseguire Git"
-"gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s","gitbello %s\nA fast Git GUI for many repositories and worktrees.\n\ngit %s · Godot %s","gitbello %s\nUna GUI Git veloce per molti repository e worktree.\n\ngit %s · Godot %s"
+"A fast, open-source Git GUI that keeps every repository and worktree you're juggling within reach.","A fast, open-source Git GUI that keeps every repository and worktree you're juggling within reach.","Una GUI Git veloce e open source che tiene a portata di mano ogni repository e worktree che hai in ballo."
 "Check out: %s","Check out: %s","Estrai: %s"
 "Go to: %s","Go to: %s","Vai a: %s"
 "Go to: %s · %s","Go to: %s · %s","Vai a: %s · %s"

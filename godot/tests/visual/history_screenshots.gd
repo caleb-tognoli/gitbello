@@ -69,9 +69,9 @@ func _wait(predicate: Callable) -> bool:
 	return true
 
 
-func _shot(out: String, name: String) -> void:
+func _shot(out: String, file_name: String) -> void:
 	for frame: int in 30:
 		await get_tree().process_frame
-	var path: String = out.path_join(name + ".png")
+	var path: String = out.path_join(file_name + ".png")
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)
