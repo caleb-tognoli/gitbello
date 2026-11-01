@@ -156,6 +156,10 @@ const REFRESH_ON_FAILURE: &[&str] = &[
 /// commit (which changes both) reloads once.
 const GRAPH_RELOAD_DELAY: Duration = Duration::from_millis(150);
 
+/// While a status or refs refresh is still on its way, the reload waits for it
+/// (under load it can land well after the other), but never longer than this.
+const GRAPH_RELOAD_MAX_HOLD: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobState {
     Started,
@@ -2849,10 +2853,13 @@ impl Runtime {
     /// Applies finished jobs and returns what changed. Call once per frame.
     pub fn poll(&mut self) -> Vec<RuntimeEvent> {
         let mut out = std::mem::take(&mut self.pending);
+        // Checked before taking events: a refresh not pending by now has
+        // already sent its result, so it is applied below.
+        let held = self.graphs_awaiting_refresh();
         while let Ok(event) = self.events.try_recv() {
             self.apply(event, &mut out);
         }
-        self.reload_dirty_graphs(&mut out);
+        self.reload_dirty_graphs(&held, &mut out);
         self.advance_searches(&mut out);
         self.run_auto_fetch();
         let latest = self.runner.log().latest_seq();
@@ -3318,11 +3325,27 @@ impl Runtime {
         }
     }
 
-    fn reload_dirty_graphs(&mut self, out: &mut Vec<RuntimeEvent>) {
+    /// Repositories with a dirty graph whose status or refs refresh has not
+    /// reported yet.
+    fn graphs_awaiting_refresh(&self) -> HashSet<PathBuf> {
+        self.repos
+            .values()
+            .filter(|state| state.graph_dirty_since.is_some())
+            .filter(|state| {
+                let pending = self.scheduler.pending_refreshes(&state.key);
+                pending.contains(RefreshKind::Status) || pending.contains(RefreshKind::Refs)
+            })
+            .map(|state| state.key.clone())
+            .collect()
+    }
+
+    fn reload_dirty_graphs(&mut self, held: &HashSet<PathBuf>, out: &mut Vec<RuntimeEvent>) {
         for state in self.repos.values_mut() {
-            let due = state
-                .graph_dirty_since
-                .is_some_and(|since| since.elapsed() >= GRAPH_RELOAD_DELAY);
+            let due = state.graph_dirty_since.is_some_and(|since| {
+                let waited = since.elapsed();
+                waited >= GRAPH_RELOAD_DELAY
+                    && (waited >= GRAPH_RELOAD_MAX_HOLD || !held.contains(&state.key))
+            });
             if !due {
                 continue;
             }

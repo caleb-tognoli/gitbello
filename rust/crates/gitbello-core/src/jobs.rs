@@ -355,6 +355,7 @@ struct Queued {
 struct Running {
     repo: PathBuf,
     cancel: CancelToken,
+    refresh: Option<RefreshKind>,
 }
 
 #[derive(Default)]
@@ -583,6 +584,23 @@ impl JobScheduler {
                 .any(|q| q.spec.access == JobAccess::Write && q.spec.repo == repo)
     }
 
+    /// The refreshes of `repo` that are queued or running. A refresh missing
+    /// here has already sent its result.
+    pub fn pending_refreshes(&self, repo: &Path) -> RefreshSet {
+        let state = self.inner.lock();
+        let queued = state
+            .queue
+            .iter()
+            .filter(|q| q.spec.repo == repo)
+            .filter_map(|q| q.refresh);
+        let running = state
+            .running
+            .values()
+            .filter(|r| r.repo == repo)
+            .filter_map(|r| r.refresh);
+        queued.chain(running).collect()
+    }
+
     /// Jobs queued or running, for tests and diagnostics.
     pub fn pending(&self) -> usize {
         let state = self.inner.lock();
@@ -623,6 +641,7 @@ fn worker(inner: &Inner) {
                         Running {
                             repo: job.spec.repo.clone(),
                             cancel: job.cancel.clone(),
+                            refresh: job.refresh,
                         },
                     );
                     if job.spec.access == JobAccess::Write {

@@ -493,6 +493,32 @@ fn duplicate_refreshes_coalesce_while_queued() {
 }
 
 #[test]
+fn pending_refreshes_cover_queued_refreshes_until_they_report() {
+    let (scheduler, events, _) = scheduler(2);
+    let timeline = Timeline::default();
+    let write = scheduler.submit(JobSpec::write(
+        "/repo/a",
+        "hold",
+        RefreshSet::EMPTY,
+        timed("hold", &timeline, 100),
+    ));
+    let both = RefreshSet::EMPTY
+        .with(RefreshKind::Status)
+        .with(RefreshKind::Refs);
+    let ids = scheduler.request_refresh(Path::new("/repo/a"), both);
+    assert_eq!(scheduler.pending_refreshes(Path::new("/repo/a")), both);
+    assert!(scheduler.pending_refreshes(Path::new("/repo/b")).is_empty());
+
+    wait_final(&events, &[write, ids[0], ids[1]]);
+    // The final event goes out before the job leaves the scheduler.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !scheduler.pending_refreshes(Path::new("/repo/a")).is_empty() {
+        assert!(Instant::now() < deadline, "refreshes never left");
+        sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
 fn successful_writes_queue_their_refreshes_after_finishing() {
     let (scheduler, events, backend) = scheduler(2);
     let refresh = RefreshSet::EMPTY
