@@ -132,10 +132,10 @@ func _details() -> Array[Array]:
 		out.append([&"GitConflict", tr("1 conflicted file") if conflicts == 1 else tr("%d conflicted files") % conflicts])
 	var ahead: int = int(worktree.get("ahead", 0))
 	if ahead > 0:
-		out.append([&"GitPush", tr("1 commit ahead") if ahead == 1 else tr("%d commits ahead") % ahead])
+		out.append([&"GitAhead", tr("1 commit ahead") if ahead == 1 else tr("%d commits ahead") % ahead])
 	var behind: int = int(worktree.get("behind", 0))
 	if behind > 0:
-		out.append([&"GitPull", tr("1 commit behind") if behind == 1 else tr("%d commits behind") % behind])
+		out.append([&"GitBehind", tr("1 commit behind") if behind == 1 else tr("%d commits behind") % behind])
 	if not String(worktree.get("operation", "")).is_empty():
 		out.append([&"GitConflict", tr("%s in progress") % tr(String(worktree["operation"]).capitalize())])
 	if bool(worktree["locked"]):
@@ -192,6 +192,11 @@ func _tooltip_line(icon_name: StringName, text: String, variation: StringName) -
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = AppTheme.icon(icon_name) if icon_name != &"" else null
+	# The commits to push and pull take the arrows and colours of their pills.
+	if icon_name in [&"GitAhead", &"GitBehind"]:
+		icon.texture = AppTheme.tintable_icon(icon_name)
+		icon.modulate = get_theme_color(&"ahead_color" if icon_name == &"GitAhead" else &"behind_color",
+				SyncCounts.THEME_TYPE)
 	icon.custom_minimum_size = Vector2.ONE * float(get_theme_constant(&"icon_size", &"WorktreeTooltip"))
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER

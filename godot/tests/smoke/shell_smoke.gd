@@ -53,8 +53,8 @@ func run() -> void:
 		expect(chips[0].tooltip_text.contains("1 commit ahead"), "the tooltip has the live ahead count")
 		var chip_tooltip: Control = chips[0]._make_custom_tooltip(chips[0].tooltip_text)
 		var push_icon: bool = chip_tooltip.find_children("*", "TextureRect", true, false).any(func(node: Node) -> bool:
-			return (node as TextureRect).texture == AppTheme.icon(&"GitPush"))
-		expect(push_icon, "the live ahead count uses the themed push SVG")
+			return (node as TextureRect).texture == AppTheme.tintable_icon(&"GitAhead"))
+		expect(push_icon, "the live ahead count has its tinted arrow")
 		chip_tooltip.free()
 		expect(chips[0].selected and not chips[1].selected, "the opened worktree's chip is selected")
 

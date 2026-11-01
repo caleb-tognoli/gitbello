@@ -80,6 +80,8 @@ class Palette:
 	var accent: Color
 	var accent_text: Color  ## Text in the accent colour
 	var error: Color
+	## Commits to pull (commits to push are in the accent).
+	var incoming: Color
 	## How strongly rows and scroll bars are shaded with the text colour.
 	var shade: float
 	var hovered: Color  ## Over hovered rows, selected or not
@@ -119,6 +121,7 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
 		p.text_muted = Color("5d6470")
 		p.accent_text = accent.darkened(0.35)
 		p.error = Color("c43d2b")
+		p.incoming = Color(0.6, 0.38, 0.0)
 		p.shade = 0.6
 		p.selected = p.background.blend(Color(accent, 0.3))
 		p.selected_focus = p.background.blend(Color(accent, 0.45))
@@ -152,6 +155,7 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
 		p.text_muted = Color("9da2ad")
 		p.accent_text = accent.lightened(0.45)
 		p.error = Color(1.0, 0.55, 0.45)
+		p.incoming = Color(0.98, 0.74, 0.35)
 		p.shade = 1.0
 		p.selected = p.background.blend(Color(accent, 0.4))
 		p.selected_focus = p.background.blend(Color(accent, 0.6))
@@ -457,9 +461,27 @@ static func _add_menus(theme: Theme, p: Palette) -> void:
 			theme.set_stylebox(style, &"PopupMenu", line)
 	theme.set_icon(&"submenu", &"PopupMenu", ARROW_RIGHT)
 	# The worktree list: smaller state icons with more room around them
-	_variation(theme, &"WorktreeListMenu", &"PopupMenu")
-	theme.set_constant(&"icon_max_width", &"WorktreeListMenu", 12)
-	theme.set_constant(&"h_separation", &"WorktreeListMenu", 8)
+	# The strip's list of every worktree: rows with the folder, its branch,
+	# the changed files and the commits to push and pull; the shown one marked
+	_variation(theme, &"WorktreeListPanel", &"PopupPanel")
+	theme.set_stylebox(&"panel", &"WorktreeListPanel", _box(p.surface, 6, Vector4(4, 4, 4, 4), p.border, 1))
+	_variation(theme, &"WorktreeListRows", &"VBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeListRows", 0)
+	_variation(theme, &"WorktreeListLine", &"HBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeListLine", 8)
+	_variation(theme, &"WorktreeListRow", &"Button")
+	var list_row: Vector4 = Vector4(8, 5, 10, 5)
+	theme.set_stylebox(&"normal", &"WorktreeListRow", _box(Color.TRANSPARENT, 4, list_row))
+	theme.set_stylebox(&"hover", &"WorktreeListRow", _box(Color(p.accent, 0.3), 4, list_row))
+	theme.set_stylebox(&"pressed", &"WorktreeListRow", _box(Color(p.accent, 0.15), 4, list_row))
+	theme.set_stylebox(&"hover_pressed", &"WorktreeListRow", _box(Color(p.accent, 0.3), 4, list_row))
+	theme.set_stylebox(&"focus", &"WorktreeListRow", _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1))
+	_variation(theme, &"WorktreeListChanges", &"Label")
+	theme.set_color(&"font_color", &"WorktreeListChanges", p.modified)
+	theme.set_font_size(&"font_size", &"WorktreeListChanges", 12)
+	theme.set_color(&"icon_color", &"WorktreeList", Color(1, 1, 1, 0.6))
+	theme.set_constant(&"max_height", &"WorktreeList", 420)
+	theme.set_constant(&"branch_width", &"WorktreeList", 240)
 
 
 ## Trees and item lists: sunk into the background, rows shaded with the text
@@ -925,12 +947,33 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 		theme.set_stylebox(&"disabled", entry[0], _box(Color(p.raised, 0.5), 6, margins, p.border, 1))
 		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 1))
 	theme.set_font_size(&"font_size", &"BigButton", 15)
+	# Leaves room for the view switch beside them in a narrow window
+	theme.set_constant(&"max_width", &"BigButton", 320)
 	theme.set_constant(&"h_separation", &"BigButton", 8)
 	theme.set_constant(&"arrow_width", &"BigButton", ARROW_DOWN.get_width() + 2 * SPLIT_ARROW_PADDING)
 	theme.set_color(&"separator_color", &"BigButton", p.border)
 	theme.set_color(&"progress_color", &"BigButton", p.accent)
-	# The Changes | History switch: joined buttons, the shown one in the accent
+	# The Changes | History | Shelves tabs: one recessed track, the shown tab
+	# raised in the accent, a divider before Branch and Sync
 	theme.set_constant(&"separation", &"ViewSwitch", 2)
+	_variation(theme, &"ViewTabs", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"ViewTabs", _box(p.background, 6, Vector4(3, 3, 3, 3), p.border, 1))
+	_variation(theme, &"ViewTab", &"Button")
+	var tab: Vector4 = Vector4(12, 4, 12, 4)
+	theme.set_stylebox(&"normal", &"ViewTab", _box(Color.TRANSPARENT, 4, tab))
+	theme.set_stylebox(&"hover", &"ViewTab", _box(p.hover, 4, tab))
+	theme.set_stylebox(&"pressed", &"ViewTab", _box(Color(p.accent, 0.35), 4, tab, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"ViewTab", _box(Color(p.accent, 0.4), 4, tab, p.accent, 1))
+	theme.set_color(&"font_color", &"ViewTab", p.text_muted)
+	theme.set_color(&"icon_normal_color", &"ViewTab", Color(1, 1, 1, 0.6))
+	_variation(theme, &"HeaderDivider", &"VSeparator")
+	theme.set_constant(&"separation", &"HeaderDivider", 17)
+	var divider: StyleBoxLine = StyleBoxLine.new()
+	divider.color = p.border
+	divider.vertical = true
+	divider.grow_begin = -4.0
+	divider.grow_end = -4.0
+	theme.set_stylebox(&"separator", &"HeaderDivider", divider)
 	_variation(theme, &"SegmentButton", &"Button")
 	var segment: Vector4 = Vector4(10, 4, 10, 4)
 	theme.set_stylebox(&"normal", &"SegmentButton", _box(p.raised, 4, segment))
@@ -943,6 +986,18 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"CountBadge", p.text)
 	theme.set_font_size(&"font_size", &"CountBadge", 11)
 	theme.set_constant(&"gap", &"CountBadge", 6)
+	# Commits to push and to pull in pills (an arrow and the count): outgoing
+	# in the accent, incoming in amber, wherever ahead/behind shows
+	theme.set_font(&"font", &"SyncCounts", bold_font())
+	theme.set_font_size(&"font_size", &"SyncCounts", 11)
+	theme.set_constant(&"padding", &"SyncCounts", 4)
+	theme.set_constant(&"padding_vertical", &"SyncCounts", 1)
+	theme.set_constant(&"icon_separation", &"SyncCounts", 2)
+	theme.set_constant(&"separation", &"SyncCounts", 4)
+	theme.set_constant(&"button_gap", &"SyncCounts", 8)
+	for entry: Array in [[&"ahead", p.accent_text, p.accent], [&"behind", p.incoming, p.incoming]]:
+		theme.set_color(StringName(String(entry[0]) + "_color"), &"SyncCounts", entry[1])
+		theme.set_stylebox(entry[0], &"SyncCounts", _box(Color(entry[2], 0.2), 8))
 	# Icon-only joined buttons (the diff layout): one outline, rounded
 	# outside; IconToggle is one on its own (the diff's whole-file switch).
 	_variation(theme, &"IconSwitch", &"HBoxContainer")
@@ -961,11 +1016,9 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 				box.corner_radius_bottom_left = 0
 				box.border_width_left = 0
 			theme.set_stylebox(state[0], entry[0], box)
-	# Panes: a header row over each left column, a status line, details
+	# Panes: the left columns, a status line, details
 	_variation(theme, &"PaneColumn", &"VBoxContainer")
 	theme.set_constant(&"separation", &"PaneColumn", 0)
-	_variation(theme, &"PaneHeader", &"PanelContainer")
-	theme.set_stylebox(&"panel", &"PaneHeader", _box(p.background, 0, Vector4(8, 6, 8, 4)))
 	_variation(theme, &"DetailsHeader", &"PanelContainer")
 	var details: StyleBoxFlat = _box(p.background, 0, Vector4(14, 12, 14, 10))
 	details.border_color = p.border

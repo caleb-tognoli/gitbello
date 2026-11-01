@@ -2,7 +2,11 @@ class_name BigButton
 extends Button
 ## A large header button (Branch, Sync; PLAN §4): an icon and a caption, an
 ## optional ▾ part on the right that asks for a menu instead of pressing, and
-## a busy state that shows a running job (spinner, text and progress line).
+## a busy state that shows a running job (spinner, a short caption and a
+## progress line, with git's progress in the tooltip), and optional commit
+## counts after the caption (`set_counts`). A caption wider than the theme's
+## `max_width` ends in "…". While busy the button keeps its width, so a
+## changing caption cannot make the row jump.
 
 ## The ▾ part was clicked (only with `has_menu`).
 signal menu_requested()
@@ -25,6 +29,13 @@ var _idle_icon: Texture2D = null
 var _idle_disabled: bool = false
 var _frame: int = 0
 var _spin: Timer = Timer.new()
+## What the running job is doing in full, for the tooltip.
+var _detail: String = ""
+## The width kept while busy.
+var _busy_width: float = 0.0
+## The untrimmed width, counts included (see `_fit`).
+var _natural: float = 0.0
+var _counts: SyncCounts = null
 
 
 func _ready() -> void:
@@ -32,28 +43,53 @@ func _ready() -> void:
 	_spin.wait_time = SPIN_SECONDS
 	_spin.timeout.connect(_next_frame)
 	add_child(_spin)
+	alignment = HORIZONTAL_ALIGNMENT_LEFT
+	resized.connect(_place_counts)
 
 
-## Shows a running job (`busy`): the spinner, `text` and, when `percent` is
-## known, a progress line; the button is disabled until it ends.
-func set_busy(busy: bool, text_value: String, percent: int) -> void:
+## Shows a running job (`busy`): the spinner, a short `text` ("Pushing…")
+## and, when `percent` is known, a progress line; `detail` (what runs and
+## git's progress) is the tooltip. The button is disabled until it ends.
+func set_busy(busy: bool, text_value: String, percent: int, detail: String = "") -> void:
 	if busy and not _busy:
 		_idle_text = text
 		_idle_icon = icon
 		_idle_disabled = disabled
+		_busy_width = size.x
 		_spin.start()
 	elif not busy and _busy:
 		_spin.stop()
 		text = _idle_text
 		icon = _idle_icon
 		disabled = _idle_disabled
+		_busy_width = 0.0
 	_busy = busy
 	_percent = percent if busy else -1
+	_detail = detail if busy else ""
 	if busy:
 		text = text_value
 		disabled = true
 		icon = AppTheme.spinner(_frame, ThemeManager.light)
+	if _counts != null:
+		_counts.visible = not busy and not _counts.is_empty()
+	_fit()
 	queue_redraw()
+
+
+## Commits to push (`ahead`) and to pull (`behind`), in pills after the
+## caption; hidden while busy.
+func set_counts(ahead: int, behind: int) -> void:
+	if _counts == null:
+		_counts = SyncCounts.new()
+		_counts.widen_button = false
+		add_child(_counts)
+	_counts.set_counts(ahead, behind)
+	_counts.visible = not _busy and not _counts.is_empty()
+	_fit()
+
+
+func counts() -> SyncCounts:
+	return _counts
 
 
 func is_busy() -> bool:
@@ -70,6 +106,49 @@ func show_state(caption: String, state_icon: Texture2D, enabled: bool) -> void:
 	text = caption
 	icon = state_icon
 	disabled = not enabled
+	_fit()
+
+
+## Whether the caption is cut short (see `max_width`).
+func is_clipped() -> bool:
+	return text_overrun_behavior != TextServer.OVERRUN_NO_TRIMMING
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		_fit()
+
+
+func _get_tooltip(_at_position: Vector2) -> String:
+	return _detail if _busy and not _detail.is_empty() else tooltip_text
+
+
+## Measures the whole caption and the counts, then caps the width at
+## `max_width` (a trimmed caption no longer counts towards the minimum size).
+## While busy the width only grows.
+func _fit() -> void:
+	text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	custom_minimum_size.x = 0.0
+	var room: float = _counts.room() if _counts != null and _counts.visible else 0.0
+	_natural = get_minimum_size().x + room
+	var width: float = _natural
+	var limit: int = get_theme_constant(&"max_width", THEME_TYPE)
+	if limit > 0 and width > limit:
+		text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		width = limit
+	if _busy:
+		width = maxf(width, _busy_width)
+		_busy_width = width
+	custom_minimum_size.x = width
+	_place_counts()
+
+
+## Sets the counts after the caption, or at the right edge when it is cut.
+func _place_counts() -> void:
+	if _counts == null or not _counts.visible:
+		return
+	var right: float = get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
+	_counts.place_after(minf(_natural, size.x) - _counts.room() - right)
 
 
 func _gui_input(event: InputEvent) -> void:

@@ -763,12 +763,12 @@ func _register_sync_actions() -> void:
 	Actions.register(&"sync.pull", "Pull", "Sync",
 			func() -> void: ops.call().pull(), PackedStringArray(["Ctrl+L"]), can_pull, pull_reason)
 	for mode: String in ["ff-only", "merge", "rebase"]:
-		var label: String = {"ff-only": "Pull (fast-forward only)", "merge": "Pull (merge)", "rebase": "Pull (rebase)"}[mode]
+		var label: String = {"ff-only": "Pull, fast-forward only", "merge": "Pull and merge", "rebase": "Pull and rebase"}[mode]
 		Actions.register(StringName("sync.pull_" + mode.replace("-", "_")), label, "Sync",
 				func() -> void: ops.call().pull(mode), PackedStringArray(), can_pull, pull_reason)
 	Actions.register(&"sync.push", "Push", "Sync",
 			func() -> void: ops.call().push(), PackedStringArray(["Ctrl+P"]), can_push, push_reason)
-	Actions.register(&"sync.force_push", "Force push (with lease)…", "Sync",
+	Actions.register(&"sync.force_push", "Force push…", "Sync",
 			func() -> void: ops.call().force_push(), PackedStringArray(), can_push, push_reason)
 	Actions.register(&"sync.cancel", "Cancel the running git operation", "Sync",
 			func() -> void: _feedback.cancel_latest(session.call()), PackedStringArray(),
@@ -1088,8 +1088,8 @@ func _error_fixes(repo_path: String, error: Dictionary) -> Array[Dictionary]:
 		"non_fast_forward":
 			fixes.append({"label": "Pull", "run": func() -> void: ops.pull()})
 		"diverged":
-			fixes.append({"label": "Pull (merge)", "run": func() -> void: ops.pull("merge")})
-			fixes.append({"label": "Pull (rebase)", "run": func() -> void: ops.pull("rebase")})
+			fixes.append({"label": "Pull and merge", "run": func() -> void: ops.pull("merge")})
+			fixes.append({"label": "Pull and rebase", "run": func() -> void: ops.pull("rebase")})
 		"conflict":
 			if command.begins_with("pull"):
 				fixes.append({"label": "Abort", "run": func() -> void: view.session.abort_operation()})

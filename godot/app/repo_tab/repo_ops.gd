@@ -247,6 +247,13 @@ func sync_state() -> String:
 	return "fetch"
 
 
+## The current branch's upstream (`origin/main`), or "".
+func upstream_name() -> String:
+	if session == null or session.current_branch().is_empty():
+		return ""
+	return String(_branch_ref("branch", session.current_branch()).get("upstream", ""))
+
+
 ## The Sync button: publish, pull, push, pull then push, or fetch. With the
 ## pull mode `ff-only`, diverged branches cannot fast-forward, so it offers
 ## merge or rebase (then the push) instead of failing.
@@ -265,8 +272,8 @@ func sync() -> void:
 				_pull_then_push(mode, origin)
 				return
 			var fixes: Array[Dictionary] = [
-				{"label": "Pull (merge)", "run": func() -> void: _pull_then_push("merge", origin)},
-				{"label": "Pull (rebase)", "run": func() -> void: _pull_then_push("rebase", origin)},
+				{"label": "Pull and merge", "run": func() -> void: _pull_then_push("merge", origin)},
+				{"label": "Pull and rebase", "run": func() -> void: _pull_then_push("rebase", origin)},
 			]
 			if feedback != null and feedback.toasts != null:
 				feedback.toasts.show_toast(tr("%s has diverged from its upstream") % session.current_branch(),
@@ -278,25 +285,28 @@ func _pull_then_push(mode: String, origin: Control) -> void:
 	var branch: String = session.current_branch()
 	var then_push: Callable = func(ok: bool) -> void:
 		if ok:
-			_track(session.push(false), tr("Pushing %s") % branch, "", Callable(), origin)
-	_track(session.pull(mode), tr("Pulling %s") % branch, "", then_push, origin)
+			_track(session.push(false), tr("Pushing %s") % branch, "", Callable(), origin, Callable(), "Pushing")
+	_track(session.pull(mode), tr("Pulling %s") % branch, "", then_push, origin, Callable(), "Pulling")
 
 
 func fetch() -> int:
-	return _track(session.fetch(), tr("Fetching %s") % session.display_name())
+	return _track(session.fetch(), tr("Fetching %s") % session.display_name(), "", Callable(), null,
+			Callable(), "Fetching")
 
 
 ## `mode` is `ff-only`, `merge`, `rebase`, or empty for the configured one.
 func pull(mode: String = "") -> int:
 	var branch: String = session.current_branch()
-	return _track(session.pull(mode), tr("Pulling %s") % branch)
+	return _track(session.pull(mode), tr("Pulling %s") % branch, "", Callable(), null, Callable(), "Pulling")
 
 
 ## Pushes the current branch; one without an upstream is published (the push
 ## sets it).
 func push() -> int:
 	var branch: String = session.current_branch()
-	return _track(session.push(false), tr("Pushing %s") % branch)
+	var publishing: bool = sync_state() == "publish"
+	return _track(session.push(false), tr("Pushing %s") % branch, "", Callable(), null, Callable(),
+			"Publishing" if publishing else "Pushing")
 
 
 func force_push() -> void:
@@ -304,7 +314,8 @@ func force_push() -> void:
 	var origin: Control = Actions.origin()
 	_ask("Force push", tr("Replace %s on %s with your local branch?\nThis is refused if the remote branch has commits you have not fetched.") % [
 		branch, session.default_remote()], "Force push", func() -> void:
-			_track(session.push(true), tr("Force pushing %s") % branch, "", Callable(), origin))
+			_track(session.push(true), tr("Force pushing %s") % branch, "", Callable(), origin, Callable(),
+					"Force pushing"))
 
 
 # --- Checkout -------------------------------------------------------------------
@@ -361,7 +372,7 @@ func _start_checkout(shown: String, start: Callable, changes: String, origin: Co
 	var job: int = start.call(changes)
 	if job >= 0:
 		_checkouts[job] = {"name": shown, "start": start, "origin": origin}
-	return _track(job, tr("Switching to %s") % shown, "", Callable(), origin)
+	return _track(job, tr("Switching to %s") % shown, "", Callable(), origin, Callable(), "Switching")
 
 
 ## The current branch's name, or "this commit" when detached.
@@ -1403,9 +1414,9 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 
 ## Reports `job` to `feedback` (see `Feedback.track`) and returns it.
 func _track(job: int, doing: String, done: String = "", then: Callable = Callable(),
-		origin: Control = null, undo: Callable = Callable()) -> int:
+		origin: Control = null, undo: Callable = Callable(), short: String = "") -> int:
 	if feedback != null:
-		feedback.track(session, job, doing, done, origin, then, undo)
+		feedback.track(session, job, doing, done, origin, then, undo, short)
 	elif then.is_valid():
 		then.call(job >= 0)
 	return job

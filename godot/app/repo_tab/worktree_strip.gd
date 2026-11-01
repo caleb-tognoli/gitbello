@@ -30,7 +30,7 @@ var _task_menu: PopupMenu = PopupMenu.new()
 var _task_ids: Array[StringName] = []
 ## The worktree icon starting the row: lists every worktree.
 var _list_button: Button = Button.new()
-var _all_menu: PopupMenu = PopupMenu.new()
+var _all_list: WorktreeListPopover = WorktreeListPopover.new()
 var _worktrees: Array[Dictionary] = []
 var _selected: String = ""
 var _reveal_pending: bool = false
@@ -85,10 +85,8 @@ func _ready() -> void:
 	_row.add_child(_spacer)
 	add_child(_task_menu)
 	_task_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_task_ids[id]))
-	_all_menu.theme_type_variation = &"WorktreeListMenu"
-	add_child(_all_menu)
-	_all_menu.id_pressed.connect(func(id: int) -> void:
-		worktree_chosen.emit(String(_worktrees[id]["path"])))
+	add_child(_all_list)
+	_all_list.chosen.connect(func(path: String) -> void: worktree_chosen.emit(path))
 	_update_overflow()
 
 
@@ -97,7 +95,7 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
 		_update_tooltips()
-		if _all_menu.visible:
+		if _all_list.visible:
 			_open_all_menu()
 
 
@@ -227,53 +225,12 @@ func _queue_reveal() -> void:
 
 
 func _open_all_menu() -> void:
-	_all_menu.clear()
-	for i: int in _worktrees.size():
-		var wt: Dictionary = _worktrees[i]
-		var branch: String = String(wt["branch"])
-		if bool(wt["detached"]):
-			branch = tr("detached %s") % String(wt["head"]).left(7)
-		var counts: PackedStringArray = PackedStringArray()
-		var tooltip: PackedStringArray = PackedStringArray([String(wt["path"])])
-		var changed: int = int(wt["changed"])
-		if changed > 0:
-			counts.append(str(changed))
-			tooltip.append(tr("1 changed file") if changed == 1 else tr("%d changed files") % changed)
-		var conflicts: int = int(wt.get("conflicts", 0))
-		if conflicts > 0:
-			tooltip.append(tr("1 conflicted file") if conflicts == 1 else tr("%d conflicted files") % conflicts)
-		for direction: String in ["ahead", "behind"]:
-			var count: int = int(wt.get(direction, 0))
-			if count > 0:
-				counts.append(("↑" if direction == "ahead" else "↓") + str(count))
-				if direction == "ahead":
-					tooltip.append(tr("1 commit ahead") if count == 1 else tr("%d commits ahead") % count)
-				else:
-					tooltip.append(tr("1 commit behind") if count == 1 else tr("%d commits behind") % count)
-		var operation: String = String(wt.get("operation", ""))
-		if not operation.is_empty():
-			tooltip.append(tr("%s in progress") % tr(operation.capitalize()))
-		if bool(wt["locked"]):
-			var reason: String = String(wt["lock_reason"])
-			tooltip.append(tr("Locked") + (": " + reason if not reason.is_empty() else ""))
-		if bool(wt["prunable"]):
-			tooltip.append(tr("The folder is missing."))
-		var marker: StringName = &""
-		if bool(wt["prunable"]):
-			marker = &"StatusWarning"
-		elif conflicts > 0 or not operation.is_empty():
-			marker = &"GitConflict"
-		elif bool(wt["locked"]):
-			marker = &"Lock"
-		var label: String = "%s  ·  %s" % [String(wt["name"]), branch]
-		if not counts.is_empty():
-			label += "  " + " ".join(counts)
-		_all_menu.add_radio_check_item(label, i)
-		if marker != &"":
-			_all_menu.set_item_icon(i, AppTheme.icon(marker))
-		_all_menu.set_item_tooltip(i, "\n".join(tooltip))
-		_all_menu.set_item_checked(i, Paths.same(String(wt["path"]), _selected))
-	_popup_under(_all_menu, _list_button)
+	_all_list.open_below(_list_button, _worktrees, _selected)
+
+
+## The list of every worktree (for tests).
+func all_list() -> WorktreeListPopover:
+	return _all_list
 
 
 func _open_task_menu() -> void:

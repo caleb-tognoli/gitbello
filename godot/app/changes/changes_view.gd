@@ -64,7 +64,6 @@ var _want_conflict_until: int = 0
 const CONFLICT_WAIT_MSEC: int = 5000
 
 @onready var _files: VBoxContainer = %Files
-@onready var _switch_slot: Container = %SwitchSlot
 @onready var _filter_bar: Control = %FilterBar
 @onready var _filter: FilterField = %FilterField
 @onready var _list_header: ListHeader = %ListHeader
@@ -172,6 +171,8 @@ func set_session(value: RepoSession) -> void:
 		session.stashes_changed.disconnect(reload_shelves)
 		session.shelf_files_loaded.disconnect(_on_shelf_files_loaded)
 		session.shelf_replaced.disconnect(_on_shelf_replaced)
+		session.badge_changed.disconnect(_update_empty)
+		session.refs_changed.disconnect(_update_empty)
 	session = value
 	if session != null:
 		session.status_changed.connect(reload)
@@ -181,6 +182,9 @@ func set_session(value: RepoSession) -> void:
 		session.stashes_changed.connect(reload_shelves)
 		session.shelf_files_loaded.connect(_on_shelf_files_loaded)
 		session.shelf_replaced.connect(_on_shelf_replaced)
+		# The remote and the commits to push or pull can arrive after the status.
+		session.badge_changed.connect(_update_empty)
+		session.refs_changed.connect(_update_empty)
 	_list.session = session
 	_commit_box.session = session
 	if session != null and is_node_ready():
@@ -191,11 +195,6 @@ func set_session(value: RepoSession) -> void:
 
 func list() -> ChangeList:
 	return _list
-
-
-## Where the Changes/History switch goes while this view shows.
-func switch_slot() -> Container:
-	return _switch_slot
 
 
 ## The left column (its width is saved per repository).
@@ -859,11 +858,11 @@ func _update_empty() -> void:
 	var behind: int = int(badge.get("behind", 0))
 	var actions: Array[Dictionary] = []
 	if ahead > 0 and behind > 0:
-		actions.append({"id": &"sync.sync", "label": tr("Sync ↓%d ↑%d") % [behind, ahead], "icon": &"GitFetch"})
+		actions.append({"id": &"sync.sync", "label": "Sync", "icon": &"Reload", "ahead": ahead, "behind": behind})
 	elif behind > 0:
-		actions.append({"id": &"sync.sync", "label": tr("Pull ↓%d") % behind, "icon": &"GitPull"})
+		actions.append({"id": &"sync.sync", "label": "Pull", "icon": &"GitPull", "behind": behind})
 	elif ahead > 0:
-		actions.append({"id": &"sync.sync", "label": tr("Push ↑%d") % ahead, "icon": &"GitPush"})
+		actions.append({"id": &"sync.sync", "label": "Push", "icon": &"GitPush", "ahead": ahead})
 	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})

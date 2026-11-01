@@ -4,7 +4,7 @@ extends PanelContainer
 ## no tab is open and in the Home tab. A filter (focused when Home shows),
 ## the Add menu, running clones, the Recent cards and every repository of the
 ## library, sorted, optionally grouped by folder, pinned ones first. Status
-## (branch, changes, ↑↓) is read only for rows on screen.
+## (branch, changes, commits to push and pull) is read only for rows on screen.
 
 ## The user chose repository `path` (a click, Enter, or a card).
 signal chosen(path: String)
@@ -466,13 +466,12 @@ func _apply_summary(control: Control, summary: Dictionary) -> void:
 		picture.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		status.add_child(picture)
-	var sync: String = ""
-	if int(summary["ahead"]) > 0:
-		sync += "↑%d" % int(summary["ahead"])
-	if int(summary["behind"]) > 0:
-		sync += (" " if not sync.is_empty() else "") + "↓%d" % int(summary["behind"])
-	if not sync.is_empty():
-		status.add_child(_label(sync, &"DimLabel"))
+	if int(summary["ahead"]) > 0 or int(summary["behind"]) > 0:
+		var counts: SyncCounts = SyncCounts.new()
+		counts.name = "Counts"
+		counts.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		counts.set_counts(int(summary["ahead"]), int(summary["behind"]))
+		status.add_child(counts)
 	var tip: PackedStringArray = PackedStringArray([String(control.get_meta(&"path"))])
 	if int(summary["changes"]) > 0:
 		tip.append(tr("%d changed files") % int(summary["changes"]) if int(summary["changes"]) != 1

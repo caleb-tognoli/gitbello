@@ -1,8 +1,8 @@
 class_name WorktreeView
 extends Control
-## One worktree of a repository tab (PLAN §4): the Branch and Sync buttons,
-## the banner of an operation in progress, and the Changes or History panes
-## with a switch at the top of their left column. Owns the worktree's
+## One worktree of a repository tab (PLAN §4): the Branch and Sync buttons
+## and the Changes | History | Shelves switch, the banner of an operation in
+## progress, and the Changes or History panes. Owns the worktree's
 ## RepoSession and the RepoOps that run its operations, builds the context
 ## menus of branches, ref labels, commits and worktree chips from the action
 ## registry, and dims its panes while a job changes its files.
@@ -37,8 +37,8 @@ const LABEL_MENUS: Dictionary[String, Array] = {
 }
 const COMMIT_MENU: Array[StringName] = [&"commit.amend", &"commit.checkout", &"branch.new", &"tag.new", &"",
 	&"commit.cherry_pick", &"commit.merge", &"", &"commit.copy_hash"]
-const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"sync.pull_merge", &"sync.pull_rebase", &"sync.push",
-	&"", &"sync.force_push"]
+const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"", &"sync.pull_merge", &"sync.pull_rebase", &"",
+	&"sync.push", &"sync.force_push"]
 ## Jobs that change the worktree's files: its panes dim while they run.
 const BLOCKING: Dictionary[String, String] = {
 	"checkout": "Switching branches",
@@ -98,6 +98,7 @@ var _sidebar_width: int = 0
 @onready var _layout: Control = %Layout
 @onready var _history: HistoryView = %History
 @onready var _changes: ChangesView = %Changes
+@onready var _view_tabs: Container = %ViewTabs
 @onready var _branch_button: BigButton = %BranchButton
 @onready var _sync_button: BigButton = %SyncButton
 @onready var _banner: Control = %Banner
@@ -135,7 +136,7 @@ func _ready() -> void:
 		button.toggle_mode = true
 		button.focus_mode = Control.FOCUS_NONE
 		button.button_group = group
-		button.theme_type_variation = &"SegmentButton"
+		button.theme_type_variation = &"ViewTab"
 		var action_id: StringName = entry[4]
 		button.pressed.connect(func() -> void: Actions.run_action(action_id, button))
 		button.tooltip_text = Actions.tooltip(entry[4])
@@ -143,6 +144,7 @@ func _ready() -> void:
 	_changes_button.add_child(_changes_badge)
 	_shelves_button.add_child(_shelves_badge)
 	_shelves_button.hide()
+	_view_tabs.add_child(_switch)
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
@@ -509,24 +511,70 @@ func _on_branch_chosen(ref: Dictionary) -> void:
 		_ops.checkout_branch(String(ref["short"]))
 
 
+## The Sync ▾ menu: one short item per outcome with its shortcut, and what
+## it does to which branch in the tooltip. While a job runs: Cancel.
 func _open_sync_menu() -> void:
 	_sync_menu.clear()
 	_sync_ids.clear()
-	for id: StringName in SYNC_MENU:
+	var ids: Array[StringName] = SYNC_MENU
+	if _sync_button.is_busy():
+		ids = [&"sync.cancel"]
+	for id: StringName in ids:
 		if id == &"":
 			_sync_menu.add_separator()
 			continue
 		var action: ActionRegistry.Action = Actions.get_action(id)
 		if action == null:
 			continue
-		_sync_menu.add_icon_item(Actions.icon(id), action.label, _sync_ids.size())
-		_sync_menu.set_item_disabled(_sync_menu.item_count - 1, not action.is_enabled())
+		var index: int = _sync_menu.item_count
+		var label: String = tr("Cancel") if id == &"sync.cancel" else action.label
+		if id == &"sync.push" and _ops.sync_state() == "publish":
+			label = tr("Publish branch")
+		_sync_menu.add_icon_item(Actions.icon(id), label, _sync_ids.size())
+		var shortcuts: PackedStringArray = Actions.shortcuts(id)
+		var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
+		if event != null:
+			var shortcut: Shortcut = Shortcut.new()
+			shortcut.events = [event]
+			_sync_menu.set_item_shortcut(index, shortcut)
+			# Shown only: the registry handles the keys.
+			_sync_menu.set_item_shortcut_disabled(index, true)
+		_sync_menu.set_item_disabled(index, not action.is_enabled())
+		var why: String = action.disabled_reason()
+		_sync_menu.set_item_tooltip(index, why if not why.is_empty() else _sync_explanation(id))
 		_sync_ids.append(id)
 	var rect: Rect2 = _sync_button.get_global_rect()
 	_sync_menu.position = Vector2i(get_window().position) + Vector2i((rect.position + Vector2(0.0, rect.size.y)) \
 			* get_window().content_scale_factor)
 	_sync_menu.reset_size()
 	_sync_menu.popup()
+
+
+## What a Sync menu item does, with the branch and remote names.
+func _sync_explanation(id: StringName) -> String:
+	var branch: String = session.current_branch()
+	var remote: String = session.default_remote()
+	var upstream: String = _ops.upstream_name()
+	var ahead: int = int(session.badge().get("ahead", 0))
+	match id:
+		&"sync.fetch":
+			return tr("Check %s for new commits. Your files don't change.") % remote
+		&"sync.pull_merge":
+			return tr("Merge the new commits from %s into %s.") % [upstream, branch]
+		&"sync.pull_rebase":
+			return tr("Bring in the new commits from %s, then replay your commits on top of them.") % upstream
+		&"sync.push":
+			if upstream.is_empty():
+				return tr("Publish %s to %s and track it.") % [branch, remote]
+			if ahead == 1:
+				return tr("Send 1 commit to %s.") % upstream
+			return tr("Send %d commits to %s.") % [ahead, upstream]
+		&"sync.force_push":
+			return tr("Replace %s with your %s. Refused if it has commits you haven't fetched.") % [
+					upstream if not upstream.is_empty() else remote, branch]
+		&"sync.cancel":
+			return tr("Stop the running git operation.")
+	return ""
 
 
 # --- Views ----------------------------------------------------------------------
@@ -542,11 +590,6 @@ func show_view(which: View) -> void:
 	_history_button.set_pressed_no_signal(which == View.HISTORY)
 	_changes_button.set_pressed_no_signal(which == View.CHANGES)
 	_shelves_button.set_pressed_no_signal(which == View.SHELVES)
-	var slot: Container = _history.switch_slot() if which == View.HISTORY else _changes.switch_slot()
-	if _switch.get_parent() != slot:
-		if _switch.get_parent() != null:
-			_switch.get_parent().remove_child(_switch)
-		slot.add_child(_switch)
 	if _sidebar_width > 0:
 		_set_sidebar_width(_sidebar_width)
 	if session != null:
@@ -637,19 +680,23 @@ func _update_header() -> void:
 	if branch.is_empty():
 		branch = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("No branch yet")
 	_branch_button.show_state(branch, AppTheme.icon(&"GitBranch"), session.is_ready())
-	_branch_button.tooltip_text = Actions.tooltip(&"branch.switch")
+	# A long name is cut short on the button: the tooltip has all of it.
+	_branch_button.tooltip_text = (branch + "
+" if _branch_button.is_clipped() else "") + Actions.tooltip(&"branch.switch")
 	var state: String = _ops.sync_state()
 	var badge: Dictionary = session.badge()
 	var ahead: int = int(badge.get("ahead", 0))
 	var behind: int = int(badge.get("behind", 0))
 	var caption: String = {
 		"publish": tr("Publish branch"),
-		"push": tr("Push ↑%d") % ahead,
-		"pull": tr("Pull ↓%d") % behind,
-		"sync": tr("Sync ↓%d ↑%d") % [behind, ahead],
+		"push": tr("Push"),
+		"pull": tr("Pull"),
+		"sync": tr("Sync"),
 		"fetch": tr("Fetch"),
 	}[state]
 	_sync_button.show_state(caption, AppTheme.icon(SYNC_ICONS[state]), session.is_ready() and session.can_fetch())
+	var counted: bool = state in ["push", "pull", "sync"]
+	_sync_button.set_counts(ahead if counted else 0, behind if counted else 0)
 	var tooltip: String = {
 		"publish": tr("Push %s and set its upstream") % session.current_branch(),
 		"push": tr("Push your commits to %s") % session.default_remote(),

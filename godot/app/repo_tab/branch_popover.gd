@@ -1,7 +1,8 @@
 class_name BranchPopover
 extends PopupPanel
 ## The Branch button's list (PLAN §4): a filter, then Recent, local branches
-## (grouped by prefix such as `feature/`) and Remote branches with ↑↓. It opens
+## (grouped by prefix such as `feature/`) and Remote branches with the commits
+## to push and pull. It opens
 ## on the current branch. Enter or a single click chooses a branch; one checked
 ## out in another worktree has a worktree icon and choosing it shows that
 ## worktree. Right-click opens the branch's menu. Opened to pick a branch to
@@ -32,6 +33,10 @@ var _empty: Label = Label.new()
 var _new_button: Button = Button.new()
 ## Picking a branch to merge rather than to switch to.
 var _merging: bool = false
+## Rows with commits to push or pull: their pills are drawn on a layer over
+## the tree.
+var _counted: Array[TreeItem] = []
+var _count_layer: Control = Control.new()
 ## The anchor window's UI scale, for the popup's size.
 var _scale: float = 1.0
 
@@ -58,6 +63,11 @@ func _ready() -> void:
 	# section arrows line up (Tree's arrows sit in a margin left of the rows).
 	_tree.hide_folding = true
 	_tree.columns = 2
+	_count_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_count_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_count_layer.draw.connect(_draw_counts)
+	_tree.add_child(_count_layer)
+	_tree.draw.connect(_count_layer.queue_redraw)
 	_tree.set_column_expand(1, false)
 	_tree.select_mode = Tree.SELECT_ROW
 	# A right-click selects its row first, so its menu is for that branch.
@@ -127,6 +137,21 @@ func row_labels() -> PackedStringArray:
 	return out
 
 
+## Draws the pills of the rows with commits to push or pull at the right of
+## their badge cell, on the layer over the tree.
+func _draw_counts() -> void:
+	var margin_right: float = float(_tree.get_theme_constant(&"inner_item_margin_right"))
+	var visible_rect: Rect2 = Rect2(Vector2.ZERO, _tree.size)
+	for item: TreeItem in _counted:
+		if not item.is_visible_in_tree():
+			continue
+		var rect: Rect2 = _tree.get_item_area_rect(item, 1)
+		if not visible_rect.intersects(rect):
+			continue
+		var counts: Vector2i = item.get_metadata(1)
+		SyncCounts.draw_counts(_count_layer, rect.grow_side(SIDE_RIGHT, -margin_right), counts.x, counts.y, true)
+
+
 ## The first branch row's ref (for tests), or empty.
 func first_ref() -> Dictionary:
 	var first: TreeItem = _first_ref(_tree.get_root())
@@ -139,6 +164,7 @@ func set_filter(text: String) -> void:
 
 func _rebuild() -> void:
 	_tree.clear()
+	_counted.clear()
 	_empty.hide()
 	_tree.set_column_custom_minimum_width(1, 0)
 	var root: TreeItem = _tree.create_item()
@@ -286,10 +312,9 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 	var badge: PackedStringArray = PackedStringArray()
 	if bool(ref["gone"]):
 		badge.append(tr("gone"))
-	if int(ref["ahead"]) > 0:
-		badge.append("↑%d" % int(ref["ahead"]))
-	if int(ref["behind"]) > 0:
-		badge.append("↓%d" % int(ref["behind"]))
+	# The commits to push and pull, in pills drawn at the cell's right.
+	var ahead: int = 0 if _merging else int(ref["ahead"])
+	var behind: int = 0 if _merging else int(ref["behind"])
 	if _merging:
 		badge.clear()
 		if ref.has("committed_at") and int(ref["committed_at"]) > 0:
@@ -297,12 +322,19 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 		item.set_icon_modulate(0, get_theme_color(&"icon_color", THEME_TYPE))
 	item.set_text(0, text)
 	item.set_text(1, " ".join(badge))
+	var margin_right: int = _tree.get_theme_constant(&"inner_item_margin_right")
+	var pills: float = SyncCounts.measure(_tree, ahead, behind).x
+	if pills > 0.0:
+		item.set_metadata(1, Vector2i(ahead, behind))
+		_counted.append(item)
 	# A column that doesn't expand keeps its minimum width: widen it to fit, up
 	# to a third of the list so a badge can't squeeze the branch names away.
 	var font: Font = _tree.get_theme_font(&"font")
-	var badge_width: int = ceili(font.get_string_size(item.get_text(1), HORIZONTAL_ALIGNMENT_LEFT, -1,
-			_tree.get_theme_font_size(&"font_size")).x) + _tree.get_theme_constant(&"inner_item_margin_left") \
-			+ _tree.get_theme_constant(&"inner_item_margin_right") + _tree.get_theme_constant(&"h_separation") * 2
+	var text_width: float = font.get_string_size(item.get_text(1), HORIZONTAL_ALIGNMENT_LEFT, -1,
+			_tree.get_theme_font_size(&"font_size")).x
+	var gap: float = float(_tree.get_theme_constant(&"h_separation")) if text_width > 0.0 and pills > 0.0 else 0.0
+	var badge_width: int = ceili(text_width + gap + pills) + _tree.get_theme_constant(&"inner_item_margin_left") \
+			+ margin_right + _tree.get_theme_constant(&"h_separation") * 2
 	badge_width = mini(badge_width, floori(get_theme_constant(&"width", THEME_TYPE) / 3.0))
 	if badge_width > _tree.get_column_width(1):
 		_tree.set_column_custom_minimum_width(1, badge_width)

@@ -45,6 +45,8 @@ class Tracked:
 	var session: RepoSession
 	var job: int
 	var doing: String
+	## The caption on a busy button ("Pushing"), `doing` when empty.
+	var short: String
 	var done: String
 	var origin: Control = null
 	## The progress toast, when there is no origin.
@@ -79,10 +81,12 @@ func watch(session: RepoSession) -> void:
 ## Reports job `job` of `session` (no-op when it did not start, -1). `doing`
 ## shows while it runs ("Pushing tag v1…"), `done` when it succeeded
 ## ("Pushed tag v1 to origin"; empty for no success toast, when the result
-## shows elsewhere). The progress goes to
-## `origin`, else to `Actions.origin()`, else to a toast.
+## shows elsewhere). The progress goes to `origin`, else to
+## `Actions.origin()`, else to a toast. A busy button says only `short`
+## ("Pushing…") when given, with the rest in its tooltip.
 func track(session: RepoSession, job: int, doing: String, done: String = "",
-		origin: Control = null, then: Callable = Callable(), undo: Callable = Callable()) -> void:
+		origin: Control = null, then: Callable = Callable(), undo: Callable = Callable(),
+		short: String = "") -> void:
 	if job < 0 or session == null:
 		if then.is_valid():
 			then.call(false)
@@ -91,13 +95,14 @@ func track(session: RepoSession, job: int, doing: String, done: String = "",
 	item.session = session
 	item.job = job
 	item.doing = tr(doing)
+	item.short = tr(short) if not short.is_empty() else item.doing
 	item.done = tr(done)
 	item.then = then
 	item.undo = undo
 	item.origin = origin if origin != null else Actions.origin()
 	_tracked.append(item)
 	if item.origin != null:
-		_set_busy(item.origin, true, item.doing, -1)
+		_set_busy(item.origin, true, item.short + "…", -1, item.doing + "…")
 	elif toasts != null:
 		item.toast = toasts.show_progress(item.doing + "…", func() -> void: session.cancel_job(job))
 
@@ -146,7 +151,9 @@ func _on_progress(id: int, _label: String, percent: int, text: String, session: 
 		return
 	var shown: String = item.doing + "…" + ("  " + text if not text.is_empty() else "")
 	if item.origin != null:
-		_set_busy(item.origin, true, shown, percent)
+		_set_busy(item.origin, true, item.short + "…", percent,
+				item.doing + "…" + ("
+" + text if not text.is_empty() else ""))
 	elif item.toast != null:
 		toasts.update_progress(item.toast, shown, percent)
 
@@ -169,7 +176,7 @@ func _end(session: RepoSession, id: int, ok: bool) -> void:
 		return
 	_tracked.erase(item)
 	if item.origin != null and is_instance_valid(item.origin):
-		_set_busy(item.origin, false, "", -1)
+		_set_busy(item.origin, false, "", -1, "")
 	var text: String = item.done if ok else ""
 	if item.toast != null:
 		toasts.finish_progress(item.toast, text, item.undo)
@@ -195,12 +202,12 @@ func _find(session: RepoSession, id: int) -> Tracked:
 	return null
 
 
-## A control showing a job: one with `set_busy(busy, text, percent)` draws it
-## itself; a plain button is disabled while the job runs.
-static func _set_busy(control: Control, busy: bool, text: String, percent: int) -> void:
+## A control showing a job: one with `set_busy(busy, text, percent, detail)`
+## draws it itself; a plain button is disabled while the job runs.
+static func _set_busy(control: Control, busy: bool, text: String, percent: int, detail: String) -> void:
 	if not is_instance_valid(control):
 		return
 	if control.has_method(&"set_busy"):
-		control.call(&"set_busy", busy, text, percent)
+		control.call(&"set_busy", busy, text, percent, detail)
 	elif control is BaseButton:
 		(control as BaseButton).disabled = busy

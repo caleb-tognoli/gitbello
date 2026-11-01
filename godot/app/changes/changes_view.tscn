@@ -23,11 +23,6 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"PaneColumn"
 
-[node name="SwitchSlot" type="PanelContainer" parent="Files"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"PaneHeader"
-
 [node name="OfferBar" type="PanelContainer" parent="Files"]
 unique_name_in_owner = true
 visible = false

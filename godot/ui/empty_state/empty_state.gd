@@ -12,7 +12,8 @@ extends CenterContainer
 
 
 ## Shows `title`, `hint` and one button per entry of `actions`:
-## `{id: StringName, label: String (else the action's), icon: StringName}`.
+## `{id: StringName, label: String (else the action's), icon: StringName}`,
+## plus `ahead`/`behind` for commit counts in pills at the button's right.
 ## Disabled actions are left out.
 func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> void:
 	_title.text = tr(heading)
@@ -27,6 +28,12 @@ func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> vo
 		var button: Button = add_button(String(entry.get("label", action.label)), entry.get("icon", &""), Callable())
 		button.pressed.connect(func() -> void: Actions.run_action(id, button))
 		button.tooltip_text = Actions.tooltip(id)
+		if entry.has("ahead") or entry.has("behind"):
+			var counts: SyncCounts = SyncCounts.new()
+			counts.widen_button = false
+			counts.at_right = true
+			counts.set_counts(int(entry.get("ahead", 0)), int(entry.get("behind", 0)))
+			button.add_child(counts)
 
 
 ## Shows `texture` above the title, such as the logo on the welcome screen;

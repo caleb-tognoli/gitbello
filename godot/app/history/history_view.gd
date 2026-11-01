@@ -48,7 +48,6 @@ var _scope_button: Button = null
 @onready var _search: FilterField = %SearchField
 @onready var _details: CommitDetails = %Details
 @onready var _left: VBoxContainer = %Left
-@onready var _switch_slot: Container = %SwitchSlot
 
 
 func _ready() -> void:
@@ -215,11 +214,6 @@ func _update_scope() -> void:
 
 func commit_list() -> CommitList:
 	return _commit_list
-
-
-## Where the Changes/History switch goes while this view shows.
-func switch_slot() -> Container:
-	return _switch_slot
 
 
 ## The left column (its width is saved per repository).

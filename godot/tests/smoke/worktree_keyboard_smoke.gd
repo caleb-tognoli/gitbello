@@ -113,22 +113,23 @@ func _overflow(source: WorktreeStrip) -> void:
 	var all: Button = get_viewport().gui_get_focus_owner() as Button
 	expect(all == strip.list_button() and all.tooltip_text == "Worktrees", "the worktree icon is in the Tab order before the chips")
 	press("Enter")
-	var menu: PopupMenu = null
-	for child: Node in strip.get_children():
-		if child is PopupMenu and (child as PopupMenu).visible:
-			menu = child as PopupMenu
-	expect(menu != null and menu.item_count == 14, "Enter opens all worktrees")
-	if menu != null:
-		await _popup_key("Down", menu)
-		await _popup_key("Escape", menu)
-		expect(not menu.visible, "Escape closes the worktree list")
+	var list: WorktreeListPopover = strip.all_list()
+	await get_tree().process_frame
+	expect(list.visible and list.rows().size() == 14, "Enter opens all worktrees")
+	if list.visible:
+		expect_eq(list.focused_index(), 0, "the shown worktree's row has the focus")
+		await _popup_key("Down", list)
+		expect_eq(list.focused_index(), 1, "Down moves to the next worktree")
+		await _popup_key("Escape", list)
+		expect(not list.visible, "Escape closes the worktree list")
 		expect(all.has_focus(), "Escape returns focus to the worktree icon")
 		var chosen: Array[String] = []
 		strip.worktree_chosen.connect(func(path: String) -> void: chosen.append(path))
 		press("Enter")
-		await _popup_key("Down", menu)
-		var target: String = String(worktrees[menu.get_focused_item()]["path"])
-		await _popup_key("Enter", menu)
+		await get_tree().process_frame
+		await _popup_key("Down", list)
+		var target: String = String(worktrees[list.focused_index()]["path"]) if list.focused_index() >= 0 else ""
+		await _popup_key("Enter", list)
 		expect_eq(chosen, [target] as Array[String], "arrows and Enter choose the highlighted worktree")
 	strip.chips()[13].grab_focus()
 	var focused_path: String = strip.chips()[13].path()
@@ -148,7 +149,7 @@ func _overflow(source: WorktreeStrip) -> void:
 	await get_tree().process_frame
 
 
-func _popup_key(shortcut: String, popup: PopupMenu) -> void:
+func _popup_key(shortcut: String, popup: Window) -> void:
 	var event: InputEventKey = Shortcuts.parse(shortcut)
 	event.window_id = popup.get_window_id()
 	Input.parse_input_event(event)

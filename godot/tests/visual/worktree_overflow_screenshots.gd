@@ -41,14 +41,14 @@ func _ready() -> void:
 		await _settle()
 		page.strip().list_button().pressed.emit()
 		await _settle()
-		var menu: PopupMenu = page.strip()._all_menu
+		var list: WorktreeListPopover = page.strip().all_list()
 		var path: String = out.path_join("%s_%s.png" % [phase, choice])
-		menu.get_texture().get_image().save_png(path)
+		list.get_texture().get_image().save_png(path)
 		get_viewport().get_texture().get_image().save_png(out.path_join("%s_%s_shell.png" % [phase, choice]))
 		print("SHOT ", path)
-		for i: int in menu.item_count:
-			print("ROW ", menu.get_item_text(i), " TOOLTIP ", menu.get_item_tooltip(i).replace("\n", " | "))
-		menu.hide()
+		for row: Dictionary in list.rows():
+			print("ROW ", row)
+		list.hide()
 	main.close_tab(0)
 	get_tree().quit()
 

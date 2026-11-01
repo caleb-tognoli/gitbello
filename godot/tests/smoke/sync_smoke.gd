@@ -25,7 +25,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.can_push() and session.can_fetch()),
 			"the repository is ready to sync")
 	var button: BigButton = page.active_view().sync_button()
-	expect(await wait_until(func() -> bool: return button.text == "Push ↑1"), "Sync shows the commit to push: %s" % button.text)
+	expect(await wait_until(func() -> bool: return button.text == "Push" and button.counts().ahead == 1),
+			"Sync shows the commit to push: %s" % button.text)
 
 	# Ctrl+Shift+F fetches; with no button behind it, a progress toast shows it.
 	var toasts: Toasts = main.toasts()
@@ -35,19 +36,20 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return _behind(session) == 1), "the fetch found one commit to pull")
 	expect(await wait_until(func() -> bool: return not toasts.toast_texts().has("Fetching repo-8…")),
 			"the progress toast goes when the fetch ends")
-	expect(await wait_until(func() -> bool: return button.text == "Sync ↓1 ↑1"),
+	expect(await wait_until(func() -> bool: return button.text == "Sync" and button.counts().ahead == 1 \
+			and button.counts().behind == 1),
 			"Sync shows both directions: %s" % button.text)
 
 	# Sync on diverged branches with ff-only pulls: merge or rebase, then push.
 	expect(Actions.run_action(&"sync.sync", button), "Sync runs")
-	expect(await wait_until(func() -> bool: return "Pull (rebase)" in toasts.fix_labels()),
+	expect(await wait_until(func() -> bool: return "Pull and rebase" in toasts.fix_labels()),
 			"a diverged sync offers merge or rebase: %s" % [toasts.fix_labels()])
-	expect("Pull (merge)" in toasts.fix_labels(), "merge is offered too")
+	expect("Pull and merge" in toasts.fix_labels(), "merge is offered too")
 	var busy_seen: Array[bool] = [false]
 	var watch: Callable = func(_job: int, _label: String) -> void:
 		busy_seen[0] = busy_seen[0] or button.is_busy()
 	session.job_started.connect(watch)
-	expect(toasts.press_fix("Pull (rebase)"), "the rebase choice can be pressed")
+	expect(toasts.press_fix("Pull and rebase"), "the rebase choice can be pressed")
 	expect(button.is_busy(), "the button shows the job it started")
 	expect(await wait_until(func() -> bool: return _behind(session) == 0 and _ahead(session) == 0),
 			"rebased and pushed: ahead %d, behind %d" % [_ahead(session), _behind(session)])
