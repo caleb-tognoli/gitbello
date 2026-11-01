@@ -154,6 +154,7 @@ func _check_catalog() -> void:
 	var keys: Dictionary = {}
 	var placeholder_pattern: RegEx = RegEx.new()
 	placeholder_pattern.compile("%(?:\\d+\\$)?[sdif%]")
+	expect_eq(file.get_csv_line(), PackedStringArray(["keys", "en", "it"]), "the catalog header names its locales")
 	while not file.eof_reached():
 		var row: PackedStringArray = file.get_csv_line()
 		if row.is_empty() or (row.size() == 1 and row[0].is_empty()):
@@ -162,9 +163,10 @@ func _check_catalog() -> void:
 		if row.size() != 3:
 			continue
 		expect(not row[0].is_empty(), "catalog keys are not empty")
-		expect(not keys.has(row[0]), "catalog key is unique: %s" % row[0])
+		# The importer unescapes keys and translations, as GDScript does string literals.
+		expect(not keys.has(row[0].c_unescape()), "catalog key is unique: %s" % row[0])
 		expect(not row[1].is_empty() and not row[2].is_empty(), "both translations exist: %s" % row[0])
-		keys[row[0]] = true
+		keys[row[0].c_unescape()] = row[2].c_unescape()
 		for column: int in [1, 2]:
 			var placeholders: Array[String] = []
 			for found: RegExMatch in placeholder_pattern.search_all(row[column]):
@@ -177,13 +179,20 @@ func _check_catalog() -> void:
 			expect_eq(placeholders, source_placeholders, "placeholders match in %s (column %d)" % [row[0], column])
 	file.close()
 
+	var locale: String = TranslationServer.get_locale()
+	TranslationServer.set_locale("it")
+	for key: String in keys:
+		expect_eq(String(TranslationServer.translate(key)), String(keys[key]),
+				"catalog key resolves in Italian: %s" % key.c_escape())
+	TranslationServer.set_locale(locale)
+
 	var call_pattern: RegEx = RegEx.new()
-	call_pattern.compile("(?:\\btr|TranslationServer\\.translate)\\(\\s*&?\"([^\"]*)\"")
+	call_pattern.compile("(?:\\btr|TranslationServer\\.translate)\\(\\s*&?\"((?:[^\"\\\\]|\\\\.)*)\"")
 	for path: String in _scripts("res://app") + _scripts("res://ui"):
 		var source: String = read_file(path)
 		for found: RegExMatch in call_pattern.search_all(source):
-			var key: String = found.get_string(1)
-			expect(keys.has(key), "literal translation exists in %s: %s" % [path, key])
+			var key: String = found.get_string(1).c_unescape()
+			expect(keys.has(key), "literal translation exists in %s: %s" % [path, key.c_escape()])
 
 
 func _scripts(path: String) -> PackedStringArray:

@@ -15,5 +15,5 @@ dest_files=["res://localization/gitbello.en.translation", "res://localization/gi
 
 compress=1
 delimiter=0
-unescape_keys=false
+unescape_keys=true
 unescape_translations=true
