@@ -266,7 +266,10 @@ func run() -> void:
 				return Actions.is_enabled(&"commit.amend")
 		return false), "the amended HEAD is refreshed and available before another amend")
 	press("Ctrl+Shift+A")
-	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)"), "HEAD message loads before hook rejection")
+	# Commit is disabled until the amend has loaded its files, and a press
+	# before that does nothing.
+	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)" and box.can_commit()),
+			"HEAD message loads before hook rejection")
 	press("Ctrl+Enter")
 	var rejected: bool = await wait_until(func() -> bool: return not box.is_busy() and box.output_text().contains("hook says no"))
 	expect(rejected, "hook output is shown: %s" % box.output_text())
