@@ -20,6 +20,7 @@ func run() -> void:
 	expect(not bool(session.history_info().get("all_branches", true)), "current branch is the default")
 	var head: String = String(session.status()["oid"])
 	expect(await wait_until(func() -> bool: return history.details().commit_oid() == head), "HEAD is selected initially")
+	expect(list.draws_unfocused_cursor, "initial and user selections use the same cursor styling")
 	list.reload_matches()
 	expect_eq(String(history.selected_commit().get("subject", "")), "Improve app", "commit actions keep metadata before the next draw")
 	expect_eq(history.list_header().status_text(), "1 outgoing", "the header counts outgoing commits")

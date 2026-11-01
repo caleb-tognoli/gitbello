@@ -19,6 +19,8 @@ var cursor: int = -1
 ## Draw the selected rows' background and the cursor's outline (off for a
 ## subclass that shows its own selection).
 var draws_selection: bool = true
+## Keep the cursor's outline when the list does not have keyboard focus.
+var draws_unfocused_cursor: bool = false
 
 var _row_count: int = 0
 var _selected: Dictionary[int, bool] = {}
@@ -149,7 +151,7 @@ func _draw() -> void:
 		if selected:
 			draw_rect(rect, selection_color)
 		_draw_row(row, rect, selected)
-		if draws_selection and row == cursor and has_focus():
+		if draws_selection and row == cursor and (has_focus() or draws_unfocused_cursor):
 			draw_rect(rect.grow(-0.5), cursor_color, false, 1.0)
 		y += height
 

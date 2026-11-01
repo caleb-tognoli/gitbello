@@ -51,6 +51,12 @@ var _window_start: int = 0
 var _window_end: int = 0
 var _graph_lanes: int = 1
 
+
+func _init() -> void:
+	super()
+	draws_unfocused_cursor = true
+
+
 # Theme values, cached because `_draw_row` runs for every visible row each frame.
 var _font: Font = null
 var _font_size: int = 0
