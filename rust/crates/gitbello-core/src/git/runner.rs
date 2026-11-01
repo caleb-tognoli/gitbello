@@ -55,16 +55,28 @@ pub struct GitRunner {
 }
 
 impl GitRunner {
-    /// Finds `git` on `PATH` and checks its version.
+    /// Finds `git` on `PATH`, then in the folders git is usually installed in,
+    /// and checks its version: the first one new enough wins. An app started
+    /// from the Finder, or by an installer that just installed git, has a
+    /// shorter or older `PATH` than a terminal.
     pub fn discover() -> Result<Self, GitError> {
-        let git = find_on_path("git").ok_or_else(|| {
+        let path = env::var_os("PATH").unwrap_or_default();
+        let mut first_error = None;
+        for git in git_candidates(&path, &usual_git_paths()) {
+            match Self::with_executable(git) {
+                Ok(runner) => return Ok(runner),
+                Err(err) => {
+                    first_error.get_or_insert(err);
+                }
+            }
+        }
+        Err(first_error.unwrap_or_else(|| {
             GitError::new(
                 "--version",
                 GitErrorKind::GitNotFound,
                 "git was not found on PATH",
             )
-        })?;
-        Self::with_executable(git)
+        }))
     }
 
     /// Uses `git` if given (the settings override), otherwise searches `PATH`.
@@ -181,11 +193,65 @@ fn base_command(git: &Path, access: Access) -> Command {
     cmd
 }
 
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    env::split_paths(&path)
-        .map(|dir| dir.join(format!("{name}{}", env::consts::EXE_SUFFIX)))
-        .find(|candidate| candidate.is_file())
+/// The git executables to try, in order: those on `path`, then the existing
+/// ones among `usual`, each once.
+fn git_candidates(path: &OsStr, usual: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let on_path = env::split_paths(path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.join(format!("git{}", env::consts::EXE_SUFFIX)));
+    for candidate in on_path.chain(usual.iter().cloned()) {
+        if candidate.is_file() && !found.contains(&candidate) {
+            found.push(candidate);
+        }
+    }
+    found
+}
+
+/// Where the Git for Windows installer and Homebrew put git.
+fn usual_git_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if cfg!(windows) {
+        for (var, sub) in [("ProgramFiles", "Git"), ("LOCALAPPDATA", "Programs/Git")] {
+            if let Some(base) = env::var_os(var) {
+                paths.push(PathBuf::from(base).join(sub).join("cmd").join("git.exe"));
+            }
+        }
+    } else if cfg!(target_os = "macos") {
+        paths.push(PathBuf::from("/opt/homebrew/bin/git"));
+        paths.push(PathBuf::from("/usr/local/bin/git"));
+    }
+    paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_candidates_put_path_first_and_skip_missing_and_repeated_ones() {
+        let root = env::temp_dir().join(format!("gitbello candidates ü {}", std::process::id()));
+        let (first, second, usual) = (root.join("a"), root.join("b b"), root.join("usual"));
+        let git = format!("git{}", env::consts::EXE_SUFFIX);
+        for dir in [&first, &second, &usual] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(second.join(&git), "").unwrap();
+        std::fs::write(usual.join(&git), "").unwrap();
+
+        let path = env::join_paths([&first, &second]).unwrap();
+        let candidates = git_candidates(
+            &path,
+            &[
+                usual.join(&git),
+                second.join(&git),
+                root.join("missing").join(&git),
+            ],
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(candidates, vec![second.join(&git), usual.join(&git)]);
+    }
 }
 
 type ProgressFn = Box<dyn FnMut(Progress) + Send>;
