@@ -1,7 +1,7 @@
 extends Node
 ## Saves numbered screenshots of the worktree strip for visual review (not
 ## part of the smoke run): the strip in both themes, hovered chips with their
-## tooltip cards, the worktree list and a narrow, scrolling strip.
+## tooltip cards, the hovered New worktree button and the worktree list.
 ## Usage: godot --path godot res://tests/visual/worktree_row_screenshots.tscn --
 ##        --repo=<worktree of a throwaway repo with several worktrees> --out=<dir>
 ## Run with GITBELLO_CONFIG pointing at a scratch config file. Read-only.
@@ -46,6 +46,9 @@ func _ready() -> void:
 			await _hover(chip)
 			await _shot(out, "%02d-hover-%s" % [step, String(chip.texts()["name"]).left(20)])
 			step += 1
+	await _hover(strip.new_task_button())
+	await _shot(out, "%02d-hover-new-worktree" % step)
+	step += 1
 	_move_mouse(Vector2(640, 600))
 	strip.list_button().pressed.emit()
 	# Embedded here, so place the list under the icon in viewport coordinates.
