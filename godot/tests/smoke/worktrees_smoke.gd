@@ -258,6 +258,9 @@ func _delete_while_in_use(main: Main, page: RepoTab, session: RepoSession, repo:
 
 func _overflow_selection() -> void:
 	var strip: WorktreeStrip = WorktreeStrip.new()
+	# The chips' widths come from the theme (`max_width` caps each name; 0
+	# without it), and the project theme is only filled in once a Main runs.
+	strip.theme = AppTheme.build(false)
 	strip.size.x = 480.0
 	add_child(strip)
 	var rows: Array[Dictionary] = []
