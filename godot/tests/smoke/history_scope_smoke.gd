@@ -100,7 +100,9 @@ func run() -> void:
 	history = page.history()
 	expect(await wait_until(func() -> bool: return history.commit_list().row_count() == 4), "reopening restores the saved scope")
 	expect(bool(page.session.history_info().get("all_branches", false)), "restored scope is all branches")
-	page.session.push(true)
+	# Push is refused until the reopened tab has read its refs.
+	expect(await wait_until(func() -> bool: return page.session.can_push()), "the reopened tab can push")
+	expect(page.session.push(true) >= 0, "the push starts")
 	var hidden: bool = await wait_until(func() -> bool: return bool(page.session.history_info().get("ready", false)) and int(page.session.history_info().get("outgoing", -1)) == 0 and history.list_header().status_text().is_empty())
 	expect(hidden, "a zero outgoing count is hidden" + ("" if hidden else " (history_info=%s header=%s)"
 			% [page.session.history_info(), history.list_header().status_text()]))
