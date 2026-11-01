@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -30,8 +31,9 @@ const SCRUBBED_ENV: &[&str] = &[
 /// How often a running command checks its cancel token.
 const POLL: Duration = Duration::from_millis(20);
 
-/// How long to keep reading output after git itself has exited.
-const EXIT_GRACE: Duration = Duration::from_millis(100);
+/// Once git has exited, how long its pipes may stay open with nothing left to
+/// read before we stop waiting for them (a helper git started still holds them).
+const EXIT_GRACE: Duration = Duration::from_millis(250);
 
 /// Whether a command only reads the repository. Reads skip optional locks so
 /// they never contend with the user's own git commands.
@@ -309,12 +311,13 @@ impl GitCommand {
         let writer = spawn_stdin_writer(&mut child, self.stdin.take());
         let (tx, rx) = mpsc::channel::<Chunk>();
         let mut open_pipes = 0;
+        let mut readers = Vec::new();
         if let Some(stdout) = child.stdout.take() {
-            spawn_reader(stdout, tx.clone(), Chunk::Out);
+            readers.push(spawn_reader(stdout, tx.clone(), Chunk::Out));
             open_pipes += 1;
         }
         if let Some(stderr) = child.stderr.take() {
-            spawn_reader(stderr, tx.clone(), Chunk::Err);
+            readers.push(spawn_reader(stderr, tx.clone(), Chunk::Err));
             open_pipes += 1;
         }
         drop(tx);
@@ -322,14 +325,21 @@ impl GitCommand {
         // Collect output (feeding progress) while checking the cancel token.
         // Processes git starts (ssh, credential helpers, aliases) can inherit
         // the pipes and keep them open after git exits, so once git has exited
-        // we only wait EXIT_GRACE for the rest of the output.
+        // we stop when every reader has sat in an empty pipe for EXIT_GRACE.
+        // The grace never counts while a reader is still busy (or not yet
+        // scheduled): under load that can take longer than git itself, and
+        // stopping then would drop output git already wrote.
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut lines = LineSplitter::default();
         let mut cancelled = false;
-        let mut exited: Option<(ExitStatus, Instant)> = None;
+        let mut read_error: Option<io::Error> = None;
+        let mut exited: Option<ExitStatus> = None;
+        let mut idle_since: Option<Instant> = None;
         loop {
-            match rx.recv_timeout(POLL) {
+            let received = rx.recv_timeout(POLL);
+            let got_message = received.is_ok();
+            match received {
                 Ok(Chunk::Out(Some(bytes))) => stdout.extend_from_slice(&bytes),
                 Ok(Chunk::Err(Some(bytes))) => {
                     if let Some(progress) = self.progress.as_mut() {
@@ -342,6 +352,9 @@ impl GitCommand {
                     stderr.extend_from_slice(&bytes);
                 }
                 Ok(Chunk::Out(None) | Chunk::Err(None)) => open_pipes -= 1,
+                Ok(Chunk::Failed(err)) => {
+                    read_error.get_or_insert(err);
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => open_pipes = 0,
             }
@@ -350,17 +363,20 @@ impl GitCommand {
                 let _ = child.kill();
             }
             if exited.is_none() {
-                if let Some(status) = child
+                exited = child
                     .try_wait()
-                    .map_err(|err| GitError::new(display, GitErrorKind::Io, err.to_string()))?
-                {
-                    exited = Some((status, Instant::now()));
-                }
+                    .map_err(|err| GitError::new(display, GitErrorKind::Io, err.to_string()))?;
             }
-            match exited {
-                Some(_) if open_pipes == 0 => break,
-                Some((_, at)) if at.elapsed() > EXIT_GRACE => break,
-                _ => {}
+            if exited.is_some() {
+                if open_pipes == 0 {
+                    break;
+                }
+                let idle = !got_message && readers.iter().all(|r| r.load(Ordering::Acquire));
+                if !idle {
+                    idle_since = None;
+                } else if idle_since.get_or_insert_with(Instant::now).elapsed() > EXIT_GRACE {
+                    break;
+                }
             }
         }
         if let Some(progress) = self.progress.as_mut() {
@@ -371,7 +387,7 @@ impl GitCommand {
             });
         }
         let status = match exited {
-            Some((status, _)) => status,
+            Some(status) => status,
             None => child
                 .wait()
                 .map_err(|err| GitError::new(display, GitErrorKind::Io, err.to_string()))?,
@@ -387,6 +403,14 @@ impl GitCommand {
                 display,
                 GitErrorKind::Cancelled,
                 String::from_utf8_lossy(&stderr),
+            ));
+        }
+        if let Some(err) = read_error {
+            // Part of the output is missing; parsing the rest would mislead.
+            return Err(GitError::new(
+                display,
+                GitErrorKind::Io,
+                format!("reading git output failed: {err}"),
             ));
         }
         if !status.success() {
@@ -448,27 +472,44 @@ impl GitCommand {
 enum Chunk {
     Out(Option<Vec<u8>>),
     Err(Option<Vec<u8>>),
+    /// Reading a pipe failed; its output is incomplete.
+    Failed(io::Error),
 }
 
+/// Copies `pipe` into `tx` on its own thread. The returned flag is true while
+/// the thread waits in `read` with everything before it sent (or has finished),
+/// and false while it is starting or passing data on.
 fn spawn_reader(
     mut pipe: impl Read + Send + 'static,
     tx: mpsc::Sender<Chunk>,
     wrap: fn(Option<Vec<u8>>) -> Chunk,
-) {
+) -> Arc<AtomicBool> {
+    let waiting = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&waiting);
     thread::spawn(move || {
         let mut buf = [0u8; 16 * 1024];
         loop {
-            match pipe.read(&mut buf) {
-                Ok(0) | Err(_) => break,
+            flag.store(true, Ordering::Release);
+            let read = pipe.read(&mut buf);
+            flag.store(false, Ordering::Release);
+            match read {
+                Ok(0) => break,
                 Ok(n) => {
                     if tx.send(wrap(Some(buf[..n].to_vec()))).is_err() {
                         return;
                     }
                 }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => {
+                    let _ = tx.send(Chunk::Failed(err));
+                    break;
+                }
             }
         }
         let _ = tx.send(wrap(None));
+        flag.store(true, Ordering::Release);
     });
+    waiting
 }
 
 fn spawn_error(display: &str, err: io::Error) -> GitError {
