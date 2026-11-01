@@ -133,7 +133,7 @@ mod imp {
             .filter_map(|(pid, name)| {
                 let file = modules(pid)
                     .into_iter()
-                    .find(|file| path_key(file).starts_with(&folder))?;
+                    .find(|file| module_key(file).starts_with(&folder))?;
                 Some(ProcessUse { pid, name, file })
             })
             .collect()
@@ -214,6 +214,18 @@ mod imp {
     fn path_key(path: &Path) -> String {
         let text = path.to_string_lossy().replace('/', "\\");
         text.strip_prefix(r"\\?\").unwrap_or(&text).to_lowercase()
+    }
+
+    /// A loaded file's key. A program started through an 8.3 short name
+    /// (`RUNNER~1`) reports its files by it, so those are expanded first;
+    /// only they contain `~`, which keeps the file system out of the scan.
+    fn module_key(file: &Path) -> String {
+        let key = path_key(file);
+        if key.contains('~') {
+            path_key(&normalize(file))
+        } else {
+            key
+        }
     }
 
     /// `dir`'s key with a trailing separator, so `wt` does not match `wt2`.
