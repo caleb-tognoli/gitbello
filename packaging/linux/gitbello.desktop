@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=gitbello
+GenericName=Git GUI
+Comment=A fast Git GUI for working across many repositories and worktrees
+Comment[it]=Una GUI per Git veloce, per lavorare con molti repository e worktree
+Exec=gitbello
+Icon=gitbello
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;version control;worktree;

@@ -1,6 +1,7 @@
 extends SceneTree
 ## Draws the raster copies of the logo from its SVGs: `icon.png` (the window
-## icon and boot splash) and `icon.ico` (the Windows executable icon). Run it
+## icon and boot splash), `icon.ico` (the Windows executable icon) and
+## `icon_macos.png` (the macOS app icon, made into an `.icns` on export). Run it
 ## again after changing `logo.svg` or `logo_small.svg`:
 ##   godot --headless --path godot -s res://tools/export_branding.gd
 
@@ -9,6 +10,10 @@ const PNG_SIZE: int = 256
 ## Sizes in the ICO. Up to `SMALL_MAX` they come from the heavier small logo.
 const ICO_SIZES: Array[int] = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 const SMALL_MAX: int = 24
+## The macOS icon's canvas and the logo inside it, with the margin of the
+## system's icon grid.
+const MACOS_SIZE: int = 1024
+const MACOS_MARGIN: int = 100
 ## The SVGs are drawn on a 64 px canvas.
 const SVG_SIZE: float = 64.0
 
@@ -25,6 +30,11 @@ func _init() -> void:
 	for size: int in ICO_SIZES:
 		pngs.append(_render(small if size <= SMALL_MAX else full, size).save_png_to_buffer())
 	ok = _write_ico(DIR.path_join("icon.ico"), pngs) and ok
+	var macos: Image = Image.create_empty(MACOS_SIZE, MACOS_SIZE, false, Image.FORMAT_RGBA8)
+	var art: Image = _render(full, MACOS_SIZE - 2 * MACOS_MARGIN)
+	art.convert(Image.FORMAT_RGBA8)
+	macos.blit_rect(art, Rect2i(Vector2i.ZERO, art.get_size()), Vector2i(MACOS_MARGIN, MACOS_MARGIN))
+	ok = macos.save_png(DIR.path_join("icon_macos.png")) == OK and ok
 	quit(0 if ok else 1)
 
 

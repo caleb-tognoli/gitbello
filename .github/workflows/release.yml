@@ -1,0 +1,267 @@
+name: Release
+
+# Push a tag like v1.0.0 to build every platform and attach the builds to a draft GitHub
+# release, published by hand once they're checked. The tag must match the version in
+# rust/Cargo.toml, godot/project.godot and godot/export_presets.cfg, and the release notes
+# are the CHANGELOG.md section of that version (see .github/scripts/release_notes.py).
+# Run it by hand to get the builds as workflow artifacts without releasing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in sync with ci.yml, config/features in godot/project.godot and the gdext api-* feature.
+  GODOT_VERSION: 4.7.2
+
+permissions:
+  contents: write
+
+jobs:
+  native:
+    name: native (${{ matrix.os }})
+    strategy:
+      matrix:
+        # Linux on the oldest runner, so the library loads on older systems too
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      # Keep in sync with rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@1.99.1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: release
+
+      - name: Build (Windows, Linux)
+        if: runner.os != 'macOS'
+        env:
+          # The C runtime inside the library, so it loads without the Visual C++ redistributable
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: cargo xtask build --release
+
+      # One library for both Macs
+      - name: Build (macOS, universal)
+        if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          set -euo pipefail
+          targets="aarch64-apple-darwin x86_64-apple-darwin"
+          rustup target add $targets
+          libs=()
+          for target in $targets; do
+            cargo build --manifest-path rust/Cargo.toml --locked --release -p gitbello-gdext --target "$target"
+            libs+=("rust/target/$target/release/libgitbello_gdext.dylib")
+          done
+          mkdir -p godot/bin/macos/release
+          lipo -create "${libs[@]}" -output godot/bin/macos/release/libgitbello_gdext.dylib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}
+          path: godot/bin/
+
+  export:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Exports copy them next to the app (inside it on macOS)
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: godot/bin
+          merge-multiple: true
+
+      - name: Check the version and write the release notes
+        run: |
+          VERSION=$(sed -n 's/^config\/version="\(.*\)"$/\1/p' godot/project.godot)
+          fail() { echo "::error::$1"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [ "$VERSION" = "${GITHUB_REF_NAME#v}" ] || fail "project.godot's config/version is $VERSION, not ${GITHUB_REF_NAME#v}"
+          fi
+          grep -qxF "version = \"$VERSION\"" rust/Cargo.toml || fail "rust/Cargo.toml's version isn't $VERSION"
+          for line in "application/file_version=\"$VERSION.0\"" "application/product_version=\"$VERSION.0\"" \
+            "application/short_version=\"$VERSION\"" "application/version=\"$VERSION\""; do
+            grep -qxF "$line" godot/export_presets.cfg || fail "godot/export_presets.cfg has no $line"
+          done
+          python3 .github/scripts/release_notes.py "$VERSION" CHANGELOG.md "$GITHUB_REPOSITORY" \
+            > release_notes.md || fail "CHANGELOG.md has no \"## $VERSION\" section"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Cache Godot and export templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot and export templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          templates=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p ~/godot "$templates"
+          cd ~/godot
+          curl -fsSLo SHA512-SUMS.txt "$base/SHA512-SUMS.txt"
+          for file in "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" "Godot_v${GODOT_VERSION}-stable_export_templates.tpz"; do
+            curl -fsSLo "$file" "$base/$file"
+            grep " $file\$" SHA512-SUMS.txt | sha512sum -c -
+          done
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          unzip -q -j "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d "$templates"
+          rm ./*.zip ./*.tpz SHA512-SUMS.txt
+
+      - name: Export
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/godot:$PATH"
+          # The editor loads the debug library; the release one works the same for importing
+          mkdir -p bin/linux/debug
+          cp bin/linux/release/libgitbello_gdext.so bin/linux/debug/
+          mkdir -p build/windows build/linux build/macos
+          godot --headless --import || true
+          godot --headless --export-release "Windows" build/windows/gitbello.exe
+          godot --headless --export-release "Linux" build/linux/gitbello.x86_64
+          godot --headless --export-release "macOS" build/macos/gitbello.zip
+          for file in build/windows/gitbello.exe build/windows/gitbello_gdext.dll \
+            build/linux/gitbello.x86_64 build/linux/libgitbello_gdext.so build/macos/gitbello.zip; do
+            [ -s "$file" ] || { echo "::error::the export has no $file"; exit 1; }
+          done
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          (cd godot/build/windows && zip -q "../../../dist/gitbello-${VERSION}-windows.zip" \
+            gitbello.exe gitbello_gdext.dll)
+          # With install.sh, which adds the launcher and the gitbello command
+          staging=godot/build/linux/gitbello
+          mkdir -p "$staging"
+          mv godot/build/linux/gitbello.x86_64 godot/build/linux/libgitbello_gdext.so "$staging/"
+          cp packaging/linux/* "$staging/"
+          cp godot/themes/branding/logo.svg "$staging/gitbello.svg"
+          cp LICENSE "$staging/"
+          chmod +x "$staging/gitbello.x86_64" "$staging/install.sh"
+          tar -czf "dist/gitbello-${VERSION}-linux.tar.gz" -C godot/build/linux gitbello
+          cp godot/build/macos/gitbello.zip "dist/gitbello-${VERSION}-macos.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builds
+          path: dist/
+
+      # For the installer, made on Windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: |
+            godot/build/windows/gitbello.exe
+            godot/build/windows/gitbello_gdext.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release_notes.md
+
+  installer:
+    # Inno Setup only runs on Windows
+    needs: export
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-app
+          path: build/windows
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: |
+          [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
+          pip install pillow
+
+      # The installer downloads this Git for Windows when git is missing, checked against its hash
+      - name: Pin Git for Windows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - >> "$GITHUB_ENV" <<'EOF'
+          import json, os, re, urllib.request
+          request = urllib.request.Request(
+              "https://api.github.com/repos/git-for-windows/git/releases/latest",
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"]},
+          )
+          release = json.load(urllib.request.urlopen(request))
+          asset = next(a for a in release["assets"] if re.fullmatch(r"Git-[\d.]+-64-bit\.exe", a["name"]))
+          print("GIT_URL=" + asset["browser_download_url"])
+          print("GIT_DIGEST=" + (asset.get("digest") or ""))
+          EOF
+          curl -fsSLo "$RUNNER_TEMP/git-setup.exe" "$(grep '^GIT_URL=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)"
+          sha=$(sha256sum "$RUNNER_TEMP/git-setup.exe" | cut -d' ' -f1)
+          digest=$(grep '^GIT_DIGEST=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)
+          if [ -n "$digest" ] && [ "$digest" != "sha256:$sha" ]; then
+            echo "::error::Git for Windows doesn't match its published digest"; exit 1
+          fi
+          echo "GIT_SHA256=$sha" >> "$GITHUB_ENV"
+
+      - name: Make the installer
+        run: |
+          VERSION=$(sed -n 's/^config\/version="\(.*\)"$/\1/p' godot/project.godot)
+          python packaging/windows/wizard_images.py build/wizard
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -Q "-DVersion=$VERSION" \
+            "-DBuild=$PWD/build/windows" "-DImages=$PWD/build/wizard" \
+            "-DGitUrl=$GIT_URL" "-DGitSha256=$GIT_SHA256" "-O$PWD/dist" \
+            packaging/windows/installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [export, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: builds
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*
+          body_path: release_notes.md
