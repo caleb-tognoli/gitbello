@@ -206,26 +206,22 @@ jobs:
       - name: Pin Git for Windows
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: python
         run: |
-          set -euo pipefail
-          python - >> "$GITHUB_ENV" <<'EOF'
-          import json, os, re, urllib.request
+          import hashlib, json, os, re, sys, urllib.request
           request = urllib.request.Request(
               "https://api.github.com/repos/git-for-windows/git/releases/latest",
               headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"]},
           )
           release = json.load(urllib.request.urlopen(request))
           asset = next(a for a in release["assets"] if re.fullmatch(r"Git-[\d.]+-64-bit\.exe", a["name"]))
-          print("GIT_URL=" + asset["browser_download_url"])
-          print("GIT_DIGEST=" + (asset.get("digest") or ""))
-          EOF
-          curl -fsSLo "$RUNNER_TEMP/git-setup.exe" "$(grep '^GIT_URL=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)"
-          sha=$(sha256sum "$RUNNER_TEMP/git-setup.exe" | cut -d' ' -f1)
-          digest=$(grep '^GIT_DIGEST=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)
-          if [ -n "$digest" ] && [ "$digest" != "sha256:$sha" ]; then
-            echo "::error::Git for Windows doesn't match its published digest"; exit 1
-          fi
-          echo "GIT_SHA256=$sha" >> "$GITHUB_ENV"
+          sha = hashlib.sha256(urllib.request.urlopen(asset["browser_download_url"]).read()).hexdigest()
+          if asset.get("digest") and asset["digest"] != "sha256:" + sha:
+              sys.exit("::error::Git for Windows doesn't match its published digest")
+          print(asset["name"], sha)
+          # newline="\n": GitHub reads a \r as part of the value
+          with open(os.environ["GITHUB_ENV"], "a", newline="\n") as env:
+              env.write(f"GIT_URL={asset['browser_download_url']}\nGIT_SHA256={sha}\n")
 
       - name: Make the installer
         run: |
