@@ -1278,6 +1278,44 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.load_head_message(&self.key)).flatten())
     }
 
+    #[func]
+    fn set_history_all_branches(&self, all: bool) {
+        let scope = if all {
+            gitbello_core::graph::HistoryScope::AllBranches
+        } else {
+            gitbello_core::graph::HistoryScope::CurrentBranch
+        };
+        runtime_cell::with(|rt| rt.set_history_scope(&self.key, scope));
+    }
+
+    #[func]
+    fn history_info(&self) -> VarDictionary {
+        self.read(|state| {
+            let info = state.history_tracking();
+            vdict! {
+                "all_branches" => state.history_scope() == gitbello_core::graph::HistoryScope::AllBranches,
+                "ready" => info.is_some(),
+                "upstream" => &gstr(info.and_then(|i| i.upstream.as_deref()).unwrap_or("")),
+                "gone" => info.is_some_and(|i| i.upstream_gone),
+                "outgoing" => to_i64(info.map_or(0, |i| i.outgoing.len())),
+            }
+        }).unwrap_or_default()
+    }
+
+    #[func]
+    fn graph_find_commit(&self, oid: GString) -> i64 {
+        self.read(|state| state.graph()?.index().row_for_oid(&oid.to_string()))
+            .flatten()
+            .filter(|&row| row < self.reported_rows)
+            .map_or(-1, to_i64)
+    }
+
+    #[func]
+    fn commit_is_outgoing(&self, oid: GString) -> bool {
+        self.read(|state| state.is_outgoing(&oid.to_string()))
+            .unwrap_or(false)
+    }
+
     /// Rows reported through `graph_changed` so far.
     #[func]
     fn graph_row_count(&self) -> i64 {
@@ -1358,6 +1396,7 @@ impl RepoSession {
                     "refs" => &convert::labels(state.labels(&hash)),
                     "match" => search.is_some_and(|s| s.is_match(row)),
                     "in_head" => state.in_head(&hash),
+                    "outgoing" => state.is_outgoing(&hash),
                 });
             }
             rows

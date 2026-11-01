@@ -661,6 +661,8 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"match_color", &"CommitList", Color(p.modified, 0.4))
 	theme.set_constant(&"padding", &"CommitList", 8)
 	theme.set_constant(&"label_gap", &"CommitList", 4)
+	theme.set_constant(&"outgoing_icon_size", &"CommitList", 14)
+	theme.set_color(&"outgoing_color", &"CommitList", p.accent)
 	theme.set_font_size(&"label_font_size", &"CommitList", 12)
 	theme.set_color(&"label_color", &"CommitList", DARK_TEXT)
 	for entry: Array in [[&"head", p.label_head], [&"branch", p.label_branch],

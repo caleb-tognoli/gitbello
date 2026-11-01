@@ -89,6 +89,64 @@ fn lays_out_a_feature_branch_merge() {
 }
 
 #[test]
+fn current_branch_excludes_unmerged_refs_but_keeps_merged_ancestors() {
+    use gitbello_core::graph::HistoryScope;
+    let repo = TestRepo::init();
+    let base = repo.commit("base", "base", "base");
+    repo.branch("feature");
+    let main = repo.commit("main", "main", "main work");
+    repo.checkout("feature");
+    let feature = repo.commit("feature", "feature", "feature work");
+    repo.git(&["tag", "feature-tag"]);
+    repo.checkout("main");
+    let current = || {
+        wait_done(GraphLoader::start_scoped(
+            repo.runner().clone(),
+            repo.path().into(),
+            HistoryScope::CurrentBranch,
+        ))
+    };
+    let loader = current();
+    let index = loader.index();
+    assert_eq!(index.row_count(), 2);
+    assert_eq!(index.row_for_oid(&main), Some(0));
+    assert_eq!(index.row_for_oid(&base), Some(1));
+    assert_eq!(index.row_for_oid(&feature), None);
+    assert_eq!(index.row_for_oid("invalid"), None);
+    assert_eq!(wait_done(load(&repo)).row_count(), 3);
+    drop(index);
+    repo.merge("feature", "merge feature");
+    let loader = current();
+    let index = loader.index();
+    assert_eq!(index.row_count(), 4);
+    assert!(index.row_for_oid(&feature).is_some());
+    assert_eq!(index.commit(0).unwrap().parent_rows.len(), 2);
+}
+
+#[test]
+fn current_scope_handles_detached_and_unborn_head() {
+    use gitbello_core::graph::HistoryScope;
+    let repo = TestRepo::init();
+    let current = || {
+        wait_done(GraphLoader::start_scoped(
+            repo.runner().clone(),
+            repo.path().into(),
+            HistoryScope::CurrentBranch,
+        ))
+    };
+    assert_eq!(current().row_count(), 0);
+    let base = repo.commit("a", "a", "base");
+    repo.commit("b", "b", "later");
+    repo.git(&["checkout", "--detach", &base]);
+    let loader = current();
+    assert_eq!(loader.row_count(), 1);
+    assert_eq!(loader.index().row_for_oid(&base), Some(0));
+    repo.git(&["checkout", "--orphan", "unborn"]);
+    assert_eq!(current().row_count(), 0);
+    assert_eq!(wait_done(load(&repo)).row_count(), 2);
+}
+
+#[test]
 fn empty_repository_loads_zero_rows() {
     let repo = TestRepo::init();
     let loader = wait_done(load(&repo));

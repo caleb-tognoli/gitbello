@@ -90,6 +90,7 @@ Run `cargo xtask check` before declaring any task done.
 - For UI, write headless smoke scripts under `godot/tests/smoke/`, run with `cargo xtask smoke`. They instantiate scenes, drive them with a fixture repo, and assert on node state.
 - `cargo xtask smoke` creates throwaway fixture repos (`gitbello-cli fixture`) and a scratch config (`GITBELLO_CONFIG`); smoke tests get them as `--fixtures=<dir>`. Never point tests at the real config.
 - To look at the UI, run `res://tests/visual/shell_screenshots.tscn -- --repos=<a>;<b> --out=<dir>` (windowed, with `GITBELLO_CONFIG` set to a scratch file) and read the PNGs.
+- `res://tests/visual/history_screenshots.tscn -- --fixtures=<CLI fixture dir> --out=<dir>` captures Current branch and All branches in dark/light themes. It fetches the fixture's local remote; use throwaway CLI fixtures and `GITBELLO_CONFIG=<fixtures>/config.toml` only.
 - `res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path>` times diff loads, slice fetches and paging (read-only).
 - `res://tests/visual/home_screenshots.tscn -- --repos=<a>;<b>;… --scan=<dir> --work=<dir> --out=<dir>` captures Home (empty, full, grouped, filtered, a missing folder, clones, the Add menu, the forms and a scan). It clones into `<work>`: throwaway repositories only, and `GITBELLO_CONFIG` in an empty folder.
 - `gitbello-cli home-bench <dir>` times Home's scan and summaries (read-only).

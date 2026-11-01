@@ -392,6 +392,7 @@ pub struct RepoState {
     commit_diff: Option<DiffState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
+    history_scope: crate::graph::HistoryScope,
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
     /// The history search's query ("" for none) and its search of `graph`.
@@ -445,6 +446,7 @@ impl RepoState {
             commit_requested: None,
             commit_diff: None,
             discards: Vec::new(),
+            history_scope: crate::graph::HistoryScope::default(),
             graph: None,
             graph_dirty_since: None,
             search_query: String::new(),
@@ -678,6 +680,24 @@ impl RepoState {
         let head = self.status.as_ref()?.oid.as_deref()?;
         (self.operation.is_none() && self.current_branch().is_some() && commit.oid == head)
             .then_some(commit)
+    }
+
+    pub fn history_scope(&self) -> crate::graph::HistoryScope {
+        self.history_scope
+    }
+
+    pub fn history_tracking(&self) -> Option<&HeadInfo> {
+        let status = self.status.as_ref()?;
+        let branch = self.current_branch().and_then(|name| self.branch(name));
+        (self.head_info.oid == status.oid
+            && self.head_info.upstream.as_deref() == branch.and_then(|r| r.upstream.as_deref())
+            && self.head_info.upstream_gone == branch.is_some_and(|r| r.tracking.gone))
+        .then_some(&self.head_info)
+    }
+
+    pub fn is_outgoing(&self, oid: &str) -> bool {
+        self.history_tracking()
+            .is_some_and(|info| info.outgoing.contains(oid))
     }
 
     /// Whether commit `oid` is in HEAD (unknown commits count as in it).
@@ -1503,6 +1523,19 @@ impl Runtime {
             .is_some_and(|s| s.is_ready() && !s.missing)
         {
             self.scheduler.request_refresh(key, kinds);
+        }
+    }
+
+    pub fn set_history_scope(&mut self, key: &Path, scope: crate::graph::HistoryScope) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        if state.history_scope == scope {
+            return;
+        }
+        state.history_scope = scope;
+        if state.is_ready() {
+            state.graph_dirty_since = Some(Instant::now() - GRAPH_RELOAD_DELAY);
         }
     }
 
@@ -2890,7 +2923,13 @@ impl Runtime {
                     self.scheduler.request_refresh(&repo, RefreshSet::all());
                     submit_head_info(&self.scheduler, &repo);
                     state.graph = Some(
-                        GraphLoader::submit(&self.scheduler, self.runner.clone(), repo.clone()).0,
+                        GraphLoader::submit_scoped(
+                            &self.scheduler,
+                            self.runner.clone(),
+                            repo.clone(),
+                            state.history_scope,
+                        )
+                        .0,
                     );
                     state.restart_search();
                     out.push(RuntimeEvent::Opened { repo });
@@ -3261,7 +3300,13 @@ impl Runtime {
             state.graph_dirty_since = None;
             // Dropping the old loader cancels it if it is still running.
             state.graph = Some(
-                GraphLoader::submit(&self.scheduler, self.runner.clone(), state.key.clone()).0,
+                GraphLoader::submit_scoped(
+                    &self.scheduler,
+                    self.runner.clone(),
+                    state.key.clone(),
+                    state.history_scope,
+                )
+                .0,
             );
             state.restart_search();
             submit_head_info(&self.scheduler, &state.key);

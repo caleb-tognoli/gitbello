@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use super::index::GraphIndex;
 use super::log::{LogParseError, LogRecord, RecordSplitter, LOG_ARGS};
+use super::HistoryScope;
 use crate::git::{CancelToken, GitError, GitErrorKind, GitRunner};
 use crate::jobs::{JobId, JobOutput, JobScheduler, JobSpec};
 
@@ -83,7 +84,11 @@ pub struct GraphLoader {
 impl GraphLoader {
     /// Loads on a dedicated thread. Prefer [`GraphLoader::submit`] inside the app.
     pub fn start(runner: GitRunner, repo: PathBuf) -> Self {
-        let (mut loader, task) = Self::unstarted();
+        Self::start_scoped(runner, repo, HistoryScope::AllBranches)
+    }
+
+    pub fn start_scoped(runner: GitRunner, repo: PathBuf, scope: HistoryScope) -> Self {
+        let (mut loader, task) = Self::unstarted(scope);
         loader.handle = thread::Builder::new()
             .name("gitbello-graph".into())
             .spawn(move || {
@@ -98,7 +103,16 @@ impl GraphLoader {
 
     /// Loads as a read job on `scheduler`; cancelling the loader cancels the job.
     pub fn submit(scheduler: &JobScheduler, runner: GitRunner, repo: PathBuf) -> (Self, JobId) {
-        let (loader, task) = Self::unstarted();
+        Self::submit_scoped(scheduler, runner, repo, HistoryScope::AllBranches)
+    }
+
+    pub fn submit_scoped(
+        scheduler: &JobScheduler,
+        runner: GitRunner,
+        repo: PathBuf,
+        scope: HistoryScope,
+    ) -> (Self, JobId) {
+        let (loader, task) = Self::unstarted(scope);
         let spec = JobSpec::read(repo.clone(), GRAPH_JOB_LABEL, move |_| {
             match task.run(&runner, repo) {
                 LoadState::Done | LoadState::Loading => Ok(JobOutput::Done),
@@ -117,7 +131,7 @@ impl GraphLoader {
     }
 
     /// A loader handle and the task that fills it, to run wherever the caller likes.
-    fn unstarted() -> (Self, GraphLoadTask) {
+    fn unstarted(scope: super::HistoryScope) -> (Self, GraphLoadTask) {
         let shared = Arc::new(Shared {
             index: RwLock::new(GraphIndex::new()),
             rows: AtomicUsize::new(0),
@@ -131,6 +145,7 @@ impl GraphLoader {
         });
         let task = GraphLoadTask {
             shared: Arc::clone(&shared),
+            scope,
         };
         (
             Self {
@@ -238,11 +253,12 @@ impl GraphReader {
 /// The work of one graph load; see [`GraphLoader::submit`].
 struct GraphLoadTask {
     shared: Arc<Shared>,
+    scope: super::HistoryScope,
 }
 
 impl GraphLoadTask {
     fn run(self, runner: &GitRunner, repo: PathBuf) -> LoadState {
-        let state = match load(runner, repo, &self.shared) {
+        let state = match load(runner, repo, &self.shared, self.scope) {
             Ok(true) => LoadState::Done,
             Ok(false) => LoadState::Cancelled,
             Err(err) => LoadState::Failed(err),
@@ -268,8 +284,30 @@ impl Drop for GraphLoader {
 }
 
 /// Returns `Ok(false)` when cancelled.
-fn load(runner: &GitRunner, repo: PathBuf, shared: &Shared) -> Result<bool, GraphLoadError> {
-    let mut stream = runner.read(&repo).args(LOG_ARGS).stream()?;
+fn load(
+    runner: &GitRunner,
+    repo: PathBuf,
+    shared: &Shared,
+    scope: super::HistoryScope,
+) -> Result<bool, GraphLoadError> {
+    let mut args = LOG_ARGS.to_vec();
+    let head;
+    if scope == super::HistoryScope::CurrentBranch {
+        match runner
+            .read(&repo)
+            .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+            .cancel_token(&shared.cancel)
+            .run()
+        {
+            Ok(output) => head = output.stdout_text().trim().to_owned(),
+            Err(error) if error.exit_code == Some(1) => return Ok(true),
+            Err(error) => return Err(error.into()),
+        }
+        args.retain(|arg| *arg != "--all");
+        args.push(&head);
+    }
+    args.push("--");
+    let mut stream = runner.read(&repo).args(args).stream()?;
     let mut splitter = RecordSplitter::new();
     let mut buf = vec![0u8; READ_CHUNK];
     loop {

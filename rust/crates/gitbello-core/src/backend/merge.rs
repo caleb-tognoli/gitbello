@@ -418,15 +418,35 @@ impl CliBackend {
         let Some(head) = self.resolve(repo, "HEAD", cancel)? else {
             return Ok(HeadInfo::default());
         };
+        let refs = self.refs(repo, cancel)?;
+        let branch = refs.iter().find(|r| r.is_head && r.target == head);
+        let upstream = branch.and_then(|r| r.upstream.clone());
+        let upstream_ref = upstream
+            .as_ref()
+            .and_then(|name| refs.iter().find(|r| &r.name == name));
+        let upstream_gone = upstream.is_some() && upstream_ref.is_none();
+        let outgoing = if let Some(remote) = upstream_ref {
+            self.read(
+                repo,
+                &["rev-list", &head, "--not", remote.commit(), "--"],
+                cancel,
+            )?
+            .stdout_text()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+        } else {
+            Default::default()
+        };
         let unpushed = self.read(
             repo,
-            &["rev-list", "-n1", "HEAD", "--not", "--remotes"],
+            &["rev-list", "-n1", &head, "--not", "--remotes"],
             cancel,
         )?;
         let undoable = if unpushed.stdout_text().trim() == head {
             let log = self.read(
                 repo,
-                &["log", "-1", UNDOABLE_LOG_FORMAT, "HEAD", "--"],
+                &["log", "-1", UNDOABLE_LOG_FORMAT, &head, "--"],
                 cancel,
             )?;
             parse_undoable(&log.stdout)
@@ -442,7 +462,7 @@ impl CliBackend {
                 "--remotes",
                 "--tags",
                 "--not",
-                "HEAD",
+                &head,
             ])
             .stream()?;
         let mut output = Vec::new();
@@ -460,6 +480,10 @@ impl CliBackend {
         Ok(HeadInfo {
             undoable,
             not_in_head,
+            oid: Some(head),
+            upstream,
+            upstream_gone,
+            outgoing,
         })
     }
 

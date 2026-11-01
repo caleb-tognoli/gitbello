@@ -741,6 +741,10 @@ pub fn parse_undoable(output: &[u8]) -> Option<UndoableCommit> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HeadInfo {
     pub undoable: Option<UndoableCommit>,
+    pub oid: Option<String>,
+    pub upstream: Option<String>,
+    pub upstream_gone: bool,
+    pub outgoing: HashSet<String>,
     /// Commits of branches, remote branches and tags that HEAD lacks (what
     /// "Merge into current" can be offered on).
     pub not_in_head: HashSet<String>,

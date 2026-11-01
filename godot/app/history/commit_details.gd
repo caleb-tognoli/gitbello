@@ -79,6 +79,7 @@ func _notification(what: int) -> void:
 		if session != null:
 			_on_commit_loaded()
 			_on_diff_changed()
+			update_outgoing()
 
 
 func set_session(value: RepoSession) -> void:
@@ -134,6 +135,17 @@ func show_commit(oid: String) -> void:
 		_clear_parents()
 		_shown_oid = ""
 	session.load_commit(oid)
+	if String(session.commit_info().get("oid", "")) == oid:
+		_on_commit_loaded()
+	update_outgoing()
+
+
+func update_outgoing() -> void:
+	var label: Label = %Outgoing
+	label.visible = session != null and not _requested_oid.is_empty() and session.commit_is_outgoing(_requested_oid)
+	if label.visible:
+		var upstream: String = String(session.history_info().get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
+		label.text = tr("Outgoing · not in %s") % upstream
 
 
 ## Shows `text` instead of a commit (while the history loads, or when it
@@ -142,6 +154,7 @@ func show_placeholder(text: String = "") -> void:
 	_requested_oid = ""
 	_shown_oid = ""
 	_clear_parents()
+	update_outgoing()
 	_summary.text = text
 	_who.hide()
 	_ids.hide()

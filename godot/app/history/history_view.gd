@@ -3,7 +3,7 @@ extends HSplitContainer
 ## History of one worktree: the commit list (with a status line) on the left,
 ## the selected commit's details and diff on the right. Right moves from the
 ## list into the details' files, and from there into the diff; Left goes back.
-## A commit is always selected once there is one: the newest by default.
+## HEAD is selected initially; reloads follow it or preserve a historical selection.
 ## Above the list, a search finds commits by subject, author or hash
 ## (`RepoSession.search_commits`) and highlights them in place: the graph
 ## stays whole, other rows are dimmed. When a search finishes, the first
@@ -36,7 +36,13 @@ var _commits_text: String = ""
 var _jump_pending: bool = false
 ## The field's previous and next match buttons.
 var _match_buttons: Array[Button] = []
+var _selected_oid: String = ""
+var _restore_oid: String = ""
+var _head_pending: bool = false
+var _follow_head: bool = false
 
+var _scope_menu: PopupMenu = null
+var _scope_button: Button = null
 @onready var _commit_list: CommitList = %CommitList
 @onready var _list_header: ListHeader = %ListHeader
 @onready var _search: FilterField = %SearchField
@@ -65,6 +71,16 @@ func _ready() -> void:
 	_search.changed.connect(_on_search_text)
 	_search.submitted.connect(func(backwards: bool) -> void: step_match(not backwards))
 	_search.done.connect(func() -> void: _commit_list.grab_focus())
+	_scope_button = _search.add_button(&"Filter", "Filter options")
+	_scope_button.toggle_mode = true
+	_scope_button.pressed.connect(_show_scope_menu)
+	_scope_menu = PopupMenu.new()
+	_scope_menu.add_radio_check_item(tr("Current branch"), 0)
+	_scope_menu.add_radio_check_item(tr("All branches"), 1)
+	_scope_menu.id_pressed.connect(func(id: int) -> void:
+		Actions.run_action(&"history.all_branches" if id == 1 else &"history.current_branch", _scope_button))
+	_scope_menu.about_to_popup.connect(_update_scope)
+	add_child(_scope_menu)
 	_apply_theme()
 
 
@@ -86,23 +102,115 @@ func set_session(value: RepoSession) -> void:
 		return
 	_cancel_parent_navigation()
 	_graph_loading = true
+	_selected_oid = ""
+	_restore_oid = ""
+	_head_pending = false
+	_follow_head = false
 	if session != null:
 		session.graph_changed.disconnect(_on_graph_changed)
 		session.graph_loaded.disconnect(_on_graph_loaded)
 		session.graph_reset.disconnect(_on_graph_reset)
 		session.search_changed.disconnect(_on_search_changed)
+		session.head_changed.disconnect(_on_history_state)
+		session.status_changed.disconnect(_on_history_state)
+		session.refs_changed.disconnect(_on_history_state)
 	session = value
 	if session != null:
 		session.graph_changed.connect(_on_graph_changed)
 		session.graph_loaded.connect(_on_graph_loaded)
 		session.graph_reset.connect(_on_graph_reset)
 		session.search_changed.connect(_on_search_changed)
+		session.head_changed.connect(_on_history_state)
+		session.status_changed.connect(_on_history_state)
+		session.refs_changed.connect(_on_history_state)
+		var saved: Dictionary = Core.repo_ui_state(session.repo_path())
+		session.set_history_all_branches(int(saved.get("history_all_branches", 0)) == 1)
 		if is_node_ready():
 			session.search_commits(_search.text())
 	_commit_list.session = session
 	_details.session = session
 	_commits_text = "Loading…" if session != null else ""
 	_update_header()
+
+
+func set_all_branches(all: bool) -> void:
+	if session == null:
+		return
+	Core.set_repo_ui_state(session.repo_path(), "history_all_branches", 1 if all else 0)
+	session.set_history_all_branches(all)
+	_update_scope()
+
+
+func can_go_to_current_commit() -> bool:
+	return session != null and not String(session.status().get("oid", "")).is_empty()
+
+
+func go_to_current_commit() -> void:
+	if not can_go_to_current_commit():
+		return
+	_cancel_parent_navigation()
+	_restore_oid = ""
+	_head_pending = true
+	_jump_pending = false
+	_select_newest_if_none()
+	_commit_list.grab_focus()
+
+
+func scope_menu() -> PopupMenu:
+	return _scope_menu
+
+
+func scope_button() -> Button:
+	return _scope_button
+
+
+func _show_scope_menu() -> void:
+	_update_scope()
+	_scope_menu.position = Vector2i(_scope_button.get_screen_position() + Vector2(0.0, _scope_button.size.y))
+	_scope_menu.reset_size()
+	_scope_menu.popup()
+
+
+func _on_history_state() -> void:
+	_commit_list.reload_matches()
+	_details.update_outgoing()
+	_update_scope()
+	_select_newest_if_none()
+
+
+func _update_scope() -> void:
+	var info: Dictionary = session.history_info() if session != null else {}
+	var branch: String = session.current_branch() if session != null else ""
+	var head: String = String(session.status().get("oid", "")) if session != null else ""
+	var current: String = tr("Current branch: %s") % branch
+	if branch.is_empty():
+		current = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("Current branch")
+	var all: bool = bool(info.get("all_branches", false))
+	_scope_menu.set_item_text(0, tr("Current branch"))
+	_scope_menu.set_item_text(1, tr("All branches"))
+	_scope_menu.set_item_checked(0, not all)
+	_scope_menu.set_item_checked(1, all)
+	_scope_menu.set_item_tooltip(0, current)
+	_scope_button.set_pressed_no_signal(all)
+	_scope_button.disabled = session == null or not session.is_ready()
+	_scope_button.tooltip_text = (tr("All branches") if all else current) + "\n" + tr("Filter options")
+	_list_header.hide_status()
+	_list_header.tooltip_text = ""
+	if head.is_empty():
+		_list_header.tooltip_text = tr("No commits yet") if session != null and session.is_ready() else tr("Loading…")
+	elif branch.is_empty():
+		_list_header.tooltip_text = tr("Detached HEAD · no upstream comparison")
+	elif not bool(info.get("ready", false)):
+		_list_header.tooltip_text = tr("Checking upstream…")
+	elif bool(info.get("gone", false)):
+		_list_header.tooltip_text = tr("Upstream gone")
+	elif String(info.get("upstream", "")).is_empty():
+		_list_header.tooltip_text = tr("No upstream · Publish branch")
+	else:
+		var upstream: String = String(info["upstream"]).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
+		_list_header.show_status(AppTheme.icon(&"GitPush"), tr("%d outgoing") % int(info["outgoing"]),
+				get_theme_color(&"outgoing_color", CommitList.LIST_THEME_TYPE),
+				tr("Commits on the current branch that are not in %s. Based on local refs; fetch to refresh.") % upstream)
 
 
 func commit_list() -> CommitList:
@@ -243,7 +351,12 @@ func _try_parent_navigation() -> void:
 
 func _on_commit_selected() -> void:
 	_cancel_parent_navigation()
-	_details.show_commit(_commit_list.hash_at(_commit_list.cursor))
+	_selected_oid = _commit_list.hash_at(_commit_list.cursor)
+	if not _selected_oid.is_empty():
+		_restore_oid = ""
+		_head_pending = false
+		_follow_head = session != null and _selected_oid == String(session.status().get("oid", ""))
+	_details.show_commit(_selected_oid)
 	_update_header()
 
 
@@ -283,6 +396,7 @@ func _on_search_changed() -> void:
 ## The commit count, or while searching "Searching… 12 matches", "3 of 41
 ## matches" (the selected commit is the third) or "No matches".
 func _update_header() -> void:
+	_update_scope()
 	var info: Dictionary = session.search_info() if session != null else {}
 	if info.is_empty():
 		_list_header.set_text(tr(_commits_text))
@@ -322,6 +436,7 @@ func _on_files_key(event: InputEvent) -> void:
 
 func _apply_theme() -> void:
 	_left.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
+	_update_scope()
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
@@ -333,7 +448,10 @@ func _on_graph_changed(_start: int, _count: int) -> void:
 
 func _on_graph_reset() -> void:
 	_cancel_parent_navigation()
+	_head_pending = _head_pending or _follow_head
+	_restore_oid = _selected_oid if not _head_pending else ""
 	_graph_loading = true
+	_commit_list.select_only(-1)
 	_commits_text = tr("Reloading…")
 	_update_header()
 
@@ -344,13 +462,30 @@ func _on_graph_loaded(row_count: int, error: String) -> void:
 	_update_header()
 	_select_newest_if_none()
 	if row_count == 0:
-		_details.show_placeholder("No commits yet." if error.is_empty() else "")
+		_details.show_placeholder(tr("No commits yet.") if error.is_empty() else "")
 	_try_parent_navigation()
 	repo_loaded.emit(row_count, error)
 
 
-## Selects the newest commit while none is (on the first rows of a load).
 func _select_newest_if_none() -> void:
-	if _commit_list.cursor < 0 and _commit_list.row_count() > 0:
-		_commit_list.select_only(0)
+	if session == null or (_commit_list.cursor >= 0 and not _head_pending):
+		return
+	if not _restore_oid.is_empty():
+		var restored: int = session.graph_find_commit(_restore_oid)
+		if restored >= 0:
+			_restore_oid = ""
+			_select(restored)
+			return
+		if _graph_loading:
+			return
+		_restore_oid = ""
+	var head: String = String(session.status().get("oid", ""))
+	var row: int = session.graph_find_commit(head) if not head.is_empty() else -1
+	if row < 0 and _graph_loading:
+		return
+	_head_pending = false
+	if row >= 0:
+		_select(row)
+	elif _commit_list.row_count() > 0:
+		_select(0)
 

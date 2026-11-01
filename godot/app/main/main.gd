@@ -633,6 +633,20 @@ func _register_change_actions() -> void:
 				return page != null and page.view == WorktreeView.View.HISTORY \
 						and page.history().can_go_to_parent())
 	parent.hidden = true
+	var history_ready: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.view == WorktreeView.View.HISTORY and page.session.is_ready()
+	Actions.register(&"history.current_branch", "Show current branch history", "History",
+			func() -> void: current_page().history().set_all_branches(false), PackedStringArray(), history_ready)
+	Actions.register(&"history.all_branches", "Show all branches history", "History",
+			func() -> void: current_page().history().set_all_branches(true), PackedStringArray(), history_ready)
+	var current_commit: ActionRegistry.Action = Actions.register(&"history.go_to_current_commit", "Go to current commit", "History",
+			func() -> void: current_page().history().go_to_current_commit(), PackedStringArray(["F"]),
+			func() -> bool:
+				var focus: Control = get_viewport().gui_get_focus_owner()
+				return bool(history_ready.call()) and not (focus is LineEdit or focus is TextEdit) \
+						and current_page().history().can_go_to_current_commit())
+	current_commit.hidden = true
 	Actions.register(&"changes.open_file", "Open file", "Changes",
 			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",

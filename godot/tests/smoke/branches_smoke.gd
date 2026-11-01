@@ -182,6 +182,7 @@ func run() -> void:
 	press("Ctrl+Shift+H")
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
+	expect(Actions.run_action(&"history.all_branches"), "all branches exposes the commit on renamed")
 	var row: int = await _row_with_subject(session, "Edit line 1")
 	expect(row >= 0, "the commit to pick is in the graph")
 	list.grab_focus()

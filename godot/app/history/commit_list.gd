@@ -114,7 +114,20 @@ func set_session(value: RepoSession) -> void:
 
 
 func row_data(row: int) -> Dictionary:
-	return _rows.get(row, {})
+	if _rows.has(row):
+		return _rows[row]
+	if session == null or row < 0:
+		return {}
+	var rows: Array[Dictionary] = session.graph_rows(row, 1)
+	return rows[0] if not rows.is_empty() else {}
+
+
+func _get_tooltip(at_position: Vector2) -> String:
+	var data: Dictionary = row_data(row_at(at_position))
+	if not bool(data.get("outgoing", false)) or session == null:
+		return ""
+	var upstream: String = String(session.history_info().get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
+	return tr("Outgoing · not in %s") % upstream
 
 
 ## Full hash of a row (fetched when it is outside the cached window), or "".
@@ -203,7 +216,15 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	_graph.draw(self, geometry, rect.position, _dim_node_alpha if dimmed else 1.0)
 
 	var subject_x: float = rect.position.x + _graph.width_for(_graph_lanes) + _padding
-	var subject_width: float = rect.end.x - _padding - subject_x
+	var icon_size: float = float(get_theme_constant(&"outgoing_icon_size", LIST_THEME_TYPE))
+	var subject_width: float = rect.end.x - _padding - subject_x - icon_size - _label_gap
+	if bool(data.get("outgoing", false)):
+		var icon_rect: Rect2 = Rect2(rect.end.x - _padding - icon_size,
+				rect.position.y + (rect.size.y - icon_size) * 0.5, icon_size, icon_size)
+		var color: Color = get_theme_color(&"outgoing_color", LIST_THEME_TYPE)
+		if dimmed:
+			color.a *= _dim_node_alpha
+		draw_texture_rect(AppTheme.icon(&"GitPush"), icon_rect, false, color)
 	if subject_width != _text_layout_width:
 		_text.clear()
 		_text_layout_width = subject_width

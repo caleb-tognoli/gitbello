@@ -346,6 +346,9 @@ func _check_pending_parents(page: RepoTab) -> void:
 	_queue_delayed(history, target)
 	history._on_graph_reset()
 	expect(history._pending_parent_oid.is_empty(), "a graph reset cancels navigation")
+	expect_eq(history.commit_list().cursor, -1, "a reset clears the stale row selection")
+	history._on_graph_loaded(5, "")
+	expect(await _select_ready(history, 0), "the source is restored after the reset")
 	var notices: Array[String] = []
 	history.notice.connect(func(_title: String, message: String) -> void: notices.append(message))
 	_queue_delayed(history, target)

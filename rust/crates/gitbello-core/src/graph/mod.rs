@@ -14,3 +14,10 @@ pub use loader::{
 };
 pub use log::{LogParseError, LogRecord, RecordSplitter, LOG_ARGS};
 pub use search::{CommitMatcher, CommitSearch, SEARCH_CHUNK_ROWS, SEARCH_JOB_LABEL};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HistoryScope {
+    #[default]
+    CurrentBranch,
+    AllBranches,
+}

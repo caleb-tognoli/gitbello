@@ -225,6 +225,16 @@ impl GraphIndex {
         })
     }
 
+    pub fn row_for_oid(&self, hex: &str) -> Option<usize> {
+        let oid = Oid::from_hex(hex).ok()?;
+        if self.hash_len != usize::from(oid.len) {
+            return None;
+        }
+        self.hashes
+            .chunks_exact(self.hash_len)
+            .position(|hash| hash == oid.as_bytes())
+    }
+
     /// Object id bytes of `row` (which must be loaded).
     pub fn hash(&self, row: usize) -> &[u8] {
         &self.hashes[row * self.hash_len..(row + 1) * self.hash_len]
