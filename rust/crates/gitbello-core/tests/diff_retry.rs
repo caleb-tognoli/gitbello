@@ -45,8 +45,17 @@ fn wait(rt: &mut Runtime, key: &Path, commit: bool, error: bool) {
     });
 }
 
-fn diff_commands(rt: &Runtime) -> u64 {
-    rt.command_log().latest_seq()
+/// Git commands run so far, minus the status, refs and stash refreshes the
+/// file watcher can start at any time: on Windows a repository with a stash
+/// reports a change to `.git/refs/heads` a debounce after it opens, and under
+/// load that refresh lands between two counts.
+fn diff_commands(rt: &Runtime) -> usize {
+    const REFRESHES: [&str; 5] = ["status", "remote", "for-each-ref", "stash", "worktree"];
+    rt.command_log()
+        .records_since(0)
+        .iter()
+        .filter(|r| !REFRESHES.contains(&r.command.split(' ').next().unwrap_or_default()))
+        .count()
 }
 
 #[test]

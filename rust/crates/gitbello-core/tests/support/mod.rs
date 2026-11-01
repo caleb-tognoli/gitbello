@@ -336,15 +336,18 @@ pub mod rt {
 
     pub const WAIT: Duration = Duration::from_secs(20);
 
-    /// A runtime on `repo` with auto-fetch off, opened and refreshed.
+    /// A runtime on `repo` with auto-fetch off, opened and refreshed. The
+    /// stash list loads in its own job, so wait for it too: under load it
+    /// can arrive well after status and refs.
     pub fn open(repo: &TestRepo) -> (Runtime, PathBuf) {
         let mut config = Config::default();
         config.auto_fetch_minutes = 0;
         let mut rt = Runtime::with_runner(config, None, repo.app_runner());
         let key = rt.open(repo.path());
         poll_until(&mut rt, |rt, _| {
-            rt.repo(&key)
-                .is_some_and(|s| s.status().is_some() && s.refs().is_some())
+            rt.repo(&key).is_some_and(|s| {
+                s.status().is_some() && s.refs().is_some() && s.stashes().is_some()
+            })
         });
         (rt, key)
     }
