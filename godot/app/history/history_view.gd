@@ -206,7 +206,7 @@ func _update_scope() -> void:
 		_list_header.tooltip_text = tr("Upstream gone")
 	elif String(info.get("upstream", "")).is_empty():
 		_list_header.tooltip_text = tr("No upstream · Publish branch")
-	else:
+	elif int(info.get("outgoing", 0)) > 0:
 		var upstream: String = String(info["upstream"]).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
 		_list_header.show_status(AppTheme.icon(&"GitPush"), tr("%d outgoing") % int(info["outgoing"]),
 				get_theme_color(&"outgoing_color", CommitList.LIST_THEME_TYPE),
