@@ -3,6 +3,7 @@
 
 mod app_core;
 mod convert;
+mod live_resize;
 mod repo_session;
 mod runtime_cell;
 
@@ -15,5 +16,17 @@ mod entry {
     struct GitbelloExtension;
 
     #[gdextension]
-    unsafe impl ExtensionLibrary for GitbelloExtension {}
+    unsafe impl ExtensionLibrary for GitbelloExtension {
+        fn on_stage_init(stage: InitStage) {
+            if stage == InitStage::MainLoop {
+                crate::live_resize::start();
+            }
+        }
+
+        fn on_stage_deinit(stage: InitStage) {
+            if stage == InitStage::MainLoop {
+                crate::live_resize::stop();
+            }
+        }
+    }
 }
