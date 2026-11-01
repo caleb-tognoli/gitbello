@@ -19,6 +19,7 @@ func _init() -> void:
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.set_column_expand(1, false)
 	layout.add_child(_tree)
+	AutoScroll.enable(_tree)
 	var buttons: HBoxContainer = HBoxContainer.new()
 	layout.add_child(buttons)
 	for spec: Array in [["Change", _start_capture], ["Reset", _reset], ["Remove", _remove]]:

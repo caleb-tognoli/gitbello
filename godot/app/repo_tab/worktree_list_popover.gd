@@ -22,6 +22,7 @@ var _chose: bool = false
 func _ready() -> void:
 	theme_type_variation = &"WorktreeListPanel"
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(_scroll)
 	add_child(_scroll)
 	_rows.theme_type_variation = &"WorktreeListRows"
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL

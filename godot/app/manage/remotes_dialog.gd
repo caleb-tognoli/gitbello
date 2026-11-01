@@ -28,6 +28,7 @@ func _ready() -> void:
 	_tree.item_selected.connect(_update_buttons)
 	_tree.item_activated.connect(func() -> void: _run("url"))
 	box.add_child(_tree)
+	AutoScroll.enable(_tree)
 	var row: HBoxContainer = HBoxContainer.new()
 	box.add_child(row)
 	for entry: Array in [["add", "Add…", &"Add"], ["url", "Change URL…", &"Rename"], ["rename", "Rename…", &"Rename"],

@@ -541,6 +541,32 @@ pub fn resolve_block(bytes: &[u8], block: usize, choice: BlockChoice) -> Option<
     Some(out)
 }
 
+/// Records in `resolved` (line ranges earlier choices wrote) the lines
+/// `choice` writes in place of `block`: ranges below the block move by the
+/// lines it gains or loses.
+pub fn record_choice(
+    resolved: &mut Vec<std::ops::Range<usize>>,
+    block: &ConflictBlock,
+    choice: BlockChoice,
+) {
+    let written = match choice {
+        BlockChoice::Ours => block.ours().len(),
+        BlockChoice::Theirs => block.theirs().len(),
+        BlockChoice::OursThenTheirs | BlockChoice::TheirsThenOurs => {
+            block.ours().len() + block.theirs().len()
+        }
+    };
+    let replaced = block.end + 1 - block.start;
+    for range in resolved.iter_mut() {
+        if range.start > block.start {
+            *range = range.start + written - replaced..range.end + written - replaced;
+        }
+    }
+    if written > 0 {
+        resolved.push(block.start..block.start + written);
+    }
+}
+
 /// A conflicted file as the resolver shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictFile {
@@ -803,6 +829,27 @@ impl UndoMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_choices_move_with_later_ones_above() {
+        let file = |text: &[u8]| parse_blocks(&split_lines(text));
+        // Two blocks: lines 1..6 and 7..12 (2 ours lines, 1 theirs line).
+        let text = b"x\n<<<<<<< o\na1\na2\n=======\nb1\n>>>>>>> t\n<<<<<<< o\nc1\nc2\n=======\nd1\n>>>>>>> t\ny\n";
+        let blocks = file(text);
+        let mut resolved = Vec::new();
+        // The second block first: its 2 ours lines replace 6 lines at 7.
+        record_choice(&mut resolved, &blocks[1], BlockChoice::Ours);
+        assert_eq!(resolved, vec![7..9]);
+        // Then the first, keeping both sides: 3 lines replace 6, so the
+        // earlier range moves up 3.
+        record_choice(&mut resolved, &blocks[0], BlockChoice::OursThenTheirs);
+        assert_eq!(resolved, vec![4..6, 1..4]);
+        // A side with no lines writes nothing.
+        let empty = file(b"<<<<<<< o\n=======\nb\n>>>>>>> t\n");
+        let mut none = Vec::new();
+        record_choice(&mut none, &empty[0], BlockChoice::Ours);
+        assert!(none.is_empty());
+    }
 
     #[test]
     fn parses_merge_tree_with_conflicts() {

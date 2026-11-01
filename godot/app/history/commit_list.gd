@@ -4,7 +4,9 @@ extends VirtualList
 ## `RepoSession.graph_rows()`. Only a window around the visible rows is fetched.
 ## Hash, author and date are in the commit details. While a search is on
 ## (`set_search`), rows it does not match are dimmed (subject and graph dot)
-## and the query is highlighted in the subjects of the rows it matches.
+## and the query is highlighted in the subjects of the rows it matches,
+## and a `MarkStrip` beside the scroll bar shows where the matches are (the
+## selected one stronger); clicking it scrolls there.
 
 const LIST_THEME_TYPE: StringName = &"CommitList"
 ## Rows fetched beyond each edge of the visible range.
@@ -41,6 +43,7 @@ class RowText:
 
 
 var _graph: GraphView = GraphView.new()
+var _strip: MarkStrip = MarkStrip.new()
 var _rows: Dictionary[int, Dictionary] = {}
 var _geometry: Dictionary[int, GraphView.RowGeometry] = {}
 var _text: Dictionary[int, RowText] = {}
@@ -75,6 +78,12 @@ var _label_rects: Dictionary[int, Array] = {}
 
 func _ready() -> void:
 	super()
+	_strip.visible = false
+	_strip.overview_source = func(buckets: int) -> PackedByteArray:
+		return session.search_overview(buckets) if session != null else PackedByteArray()
+	_strip.jumped.connect(func(fraction: float) -> void:
+		set_scroll_offset(fraction * row_count() * row_height() - size.y / 2.0))
+	add_child(_strip, false, Node.INTERNAL_MODE_FRONT)
 	_update_theme()
 
 
@@ -117,6 +126,7 @@ func set_session(value: RepoSession) -> void:
 	select_only(-1)
 	set_scroll_offset(0.0)
 	refresh()
+	_update_strip()
 
 
 func row_data(row: int) -> Dictionary:
@@ -163,6 +173,7 @@ func label_at(row: int, at: Vector2) -> Dictionary:
 ## come with the rows: call `reload_matches` when the search reports.
 func set_search(query: String) -> void:
 	_query = query.strip_edges()
+	_update_strip()
 	queue_redraw()
 
 
@@ -173,7 +184,24 @@ func search_query() -> String:
 ## Fetches the rows again for their new match flags.
 func reload_matches() -> void:
 	_clear_window()
+	_update_strip()
 	queue_redraw()
+
+
+## The strip of matches beside the scroll bar.
+func match_strip() -> MarkStrip:
+	return _strip
+
+
+## Shows the strip while a search has matches, with their marks fetched again.
+func _update_strip() -> void:
+	_strip.visible = not _query.is_empty() and session != null 			and int(session.search_info().get("matches", 0)) > 0
+	_strip.refresh()
+	queue_redraw()
+
+
+func _scroll_column_width() -> float:
+	return super() + (_strip.strip_width() if _strip.visible else 0.0)
 
 
 ## Local date and time (`YYYY-MM-DD HH:MM`) of a unix time.
@@ -187,6 +215,13 @@ func _get_row_count() -> int:
 
 func _draw() -> void:
 	var started: int = Time.get_ticks_usec()
+	if _strip.visible:
+		# Beside the scroll bar, which shows and hides with the row count.
+		var width: float = _strip.strip_width()
+		_strip.position = Vector2(size.x - _scroll_column_width(), 0.0)
+		_strip.size = Vector2(width, size.y)
+		var current: bool = cursor >= 0 and session.search_match_index(cursor) >= 0
+		_strip.current = (cursor + 0.5) / maxf(1.0, float(row_count())) if current else -1.0
 	super()
 	last_draw_usec = Time.get_ticks_usec() - started
 
@@ -326,6 +361,7 @@ func _clear_window() -> void:
 
 func _on_graph_changed(_start: int, _count: int) -> void:
 	refresh()
+	_strip.refresh()
 
 
 ## A new load replaced the graph: drop cached rows, keep the scroll position.

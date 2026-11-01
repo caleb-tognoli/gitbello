@@ -30,6 +30,7 @@ func _ready() -> void:
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_selected.connect(_update_buttons)
 	box.add_child(_tree)
+	AutoScroll.enable(_tree)
 	var row: HBoxContainer = HBoxContainer.new()
 	box.add_child(row)
 	for entry: Array in [["new", "Tag HEAD…", &"Add"], ["push", "Push", &"GitPush"], ["delete", "Delete…", &"Remove"]]:

@@ -8,7 +8,8 @@ const MAIN: PackedScene = preload("res://app/main/main.tscn")
 func run() -> void:
 	var before: Dictionary = Core.settings()
 	var before_theme: String = Core.theme_choice()
-	Core.set_settings({"auto_fetch_minutes": 10, "branch_prefix": "", "accent": "", "language": "en"})
+	Core.set_settings({"auto_fetch_minutes": 10, "branch_prefix": "", "accent": "", "added_color": "",
+		"removed_color": "", "language": "en"})
 	L10n.apply("en")
 	Core.set_theme_choice("system")
 	var main: Main = MAIN.instantiate() as Main
@@ -66,6 +67,36 @@ func run() -> void:
 	expect(ThemeManager.accent.is_equal_approx(Color("e0569a")), "the accent applies immediately")
 	settings.get_revert_button(&"accent").pressed.emit()
 	expect_eq(String(Core.settings()["accent"]), "", "the default accent is restored")
+
+	# Added and removed colours: one colour in both themes, back to each
+	# theme's own on revert.
+	var project: Theme = ThemeDB.get_project_theme()
+	var own_added: Color = project.get_color(&"added_mark", &"DiffView")
+	var added: ColorPickerButton = settings.get_control(&"added_color") as ColorPickerButton
+	expect(added.color.is_equal_approx(own_added), "the added picker shows the theme's colour")
+	added.color = Color("2bb5a0")
+	added.color_changed.emit(added.color)
+	expect_eq(String(Core.settings()["added_color"]), "#2bb5a0", "the added colour saves")
+	expect(project.get_color(&"added_mark", &"DiffView").is_equal_approx(Color("2bb5a0")),
+			"diffs use it at once")
+	expect(project.get_color(&"added_mark", &"DiffMinimap").is_equal_approx(Color("2bb5a0")),
+			"and so does the minimap")
+	var removed: ColorPickerButton = settings.get_control(&"removed_color") as ColorPickerButton
+	removed.color = Color("d2691e")
+	removed.color_changed.emit(removed.color)
+	expect_eq(String(Core.settings()["removed_color"]), "#d2691e", "the removed colour saves")
+	theme.select(1)
+	theme.item_selected.emit(1)
+	expect(project.get_color(&"added_mark", &"DiffView").is_equal_approx(Color("2bb5a0")),
+			"the dark theme keeps the chosen colour")
+	expect(project.get_color(&"removed_mark", &"DiffView").is_equal_approx(Color("d2691e")),
+			"and the removed one")
+	settings.get_revert_button(&"added_color").pressed.emit()
+	expect_eq(String(Core.settings()["added_color"]), "", "revert clears the added colour")
+	expect(project.get_color(&"added_mark", &"DiffView").is_equal_approx(AppTheme.palette(false).added),
+			"diffs go back to the theme's green")
+	theme.select(2)
+	theme.item_selected.emit(2)
 
 	minutes.value = 20
 	settings.custom_action.emit(&"reset")

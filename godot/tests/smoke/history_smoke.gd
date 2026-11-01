@@ -141,6 +141,8 @@ func _check_search(session: RepoSession, list: CommitList) -> void:
 	expect_eq(session.next_match(2, false), 1, "from a row that is not a match")
 	expect_eq(session.search_match_index(1), 1, "row 1 is the second match")
 	expect_eq(session.search_match_index(2), -1, "row 2 is no match")
+	expect_eq(session.search_overview(6), PackedByteArray([1, 1, 1, 1, 0, 0]),
+			"the overview marks the top two of three rows")
 	var oid: String = list.hash_at(2)
 	session.search_commits(oid.left(7))
 	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
@@ -170,6 +172,16 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	expect(await wait_until(func() -> bool: return history.status_text() == "2 of 2 matches"),
 			"the selected commit is the second match: %s" % history.status_text())
 	expect(history.match_buttons().all(func(b: Button) -> bool: return b.visible), "the match buttons show while searching")
+	var strip: MarkStrip = list.match_strip()
+	expect(strip.visible, "the strip of matches shows")
+	await get_tree().process_frame
+	expect(strip.position.x + strip.size.x <= list.size.x and strip.position.x >= list.content_width(),
+			"it sits beside the scroll bar, outside the rows (%s)" % strip.position)
+	var marked: int = 0
+	for flag: int in strip.overview():
+		marked += flag
+	expect(marked > 0, "it marks the matches")
+	expect(strip.current >= 0.0, "the selected match is marked stronger")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "Enter wraps to the first match")
 	expect_eq(history.status_text(), "1 of 2 matches", "the header follows")
@@ -190,6 +202,7 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	field.set_text("zzz-none")
 	expect(await wait_until(func() -> bool: return history.status_text() == "No matches"),
 			"no matches: %s" % history.status_text())
+	expect(not list.match_strip().visible, "no strip without matches")
 	field.focus_text()
 	press("Escape")
 	expect_eq(field.text(), "", "Escape clears the search")

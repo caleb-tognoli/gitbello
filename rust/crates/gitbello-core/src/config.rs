@@ -76,8 +76,14 @@ pub struct Config {
     /// Accent colour as `#rrggbb` (see [`parse_accent`]); `None` uses the
     /// app's default.
     pub accent: Option<String>,
+    /// Colours of added and removed lines as `#rrggbb` (see
+    /// [`parse_accent`]), the same in both themes; `None` uses each theme's.
+    pub added_color: Option<String>,
+    pub removed_color: Option<String>,
     /// Show diffs side by side instead of unified.
     pub diff_side_by_side: bool,
+    /// Show the minimap beside diffs (else only its strip of change marks).
+    pub diff_minimap: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
     pub keybindings: BTreeMap<String, String>,
     /// Keys this version does not model, kept as read.
@@ -157,7 +163,10 @@ impl Default for Config {
             theme: ThemeChoice::System,
             language: LanguageChoice::System,
             accent: None,
+            added_color: None,
+            removed_color: None,
             diff_side_by_side: false,
+            diff_minimap: true,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
@@ -184,6 +193,17 @@ pub fn parse_accent(text: &str) -> Option<String> {
     Some(format!("#{full}"))
 }
 
+/// An optional `#rrggbb` colour at `key` (see [`parse_accent`]).
+fn take_color(table: &mut Table, key: &'static str) -> Result<Option<String>, ConfigError> {
+    match take_string(table, key)? {
+        None => Ok(None),
+        Some(text) => parse_accent(&text).map(Some).ok_or(ConfigError::Invalid {
+            key,
+            expected: "a colour like \"#4c9cff\"",
+        }),
+    }
+}
+
 const KEYS: &[&str] = &[
     "git_path",
     "known_repos",
@@ -200,7 +220,10 @@ const KEYS: &[&str] = &[
     "theme",
     "language",
     "accent",
+    "added_color",
+    "removed_color",
     "diff_side_by_side",
+    "diff_minimap",
     "keybindings",
 ];
 
@@ -282,14 +305,11 @@ impl Config {
                     expected: "\"system\", \"en\" or \"it\"",
                 })?,
             },
-            accent: match take_string(&mut table, "accent")? {
-                None => None,
-                Some(text) => Some(parse_accent(&text).ok_or(ConfigError::Invalid {
-                    key: "accent",
-                    expected: "a colour like \"#4c9cff\"",
-                })?),
-            },
+            accent: take_color(&mut table, "accent")?,
+            added_color: take_color(&mut table, "added_color")?,
+            removed_color: take_color(&mut table, "removed_color")?,
             diff_side_by_side: take_bool(&mut table, "diff_side_by_side")?.unwrap_or(false),
+            diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
             keybindings: take_string_map(&mut table, "keybindings")?,
             extra: table,
         };
@@ -347,13 +367,20 @@ impl Config {
             "language".into(),
             Value::String(self.language.as_str().into()),
         );
-        if let Some(accent) = &self.accent {
-            table.insert("accent".into(), Value::String(accent.clone()));
+        for (key, color) in [
+            ("accent", &self.accent),
+            ("added_color", &self.added_color),
+            ("removed_color", &self.removed_color),
+        ] {
+            if let Some(color) = color {
+                table.insert(key.into(), Value::String(color.clone()));
+            }
         }
         table.insert(
             "diff_side_by_side".into(),
             Value::Boolean(self.diff_side_by_side),
         );
+        table.insert("diff_minimap".into(), Value::Boolean(self.diff_minimap));
         if !self.keybindings.is_empty() {
             let bindings: Table = self
                 .keybindings
@@ -508,7 +535,10 @@ mod tests {
             theme: ThemeChoice::Dark,
             language: LanguageChoice::Italian,
             accent: Some("#e0569a".into()),
+            added_color: Some("#2bb5a0".into()),
+            removed_color: Some("#d2691e".into()),
             diff_side_by_side: true,
+            diff_minimap: false,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };
@@ -598,6 +628,13 @@ mod tests {
         assert!(matches!(
             Config::parse("accent = \"blue\""),
             Err(ConfigError::Invalid { key: "accent", .. })
+        ));
+        assert!(matches!(
+            Config::parse("removed_color = \"#12\""),
+            Err(ConfigError::Invalid {
+                key: "removed_color",
+                ..
+            })
         ));
         assert!(matches!(
             Config::parse("[keybindings]\npalette = 3"),

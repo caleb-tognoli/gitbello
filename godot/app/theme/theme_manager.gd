@@ -1,8 +1,9 @@
 class_name ThemeManager
 extends RefCounted
 ## Picks light or dark (following the OS unless the user chose one), the
-## accent colour and the UI scale for HiDPI screens (PLAN §3.7), and applies
-## the theme `AppTheme` builds from them.
+## accent colour, the colours of added and removed lines and the UI scale for
+## HiDPI screens (PLAN §3.7), and applies the theme `AppTheme` builds from
+## them.
 
 const BASE_DPI: float = 96.0
 
@@ -21,6 +22,13 @@ static func is_light(choice: String) -> bool:
 			return false
 		_:
 			return not DisplayServer.is_dark_mode()
+
+
+## The configured colour at settings key `key` (`added_color`,
+## `removed_color`), or transparent for the theme's own.
+static func configured_color(key: StringName) -> Color:
+	var text: String = String(Core.settings().get(key, ""))
+	return Color.from_string(text, Color.TRANSPARENT) if not text.is_empty() else Color.TRANSPARENT
 
 
 ## The configured accent colour, or the default one.
@@ -43,7 +51,8 @@ static func apply(root: Node) -> void:
 	# the replacement theme (including shelf headings during a live switch).
 	var previous: Theme = project_theme.duplicate() as Theme
 	project_theme.clear()
-	project_theme.merge_with(AppTheme.build(light, accent))
+	project_theme.merge_with(AppTheme.build(light, accent, configured_color(&"added_color"),
+			configured_color(&"removed_color")))
 	# What Windows fills newly exposed window area with until the next frame
 	# (while the border is dragged), instead of Godot's default grey.
 	RenderingServer.set_default_clear_color(AppTheme.palette(light, accent).background)

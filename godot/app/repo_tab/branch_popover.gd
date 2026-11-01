@@ -80,6 +80,7 @@ func _ready() -> void:
 		_set_arrow(item)
 		_fit.call_deferred())
 	box.add_child(_tree)
+	AutoScroll.enable(_tree)
 	_empty.theme_type_variation = &"DimLabel"
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

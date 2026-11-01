@@ -97,6 +97,7 @@ func _ready() -> void:
 		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
 		&"diff.toggle_side_by_side": func() -> bool: return Core.diff_side_by_side(),
+		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
 		&"diff.toggle_whole_file": func() -> bool:
 			var panel: DiffPanel = _shown_diff_panel()
 			return panel != null and panel.whole_file_button().button_pressed,
@@ -560,6 +561,13 @@ func _register_actions() -> void:
 	Actions.register(&"diff.toggle_whole_file", "Show whole file", "View",
 			func() -> void: _shown_diff_panel().toggle_whole_file(), PackedStringArray(),
 			func() -> bool: return _shown_diff_panel() != null)
+	Actions.register(&"diff.toggle_minimap", "Diff minimap", "View", _toggle_minimap)
+	Actions.register(&"diff.next_change", "Next change", "View",
+			func() -> void: _navigable_diff().jump_to_change(true), PackedStringArray(["F7"]),
+			func() -> bool: return _navigable_diff() != null)
+	Actions.register(&"diff.previous_change", "Previous change", "View",
+			func() -> void: _navigable_diff().jump_to_change(false), PackedStringArray(["Shift+F7"]),
+			func() -> bool: return _navigable_diff() != null)
 	Actions.register(&"diff.retry", "Retry diff", "View",
 			func() -> void:
 				var page: RepoTab = current_page()
@@ -1123,6 +1131,19 @@ func _focused_diff() -> DiffView:
 	return get_viewport().gui_get_focus_owner() as DiffView
 
 
+## The diff that the next and previous change move in: the focused one,
+## else the one on screen; null when it has no rows or no changes source.
+func _navigable_diff() -> DiffView:
+	var diff: DiffView = _focused_diff()
+	if diff == null:
+		for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
+			var panel: DiffPanel = node as DiffPanel
+			if panel != null and panel.is_visible_in_tree() and panel.view().row_count() > 0:
+				diff = panel.view()
+				break
+	return diff if diff != null and diff.row_count() > 0 and diff.change_source.is_valid() else null
+
+
 ## The diff panel on screen that can show its whole file, or null.
 func _shown_diff_panel() -> DiffPanel:
 	for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
@@ -1136,6 +1157,12 @@ func _toggle_side_by_side() -> void:
 	var value: bool = not Core.diff_side_by_side()
 	Core.set_diff_side_by_side(value)
 	get_tree().call_group(DiffPanel.GROUP, &"set_side_by_side", value)
+
+
+func _toggle_minimap() -> void:
+	var value: bool = not Core.diff_minimap()
+	Core.set_diff_minimap(value)
+	get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", value)
 
 
 func _set_theme(choice: String) -> void:

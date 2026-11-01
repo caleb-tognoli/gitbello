@@ -303,6 +303,7 @@ func add_text(key: String, label: String, value: String = "", placeholder: Strin
 	text.text_changed.connect(_touch.bind(key))
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_box.add_child(text)
+	AutoScroll.enable(text)
 	_fields[key] = text
 	return text
 

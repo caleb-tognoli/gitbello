@@ -45,6 +45,7 @@ func _ready() -> void:
 	_scroll.resized.connect(_queue_reveal)
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	AutoScroll.enable(_scroll)
 	_scroll.follow_focus = true
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_chips.theme_type_variation = &"ChipRow"

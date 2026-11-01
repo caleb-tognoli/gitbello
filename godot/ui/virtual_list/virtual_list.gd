@@ -4,8 +4,8 @@ extends Control
 ##
 ## Subclasses override `_get_row_count()`, `_draw_row()` and optionally
 ## `_prepare_rows()`, then call `refresh()` when the row count changes.
-## Handles scrolling, keyboard navigation, multi-select (Ctrl/Shift) and
-## context-menu requests.
+## Handles scrolling (with middle-click autoscroll, see `AutoScroll`), keyboard
+## navigation, multi-select (Ctrl/Shift) and context-menu requests.
 
 signal selection_changed()
 signal row_activated(row: int)
@@ -21,6 +21,13 @@ var cursor: int = -1
 var draws_selection: bool = true
 ## Keep the cursor's outline when the list does not have keyboard focus.
 var draws_unfocused_cursor: bool = false
+## Show the scroll bar when the rows overflow (off for a subclass that draws
+## its own scroll column; the bar still holds the offset).
+var shows_scroll_bar: bool = true:
+	set(value):
+		shows_scroll_bar = value
+		if is_node_ready():
+			_update_scroll_range()
 
 var _row_count: int = 0
 var _selected: Dictionary[int, bool] = {}
@@ -38,6 +45,7 @@ func _ready() -> void:
 	_scroll_bar.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
 	_scroll_bar.value_changed.connect(_on_scroll_changed)
 	resized.connect(_update_scroll_range)
+	AutoScroll.enable(self)
 	refresh()
 
 
@@ -82,6 +90,17 @@ func set_scroll_offset(offset: float) -> void:
 	_scroll_bar.value = clampf(offset, 0.0, maxf(0.0, _scroll_bar.max_value - _scroll_bar.page))
 
 
+## Axes the list can scroll now (0 or 1 each); a subclass that scrolls
+## sideways adds x.
+func scroll_axes() -> Vector2i:
+	return Vector2i(0, 1 if _row_count * row_height() > size.y else 0)
+
+
+## Scrolls by `delta` pixels; a subclass that scrolls sideways uses x.
+func scroll_by(delta: Vector2) -> void:
+	set_scroll_offset(scroll_offset() + delta.y)
+
+
 func first_visible_row() -> int:
 	return int(scroll_offset() / row_height())
 
@@ -90,9 +109,20 @@ func visible_row_count() -> int:
 	return int(ceil(size.y / row_height())) + 1
 
 
-## Width available to rows (excludes the scroll bar when it is shown).
+## Width available to rows (excludes the scroll column).
 func content_width() -> float:
-	return size.x - (_scroll_bar.size.x if _scroll_bar.visible else 0.0)
+	return size.x - _scroll_column_width()
+
+
+## Width of the scroll column on the right: the scroll bar when it is shown.
+## Override for a column of its own.
+func _scroll_column_width() -> float:
+	return _scroll_bar.size.x if _scroll_bar.visible else 0.0
+
+
+## Furthest the rows scroll down, in pixels.
+func max_scroll_offset() -> float:
+	return maxf(0.0, _scroll_bar.max_value - _scroll_bar.page)
 
 
 func row_at(at_position: Vector2) -> int:
@@ -260,7 +290,7 @@ func _update_scroll_range() -> void:
 	var content: float = _row_count * row_height()
 	_scroll_bar.max_value = content
 	_scroll_bar.page = size.y
-	_scroll_bar.visible = content > size.y
+	_scroll_bar.visible = shows_scroll_bar and content > size.y
 	set_scroll_offset(scroll_offset())
 
 

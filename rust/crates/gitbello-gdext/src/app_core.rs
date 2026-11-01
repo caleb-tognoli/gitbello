@@ -819,6 +819,22 @@ impl AppCore {
         .unwrap_or(false)
     }
 
+    /// Whether diffs show the minimap (saved in the config); without it
+    /// only the strip of change marks is shown.
+    #[func]
+    fn diff_minimap(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().diff_minimap).unwrap_or(true)
+    }
+
+    #[func]
+    fn set_diff_minimap(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().diff_minimap = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
     /// `ff-only`, `merge` or `rebase`: what a plain pull does.
     #[func]
     fn pull_mode(&self) -> GString {
@@ -879,9 +895,10 @@ impl AppCore {
 
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
-    /// worktree_template, branch_prefix, language, accent, clone_folder}`; an
-    /// empty terminal command means the platform's, an empty accent the
-    /// app's default (else `#rrggbb`), an empty clone folder the last one used.
+    /// worktree_template, branch_prefix, language, accent, added_color,
+    /// removed_color, clone_folder, diff_minimap}`; an empty terminal command
+    /// means the platform's, an empty colour the theme's (else `#rrggbb`), an
+    /// empty clone folder the last one used.
     #[func]
     fn settings(&self) -> VarDictionary {
         runtime_cell::with(|rt| {
@@ -895,7 +912,10 @@ impl AppCore {
                 "branch_prefix" => &gstr(&c.branch_prefix),
                 "language" => c.language.as_str(),
                 "accent" => &gstr(c.accent.as_deref().unwrap_or_default()),
+                "added_color" => &gstr(c.added_color.as_deref().unwrap_or_default()),
+                "removed_color" => &gstr(c.removed_color.as_deref().unwrap_or_default()),
                 "clone_folder" => &c.clone_folder.as_deref().map_or_else(GString::new, path_str),
+                "diff_minimap" => c.diff_minimap,
             }
         })
         .unwrap_or_default()
@@ -943,16 +963,35 @@ impl AppCore {
                 None => return gstr("Language must be system, en or it."),
             },
         };
-        let accent = match text("accent") {
+        // `None` leaves a colour, `Some(None)` clears it.
+        let color = |key: &str| -> Result<Option<Option<String>>, ()> {
+            match text(key) {
+                None => Ok(None),
+                Some(c) if c.trim().is_empty() => Ok(Some(None)),
+                Some(c) => parse_accent(&c).map(|c| Some(Some(c))).ok_or(()),
+            }
+        };
+        let Ok(accent) = color("accent") else {
+            return gstr("The accent colour must look like #4c9cff.");
+        };
+        let Ok(added_color) = color("added_color") else {
+            return gstr("The added colour must look like #4c9cff.");
+        };
+        let Ok(removed_color) = color("removed_color") else {
+            return gstr("The removed colour must look like #4c9cff.");
+        };
+        let minimap = match settings.get("diff_minimap") {
             None => None,
-            Some(a) if a.trim().is_empty() => Some(None),
-            Some(a) => match parse_accent(&a) {
-                Some(a) => Some(Some(a)),
-                None => return gstr("The accent colour must look like #4c9cff."),
+            Some(value) => match value.try_to::<bool>() {
+                Ok(shown) => Some(shown),
+                Err(_) => return gstr("Show minimap must be true or false."),
             },
         };
         runtime_cell::with(|rt| {
             let config = rt.config_mut();
+            if let Some(shown) = minimap {
+                config.diff_minimap = shown;
+            }
             if let Some(mode) = pull_mode {
                 config.pull_mode = mode;
             }
@@ -977,6 +1016,12 @@ impl AppCore {
             }
             if let Some(accent) = accent {
                 config.accent = accent;
+            }
+            if let Some(added) = added_color {
+                config.added_color = added;
+            }
+            if let Some(removed) = removed_color {
+                config.removed_color = removed;
             }
             if let Some(folder) = text("clone_folder") {
                 let folder = folder.trim();

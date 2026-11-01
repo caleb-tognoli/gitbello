@@ -460,6 +460,20 @@ impl DiffLayout {
         }
     }
 
+    /// The rows that open a gap, top down, with the gap: each hunk header
+    /// (its gap is above it) and the end row.
+    pub fn gap_rows(&self, split: bool) -> impl Iterator<Item = (usize, usize)> + '_ {
+        let last = self.gaps.len().saturating_sub(1);
+        self.runs(split)
+            .runs
+            .iter()
+            .filter_map(move |&(row, run)| match run {
+                Run::Header(i) => self.headers.get(i).map(|h| (row, h.hunk)),
+                Run::End => Some((row, last)),
+                _ => None,
+            })
+    }
+
     /// Number of gaps: one before each hunk and one after the last.
     pub fn gap_count(&self) -> usize {
         self.gaps.len()

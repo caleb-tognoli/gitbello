@@ -32,6 +32,9 @@ const CATEGORIES: Array = [
 			[&"language", "Language", &"option", ["System", "English", "Italian"],
 				["system", "en", "it"]],
 			[&"accent", "Accent colour", &"color"],
+			[&"added_color", "Added colour", &"change_color"],
+			[&"removed_color", "Removed colour", &"change_color"],
+			[&"diff_minimap", "Show minimap", &"check"],
 		],
 	],
 ]
@@ -46,6 +49,9 @@ const DETAILS: Dictionary = {
 	&"theme": "System follows the operating system's dark or light mode",
 	&"language": "System follows the operating system's language",
 	&"accent": "Used for selections, focused fields and active controls",
+	&"added_color": "Added lines in diffs, the minimap and change counts, in both themes",
+	&"removed_color": "Removed lines in diffs, the minimap and change counts, in both themes",
+	&"diff_minimap": "A small picture of the whole diff beside it. Off, only the strip of change marks shows.",
 }
 const DEFAULTS: Dictionary = {
 	&"pull_mode": "ff-only",
@@ -58,6 +64,9 @@ const DEFAULTS: Dictionary = {
 	&"theme": "system",
 	&"language": "system",
 	&"accent": "",
+	&"added_color": "",
+	&"removed_color": "",
+	&"diff_minimap": true,
 }
 
 var categories: ItemList = ItemList.new()
@@ -102,6 +111,7 @@ func _init() -> void:
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(scroll)
 	layout.add_child(scroll)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override(&"separation", 4)
@@ -174,6 +184,7 @@ func reset_to_defaults() -> void:
 	if not error.is_empty():
 		_show_error(&"", error)
 		return
+	get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", bool(DEFAULTS[&"diff_minimap"]))
 	Core.set_theme_choice(String(DEFAULTS[&"theme"]))
 	ThemeManager.apply(self)
 	L10n.apply(String(DEFAULTS[&"language"]))
@@ -260,6 +271,13 @@ func _create_control(key: StringName, kind: StringName, options: Array) -> Contr
 			return spin
 		&"color":
 			return _create_color_control(key)
+		&"change_color":
+			return _create_change_color_control(key)
+		&"check":
+			var check: CheckBox = CheckBox.new()
+			check.toggled.connect(func(on: bool) -> void: _set_value(key, on))
+			_refreshers[key] = func() -> void: check.set_pressed_no_signal(bool(_current_value(key)))
+			return check
 		_:
 			var option: OptionButton = OptionButton.new()
 			var labels: Array = options[0]
@@ -303,6 +321,31 @@ func _create_color_control(key: StringName) -> Control:
 	return row
 
 
+## A picker for the colour of added or removed lines; it shows the theme's
+## own colour until one is chosen.
+func _create_change_color_control(key: StringName) -> Control:
+	# In a row, so the picker keeps the accent picker's width.
+	var row: HBoxContainer = HBoxContainer.new()
+	var picker: ColorPickerButton = ColorPickerButton.new()
+	picker.edit_alpha = false
+	picker.custom_minimum_size.x = 64.0
+	row.add_child(picker)
+	row.set_meta(&"editor", picker)
+	picker.color_changed.connect(func(color: Color) -> void:
+		var own: Color = _theme_change_color(key)
+		_set_value(key, "" if color.is_equal_approx(own) else "#" + color.to_html(false)))
+	_refreshers[key] = func() -> void:
+		var color: Color = ThemeManager.configured_color(key)
+		picker.color = color if color.a > 0.0 else _theme_change_color(key)
+	return row
+
+
+## The theme's own colour for `key` (`added_color` or `removed_color`).
+func _theme_change_color(key: StringName) -> Color:
+	var p: AppTheme.Palette = AppTheme.palette(ThemeManager.light)
+	return p.added if key == &"added_color" else p.removed
+
+
 func _commit_line(key: StringName, line: LineEdit) -> void:
 	if not _refreshing:
 		_set_value(key, line.text.strip_edges())
@@ -320,8 +363,10 @@ func _set_value(key: StringName, value: Variant) -> bool:
 			error = L10n.set_choice(String(value))
 		else:
 			error = Core.set_settings({key: value})
-			if error.is_empty() and key == &"accent":
+			if error.is_empty() and key in [&"accent", &"added_color", &"removed_color"]:
 				ThemeManager.apply(self)
+			elif error.is_empty() and key == &"diff_minimap":
+				get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", bool(value))
 	_show_error(key, error)
 	if error.is_empty():
 		_refresh(key)

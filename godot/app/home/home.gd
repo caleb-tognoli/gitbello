@@ -84,6 +84,7 @@ func _ready() -> void:
 
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(_scroll)
 	# Rows reached with ↑↓ scroll into view.
 	_scroll.follow_focus = true
 	_scroll.get_v_scroll_bar().value_changed.connect(func(_value: float) -> void: _queue_summaries())

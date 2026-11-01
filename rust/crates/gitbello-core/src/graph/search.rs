@@ -99,6 +99,29 @@ impl CommitMatcher {
     }
 }
 
+/// One byte per bucket of `buckets` equal slices of `rows` rows from the
+/// top: 1 where a row of `matches` (ascending) falls, else 0. Matches past
+/// `rows` are left out. Fewer rows than buckets spread each row over the
+/// buckets it covers.
+pub fn match_overview(matches: &[u32], rows: usize, buckets: usize) -> Vec<u8> {
+    let mut out = vec![0; buckets];
+    if rows == 0 || buckets == 0 {
+        return out;
+    }
+    for &row in matches {
+        let row = row as usize;
+        if row >= rows {
+            break;
+        }
+        let from = row * buckets / rows;
+        let to = ((row + 1) * buckets).div_ceil(rows).max(from + 1);
+        for bucket in &mut out[from..to.min(buckets)] {
+            *bucket = 1;
+        }
+    }
+    out
+}
+
 /// Whether the hex form of `hash` starts with `digits` (nibble values).
 fn hash_starts_with(hash: &[u8], digits: &[u8]) -> bool {
     digits.len() <= hash.len() * 2
@@ -210,6 +233,12 @@ impl CommitSearch {
     pub fn match_index(&self, row: usize) -> Option<usize> {
         let row = u32::try_from(row).ok()?;
         self.lock_matches().binary_search(&row).ok()
+    }
+
+    /// Where the matches among the first `rows` rows are, in `buckets` equal
+    /// slices from the top (see [`match_overview`]).
+    pub fn overview(&self, rows: usize, buckets: usize) -> Vec<u8> {
+        match_overview(&self.lock_matches(), rows, buckets)
     }
 
     /// The first match after `row` (or before it when not `forward`),
@@ -340,6 +369,24 @@ mod tests {
             matcher.scan(index, 0..usize::MAX, &mut out);
         }
         out
+    }
+
+    #[test]
+    fn the_overview_places_matches_in_buckets() {
+        assert_eq!(match_overview(&[0, 5, 99], 100, 10), {
+            let mut out = vec![0; 10];
+            out[0] = 1;
+            out[9] = 1;
+            out
+        });
+        assert_eq!(match_overview(&[1], 4, 8), vec![0, 0, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(
+            match_overview(&[3, 50], 10, 5),
+            vec![0, 1, 0, 0, 0],
+            "rows past the end"
+        );
+        assert_eq!(match_overview(&[1], 0, 4), vec![0; 4]);
+        assert!(match_overview(&[1], 10, 0).is_empty());
     }
 
     #[test]

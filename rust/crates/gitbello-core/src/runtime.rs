@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -303,6 +304,13 @@ pub struct ConflictState {
     file: Option<ConflictFile>,
     layout: ConflictLayout,
     error: Option<GitError>,
+    /// Line ranges block choices wrote while the file was shown, for the
+    /// minimap; dropped when the file changes otherwise.
+    resolved: Vec<Range<usize>>,
+    /// `resolved` before each choice, newest last, for undo.
+    resolved_before: Vec<Vec<Range<usize>>>,
+    /// Hash of the content `resolved` belongs to.
+    resolved_for: Option<u64>,
 }
 
 impl ConflictState {
@@ -315,6 +323,9 @@ impl ConflictState {
             file: None,
             layout: ConflictLayout::default(),
             error: None,
+            resolved: Vec::new(),
+            resolved_before: Vec::new(),
+            resolved_for: None,
         }
     }
 
@@ -342,6 +353,22 @@ impl ConflictState {
         self.error.as_ref()
     }
 
+    /// Line ranges of the file that block choices wrote while it was shown.
+    pub fn resolved(&self) -> &[Range<usize>] {
+        &self.resolved
+    }
+
+    /// Keeps the resolved ranges only while the file is the one they were
+    /// recorded for.
+    fn check_resolved(&mut self) {
+        let content = self.file.as_ref().map(|f| content_hash(&f.content));
+        if content.is_none() || content != self.resolved_for {
+            self.resolved.clear();
+            self.resolved_before.clear();
+            self.resolved_for = None;
+        }
+    }
+
     fn relayout(&mut self, show_base: bool) {
         self.layout = self
             .file
@@ -349,6 +376,13 @@ impl ConflictState {
             .map(|f| ConflictLayout::build(f, show_base))
             .unwrap_or_default();
     }
+}
+
+fn content_hash(content: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// A block choice that can be undone: the file before and after it.
@@ -2497,8 +2531,15 @@ impl Runtime {
         let file = conflict.file.as_ref()?;
         let (kind, sizes) = (file.kind, (file.ours_size, file.theirs_size));
         let before = file.content.clone();
+        let found = file.blocks.get(block).cloned();
         let after = merge::resolve_block(&before, block, choice)?;
         let stage = merge::parse_blocks(&merge::split_lines(&after)).is_empty();
+        conflict.check_resolved();
+        conflict.resolved_before.push(conflict.resolved.clone());
+        if let Some(found) = &found {
+            merge::record_choice(&mut conflict.resolved, found, choice);
+        }
+        conflict.resolved_for = Some(content_hash(&after));
         // Show the result at once; the reload after the write confirms it.
         let mut next = ConflictFile::new(path.to_path_buf(), kind, Some(after.clone()));
         (next.ours_size, next.theirs_size) = sizes;
@@ -2542,6 +2583,10 @@ impl Runtime {
             // Keep showing the file: as its conflicts once they are back.
             state.diff = None;
             state.conflict = Some(ConflictState::new(undo.path.clone(), ConflictKind::Content));
+        }
+        if let Some(conflict) = state.conflict.as_mut().filter(|c| c.path == undo.path) {
+            conflict.resolved = conflict.resolved_before.pop().unwrap_or_default();
+            conflict.resolved_for = Some(content_hash(&undo.before));
         }
         let op = ConflictOp::Restore {
             path: undo.path,
@@ -3701,6 +3746,7 @@ fn apply_conflict(
             }
             conflict.kind = file.kind;
             conflict.file = Some(*file);
+            conflict.check_resolved();
             conflict.relayout(show_base);
         }
         EventKind::Finished(Err(error))

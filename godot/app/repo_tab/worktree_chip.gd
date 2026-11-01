@@ -37,6 +37,8 @@ func _ready() -> void:
 	focus_exited.connect(queue_redraw)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	# Middle click shows the folder rather than autoscrolling the strip.
+	add_to_group(AutoScroll.OWN_MIDDLE_CLICK)
 	_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_row)
 	_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

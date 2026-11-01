@@ -95,6 +95,7 @@ func _ready() -> void:
 				Actions.run_action(&"diff.toggle_side_by_side"))
 	_update_layout_tooltips()
 	set_side_by_side(Core.diff_side_by_side())
+	set_minimap_enabled(Core.diff_minimap())
 	_view.expand_requested.connect(func(gap: int, how: String) -> void: expand_requested.emit(gap, how))
 	_whole_button.icon = AppTheme.icon(&"ExpandAll")
 	_whole_button.toggled.connect(func(on: bool) -> void: whole_file_requested.emit(on))
@@ -298,6 +299,23 @@ func set_source(source: Callable) -> void:
 ## Where side-by-side rows come from (see DiffView).
 func set_split_source(source: Callable) -> void:
 	_view.split_source = source
+
+
+## Where the minimap's tiles, overview and strip positions come from (see
+## DiffMinimap).
+func set_minimap_sources(tiles: Callable, overview: Callable,
+		positions: Callable = Callable(), targets: Callable = Callable()) -> void:
+	_view.set_minimap_sources(tiles, overview, positions, targets)
+
+
+## Where `jump_to_change` finds change blocks (see DiffView.change_source).
+func set_change_source(source: Callable) -> void:
+	_view.change_source = source
+
+
+## Shows the minimap's preview, or only its strip of change marks.
+func set_minimap_enabled(value: bool) -> void:
+	_view.set_minimap_enabled(value)
 
 
 func set_side_by_side(value: bool) -> void:

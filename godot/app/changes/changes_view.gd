@@ -112,6 +112,20 @@ func _ready() -> void:
 		return session.diff_lines(start, count) if session != null else [])
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("changes", start, count) if session != null else [])
+	_diff_panel.set_minimap_sources(
+		func(split: bool, first: int, rows: int, columns: int, row_px: int, char_px: int,
+				palette: PackedColorArray) -> PackedByteArray:
+			if session == null:
+				return PackedByteArray()
+			return session.diff_minimap_tile("changes", split, first, rows, columns, row_px, char_px, palette),
+		func(split: bool, buckets: int) -> PackedByteArray:
+			return session.diff_overview("changes", split, buckets, true) if session != null else PackedByteArray(),
+		func(split: bool, row: float) -> float:
+			return session.diff_strip_position("changes", split, row, true) if session != null else 0.0,
+		func(split: bool, fraction: float) -> Dictionary:
+			return session.diff_strip_target("changes", split, fraction, true) if session != null else {})
+	_diff_panel.set_change_source(func(split: bool, from_row: int, forward: bool) -> int:
+		return session.diff_change_row("changes", split, from_row, forward) if session != null else -1)
 	_diff_view.row_activated.connect(func(_row: int) -> void: toggle_diff_lines())
 	_diff_view.pick_clicked.connect(func(lines: PackedInt32Array, include: bool) -> void:
 		session.pick_lines(lines, include))
@@ -900,6 +914,7 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 		if has_conflict_blocks():
 			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
 				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
+		ids.append_array([&"", &"diff.toggle_minimap"])
 	if source == _list:
 		ids.append_array([&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
 			&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
@@ -914,6 +929,9 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 			continue
 		var action: ActionRegistry.Action = Actions.get_action(id)
 		_menu.add_icon_item(Actions.icon(id), action.label, _menu_actions.size())
+		if id == &"diff.toggle_minimap":
+			_menu.set_item_as_checkable(_menu.item_count - 1, true)
+			_menu.set_item_checked(_menu.item_count - 1, Core.diff_minimap())
 		_menu_actions.append(id)
 	if _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
 		_menu.remove_item(_menu.item_count - 1)

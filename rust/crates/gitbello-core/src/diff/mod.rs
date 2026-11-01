@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::repo::{Change, ParseError};
 
 mod layout;
+pub mod minimap;
 mod patch;
 
 pub use layout::{

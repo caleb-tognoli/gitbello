@@ -145,3 +145,39 @@ search chunk    max 0.30 ms per 4096 rows (read lock held)
 
 A whole search fits in a frame, and loading or the UI's slice reads wait at
 most one chunk for the read lock.
+
+## M7.6 — diff minimap
+
+`godot --path godot res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path> [--no-minimap]`
+(windowed, debug gdext). Temp repo with a 50,000-line Rust file, every line
+changed: a 100,001-row diff (loaded with `--full`). Tiles are 256 rows at
+94 × 2 px a row, rendered by core into RGBA bytes; the overview has 800
+buckets.
+
+```text
+minimap tile, unified          p50 0.65 ms, max 0.77 ms
+minimap tile, side by side     p50 1.05 ms, max 1.09 ms
+overview, unified              1.7 ms
+overview, side by side         0.9 ms
+paging, frame time             p50 41.0 ms with the minimap, 39.6 ms without
+```
+
+A tile is rendered once and kept (12 at most), so scrolling only draws
+textures; the minimap adds about 1.4 ms a frame while paging through this
+worst case, whose 40 ms frames come from fetching and drawing 30 fully
+changed, highlighted rows a page.
+
+M7.6 P3 step B (same file and command, windowed): tiles now draw the
+changed words of paired lines, and the strip and its positions map the
+whole file.
+
+```text
+minimap tile, unified          p50 0.83 ms, max 0.96 ms
+minimap tile, side by side     p50 1.38 ms, max 1.60 ms
+overview, unified              1.7 ms
+overview, side by side         0.9 ms
+paging, frame time             p50 43.4 ms with the minimap, 43.3 ms without
+```
+
+Word ranges cost about 0.2 to 0.3 ms a tile. They are computed only for
+tiles: computing them for every row of the overview took it to 66 ms.

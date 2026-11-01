@@ -27,6 +27,10 @@ extends VirtualList
 ## (`block` >= 0) with buttons that emit `block_action`. Their `side` (`ours`,
 ## `theirs`, `base`) draws them in the sides' own colours, with a bar at the
 ## gutter's edge instead of a +/− mark.
+## With minimap sources (`set_minimap_sources`), a `DiffMinimap` replaces the
+## vertical scroll bar. With a `change_source`, `jump_to_change` steps through
+## the change blocks; jumps ease (`ease_to_offset`) and any input finishes
+## them.
 
 ## A checkbox was clicked: the line indices of its row, and whether to pick
 ## them (the box was not `all`).
@@ -98,6 +102,10 @@ const DRAG_SCROLL_RATE: float = 12.0
 var source: Callable = Callable()
 ## Side-by-side rows of a range; see the class docs.
 var split_source: Callable = Callable()
+## `(split, from_row, forward) -> int`: the first row of the next change
+## block after `from_row`, or before it, wrapping; -1 without changes
+## (`RepoSession.diff_change_row`).
+var change_source: Callable = Callable()
 ## Show the old and new sides next to each other.
 var side_by_side: bool = false:
 	set = set_side_by_side
@@ -125,7 +133,17 @@ var _split_count: int = 0
 var _number_digits: int = 1
 var _cache: Dictionary[int, Dictionary] = {}
 var _h_scroll: HScrollBar = HScrollBar.new()
+var _minimap: DiffMinimap = DiffMinimap.new()
 var _widest: float = 0.0
+## The running ease of a jump, its target and whether a step of it is
+## scrolling (other scrolling cancels it).
+var _ease: Tween = null
+var _ease_target: float = 0.0
+var _easing_step: bool = false
+## The change block `jump_to_change` went to last and the offset it ended
+## at; the next jump starts from it while the diff has not scrolled since.
+var _change_row: int = -1
+var _change_offset: float = 0.0
 
 ## Selection as `(row, column)` ends; `_sel_to` is the caret. Row -1: none.
 var _sel_from: Vector2i = Vector2i(-1, 0)
@@ -185,7 +203,9 @@ func _ready() -> void:
 	add_child(_h_scroll, false, Node.INTERNAL_MODE_FRONT)
 	_h_scroll.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_h_scroll.value_changed.connect(func(_v: float) -> void: queue_redraw())
-	resized.connect(_update_h_range)
+	_minimap.view = self
+	add_child(_minimap, false, Node.INTERNAL_MODE_FRONT)
+	resized.connect(_layout_minimap)
 	mouse_exited.connect(func() -> void:
 		_set_hover([])
 		_block_hover = [])
@@ -199,6 +219,9 @@ func _notification(what: int) -> void:
 		queue_redraw()
 	elif what == NOTIFICATION_FOCUS_ENTER or what == NOTIFICATION_FOCUS_EXIT:
 		queue_redraw()
+	elif what == NOTIFICATION_DRAW:
+		# Scrolling, selecting and reloading all redraw the rows.
+		_minimap.queue_redraw()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		if not _hover.is_empty():
 			tooltip_text = tr(EXPANDER_TIPS.get(String(_hover[1]), ""))
@@ -217,6 +240,8 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool, split_
 	_number_digits = maxi(1, str(max_line_number).length())
 	_cache.clear()
 	if rows_changed or not keep_scroll:
+		_cancel_ease()
+		_change_row = -1
 		_expanding_gap = -1
 		_choice_rows = Vector2i(-1, 0)
 	if not keep_scroll:
@@ -230,12 +255,62 @@ func show_lines(line_count: int, max_line_number: int, keep_scroll: bool, split_
 		# Rows mean other lines now: keep only the caret's row, so Enter can
 		# pick line after line.
 		_collapse(mini(cursor, row_count() - 1))
-	_update_h_range()
+	_minimap.reset()
+	_layout_minimap()
+	_minimap.rows_shown()
 
 
 ## Drops the fetched rows so they are read again (their picks changed).
 func invalidate() -> void:
 	_cache.clear()
+	_minimap.reset()
+	queue_redraw()
+
+
+## Where the minimap gets its tiles, overview and strip positions (see
+## `DiffMinimap`); the plain scroll bar shows until tiles and overview are
+## set.
+func set_minimap_sources(tiles: Callable, overview: Callable,
+		positions: Callable = Callable(), targets: Callable = Callable()) -> void:
+	_minimap.tile_source = tiles
+	_minimap.overview_source = overview
+	_minimap.position_source = positions
+	_minimap.target_source = targets
+	shows_scroll_bar = not _minimap.has_sources()
+	_minimap.reset()
+	_layout_minimap()
+
+
+## Shows the minimap's preview, or only its strip.
+func set_minimap_enabled(value: bool) -> void:
+	if value != _minimap.enabled:
+		_minimap.enabled = value
+		_minimap.reset()
+		_layout_minimap()
+
+
+func minimap() -> DiffMinimap:
+	return _minimap
+
+
+## First and last row the selection touches, or (-1, -1) without one.
+func selection_rows() -> Vector2i:
+	if not has_selection():
+		return Vector2i(-1, -1)
+	var ends: Array[Vector2i] = _ordered()
+	return Vector2i(ends[0].x, ends[1].x)
+
+
+func _scroll_column_width() -> float:
+	return _minimap.column_width() if _minimap.has_sources() else super()
+
+
+func _layout_minimap() -> void:
+	var width: float = _minimap.column_width()
+	_minimap.visible = width > 0.0
+	_minimap.position = Vector2(size.x - width, 0.0)
+	_minimap.size = Vector2(width, size.y)
+	_update_h_range()
 	queue_redraw()
 
 
@@ -277,12 +352,91 @@ func set_side_by_side(value: bool) -> void:
 	set_scroll_offset(0.0)
 	refresh()
 	_reset_selection()
-	_update_h_range()
+	_minimap.reset()
+	_layout_minimap()
 
 
 ## Horizontal scroll offset in pixels.
 func h_scroll() -> float:
 	return _h_scroll.value
+
+
+func scroll_axes() -> Vector2i:
+	return Vector2i(1 if _h_scroll.visible else 0, super().y)
+
+
+func scroll_by(delta: Vector2) -> void:
+	finish_ease()
+	super(delta)
+	_h_scroll.value += delta.x
+
+
+func set_scroll_offset(offset: float) -> void:
+	if not _easing_step and not is_equal_approx(offset, scroll_offset()):
+		_cancel_ease()
+	super(offset)
+
+
+## Scrolls to `offset` over the theme's `ease_msec`, ease-out cubic, from
+## where the diff is now (a running ease stops there).
+func ease_to_offset(offset: float) -> void:
+	_cancel_ease()
+	var target: float = clampf(offset, 0.0, max_scroll_offset())
+	var seconds: float = get_theme_constant(&"ease_msec", DIFF_THEME_TYPE) / 1000.0
+	if seconds <= 0.0 or not is_inside_tree() or is_equal_approx(target, scroll_offset()):
+		set_scroll_offset(target)
+		return
+	_ease_target = target
+	_ease = create_tween()
+	_ease.tween_method(_ease_step, scroll_offset(), target, seconds) 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+func is_easing() -> bool:
+	return _ease != null and _ease.is_running()
+
+
+## Where scrolling ends: the ease's target while easing, else the offset.
+func target_scroll_offset() -> float:
+	return _ease_target if is_easing() else scroll_offset()
+
+
+## Ends a running ease at its target.
+func finish_ease() -> void:
+	if is_easing():
+		var target: float = _ease_target
+		_cancel_ease()
+		set_scroll_offset(target)
+
+
+func _cancel_ease() -> void:
+	if _ease != null:
+		_ease.kill()
+		_ease = null
+
+
+func _ease_step(offset: float) -> void:
+	_easing_step = true
+	set_scroll_offset(offset)
+	_easing_step = false
+
+
+## Eases to the first row of the next change block (`forward`) or the
+## previous one, centred, wrapping past either end. It counts from the block
+## it went to last while the diff has not scrolled since, else from the
+## middle row. False without changes.
+func jump_to_change(forward: bool) -> bool:
+	if not change_source.is_valid() or row_count() == 0:
+		return false
+	var from: int = _change_row
+	if from < 0 or not is_equal_approx(target_scroll_offset(), _change_offset):
+		from = int((target_scroll_offset() + size.y / 2.0) / row_height())
+	var row: int = int(change_source.call(side_by_side, from, forward))
+	if row < 0 or row >= row_count():
+		return false
+	ease_to_offset(row * row_height() - (size.y - row_height()) / 2.0)
+	_change_row = row
+	_change_offset = target_scroll_offset()
+	return true
 
 
 func row_height() -> float:
@@ -396,6 +550,13 @@ func press_expander(row: int, how: String) -> void:
 		_expanding_gap = int(data.get("gap", -1))
 		queue_redraw()
 		expand_requested.emit(_expanding_gap, how)
+
+
+## Opens every line of gap `gap` (as its expanders would).
+func expand_gap(gap: int) -> void:
+	_expanding_gap = gap
+	queue_redraw()
+	expand_requested.emit(gap, "all")
 
 
 ## What `row`'s expanders say: the lines its gap hides, or that they load.
@@ -1164,6 +1325,8 @@ func _row_bg(kind: int, side: String = "") -> Color:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if (event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
+		finish_ease()
 	var key: InputEventKey = event as InputEventKey
 	if key != null and key.pressed and key.keycode == KEY_C and key.is_command_or_control_pressed():
 		copy_selection()
@@ -1417,7 +1580,7 @@ func _update_h_range() -> void:
 	_h_scroll.max_value = total
 	_h_scroll.page = maxf(0.0, text_width)
 	_h_scroll.visible = total > text_width and row_count() > 0
-	_h_scroll.offset_right = -(_scroll_bar.size.x if _scroll_bar.visible else 0.0)
+	_h_scroll.offset_right = -_scroll_column_width()
 
 
 func _update_theme() -> void:

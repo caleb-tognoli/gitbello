@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
+use gitbello_core::diff::minimap::{
+    self, ConflictMinimap, DiffMinimap, MinimapPalette, MinimapSource, MinimapStyle, Rgba, StripMap,
+};
 use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::jobs::{JobId, RefreshSet};
@@ -1115,6 +1118,115 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// Minimap rows `first_row..first_row + rows` of a diff (`slot` as for
+    /// `diff_split_rows`; the resolver's file in `changes`) as RGBA8 bytes,
+    /// `columns` wide and `rows * row_px` high, `char_px` per character.
+    /// `palette` holds `minimap::PALETTE_LEN` colours: the row backgrounds
+    /// (context, header, added, removed, ours, theirs, base, resolved), the
+    /// text, the five syntax colours, the gap dashes, the veil over lines
+    /// left out and the changed words of added and removed lines.
+    /// Empty when there is no diff or the palette is short.
+    #[func]
+    #[allow(clippy::too_many_arguments)]
+    fn diff_minimap_tile(
+        &self,
+        slot: GString,
+        split: bool,
+        first_row: i64,
+        rows: i64,
+        columns: i64,
+        row_px: i64,
+        char_px: i64,
+        palette: PackedColorArray,
+    ) -> PackedByteArray {
+        let colors: Vec<Rgba> = palette.as_slice().iter().map(rgba).collect();
+        let (Some(palette), Ok(first), Ok(rows), Ok(columns), Ok(row_px), Ok(char_px)) = (
+            MinimapPalette::from_colors(&colors),
+            usize::try_from(first_row),
+            usize::try_from(rows),
+            usize::try_from(columns),
+            usize::try_from(row_px),
+            usize::try_from(char_px),
+        ) else {
+            return PackedByteArray::new();
+        };
+        let style = MinimapStyle {
+            columns: columns.min(4096),
+            row_px: row_px.clamp(1, 64),
+            char_px: char_px.clamp(1, 16),
+            palette,
+        };
+        let rows = rows.min(4096);
+        self.with_minimap(&slot, split, |source| {
+            PackedByteArray::from(minimap::render_tile(source, first, rows, &style).as_slice())
+        })
+        .unwrap_or_default()
+    }
+
+    /// The marks of a whole diff in `buckets` slices from the top: one byte
+    /// of flags each, 1 added, 2 removed, 4 conflict, 8 left out of the
+    /// commit, 16 resolved this session. With `whole_file`, the strip spans
+    /// the file: the lines collapsed gaps hide take their room.
+    #[func]
+    fn diff_overview(
+        &self,
+        slot: GString,
+        split: bool,
+        buckets: i64,
+        whole_file: bool,
+    ) -> PackedByteArray {
+        let buckets = usize::try_from(buckets).unwrap_or(0).min(16_384);
+        self.with_minimap(&slot, split, |source| {
+            PackedByteArray::from(minimap::overview(source, buckets, whole_file).as_slice())
+        })
+        .unwrap_or_default()
+    }
+
+    /// Where (fractional) row `row` starts on the strip, `0..1`
+    /// (`whole_file` as for `diff_overview`).
+    #[func]
+    fn diff_strip_position(&self, slot: GString, split: bool, row: f64, whole_file: bool) -> f64 {
+        self.with_minimap(&slot, split, |source| {
+            StripMap::new(source, whole_file).position(row)
+        })
+        .unwrap_or(0.0)
+    }
+
+    /// The (fractional) row at `fraction` of the strip and the collapsed
+    /// gap there: `{row, gap}`, `gap` -1 outside one.
+    #[func]
+    fn diff_strip_target(
+        &self,
+        slot: GString,
+        split: bool,
+        fraction: f64,
+        whole_file: bool,
+    ) -> VarDictionary {
+        let (row, gap) = self
+            .with_minimap(&slot, split, |source| {
+                StripMap::new(source, whole_file).target(fraction)
+            })
+            .unwrap_or((0.0, None));
+        vdict! {
+            "row" => row,
+            "gap" => gap.and_then(|g| i64::try_from(g).ok()).unwrap_or(-1),
+        }
+    }
+
+    /// The first row of the next change block after `from_row` (`forward`)
+    /// or before it, wrapping past either end, in the rows of `slot`'s diff
+    /// as for `diff_overview`. -1 without changes.
+    #[func]
+    fn diff_change_row(&self, slot: GString, split: bool, from_row: i64, forward: bool) -> i64 {
+        let from = usize::try_from(from_row).unwrap_or(0);
+        self.with_minimap(&slot, split, |source| {
+            minimap::change_row(source, from, forward)
+        })
+        .flatten()
+        .and_then(|row| i64::try_from(row).ok())
+        .unwrap_or(-1)
+    }
+
     // --- Commit details -----------------------------------------------------
 
     /// Loads a commit's details (full or unique hash); `commit_loaded` follows.
@@ -1454,6 +1566,18 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// Where the history search's matches are among the rows reported so
+    /// far, in `buckets` slices from the top: one byte each, 1 for a match.
+    #[func]
+    fn search_overview(&self, buckets: i64) -> PackedByteArray {
+        let buckets = usize::try_from(buckets).unwrap_or(0).min(16_384);
+        let rows = self.reported_rows;
+        self.read(|state| state.search().map(|s| s.overview(rows, buckets)))
+            .flatten()
+            .map(|flags| PackedByteArray::from(flags.as_slice()))
+            .unwrap_or_default()
+    }
+
     /// Position of graph row `row` among the matches (0-based), or -1.
     #[func]
     fn search_match_index(&self, row: i64) -> i64 {
@@ -1542,6 +1666,11 @@ fn mark_picked(line: &mut VarDictionary, picks: &[PickState]) {
     line.set("picked", picked);
 }
 
+fn rgba(color: &Color) -> Rgba {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [byte(color.r), byte(color.g), byte(color.b), byte(color.a)]
+}
+
 fn job_id(job: Option<JobId>) -> i64 {
     job.map_or(-1, |id| i64::try_from(id).unwrap_or(i64::MAX))
 }
@@ -1557,6 +1686,46 @@ impl RepoSession {
 
     fn read<R>(&self, f: impl FnOnce(&RepoState) -> R) -> Option<R> {
         runtime_cell::with(|rt| rt.repo(&self.key).map(f)).flatten()
+    }
+
+    /// Calls `f` with the minimap rows of `slot`'s diff, or of the
+    /// resolver's file in `changes`.
+    fn with_minimap<R>(
+        &self,
+        slot: &GString,
+        split: bool,
+        f: impl FnOnce(&dyn MinimapSource) -> R,
+    ) -> Option<R> {
+        let commit = *slot == "commit";
+        self.read(|s| {
+            if let (false, Some(conflict)) = (commit, s.conflict()) {
+                let file = conflict.file()?;
+                let language = convert::diff_language(conflict.path());
+                return Some(f(&ConflictMinimap::new(
+                    file,
+                    conflict.layout(),
+                    conflict.resolved(),
+                    split,
+                    language,
+                )));
+            }
+            let state = if commit { s.commit_diff() } else { s.diff() }?;
+            let picks = if !commit && s.can_pick_lines() {
+                s.diff_picks()
+            } else {
+                &[]
+            };
+            let language = convert::diff_language(&state.target().path);
+            Some(f(&DiffMinimap::new(
+                state.diff()?,
+                state.layout(),
+                state.old_file(),
+                picks,
+                split,
+                language,
+            )))
+        })
+        .flatten()
     }
 
     fn checkout(&self, target: Option<CheckoutTarget>, changes: &GString) -> i64 {

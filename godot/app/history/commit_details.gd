@@ -10,7 +10,7 @@ const THEME_TYPE: StringName = &"CommitDetails"
 const HASH_LENGTH: int = 10
 const PARENT_LENGTH: int = 7
 ## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all"]
+const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.toggle_minimap"]
 
 var session: RepoSession = null:
 	set = set_session
@@ -55,6 +55,20 @@ func _ready() -> void:
 		return session.commit_diff_lines(start, count) if session != null else [])
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("commit", start, count) if session != null else [])
+	_diff_panel.set_minimap_sources(
+		func(split: bool, first: int, rows: int, columns: int, row_px: int, char_px: int,
+				palette: PackedColorArray) -> PackedByteArray:
+			if session == null:
+				return PackedByteArray()
+			return session.diff_minimap_tile("commit", split, first, rows, columns, row_px, char_px, palette),
+		func(split: bool, buckets: int) -> PackedByteArray:
+			return session.diff_overview("commit", split, buckets, true) if session != null else PackedByteArray(),
+		func(split: bool, row: float) -> float:
+			return session.diff_strip_position("commit", split, row, true) if session != null else 0.0,
+		func(split: bool, fraction: float) -> Dictionary:
+			return session.diff_strip_target("commit", split, fraction, true) if session != null else {})
+	_diff_panel.set_change_source(func(split: bool, from_row: int, forward: bool) -> int:
+		return session.diff_change_row("commit", split, from_row, forward) if session != null else -1)
 	_diff_panel.load_full_requested.connect(func() -> void:
 		session.select_commit_file(String(session.commit_diff_info().get("path", "")), true))
 	_diff_panel.expand_requested.connect(func(gap: int, how: String) -> void:
@@ -261,12 +275,19 @@ func _on_diff_changed() -> void:
 	_diff_panel.show_info(session.commit_diff_info())
 
 
-## The diff's context menu: Copy (when text is selected) and Select all.
+## The diff's context menu: Copy (when text is selected), Select all and
+## the minimap toggle.
 func _show_diff_menu(_row: int, at_position: Vector2) -> void:
 	_menu.clear()
 	for i: int in DIFF_MENU_ACTIONS.size():
+		if DIFF_MENU_ACTIONS[i] == &"":
+			_menu.add_separator()
+			continue
 		_menu.add_icon_item(Actions.icon(DIFF_MENU_ACTIONS[i]), Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
-		_menu.set_item_disabled(i, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
+		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
+		if DIFF_MENU_ACTIONS[i] == &"diff.toggle_minimap":
+			_menu.set_item_as_checkable(_menu.item_count - 1, true)
+			_menu.set_item_checked(_menu.item_count - 1, Core.diff_minimap())
 	_menu.position = Vector2i(_diff_panel.view().get_screen_position() + at_position)
 	_menu.reset_size()
 	_menu.popup()

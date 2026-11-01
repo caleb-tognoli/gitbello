@@ -66,6 +66,11 @@ static var _spinners: Dictionary[Vector2i, DPITexture] = {}
 static var _dots: Dictionary[Color, DPITexture] = {}
 ## White copies of icons, by name (see `tintable_icon`).
 static var _tintable: Dictionary[StringName, DPITexture] = {}
+## How strongly the changed words of paired lines are tinted, in percent of
+## the added or removed colour: the diff's word background, and the
+## minimap's word blocks over its row tint. A variable so that
+## `tests/visual/word_tint_sheet.tscn` can compare intensities.
+static var word_tint_percent: int = 60
 
 
 class Palette:
@@ -107,7 +112,10 @@ class Palette:
 	var syntax_number: Color
 
 
-static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
+## `added` and `removed` replace the theme's colours of added and removed
+## lines unless transparent (the user's choice, the same in both themes).
+static func palette(light: bool, accent: Color = DEFAULT_ACCENT,
+		added: Color = Color.TRANSPARENT, removed: Color = Color.TRANSPARENT) -> Palette:
 	var p: Palette = Palette.new()
 	p.light = light
 	p.accent = accent
@@ -179,6 +187,10 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT) -> Palette:
 		p.syntax_type = Color(0.4, 0.78, 0.85)
 		p.syntax_string = Color(0.6, 0.82, 0.5)
 		p.syntax_number = Color(0.95, 0.65, 0.4)
+	if added.a > 0.0:
+		p.added = added
+	if removed.a > 0.0:
+		p.removed = removed
 	p.hovered = Color(p.text, 0.07 * p.shade)
 	# Ref labels carry light text in both themes, darkened until it reads.
 	p.label_head = _readable_under(DARK_TEXT, p.label_head, Color.TRANSPARENT)
@@ -228,8 +240,9 @@ static func _readable_under(text: Color, background: Color, hovered: Color) -> C
 	return background
 
 
-static func build(light: bool, accent: Color = DEFAULT_ACCENT) -> Theme:
-	var p: Palette = palette(light, accent)
+static func build(light: bool, accent: Color = DEFAULT_ACCENT,
+		added: Color = Color.TRANSPARENT, removed: Color = Color.TRANSPARENT) -> Theme:
+	var p: Palette = palette(light, accent, added, removed)
 	recolor_icons(light)
 	var theme: Theme = Theme.new()
 	theme.default_font_size = 14
@@ -698,6 +711,11 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"selection_color", &"VirtualList", p.selected_focus)
 	theme.set_color(&"cursor_color", &"VirtualList", Color(p.accent, 0.9))
 	theme.set_constant(&"row_height", &"VirtualList", 24)
+	# Middle-click autoscroll: no scrolling within `dead_zone` px of the click,
+	# then `speed_percent` / 100 × (distance past it)^1.5 px/s, at most `max_speed`.
+	theme.set_constant(&"dead_zone", &"AutoScroll", 8)
+	theme.set_constant(&"speed_percent", &"AutoScroll", 170)
+	theme.set_constant(&"max_speed", &"AutoScroll", 6000)
 	for i: int in p.lanes.size():
 		theme.set_color(StringName("lane_%d" % i), &"GraphView", p.lanes[i])
 	theme.set_color(&"node_outline", &"GraphView", p.background)
@@ -809,8 +827,9 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"hunk_bg", &"DiffView", p.background.blend(Color(p.accent, 0.1)))
 	theme.set_color(&"added_bg", &"DiffView", p.background.blend(Color(p.added, 0.16)))
 	theme.set_color(&"removed_bg", &"DiffView", p.background.blend(Color(p.removed, 0.16)))
-	theme.set_color(&"added_hl_bg", &"DiffView", p.background.blend(Color(p.added, 0.38)))
-	theme.set_color(&"removed_hl_bg", &"DiffView", p.background.blend(Color(p.removed, 0.38)))
+	var word_tint: float = word_tint_percent / 100.0
+	theme.set_color(&"added_hl_bg", &"DiffView", p.background.blend(Color(p.added, word_tint)))
+	theme.set_color(&"removed_hl_bg", &"DiffView", p.background.blend(Color(p.removed, word_tint)))
 	theme.set_color(&"added_mark", &"DiffView", p.added)
 	theme.set_color(&"removed_mark", &"DiffView", p.removed)
 	theme.set_color(&"gutter_bg", &"DiffView", p.surface)
@@ -849,6 +868,61 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"v_separation", &"ConflictCardTable", 2)
 	theme.set_constant(&"row_height", &"DiffView", 20)
 	theme.set_constant(&"padding", &"DiffView", 8)
+	# Marks over a whole list beside its scroll bar (History's search hits):
+	# the selected one stronger and taller
+	theme.set_color(&"background", &"MarkStrip", Color(p.text, 0.04))
+	theme.set_color(&"mark_color", &"MarkStrip", Color(p.accent, 0.6))
+	theme.set_color(&"current_color", &"MarkStrip", p.accent)
+	theme.set_constant(&"width", &"MarkStrip", 6)
+	theme.set_constant(&"min_mark", &"MarkStrip", 2)
+	theme.set_constant(&"current_height", &"MarkStrip", 4)
+	# How long a jump (a minimap click, the next change) eases, in ms
+	theme.set_constant(&"ease_msec", &"DiffView", 120)
+	# The diff's minimap (M7.6): rows in stronger tints than the diff's, text
+	# as faint blocks, a box for the visible rows and a strip of change marks
+	theme.set_color(&"background", &"DiffMinimap", p.background)
+	theme.set_color(&"border_color", &"DiffMinimap", p.border)
+	theme.set_color(&"context_bg", &"DiffMinimap", Color.TRANSPARENT)
+	theme.set_color(&"header_bg", &"DiffMinimap", Color(p.accent, 0.18))
+	theme.set_color(&"added_bg", &"DiffMinimap", Color(p.added, 0.38))
+	theme.set_color(&"removed_bg", &"DiffMinimap", Color(p.removed, 0.38))
+	theme.set_color(&"ours_bg", &"DiffMinimap", Color(p.ours, 0.4))
+	theme.set_color(&"theirs_bg", &"DiffMinimap", Color(p.theirs, 0.4))
+	theme.set_color(&"base_bg", &"DiffMinimap", Color(p.text_muted, 0.25))
+	theme.set_color(&"resolved_bg", &"DiffMinimap", Color(p.added, 0.3))
+	theme.set_color(&"added_word", &"DiffMinimap", Color(p.added, word_tint))
+	theme.set_color(&"removed_word", &"DiffMinimap", Color(p.removed, word_tint))
+	theme.set_color(&"text_color", &"DiffMinimap", Color(p.text, 0.45))
+	theme.set_color(&"syntax_keyword", &"DiffMinimap", Color(p.syntax_keyword, 0.75))
+	theme.set_color(&"syntax_type", &"DiffMinimap", Color(p.syntax_type, 0.75))
+	theme.set_color(&"syntax_string", &"DiffMinimap", Color(p.syntax_string, 0.75))
+	theme.set_color(&"syntax_number", &"DiffMinimap", Color(p.syntax_number, 0.75))
+	theme.set_color(&"syntax_comment", &"DiffMinimap", Color(p.text_muted, 0.6))
+	theme.set_color(&"divider_color", &"DiffMinimap", Color(p.text_muted, 0.7))
+	theme.set_color(&"veil_color", &"DiffMinimap", Color(p.background, 0.6))
+	theme.set_color(&"slider_color", &"DiffMinimap", Color(p.text, 0.16))
+	theme.set_color(&"slider_hover_color", &"DiffMinimap", Color(p.text, 0.26))
+	theme.set_color(&"strip_background", &"DiffMinimap", p.surface)
+	theme.set_color(&"thumb_color", &"DiffMinimap", Color(p.text, 0.24))
+	theme.set_color(&"thumb_hover_color", &"DiffMinimap", Color(p.text, 0.38))
+	theme.set_color(&"selection_color", &"DiffMinimap", Color(p.accent, 0.5))
+	theme.set_color(&"added_mark", &"DiffMinimap", p.added)
+	theme.set_color(&"removed_mark", &"DiffMinimap", p.removed)
+	theme.set_color(&"conflict_mark", &"DiffMinimap", p.error)
+	theme.set_color(&"resolved_mark", &"DiffMinimap", p.added)
+	# Sizes: the whole column, its strip, the strip alone (minimap off or a
+	# narrow diff), a row and a character, the diff width under which only the
+	# strip shows, the strip's thumb and visible-rows shade, and how opaque
+	# marks of lines left out of the commit are
+	theme.set_constant(&"width", &"DiffMinimap", 100)
+	theme.set_constant(&"strip_width", &"DiffMinimap", 6)
+	theme.set_constant(&"strip_only_width", &"DiffMinimap", 12)
+	theme.set_constant(&"row_height", &"DiffMinimap", 2)
+	theme.set_constant(&"char_width", &"DiffMinimap", 1)
+	theme.set_constant(&"narrow_width", &"DiffMinimap", 600)
+	theme.set_constant(&"min_thumb", &"DiffMinimap", 20)
+	theme.set_constant(&"min_shade", &"DiffMinimap", 4)
+	theme.set_constant(&"left_out_percent", &"DiffMinimap", 40)
 
 
 ## The shell of M6.5 P2: menu strip, header buttons, worktree chips, the

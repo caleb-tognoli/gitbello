@@ -42,6 +42,7 @@ func _ready() -> void:
 	alignment = BoxContainer.ALIGNMENT_END
 	_scroll.name = "Scroll"
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(_scroll)
 	_scroll.follow_focus = true
 	add_child(_scroll)
 	_stack.name = "Stack"

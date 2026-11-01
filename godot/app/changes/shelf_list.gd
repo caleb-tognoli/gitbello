@@ -44,6 +44,7 @@ func _ready() -> void:
 	add_child(_picker)
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(scroll)
 	_picker.add_child(scroll)
 	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_choices.theme_type_variation = &"PaneColumn"

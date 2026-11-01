@@ -1,10 +1,10 @@
 extends Node
 ## Diff view benchmark (read-only): loads the unstaged diff of one file and
 ## times the slice fetches the view makes (unified and side by side, with
-## syntax and word highlights), then scrolls a windowed DiffPanel page by
-## page. Prints `BENCH <key> <value>` lines and quits.
+## syntax and word highlights) and the minimap's tiles and overview, then
+## scrolls a windowed DiffPanel (with its minimap) page by page. Prints `BENCH <key> <value>` lines and quits.
 ## Usage: godot --path godot res://tests/perf/diff_bench.tscn --
-##        --repo=<worktree root> --file=<path in the repo>
+##        --repo=<worktree root> --file=<path in the repo> [--no-minimap]
 
 const WINDOW: int = 300
 const SAMPLES: int = 20
@@ -56,12 +56,42 @@ func _ready() -> void:
 		print("BENCH %s_fetch_%d_us_p50 %.0f" % [layout_name, WINDOW, times[floori(times.size() / 2.0)]])
 		print("BENCH %s_fetch_%d_us_max %.0f" % [layout_name, WINDOW, times[times.size() - 1]])
 
+	var palette: PackedColorArray = PackedColorArray()
+	for i: int in DiffMinimap.PALETTE_COLORS.size():
+		palette.append(Color(0.5, 0.6, 0.7, 0.5))
+	var rows: int = int(info["line_count"])
+	for split: bool in [false, true]:
+		var layout_name: String = "split" if split else "unified"
+		var tiles: PackedFloat64Array = PackedFloat64Array()
+		for i: int in SAMPLES:
+			var first: int = (i * 7919) % maxi(1, rows - DiffMinimap.TILE_ROWS)
+			var t: int = Time.get_ticks_usec()
+			session.diff_minimap_tile("changes", split, first, DiffMinimap.TILE_ROWS, 94, 2, 1, palette)
+			tiles.append(float(Time.get_ticks_usec() - t))
+		tiles.sort()
+		print("BENCH %s_minimap_tile_us_p50 %.0f" % [layout_name, tiles[floori(tiles.size() / 2.0)]])
+		print("BENCH %s_minimap_tile_us_max %.0f" % [layout_name, tiles[tiles.size() - 1]])
+		var overview_start: int = Time.get_ticks_usec()
+		session.diff_overview("changes", split, 800, true)
+		print("BENCH %s_overview_800_ms %.1f" % [layout_name, (Time.get_ticks_usec() - overview_start) / 1000.0])
+
 	var panel: DiffPanel = PANEL.instantiate() as DiffPanel
 	add_child(panel)
 	panel.size = get_viewport().get_visible_rect().size
 	panel.set_source(func(start: int, count: int) -> Array: return session.diff_lines(start, count))
 	panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("changes", start, count))
+	if not OS.get_cmdline_user_args().has("--no-minimap"):
+		panel.set_minimap_sources(
+			func(split: bool, first: int, count: int, columns: int, row_px: int, char_px: int,
+					colors: PackedColorArray) -> PackedByteArray:
+				return session.diff_minimap_tile("changes", split, first, count, columns, row_px, char_px, colors),
+			func(split: bool, buckets: int) -> PackedByteArray:
+				return session.diff_overview("changes", split, buckets, true),
+			func(split: bool, row: float) -> float:
+				return session.diff_strip_position("changes", split, row, true),
+			func(split: bool, fraction: float) -> Dictionary:
+				return session.diff_strip_target("changes", split, fraction, true))
 	panel.show_info(info)
 	await get_tree().process_frame
 	var view: DiffView = panel.view()

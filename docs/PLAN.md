@@ -147,7 +147,8 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 - **Custom controls** (in `godot/ui/`):
   - **`VirtualList`:** draws only visible rows with `_draw()`, handles selection, keyboard navigation, multi-select and context menus. It is the base for the commit list, file lists and the blame gutter.
   - **`GraphView`:** draws lanes and nodes for visible rows from the lane data supplied by core. It is combined with the commit list inside one scroll container.
-  - **`DiffView`:** unified and side-by-side views with hunk and line selection gutters, intra-line highlights, and an editable working-copy side (§3.10). It wraps `CodeEdit` where possible.
+  - **`DiffView`:** unified and side-by-side views with hunk and line selection gutters, intra-line highlights, and an editable working-copy side (§3.10). It wraps `CodeEdit` where possible. A minimap rendered by core replaces its scroll bar (M7.6).
+  - **`AutoScroll`:** browser-style middle-click autoscroll for every `VirtualList` and `ScrollContainer` (M7.6).
 - **`ActionRegistry`** (autoload). Every action is `{ id, label, category, shortcut, enabled: Callable, run: Callable }`. The command palette fuzzy-searches it, the menu bar, big buttons, menus and context menus are built from it, and shortcuts are rebindable. From M6.5 an action can also give the reason it is disabled (shown in tooltips), and a run carries its origin control so the job's progress shows there (§4 Feedback).
 - **Theming** (M6.5 P1): `AppTheme` (GDScript, modelled on spritesheetbelli's) builds the `Theme` at startup from one palette per theme and the accent colour from Settings, and rebuilds it when the OS theme, the theme override or the accent changes. The app follows `DisplayServer.is_dark_mode()` and reacts to changes (use the system theme change callback if the pinned Godot version provides it; otherwise re-check on focus-in).
   - **Tokens:** background, surface, raised, hover, border, text, muted text, accent, error, plus the git colours (graph lanes, ref labels, added/removed/modified/renamed, diff backgrounds and highlights, syntax).
@@ -672,6 +673,102 @@ Scope settled in the Q&A of 2026-10-31 (§4 Home, D13). Replaces the welcome scr
 - A row's menu is a ⋯ button and right-click; failed clones keep a row with Retry and Dismiss.
 - Dialogs of the flows put Cancel then OK on the right, like forms (`FormDialog.align_right`).
 - Recent cards and File → Open recent tell repositories with the same folder name apart by parent folders (`Paths.short_labels`, from the welcome screen's labels on main); Recent fills the width in equal columns clear of the scroll bar.
+
+### M7.6 — Content navigation: autoscroll and the diff minimap (≈1.5 weeks)
+
+Scope settled in the Q&A of 2026-11-01. Two independent parts, each ending with a review stop: P1 middle-click autoscroll everywhere, P2 a VS Code-style minimap in place of the diff's scroll bar.
+
+**P1 — Middle-click autoscroll.**
+- **Behaviour** (browser-style, every OS, no setting): a quick middle click (released within ~250 ms without leaving the dead zone) starts sticky autoscroll; holding the button and moving scrolls only while it is held. An anchor icon stays at the click point, the cursor shows the direction (`CURSOR_VSIZE`, `CURSOR_HSIZE` or `CURSOR_MOVE`), and speed grows with the distance past a dead zone (~8 px, HiDPI-scaled; about `k · d^1.5`, capped). Only the axes that can scroll take part.
+- **Stops on:** any mouse button (consumed), a wheel turn (which then scrolls normally), Esc (consumed), any other key (passed on), focus loss, or the target hiding or leaving the tree.
+- **Where:** every `VirtualList` (change lists, shelf files, commit list and graph, `DiffView` on both axes) and every `ScrollContainer` (Home, Settings, shelves, scan dialog, worktree list popover, toasts, the worktree strip sideways). Controls with their own middle click (a worktree chip shows its folder) accept the event first, so autoscroll only sees the unhandled ones.
+- **Shape:** one `AutoScroll` node (a `CanvasLayer` on top) per window, in `godot/ui/auto_scroll/`. It reads middle presses in `_input`, before the controls (a press over a control with `MOUSE_FILTER_STOP` never reaches its `ScrollContainer` parent), walks up from the hovered control and starts on the first `VirtualList` or `ScrollContainer` that can scroll; a control in the `own_middle_click` group (the worktree chip) or a text field ends the walk. `AutoScroll.enable(control)` adds the window's instance: `VirtualList._ready` calls it, and so does each place that makes a `ScrollContainer`. `VirtualList.scroll_axes()` and `scroll_by(delta)` are what it drives; `DiffView` adds the horizontal axis. While running it swallows mouse motion (no hover effects), draws the anchor icon and moves the offsets in `_process`; nothing runs while it is idle. Dead zone and speed are theme constants in `app_theme.gd`; `AutoScroll`, `AutoScrollVertical` and `AutoScrollHorizontal` SVG icons (`LICENSES.md`).
+
+- [x] `AutoScroll` helper, overlay, anchor icon and theme constants
+- [x] Hooked into `VirtualList` (and `DiffView` sideways) and every `ScrollContainer` above
+- [x] Smoke test `auto_scroll_smoke.gd`: sticky and hold modes move the offset with the distance, the dead zone holds still, each stop condition ends it, an unscrollable axis stays put, a worktree chip's middle click still shows its folder
+
+*P1 result:* as specified above. Where hover is not tracked (headless runs), the target comes from `AutoScroll.control_at`, a hit test that follows the viewport's picking rules; positions come from the input events, not `get_mouse_position()`. `auto_scroll_smoke.gd` covers the list above plus the speed curve and its cap. Tree, ItemList and RichTextLabel scroll areas (the shortcuts dialog, for one) are not covered yet.
+
+**P2 — Diff minimap** (Changes, History and the resolver; every `DiffPanel`).
+- **Layout:** a column of about 100 px (theme constant, HiDPI-scaled) replaces `DiffView`'s vertical scroll bar; the horizontal scroll bar stays. On its right edge, a strip of ~6 px always covers the whole diff.
+- **Preview:** rows of the diff as shown (a collapsed gap is its header row, drawn with a thin dashed divider when it hides lines), 2 px per row, one block of about 1 px per character, syntax-coloured, on the row's background: added, removed, hunk header, unchanged; in the resolver ours, theirs and base in the sides' colours. Lines left out of the commit (Changes, `pickable`) are dimmed. Side by side: one column, old side in the left half, new side in the right half, row for row.
+- **Scrolling** (VS Code's proportional mode): while the rows fit, the minimap is drawn from the top at 2 px per row; past that it scrolls along so its offset is the diff's scroll ratio times its overflow. A translucent viewport box marks the visible rows: drag it to scroll, click outside it to centre that row, wheel over the column scrolls the diff. Middle-click autoscroll works over it as over the diff.
+- **Edge strip:** marks for the whole diff, one bucket per pixel: unresolved conflict blocks first, then removed, added and left-out lines (a block choice turns a conflict into plain lines, so a chosen block simply stops being marked); the selection as a faint band (drawn in GDScript from `DiffView`'s selection); a shade for the visible rows. Clicking the strip jumps there.
+- **Off or narrow:** the setting **Show minimap** (Settings, on by default, `diff_minimap` in `config.toml`) and the action `diff.toggle_minimap` (palette, diff context menu, View menu). Off, or when the diff is narrower than ~600 px, only the strip stays, widened to a scroll bar with a thumb, so the change marks never go away.
+- **Data stays in core** (approved 2026-11-01). Core renders the preview in tiles of 256 rows straight into RGBA bytes, with the colours GDScript passes from the theme, and computes the strip's buckets; GDScript wraps tiles in `ImageTexture`s, keeps a few (LRU) and drops them on a diff change, pick change, expand, side-by-side toggle, theme or accent change. Scrolling only draws cached textures.
+
+**API (proposed).**
+- Core `diff::minimap`: `MinimapMark` (header, context, unchanged, added, removed, ours, theirs, base, end) and a `MinimapSource` view over `DiffState` (with its picks) and `ConflictState` that yields each layout row's marks, texts and gap flags, unified or split; `render_tile(source, split, first_row, rows, &MinimapStyle { columns, row_px, palette }) -> Vec<u8>` (RGBA8, `columns × rows·row_px`); `overview(source, split, buckets) -> Vec<u8>` (two bytes a bucket: change mark, left-out flag). Highlighting uses `highlight::highlight` per line of the tile.
+- `RepoSession` (gdext): `diff_minimap_tile(slot, split, first_row, rows, columns, row_px, palette: PackedColorArray) -> PackedByteArray` and `diff_overview(slot, split, buckets) -> PackedByteArray`, `slot` `changes` (or the resolver) or `commit` as for `diff_split_rows`.
+- `VirtualList`: an overridable `_scroll_column_width()` (default: the scroll bar's) so `content_width()` and the horizontal scroll bar leave room for the minimap; `DiffView` hides the base scroll bar and keeps it as the offset model.
+- Config: `diff_minimap: bool` (default `true`).
+
+- [x] Core `diff::minimap` (tiles, overview, picks, conflicts, split) with unit tests on built layouts and fixture-repo tests for a picked diff and a conflicted file
+- [x] `RepoSession` calls, `diff_minimap` config key with its round trip test
+- [x] `DiffMinimap` control (`godot/ui/diff_view/diff_minimap.gd`): tile cache, viewport box, click/drag/wheel, edge strip, narrow and off modes; theme colours for both themes in `app_theme.gd`
+- [x] Setting, `diff.toggle_minimap` action, English and Italian strings
+- [x] Smoke tests in `diff_view_smoke.gd`: the column shows for a diff, a click and a drag map to the expected rows, a toggle and a narrow width fall back to the strip, tiles drop on expand and on a pick
+- [x] `tests/visual/diff_minimap_screenshots.tscn`: unified, side by side, partial picks, the resolver, a long file scrolled to the middle, narrow, off; dark and light
+- [x] Timings in `docs/perf.md` through `diff_bench.tscn`: a tile and the overview of a 100k-line diff (target: under 2 ms a tile, under 20 ms the overview)
+
+**Accept when:** both smoke tests and `cargo xtask check` pass; the screenshots show every case above in both themes; the perf numbers meet the targets; a manual pass through Changes, History, the resolver and Home scrolls with the middle button and the minimap on a real repository (read-only).
+
+*P2 result:* as specified, with these changes:
+- The API as built: `diff::minimap::{Mark, MiniLine, MiniRow, MinimapSource, DiffMinimap, ConflictMinimap, MinimapPalette (PALETTE_LEN 15), MinimapStyle { columns, row_px, char_px, palette }, render_tile, overview, OVERVIEW_ADDED/REMOVED/CONFLICT/LEFT_OUT}`, one flag byte a bucket; `RepoSession.diff_minimap_tile(slot, split, first_row, rows, columns, row_px, char_px, palette)` and `diff_overview(slot, split, buckets)`; `AppCore.diff_minimap()` / `set_diff_minimap()` and `diff_minimap` in `settings()`; `VirtualList.shows_scroll_bar`, `_scroll_column_width()` and `max_scroll_offset()`; `DiffView.set_minimap_sources`, `set_minimap_enabled`, `minimap()`, `selection_rows()`; `DiffPanel.set_minimap_sources` and `set_minimap_enabled` (called on `DiffPanel.GROUP` by the toggle and Settings).
+- The narrow cutoff is 600 px rather than 480, so the minimum window width shows only the strip.
+- The action is "Diff minimap", a check item in the View menu and both diffs' context menus; the setting is "Show minimap" under Interface.
+- Core tests: 8 unit tests in `diff/minimap.rs` and `tests/minimap.rs` (a picked diff on a temp repo, a conflicted merge). `diff_view_smoke.gd` covers the column, tiles, overview flags, a click, a box drag, the wheel, the strip, the toggle, a narrow window and lines left out. `diff_minimap_screenshots.tscn` saves 11 shots (`--repo --file --conflict-repo --conflict --out`). Timings in `docs/perf.md`.
+
+**P3 — Refinements** (scope settled in the Q&A of 2026-11-01; hover peek, rich-text autoscroll, HEAD/tip marks and change-list strips were declined). Three steps; steps B and C stop for Caleb to review before and after screenshots, and each change there is kept or reverted on that review.
+
+*Step A — feel (no review stop).*
+- **Next / previous change:** `diff.next_change` (F7) and `diff.previous_change` (Shift+F7), keys and palette only. A change block is a run of added, removed or conflict rows in the rows shown; the jump centres its first row and wraps at either end silently. Core finds it: `RepoSession.diff_change_row(slot, split, from_row, forward) -> int` (-1 with no change), O(rows) over the layout, no rows to GDScript.
+- **Smooth jumps:** `DiffView.ease_to_offset(target)`: ease-out cubic over 120 ms (theme constant) for minimap and strip clicks and F7/Shift+F7; any input during the ease (wheel, drag, key, another jump) finishes it at once. Dragging, the wheel and autoscroll stay direct.
+- **Cursor feedback:** the minimap shows `CURSOR_DRAG` over the viewport box and while dragging it, `CURSOR_POINTING_HAND` over the rest of the preview and the strip.
+- **Tile prefetch:** after a draw, the minimap renders the missing tiles just above and below the visible ones on idle frames, one a frame, then stops processing.
+- **Autoscroll outside the window:** while running (not headless), `AutoScroll` reads the OS cursor (`DisplayServer.mouse_get_position()` mapped into the viewport) each frame, so speed keeps following the mouse past the window edge.
+- **More autoscroll targets:** `Tree` and `ItemList` (shortcuts dialog, Settings categories, remotes and tags dialogs) and multi-line `TextEdit` (commit description), through their scroll bars; a `TextEdit` with `middle_mouse_paste_enabled` on a system with a primary clipboard (Linux) keeps its paste. Each window that holds one calls `AutoScroll.enable`.
+
+*Step B — colours and marks (review stop: before/after screenshots of each, kept or reverted).*
+- **Stronger changed-word tint:** `added_hl_bg` / `removed_hl_bg` stronger in the diff, and the minimap draws the changed range of paired lines (core's `changed_ranges`) in two new palette colours (`added_word`, `removed_word`; `PALETTE_LEN` 17). The intensity is one theme constant (`word_tint_percent`); a comparison sheet (`tests/visual/word_tint_sheet.tscn`) renders the same diff and minimap at several intensities side by side for Caleb to pick from or tweak.
+- **Strip over the whole file:** with hunks collapsed, the strip maps file lines rather than rows shown, so collapsed gaps are empty space and a mark's height is its place in the file (falling back to rows while the file's length is unknown). Core: `diff_overview(slot, split, buckets, whole_file)`, `diff_strip_position(slot, split, row) -> float` (for the visible-rows shade and the selection) and `diff_strip_target(slot, split, fraction) -> {row, gap}`; a click in a gap opens it (`expand_diff(gap, "all")`) and then scrolls there. Before/after shots: the same collapsed diff with each mapping.
+- **Resolved conflict blocks:** core's `ConflictState` keeps the line ranges block choices wrote this session (shifted by later choices above them, dropped on undo, on an outside change of the file and when the file closes) and marks those rows `Mark::Resolved`: a green row tint in the preview and `OVERVIEW_RESOLVED` (16) in the strip, beside the red of the blocks left. Before/after: a file with one of three blocks chosen.
+
+*Step C — settings and History (review stop: screenshots).*
+- **Change colours:** Settings → Interface gets "Added colour" and "Removed colour" colour pickers (with revert), stored as `added_color` / `removed_color` (`#rrggbb`, parsed like `accent`) and passed to `AppTheme.palette`; one colour serves both themes, as the accent does, and every place built from `p.added` / `p.removed` follows (diff rows and words, minimap, strip, +/− counts, file status colours). Empty keeps the per-theme defaults.
+- **History search hits on the scroll bar:** the commit list gets a 6 px strip beside its scroll bar while a search has matches: hits in the accent colour, the current match stronger. Core: `RepoSession.search_overview(buckets) -> PackedByteArray` from the search's match rows; the strip is a small `MarkStrip` control shared with `DiffMinimap`'s strip drawing.
+
+- [x] A: next/previous change (core call, actions, smoke)
+- [x] A: smooth jumps, cursor feedback, tile prefetch (smoke: end offsets, cursor shapes, tiles ready after idle frames)
+- [x] A: autoscroll outside the window and on Tree, ItemList and TextEdit (smoke)
+- [x] B: word tint sheet, Caleb's pick applied to the diff and minimap
+- [x] B: whole-file strip (core tests on collapsed layouts, before/after shots)
+- [x] B: resolved block marks (core tests on choices, undo and outside edits; before/after shots)
+- [x] C: added/removed colour settings (config round trip, smoke through Settings, shots in both themes)
+- [x] C: history search strip (core test, smoke, shots)
+
+**Accept when:** `cargo xtask check`, the smoke tests and the Godot warnings script pass; each review stop's screenshots are approved (or the change reverted); perf of a minimap tile with word ranges stays under 2 ms on the 100k-line diff.
+
+*Step A result:* as specified, with these details:
+- Core `diff::minimap::change_row(source, from, forward)` (unit test over unified, split and conflict rows, wrapping and a file without changes); `RepoSession.diff_change_row`; `DiffView.change_source` set through `DiffPanel.set_change_source`. Without a previous jump (or once the diff scrolled), F7 counts from the middle row, so from the top it skips a block already in the upper half. The actions work on the focused diff, else the one on screen.
+- `DiffView.ease_to_offset`, `is_easing`, `target_scroll_offset`, `finish_ease` (a `Tween`, `ease_msec` 120 in the `DiffView` theme). A mouse press or key in the diff or the minimap finishes it; any other scrolling (a drag, autoscroll, a reload) takes over from where it is.
+- Cursors through `mouse_default_cursor_shape`; prefetch renders the tile below, then the one above, one a frame.
+- `AutoScroll.os_mouse()` maps `DisplayServer.mouse_get_position()` through the host window and the viewport's screen transform (checked windowed at a 1.5 content scale: it matches the viewport's mouse). Trees and item lists scroll through their bars, text edits by lines (`step_size`); the remotes, tags and shortcuts dialogs, the branch popover and form dialogs' text fields enable it in their windows.
+- Smoke: `diff_view_smoke.gd` (eased clicks, cursor shapes, F7/Shift+F7 through both blocks and back, the wheel finishing an ease, prefetch on a 2000-row standalone diff), `auto_scroll_smoke.gd` (a Tree, an ItemList and a TextEdit; the paste rule).
+
+*Step B result:* all three kept on review (2026-11-01), the word tint at 60%.
+- Word tint: `AppTheme.word_tint_percent` (60; 38 before) sets the diff's `added_hl_bg`/`removed_hl_bg` and the minimap's `added_word`/`removed_word`, drawn over the row tint. Core computes word ranges only for tiles (`MinimapSource::words`), not for the overview, which took 66 ms when every row computed them. `tests/visual/word_tint_sheet.tscn` compares 38, 50, 60 and 70 in both themes.
+- Whole-file strip: `MinimapSource::gaps`, `DiffLayout::gap_rows`, `StripMap` (`units`, `position`, `target`); `overview(source, buckets, whole_file)`; `RepoSession.diff_overview(slot, split, buckets, whole_file)`, `diff_strip_position(slot, split, row, whole_file)` and `diff_strip_target(slot, split, fraction, whole_file)`; the UI always passes `true`. A click in a gap calls `DiffView.expand_gap` and scrolls there on `DiffMinimap.rows_shown`. Marks of a few lines in a long file are 1-2 px (a minimum height was offered, not taken).
+- Resolved blocks: `merge::record_choice`, `ConflictState::resolved()` (kept with a content hash, a snapshot per choice for undo); `Mark::Resolved` (`MARK_COUNT` 8, `PALETTE_LEN` 18 with `resolved_bg`, `added_word`, `removed_word`), `OVERVIEW_RESOLVED` 16, `resolved_mark` green. Not a change for F7.
+- Tests: unit tests for word ranges, the strip map, layout gaps, resolved marks and `record_choice`; `tests/minimap.rs` chooses two of three blocks, undoes one and edits the file outside; `diff_view_smoke.gd` checks strip positions and a click in a gap. Shots: `tests/visual/minimap_marks_screenshots.tscn`. Timings in `docs/perf.md`.
+
+*Step C result:* both kept on review (2026-11-01).
+- Colours: `Config.added_color` / `removed_color` (`take_color`, shared with `accent`), in `AppCore.settings()` / `set_settings`; `AppTheme.palette` and `build` take `added` and `removed` (transparent keeps the theme's), `ThemeManager.configured_color(key)`. Settings → Interface: "Added colour" and "Removed colour" pickers (`change_color` rows) showing the theme's colour until one is chosen; choosing the theme's own stores nothing.
+- Search strip: `graph::search::match_overview` and `CommitSearch::overview(rows, buckets)` (unit test), `RepoSession.search_overview(buckets)` over the rows reported; `MarkStrip` (`godot/ui/mark_strip/mark_strip.gd`: overview source, `current`, `jumped`, static `runs` that `DiffMinimap`'s strip uses too) beside `CommitList`'s scroll bar while a search has matches. Clicking or dragging it scrolls the list (not in the plan; it matches the diff strip).
+- Tests: config round trip and an invalid colour; `settings_smoke.gd` (save, apply, both themes, revert); `history_smoke.gd` (overview, strip shown, beside the scroll bar, current mark, hidden without matches). Shots: `tests/visual/change_colors_screenshots.tscn`.
+
+M7.6 is complete: P1, P2 and P3 are done.
 
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit

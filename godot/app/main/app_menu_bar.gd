@@ -30,12 +30,14 @@ const MENUS: Array[Array] = [
 		["Shelves", [&"changes.shelve", &"shelf.restore_left"]], &"",
 		&"operation.continue", &"operation.open_resolver", &"operation.abort", &"", &"repo.refresh"]],
 	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"", &"branch.rename", &"branch.set_upstream"]],
-	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_side_by_side", &"diff.toggle_whole_file", &"",
+	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_side_by_side", &"diff.toggle_whole_file",
+		&"diff.toggle_minimap", &"",
 		&"app.command_palette", &"view.toggle_git_log"]],
 	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
 ]
 const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves"]
-const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_side_by_side", &"diff.toggle_whole_file", &"view.toggle_git_log"]
+const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_side_by_side", &"diff.toggle_whole_file",
+	&"diff.toggle_minimap", &"view.toggle_git_log"]
 const OPERATION_ACTIONS: Array[StringName] = [&"operation.continue", &"operation.open_resolver", &"operation.abort"]
 
 ## Submenu name -> `func() -> Array[Dictionary]` of `{label, run: Callable}`.
