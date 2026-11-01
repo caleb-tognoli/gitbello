@@ -1,5 +1,5 @@
 extends SmokeTest
-## Required project settings (PLAN §3.7) are on and the main scene shows the core version.
+## Required project settings (PLAN §3.7), the shell layout and app branding.
 
 
 func run() -> void:
@@ -18,10 +18,13 @@ func run() -> void:
 	var main: Node = packed.instantiate()
 	add_child(main)
 	await get_tree().process_frame
-	var label: Label = main.get_node_or_null("%VersionLabel") as Label
-	expect(label != null, "main scene has %VersionLabel")
-	if label != null:
-		expect(label.text.contains(Core.core_version()), "version label shows the core version")
+	expect_eq(get_window().title, "%s - gitbello %s" % [tr("Home"), Core.core_version()],
+			"empty Home window title includes the app version")
+	expect(main.get_node_or_null("Layout/StatusBar") == null, "main scene has no status bar")
+	var body: Control = main.get_node("Layout/Body") as Control
+	var shell_rect: Rect2 = (main as Control).get_global_rect()
+	expect(is_equal_approx(body.get_global_rect().end.y, shell_rect.end.y),
+			"main content fills the space to the bottom of the shell")
 
 	# Branding: the icons exist, Home's welcome and About show the logo.
 	for setting: String in ["application/config/icon", "application/config/windows_native_icon",

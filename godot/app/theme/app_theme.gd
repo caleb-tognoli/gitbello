@@ -71,7 +71,7 @@ static var _tintable: Dictionary[StringName, DPITexture] = {}
 class Palette:
 	var light: bool
 	var background: Color  ## Window, lists and content
-	var surface: Color  ## Toolbars, sidebar, status bar, menus, dialogs
+	var surface: Color  ## Toolbars, sidebar, menus, dialogs
 	var raised: Color  ## Buttons and fields
 	var hover: Color
 	var border: Color
@@ -437,11 +437,13 @@ static func _add_fields(theme: Theme, p: Palette) -> void:
 
 
 static func _add_menus(theme: Theme, p: Palette) -> void:
+	theme.set_font_size(&"font_size", &"MenuBar", 13)
+	theme.set_font_size(&"font_size", &"PopupMenu", 14)
 	for color: StringName in [&"font_color", &"font_hover_color", &"font_pressed_color",
 			&"font_hover_pressed_color", &"font_focus_color"]:
 		theme.set_color(color, &"MenuBar", p.text)
 	theme.set_color(&"font_disabled_color", &"MenuBar", Color(p.text_muted, 0.6))
-	var item: Vector4 = Vector4(8, 4, 8, 4)
+	var item: Vector4 = Vector4(8, 3, 8, 3)
 	theme.set_stylebox(&"normal", &"MenuBar", _box(Color.TRANSPARENT, 4, item))
 	theme.set_stylebox(&"disabled", &"MenuBar", _box(Color.TRANSPARENT, 4, item))
 	theme.set_stylebox(&"hover", &"MenuBar", _box(p.hover, 4, item))
@@ -572,7 +574,7 @@ static func _add_tabs(theme: Theme, p: Palette) -> void:
 	theme.set_icon(&"close", &"TabBar", CLOSE)
 
 
-## The shell around the repo views: status bar, welcome screen, palette,
+## The shell around the repo views: welcome screen, palette,
 ## toasts, sidebar, git log, jobs and forms.
 static func _add_shell(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"ShellLayout", &"VBoxContainer")
@@ -585,11 +587,6 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"panel", &"ViewBar", bar)
 	_variation(theme, &"ViewSwitch", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ViewSwitch", 4)
-	_variation(theme, &"StatusBar", &"PanelContainer")
-	var status: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 3, 8, 3))
-	status.border_color = p.border
-	status.border_width_top = 1
-	theme.set_stylebox(&"panel", &"StatusBar", status)
 	_variation(theme, &"WelcomeBox", &"VBoxContainer")
 	theme.set_constant(&"separation", &"WelcomeBox", 14)
 	_variation(theme, &"RecentList", &"ItemList")

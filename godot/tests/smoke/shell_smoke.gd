@@ -152,7 +152,8 @@ func run() -> void:
 	await _check_graph(main.page_at(0))
 	main.tab_bar().current_tab = 0
 	expect(await wait_until(func() -> bool: return main.current_page().session.can_push()), "repo-1 can push")
-	_check_menus(main)
+	await _check_menus(main)
+	await _check_window_titles(main)
 
 	# Reorder: move the first tab to the end.
 	main.tab_bar().current_tab = 0
@@ -209,6 +210,31 @@ func run() -> void:
 	restored.queue_free()
 	await get_tree().process_frame
 	await _check_home_recent()
+
+
+func _check_window_titles(main: Main) -> void:
+	var suffix: String = " - gitbello %s" % Core.core_version()
+	main.tab_bar().current_tab = 0
+	expect_eq(get_window().title, "repo-1" + suffix, "window title names the active repository")
+	main.tab_bar().current_tab = 1
+	expect_eq(get_window().title, "repo-2" + suffix, "window title follows repository tab switching")
+	main.tab_bar().current_tab = 0
+	main.page_at(0).select_chip(1)
+	expect_eq(get_window().title, "repo-1" + suffix, "linked worktree keeps the repository title without a suffix")
+	main.page_at(0).select_chip(0)
+	main.open_home()
+	expect_eq(get_window().title, tr("Home") + suffix, "Home tab has its own window title")
+	main.page_at(0).state_changed.emit()
+	expect_eq(get_window().title, tr("Home") + suffix, "background repository updates preserve the Home title")
+	var locale: String = TranslationServer.get_locale()
+	TranslationServer.set_locale("it")
+	await get_tree().process_frame
+	expect_eq(get_window().title, tr("Home") + suffix, "Home window title follows the selected language")
+	TranslationServer.set_locale(locale)
+	await get_tree().process_frame
+	main.close_tab(main.tab_count())
+	expect_eq(get_window().title, main.current_page().title() + suffix, "closing Home restores the repository title")
+	main.tab_bar().current_tab = 0
 
 
 ## Home's Recent cards (M7.5 replaced the welcome screen): ordered as the
@@ -402,14 +428,112 @@ func _check_menus(main: Main) -> void:
 	var bar: AppMenuBar = main.menu_bar()
 	for title: String in ["File", "Edit", "Repository", "Branch", "View", "Help"]:
 		expect(bar.menu(title) != null, "menu %s exists" % title)
+	expect_eq(bar.get_theme_font_size(&"font_size"), 13, "compact top-level menu font")
+	expect_eq(bar.menu("File").get_theme_font_size(&"font_size"), 14, "readable dropdown menu font")
+	var normal: StyleBox = bar.get_theme_stylebox(&"normal")
+	expect_eq(normal.get_minimum_size().y, 6.0, "compact top-level vertical padding")
+	var file: PackedStringArray = bar.labels("File")
+	expect(file.find("Open repository…") < file.find("Open recent") \
+			and file.find("Open recent") < file.find("Clone repository…"), "Open recent follows Open: %s" % [file])
+	expect("New repository" in file and "Create repository…" in file and "Initialize folder…" in file,
+			"New repository groups creation commands: %s" % [file])
+	expect(not "Add existing folder…" in file, "Open uses the repository-oriented label")
+	main.tab_bar().current_tab = 1
+	for entry: Dictionary in main._recent_entries():
+		if Paths.same(String(entry["tooltip"]), _fixtures.path_join("repo-1")):
+			(entry["run"] as Callable).call()
+			break
+	expect_eq(main.tab_bar().current_tab, 0, "Recent focuses an already-open repository")
+	expect_eq(main.tab_count(), 5, "Recent does not duplicate an open repository")
+
 	var repository: PackedStringArray = bar.labels("Repository")
-	expect("Remotes…" in repository and "Tags…" in repository, "Repository has Remotes… and Tags…: %s" % [repository])
+	expect("Remotes and tags" in repository and "Remotes…" in repository and "Tags…" in repository,
+			"Repository groups Remotes and Tags: %s" % [repository])
+	expect("Worktrees" in repository and "Add worktree for a branch…" in repository,
+			"Repository groups worktree management")
+	expect("Shelves" in repository and "Shelve selected files… (disabled)" in repository,
+			"Shelves moved out of Branch")
+	expect(not "Shelve selected files…" in bar.labels("Branch"), "Branch keeps only branch operations")
+	expect(not "Continue the operation in progress" in repository and not "Abort the operation in progress…" in repository,
+			"operation-only commands are hidden while idle")
 	expect("Push" in repository, "Push is enabled with commits to push: %s" % [repository])
-	expect("Undo last discard (disabled)" in bar.labels("Edit"), "a disabled entry shows disabled")
+	expect("Undo" in bar.labels("Edit") and "Undo last discard (disabled)" in bar.labels("Edit"),
+			"Edit groups explicit undo operations")
 	expect(Actions.disabled_reason(&"changes.undo_discard") != "", "a disabled action says why")
+	var view_labels: PackedStringArray = bar.labels("View")
+	expect(not "Theme: System" in view_labels and not "Theme: Dark" in view_labels and not "Theme: Light" in view_labels,
+			"theme choices live outside View")
+	expect("Command palette" in view_labels, "Command palette moved to View")
+	expect_eq(Actions.shortcuts(&"app.command_palette")[0], "Ctrl+Shift+P", "the primary palette shortcut is displayed")
+	expect_eq(Actions.shortcuts(&"app.settings"), PackedStringArray(["Ctrl+Comma"]), "Settings has the conventional shortcut")
+	expect(Actions.shortcuts(&"app.keyboard_shortcuts").is_empty(), "Keyboard shortcuts has no conflicting default")
+
 	expect(bar.press("View", "Changes"), "a menu entry runs its action")
 	expect_eq(main.current_page().view, WorktreeView.View.CHANGES, "View → Changes shows the changes")
+	var view: PopupMenu = bar.menu("View")
+	bar.labels("View")
+	var changes_index: int = _menu_item(view, "Changes")
+	expect(changes_index >= 0 and view.is_item_radio_checkable(changes_index) and view.is_item_checked(changes_index),
+			"the current view has a selected radio mark")
+	var split_index: int = _menu_item(view, "Side-by-side diff")
+	expect(split_index >= 0 and view.is_item_checkable(split_index) \
+			and view.is_item_checked(split_index) == Core.diff_side_by_side(), "diff layout toggle reflects its state")
+	var log_index: int = _menu_item(view, "Git command log")
+	var log_shown: bool = main.git_log().visible
+	expect(log_index >= 0 and view.is_item_checkable(log_index) and view.is_item_checked(log_index) == log_shown,
+			"Git log toggle reflects its state")
+	Actions.run_action(&"view.toggle_git_log")
+	bar.labels("View")
+	log_index = _menu_item(view, "Git command log")
+	expect(view.is_item_checked(log_index) == (not log_shown), "Git log checkmark updates")
+	Actions.run_action(&"view.toggle_git_log")
 	expect(bar.press("View", "History"), "View → History")
+	bar.labels("View")
+	var history_index: int = _menu_item(view, "History")
+	changes_index = _menu_item(view, "Changes")
+	expect(view.is_item_checked(history_index) and not view.is_item_checked(changes_index), "view radio marks follow the selection")
+
+	press("Ctrl+Comma")
+	expect(main.settings_window().visible, "Ctrl+, opens Settings")
+	main.settings_window().hide()
+	main.open_home()
+	expect(Actions.is_enabled(&"tab.close"), "Close tab remains available on the Home tab")
+	expect(not Actions.is_enabled(&"repo.refresh") and not Actions.is_enabled(&"view.history") \
+			and not Actions.is_enabled(&"view.changes"), "repository-only commands are disabled on Home")
+	press("Ctrl+W")
+	expect(not main.has_home_tab(), "Ctrl+W closes the active Home tab")
+	expect(main.current_page() != null, "closing Home returns to a repository")
+	await _check_menu_keyboard(bar)
+
+
+func _menu_item(popup: PopupMenu, label: String) -> int:
+	for i: int in popup.item_count:
+		if popup.get_item_text(i) == label:
+			return i
+	return -1
+
+
+func _check_menu_keyboard(bar: AppMenuBar) -> void:
+	if bar.is_native_menu() or OS.has_feature("macos"):
+		return
+	press("F10")
+	expect(await wait_until(func() -> bool: return bar.menu("File").visible), "F10 opens File")
+	press("Alt+E", bar.menu("File"))
+	expect(await wait_until(func() -> bool: return bar.menu("Edit").visible), "Alt+E switches from File to Edit")
+	press("F10", bar.menu("Edit"))
+	await get_tree().process_frame
+	expect(not bar.menu("Edit").visible, "F10 closes the menu")
+	press("Alt+R")
+	expect(await wait_until(func() -> bool: return bar.menu("Repository").visible), "Alt+R opens Repository")
+	press("F10", bar.menu("Repository"))
+	var locale: String = TranslationServer.get_locale()
+	TranslationServer.set_locale("it")
+	await get_tree().process_frame
+	press("Alt+M")
+	expect(await wait_until(func() -> bool: return bar.menu("Edit").visible), "the localized Edit mnemonic opens Modifica")
+	press("F10", bar.menu("Edit"))
+	TranslationServer.set_locale(locale)
+	await get_tree().process_frame
 
 
 func _check_graph(page: RepoTab) -> void:

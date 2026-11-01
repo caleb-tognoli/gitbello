@@ -2,7 +2,7 @@ class_name Main
 extends PanelContainer
 ## App shell (PLAN §4): the menu bar, one tab per repository (its worktrees
 ## are chips inside it), Home (when no tab is open, or in the Home tab the +
-## opens, always the last tab), the git command log, the status bar, toasts
+## opens, always the last tab), the git command log, toasts
 ## and the command palette. Every user operation is an action in `Actions`.
 
 const MIN_WINDOW_SIZE: Vector2i = Vector2i(960, 600)
@@ -38,8 +38,6 @@ var _fit_queued: bool = false
 @onready var _content: Control = %Content
 @onready var _home: Home = %Home
 @onready var _git_log: GitLogPanel = %GitLog
-@onready var _status_label: Label = %StatusLabel
-@onready var _version_label: Label = %VersionLabel
 @onready var _toasts: Toasts = %Toasts
 @onready var _palette: CommandPalette = %Palette
 @onready var _shortcuts_dialog: ShortcutsDialog = %ShortcutsDialog
@@ -54,8 +52,6 @@ func _ready() -> void:
 		DisplayServer.set_system_theme_change_callback(_on_system_theme_changed)
 	window.files_dropped.connect(_on_files_dropped)
 
-	_version_label.text = "gitbello %s" % Core.core_version()
-	_version_label.tooltip_text = "git %s" % Core.git_version()
 	_feedback.name = "Feedback"
 	_feedback.toasts = _toasts
 	_feedback.busy_changed.connect(func(_session: RepoSession) -> void: _update_tab_icons())
@@ -96,6 +92,16 @@ func _ready() -> void:
 	_home.refresh_texts()
 	_update_localized_actions()
 	_menu_bar.dynamic_menus["Open recent"] = _recent_entries
+	_menu_bar.checked_states = {
+		&"view.changes": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.CHANGES,
+		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
+		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
+		&"diff.toggle_side_by_side": func() -> bool: return Core.diff_side_by_side(),
+		&"diff.toggle_whole_file": func() -> bool:
+			var panel: DiffPanel = _shown_diff_panel()
+			return panel != null and panel.whole_file_button().button_pressed,
+		&"view.toggle_git_log": func() -> bool: return _git_log.visible,
+	}
 	_menu_strip.visible = not _menu_bar.is_native_menu()
 
 	if not L10n.runtime_error(Core.start_error()).is_empty():
@@ -349,9 +355,9 @@ func _update_view() -> void:
 	_tab_strip.visible = not _pages.is_empty()
 	for i: int in _pages.size():
 		_pages[i].visible = i == _tabs.current_tab
-	var view: WorktreeView = current_view()
-	_status_label.text = view.worktree_path() if view != null else tr("No repository open")
-	_status_label.tooltip_text = _status_label.text
+	var page: RepoTab = current_page()
+	var context: String = page.title() if page != null else tr("Home")
+	get_window().title = "%s - gitbello %s" % [context, Core.core_version()]
 	_queue_fit_tabs()
 
 
@@ -489,28 +495,28 @@ func _apply_theme() -> void:
 # --- Actions ----------------------------------------------------------------
 
 func _register_actions() -> void:
-	var has_tab: Callable = func() -> bool: return not _pages.is_empty()
+	var has_repo: Callable = func() -> bool: return current_page() != null
+	var can_close_tab: Callable = func() -> bool: return not _pages.is_empty()
 	var many_tabs: Callable = func() -> bool: return _pages.size() > 1
 	var no_repo: Callable = func() -> String: return "Open a repository first."
 	Actions.register(&"app.command_palette", "Command palette", "App",
-			_palette.open, PackedStringArray(["Ctrl+K", "Ctrl+Shift+P"]))
-	Actions.register(&"app.keyboard_shortcuts", "Keyboard shortcuts…", "App",
-			_shortcuts_dialog.open, PackedStringArray(["Ctrl+Comma"]))
+			_palette.open, PackedStringArray(["Ctrl+Shift+P", "Ctrl+K"]))
+	Actions.register(&"app.keyboard_shortcuts", "Keyboard shortcuts…", "App", _shortcuts_dialog.open)
 	Actions.register(&"app.quit", "Quit", "App",
 			func() -> void: get_tree().quit(), PackedStringArray(["Ctrl+Q"]))
 	Actions.register(&"app.about", "About gitbello", "App", _show_about)
 	Actions.register(&"home.open", "Home", "App", open_home, PackedStringArray(["Ctrl+N"]))
 	Actions.register(&"repo.clone", "Clone repository…", "Repository", func() -> void: _library.clone())
-	Actions.register(&"repo.add_existing", "Add existing folder…", "Repository", _library.add_existing,
+	Actions.register(&"repo.add_existing", "Open repository…", "Repository", _library.add_existing,
 			PackedStringArray(["Ctrl+O"]))
 	Actions.register(&"repo.scan", "Scan folder for repositories…", "Repository",
 			func() -> void: _library.scan())
 	Actions.register(&"repo.create", "Create repository…", "Repository", _library.create)
 	Actions.register(&"repo.init", "Initialize folder…", "Repository", func() -> void: _library.init_folder())
 	Actions.register(&"repo.refresh", "Refresh", "Repository",
-			func() -> void: current_page().session.refresh(), PackedStringArray(["F5"]), has_tab, no_repo)
+			func() -> void: current_page().session.refresh(), PackedStringArray(["F5"]), has_repo, no_repo)
 	Actions.register(&"tab.close", "Close tab", "Tabs",
-			func() -> void: close_tab(_tabs.current_tab), PackedStringArray(["Ctrl+W"]), has_tab, no_repo)
+			func() -> void: close_tab(_tabs.current_tab), PackedStringArray(["Ctrl+W"]), can_close_tab, no_repo)
 	Actions.register(&"tab.next", "Next tab", "Tabs",
 			func() -> void: _tabs.current_tab = (_tabs.current_tab + 1) % _pages.size(),
 			PackedStringArray(["Ctrl+Tab"]), many_tabs)
@@ -522,10 +528,10 @@ func _register_actions() -> void:
 			PackedStringArray(["Ctrl+Shift+L"]))
 	Actions.register(&"view.history", "History", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.HISTORY),
-			PackedStringArray(["Ctrl+Shift+H"]), has_tab, no_repo)
+			PackedStringArray(["Ctrl+Shift+H"]), has_repo, no_repo)
 	Actions.register(&"view.changes", "Changes", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.CHANGES),
-			PackedStringArray(["Ctrl+Shift+G"]), has_tab, no_repo)
+			PackedStringArray(["Ctrl+Shift+G"]), has_repo, no_repo)
 	Actions.register(&"view.shelves", "Shelves", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(),
 			func() -> bool: return current_page() != null and not current_page().session.shelves().is_empty(),
@@ -542,7 +548,7 @@ func _register_actions() -> void:
 	_register_branch_actions()
 	_register_merge_actions()
 	_register_worktree_actions()
-	Actions.register(&"app.settings", "Settings…", "App", _open_settings)
+	Actions.register(&"app.settings", "Settings…", "App", _open_settings, PackedStringArray(["Ctrl+Comma"]))
 	Actions.register(&"diff.toggle_side_by_side", "Side-by-side diff", "View",
 			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
 	Actions.register(&"diff.copy", "Copy", "Edit",
@@ -1143,15 +1149,13 @@ func _show_about() -> void:
 	_about.show_about()
 
 
-## File → Open recent: recently opened repositories not open now.
+## File → Open recent: opening an already-open repository focuses its tab.
 func _recent_entries() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = []
 	var recent: PackedStringArray = Core.recent_repos(RECENT_MENU)
 	var labels: PackedStringArray = Paths.short_labels(recent)
 	for i: int in recent.size():
 		var path: String = recent[i]
-		if page_for(path) != null:
-			continue
 		entries.append({"label": labels[i], "tooltip": path, "run": func() -> void: open_repo(path)})
 	return entries
 

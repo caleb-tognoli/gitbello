@@ -239,15 +239,14 @@ File  Edit  Repository  Branch  View  Help
 |                           |                                       |
 |  commit box (Changes)     |                                       |
 +---------------------------+---------------------------------------+
-<worktree path>                                       gitbello · git
 ```
 
-**Menu bar.** Built from the action registry; disabled items say why in their tooltip.
-- **File:** Home, Clone…, Add existing folder…, Scan folder…, Create…, Initialize folder…, Recent (from the library), Close tab, Settings, Quit.
-- **Edit:** Undo (where available), Command palette, Keyboard shortcuts.
-- **Repository:** Fetch, Pull, Push, New task, Clean up worktrees, Open in editor / terminal / file manager, Remotes…, Tags…, Git log.
-- **Branch:** Switch…, New branch, Rename, Delete, Merge into current…, Rebase current onto…, Set upstream.
-- **View:** Changes, History, Side by side, Theme, Git log panel.
+**Menu bar.** Built from the action registry; disabled items say why in their tooltip. The top row uses compact 13 px text; dropdowns stay at 14 px. F10 opens File on Windows/Linux, and Alt plus the localized menu's initial opens a menu; native macOS menus keep platform behavior.
+- **File:** Home, Open repository…, Open recent (including open repositories), Clone…, Scan folder…, New repository (Create… and Initialize folder…), Close tab, Settings (Ctrl+,), Quit.
+- **Edit:** Copy, Select all, explicit Undo operations, Find and search matches.
+- **Repository:** Fetch, Pull, Push, New worktree, worktree management, Open in editor / terminal / file manager, Remotes and tags, Shelves, operation commands only while one is in progress, Refresh.
+- **Branch:** Switch…, New branch, Merge into current…, Rename, Set upstream.
+- **View:** checked Changes / History / Shelves choices, checked diff and Git log toggles, Command palette. Themes live in Settings and remain palette actions.
 - **Help:** Keyboard shortcuts, About.
 
 **Repo tabs.** One tab per repo, never per worktree; the title is the repo name.

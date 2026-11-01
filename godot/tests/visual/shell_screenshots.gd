@@ -1,9 +1,10 @@
 extends Node
 ## Saves screenshots of the shell for visual review (not part of the smoke run).
 ## Usage: godot --path godot res://tests/visual/shell_screenshots.tscn --
-##        --repos=<path>;<path>;... --out=<dir> [--branches-only]
+##        --repos=<path>;<path>;... --out=<dir> [--branches-only] [--menus-only]
 ## Run with GITBELLO_CONFIG pointing at a scratch config file.
 ## --branches-only captures grouped and filtered lists without the later git operations.
+## --menus-only captures the shell and the File, Repository and View menus.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 const WAIT_MS: int = 30_000
@@ -13,6 +14,7 @@ func _ready() -> void:
 	var repos: PackedStringArray = PackedStringArray()
 	var out: String = ""
 	var branches_only: bool = false
+	var menus_only: bool = false
 	var parent_fixtures: String = ""
 	var prepare_parent_merge: bool = false
 	for arg: String in OS.get_cmdline_user_args():
@@ -22,6 +24,8 @@ func _ready() -> void:
 			out = arg.trim_prefix("--out=")
 		elif arg == "--branches-only":
 			branches_only = true
+		elif arg == "--menus-only":
+			menus_only = true
 		elif arg.begins_with("--parent-details="):
 			parent_fixtures = arg.trim_prefix("--parent-details=")
 		elif arg == "--prepare-parent-merge":
@@ -56,6 +60,16 @@ func _ready() -> void:
 
 	Actions.run_action(&"view.theme_dark")
 	await _shot(out, "dark")
+	for entry: Array in [[0, "file"], [2, "repository"], [4, "view"]]:
+		main.menu_bar()._open_menu(entry[0])
+		var popup: PopupMenu = main.menu_bar().get_menu_popup(entry[0])
+		await _shot_window(popup, out, "menu_" + String(entry[1]))
+		main.menu_bar()._close_menus()
+	if menus_only:
+		while main.tab_count() > 0:
+			main.close_tab(0)
+		get_tree().quit()
+		return
 	Actions.run_action(&"view.theme_light")
 	await _shot(out, "light")
 	# Two more accent colours (P1 review), then back to the default.
