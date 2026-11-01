@@ -314,6 +314,9 @@ func run() -> void:
 	box.begin_amend({"hash": String(session.status().get("oid", "")), "subject": "Add notes (amended)"})
 	expect(await wait_until(func() -> bool: return box.can_commit()), "pushed commit loads for amend")
 	expect(box._amend_warning.visible, "a pushed commit has a persistent warning")
+	# Nothing is picked: with the same message, an amend in the same second
+	# as the commit it replaces would recreate it exactly and leave HEAD.
+	box.set_message(box.summary(), "Amended after the push.")
 	var pushed_head: String = String(session.status().get("oid", ""))
 	expect(not box.commit(), "saving a pushed commit first asks for confirmation")
 	expect(box._amend_confirm.visible, "the pushed-commit confirmation is visible")
