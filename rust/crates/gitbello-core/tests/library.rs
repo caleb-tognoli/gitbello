@@ -157,7 +157,9 @@ fn summaries_report_branch_changes_upstream_and_missing() {
         .count();
     assert_eq!(loaded, paths.len());
 
-    let main = rt.summary(repo.path()).unwrap();
+    // Summaries are keyed by the library's (canonical) entry paths.
+    let summary = |path: &Path| rt.summary(&normalize(path));
+    let main = summary(repo.path()).unwrap();
     assert_eq!(main.branch.as_deref(), Some("main"));
     assert_eq!(
         (main.changes, main.upstream, main.ahead, main.behind),
@@ -173,15 +175,15 @@ fn summaries_report_branch_changes_upstream_and_missing() {
         Some(root.as_str())
     );
 
-    let unborn = rt.summary(&unborn).unwrap();
+    let unborn = summary(&unborn).unwrap();
     assert_eq!(unborn.branch.as_deref(), Some("trunk"));
     assert_eq!((unborn.changes, unborn.root_commit.as_deref()), (0, None));
 
-    let detached = rt.summary(&detached).unwrap();
+    let detached = summary(&detached).unwrap();
     assert!(detached.detached && detached.branch.is_none());
 
-    assert!(rt.summary(&missing).unwrap().missing);
-    let plain = rt.summary(&plain).unwrap();
+    assert!(summary(&missing).unwrap().missing);
+    let plain = summary(&plain).unwrap();
     assert!(!plain.missing);
     assert_eq!(
         plain.error.as_ref().map(|e| e.kind),

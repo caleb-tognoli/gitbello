@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::git::CancelToken;
 use crate::library::path_key;
+use crate::runtime::normalize;
 
 /// Folder names never walked into.
 pub const SKIPPED: &[&str] = &["node_modules", "$RECYCLE.BIN", "System Volume Information"];
@@ -40,7 +41,10 @@ pub fn scan(
     mut progress: impl FnMut(usize, usize),
 ) -> Vec<ScanHit> {
     let mut hits: BTreeMap<String, ScanHit> = BTreeMap::new();
-    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    // Walk from the real path: a worktree's `.git` file names its main
+    // repository by the path git saw, so both must take the same form
+    // (macOS `/var` is `/private/var`, Windows has 8.3 names and links).
+    let mut stack: Vec<(PathBuf, usize)> = vec![(normalize(root), 0)];
     let mut folders = 0usize;
     while let Some((dir, level)) = stack.pop() {
         if cancel.is_cancelled() {
@@ -56,7 +60,7 @@ pub fn scan(
                 continue;
             }
             Some(Found::Worktree { main, bare }) => {
-                hit(&mut hits, &main, bare).worktrees.push(dir);
+                hit(&mut hits, &normalize(&main), bare).worktrees.push(dir);
                 continue;
             }
             None => {}
