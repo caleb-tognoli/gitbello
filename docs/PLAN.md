@@ -786,10 +786,12 @@ M7.6 is complete: P1, P2 and P3 are done.
 
 ### M11 — Packaging and first release (≈1.5 weeks)
 - [x] Logo and app icon (pulled forward 2026-11-01): `themes/branding/logo.svg` (a shared-stem "gb" drawn as a branch on a deep blue squircle with amber commit dots, for contrast on the taskbar) and a heavier `logo_small.svg` for 24 px and below; `tools/export_branding.gd` draws `icon.png` (window icon, boot splash) and `icon.ico` (Windows); the logo shows on Home's welcome screen and in About
-- [ ] macOS `.icns` from `icon.png` when the macOS export is set up
-- [ ] Custom slim export templates; release builds in CI
-- [ ] Windows: zip plus installer (Inno Setup or similar). Linux: AppImage (Flatpak later). macOS: `.app` zip, documenting the unsigned-app steps (signing and notarization later)
-- [ ] README with screenshots, CONTRIBUTING, issue templates; tag v0.1.0
+- [x] macOS icon (2026-11-01): `tools/export_branding.gd` also draws `icon_macos.png` (1024 px, on the system icon grid), made into an `.icns` by the macOS export
+- [x] Release builds in CI (2026-11-01, pulled ahead of M8–M10 for 1.0.0): `.github/workflows/release.yml` builds the gdext library on Windows (static CRT), Linux (ubuntu-22.04) and macOS (universal), exports the three presets in `godot/export_presets.cfg` with Godot's stock templates, and attaches them to a draft release whose notes are the `CHANGELOG.md` section of the tag's version
+- [x] Windows: zip plus Inno Setup installer (`packaging/windows/installer.iss`, current user, offers to download Git for Windows pinned by URL and SHA-256 when git is missing or older than 2.40). Linux: `.tar.gz` with `install.sh` (as spritesheetbelli; AppImage/Flatpak later). macOS: `.app` zip, ad-hoc signed, with the unsigned-app steps in the README (signing and notarization later). Core discovery also looks in the usual Git for Windows and Homebrew folders, for apps started from the Finder or right after the installer added Git
+- [x] README with screenshots (`tests/visual/readme_screenshots.tscn`), CHANGELOG; tag v1.0.0
+- [ ] Custom slim export templates (the stock ones make a 110 MB Windows executable)
+- [ ] CONTRIBUTING and issue templates
 
 **Total:** about 28 weeks to v0.1.0 at 20 h/week, with the daily-driver point (after M6.5) at about 19 weeks.
 

@@ -44,6 +44,8 @@ cargo xtask smoke [--only <name>]   # headless Godot smoke scripts (or those mat
 cargo xtask bench-graph <repo> [--ui] [--record]   # graph load + scroll benchmark (read-only)
 ```
 
+Releases: bump the version in `rust/Cargo.toml`, `godot/project.godot` and `godot/export_presets.cfg`, add its `CHANGELOG.md` section, then push a `v<version>` tag. `.github/workflows/release.yml` builds every platform and the Windows installer (`packaging/`) and attaches them to a draft release.
+
 Run `cargo xtask check` before declaring any task done.
 
 ## Golden rules
@@ -106,4 +108,5 @@ Run `cargo xtask check` before declaring any task done.
 - `res://tests/visual/view_switch_screenshots.tscn -- --repo=<CLI fixture repo-11> --out=<dir>` captures the header row with the Changes | History | Shelves switch in each view and theme, then at the minimum window width (read-only).
 - `res://tests/visual/sync_button_screenshots.tscn -- --fixtures=<CLI fixture dir> --out=<dir>` captures the Sync button (push, menu, busy, sync) and the ahead/behind pills in the branch list, chip tooltip, "No local changes" and Home. It fetches `repo-8` and expects `repo-1` without changes (stash them first): throwaway CLI fixtures and `GITBELLO_CONFIG=<fixtures>/config.toml` only.
 - `res://tests/visual/toast_flow_screenshots.tscn -- --repo=<CLI fixture repo-8> --out=<dir>` walks the toast rules in numbered shots: a commit (no toast), a discard (Undo), Copy hash, a fetch's progress, an error with a fix, the light theme and a burst. It commits, discards and fetches: throwaway fixtures only, with `GITBELLO_CONFIG=<fixtures>/config.toml`. Keep the fixture path short on Windows (the fixture's remote hits the path limit under deep temp folders).
+- `res://tests/visual/readme_screenshots.tscn -- --repo=<throwaway repo with worktrees and an uncommitted change> --out=<dir>` captures the README's History and Changes shots in both themes (read-only); copy `changes_dark.png` and `changes_light.png` to `docs/screenshot.png` and `docs/screenshot-light.png`.
 - Performance claims need numbers. Log timings and memory, and include them in the milestone summary.
