@@ -296,12 +296,12 @@ All repositories (34)                     Sort: Name v   Group: Folder v
 
 Not in scope for M7.5: custom groups or tags (pin and folder groups only), listing repositories from GitHub/GitLab accounts (needs auth; later milestone), a "start on Home" setting (tabs keep being restored; Home shows when none come back), shallow clones.
 
-**Worktree strip.** One row of chips: the main worktree first, then the linked ones by folder name.
-- A chip shows the folder name, the branch in muted text (hidden when it equals the folder name), the changed-file count, ↑ahead ↓behind, and markers for an operation in progress, a lock or a missing folder.
+**Worktree strip.** One row: a worktree icon (it lists all worktrees), the main worktree's chip, a thin line, then the linked ones by folder name.
+- A chip is borderless text (the shown one filled): the folder name without the repository's name in front (`shop-login` → `login`; core's `worktrees::short_name`), capped in width with "…", then one marker: a missing-folder, conflict/operation (in the conflict colour) or lock icon, else a dot when it has changed files. Its tooltip card has the folder, branch (or detached commit), path, changed and conflicted files, ↑ahead ↓behind, the operation and the lock reason. Middle-click shows its folder in the file manager.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
 - Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Delete… (also for the shown worktree, which moves to the main one; offers to delete its branch too, on by default).
 - Right after the last chip, **+** (New worktree) runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
-- When the chips don't fit, the strip scrolls and a ▾ at its end lists all worktrees. Selection and chip-layout changes reveal the selected chip with minimal scrolling; unchanged refreshes preserve manual scrolling.
+- When the chips don't fit, the strip scrolls; the worktree icon still lists all worktrees. Selection and chip-layout changes reveal the selected chip with minimal scrolling; unchanged refreshes preserve manual scrolling.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
 - A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Each branch row has a branch icon, except the current branch uses a checkmark instead. Section arrows line up with top-level rows. The list opens with the current branch selected (nothing when it is not listed); while filtering, the first match is. Enter or a single click checks out. An unmatched search shows a quiet "No matching branches" message in the list area; changing or clearing the search restores the matching rows.

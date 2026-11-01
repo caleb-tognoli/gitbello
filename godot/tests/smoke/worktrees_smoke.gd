@@ -29,7 +29,7 @@ func run() -> void:
 	var strip: WorktreeStrip = page.strip()
 	expect(await wait_until(func() -> bool: return strip.chips().size() == 2), "two chips")
 	await _overflow_presentation()
-	strip._all_button.pressed.emit()
+	strip.list_button().pressed.emit()
 	var all_menu: PopupMenu = strip._all_menu
 	expect_eq(all_menu.item_count, 2, "overflow lists both real worktrees")
 	all_menu.id_pressed.emit(1)
@@ -220,7 +220,7 @@ func _overflow_selection() -> void:
 	strip.worktree_chosen.connect(func(path: String) -> void: strip.show_worktrees(rows, path))
 	strip.show_worktrees(rows, last)
 	await _settle_strip()
-	expect(strip._all_button.visible, "the test strip overflows")
+	expect(strip.overflows(), "the test strip overflows")
 	expect(_chip_in_view(strip, last), "an initially selected last chip scrolls into view")
 	strip.show_worktrees(rows, first)
 	await _settle_strip()
@@ -266,7 +266,7 @@ func _overflow_selection() -> void:
 	strip.show_worktrees([rows[0]], first)
 	strip.size.x = 800.0
 	await _settle_strip()
-	expect(not strip._all_button.visible, "the all-worktrees button hides when the chips fit")
+	expect(not strip.overflows(), "the chips fit again")
 	expect(_chip_in_view(strip, first), "a fitting selection remains visible")
 	strip.queue_free()
 	await get_tree().process_frame
@@ -294,8 +294,8 @@ func _overflow_presentation() -> void:
 	strip.show_worktrees(rows, "/fixture/dirty")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	expect(strip._all_button.visible, "a narrow strip exposes overflow")
-	strip._all_button.pressed.emit()
+	expect(strip.overflows(), "a narrow strip overflows")
+	strip.list_button().pressed.emit()
 	var menu: PopupMenu = strip._all_menu
 	expect_eq(menu.item_count, 6, "all worktrees listed")
 	expect_eq(menu.get_item_text(0), "main  ·  main", "main remains first with no clean badge")
@@ -315,7 +315,7 @@ func _overflow_presentation() -> void:
 	menu.hide()
 	dirty["changed"] = 4
 	strip.show_worktrees(rows, "/fixture/main")
-	strip._all_button.pressed.emit()
+	strip.list_button().pressed.emit()
 	expect(menu.get_item_text(3).ends_with("4 ↑1 ↓2"), "reopening gets current status")
 	expect(menu.is_item_checked(0) and not menu.is_item_checked(3), "selection refreshes")
 	menu.hide()
@@ -339,57 +339,63 @@ static func _chip_in_view(strip: WorktreeStrip, path: String) -> bool:
 
 func _test_chip_tooltips() -> void:
 	var chip: WorktreeChip = WorktreeChip.new()
-	var wt: Dictionary = {"path": "C:/test/repo", "name": "repo", "branch": "main",
-		"head": "abcdef1234", "detached": false, "prunable": false, "locked": false,
+	var wt: Dictionary = {"path": "C:/test/repo-login", "name": "repo-login", "short_name": "login",
+		"branch": "main", "head": "abcdef1234", "detached": false, "prunable": false, "locked": false,
 		"lock_reason": "", "changed": 1, "ahead": 1, "behind": 2, "conflicts": 1, "operation": "rebase"}
 	chip.set_worktree(wt)
 	add_child(chip)
-	expect_eq(chip.texts()["badge"], "1 ↑1 ↓2", "tooltip explanations do not change the badge")
-	expect_eq(chip.tooltip_text, "C:/test/repo\n1 changed file\n1 conflicted file\nRebase in progress", "tracking has no heading, words or unicode arrows")
-	_expect_tooltip_tracking(chip, [{"icon": &"GitPush", "count": "1"}, {"icon": &"GitPull", "count": "2"}])
-	wt.merge({"changed": 3, "ahead": 2, "behind": 0, "conflicts": 2, "operation": "", "locked": true, "lock_reason": "[b]review[/b]"}, true)
+	expect_eq(chip.texts(), {"name": "login", "marker": "GitConflict"}, "the short name; a conflict outranks changes")
+	expect_eq(chip.tooltip_text, "repo-login\nmain\nC:/test/repo-login\n1 changed file\n1 conflicted file\n1 commit ahead\n2 commits behind\nRebase in progress",
+			"the tooltip names the folder, branch and path, then the state")
+	_expect_card(chip, [&"FileModified", &"GitConflict", &"GitPush", &"GitPull", &"GitConflict"])
+	wt.merge({"changed": 3, "ahead": 2, "behind": 0, "conflicts": 0, "operation": "", "locked": true, "lock_reason": "[b]review[/b]"}, true)
 	chip.set_worktree(wt)
+	expect_eq(chip.texts()["marker"], "Lock", "a lock outranks changes")
 	expect(chip.tooltip_text.contains("3 changed files"), "changed files plural")
-	expect(chip.tooltip_text.contains("2 conflicted files"), "conflicted files plural")
 	expect(chip.tooltip_text.ends_with("Locked: [b]review[/b]"), "lock reason is retained as plain text")
-	_expect_tooltip_tracking(chip, [{"icon": &"GitPush", "count": "2"}])
-	var reused_tooltip: Control = chip._make_custom_tooltip(chip.tooltip_text)
-	wt.merge({"ahead": 0, "behind": 1}, true)
+	var reused: Control = chip._make_custom_tooltip(chip.tooltip_text)
+	wt.merge({"locked": false}, true)
 	chip.set_worktree(wt)
-	_expect_tooltip_tracking(chip, [{"icon": &"GitPull", "count": "1"}], reused_tooltip)
-	reused_tooltip = chip._make_custom_tooltip(chip.tooltip_text)
-	wt.merge({"changed": 0, "ahead": 0, "behind": 0, "conflicts": 0, "locked": false, "detached": true}, true)
+	expect_eq(chip.texts()["marker"], "dot", "changed files show a dot")
+	_expect_card(chip, [&"FileModified", &"GitPush"], reused)
+	wt.merge({"changed": 0, "ahead": 0, "detached": true}, true)
 	chip.set_worktree(wt)
-	expect_eq(chip.tooltip_text, "C:/test/repo\nNo changed files", "known zero does not claim synced or an upstream")
-	expect_eq(chip.texts()["badge"], "", "zero counts remain hidden")
-	_expect_tooltip_tracking(chip, [], reused_tooltip)
-	wt.merge({"changed": -1, "ahead": 9, "behind": 8}, true)
+	expect_eq(chip.texts(), {"name": "login", "marker": ""}, "a clean detached worktree shows only its name")
+	expect_eq(chip.tooltip_text, "repo-login\nDetached at abcdef1\nC:/test/repo-login\nNo changed files",
+			"known zero does not claim synced; detached is in the tooltip")
+	wt.merge({"changed": -1, "ahead": 9}, true)
 	chip.set_worktree(wt)
-	expect_eq(chip.tooltip_text, "C:/test/repo\nStatus not available yet", "unknown is not reported as clean")
-	_expect_tooltip_tracking(chip, [])
+	expect_eq(chip.texts()["marker"], "", "unknown status has no dot")
+	expect(chip.tooltip_text.ends_with("Status not available yet"), "unknown is not reported as clean")
 	wt.merge({"prunable": true, "changed": 3}, true)
 	chip.set_worktree(wt)
-	expect_eq(chip.tooltip_text, "C:/test/repo\nThe folder is missing.", "missing folder takes precedence over status")
-	_expect_tooltip_tracking(chip, [])
+	expect_eq(chip.texts()["marker"], "StatusWarning", "a missing folder has the warning marker")
+	expect(chip.tooltip_text.ends_with("C:/test/repo-login\nThe folder is missing."), "missing folder takes precedence over status")
+	_expect_card(chip, [&"StatusWarning"])
+	wt.erase("short_name")
+	chip.set_worktree(wt)
+	expect_eq(chip.texts()["name"], "repo-login", "without a short name the folder is shown")
 	chip.queue_free()
 
 
-func _expect_tooltip_tracking(chip: WorktreeChip, expected: Array[Dictionary], existing: Control = null) -> void:
+## Checks a chip's tooltip card against its plain tooltip: title, branch and
+## path lines, then one line per state with `status_icons`.
+func _expect_card(chip: WorktreeChip, status_icons: Array[StringName], existing: Control = null) -> void:
 	var child_count: int = chip.get_child_count()
-	var tooltip: Control = existing if existing != null else chip._make_custom_tooltip(chip.tooltip_text)
-	var text: Label = tooltip.get_child(0) as Label
-	expect_eq(text.text, chip.tooltip_text, "paths and user content remain literal label text")
-	expect_eq(text.theme_type_variation, &"TooltipLabel", "native tooltip font styling")
-	expect_eq(tooltip.get_child_count(), 1 if expected.is_empty() else 2, "no empty or stale tracking row")
-	var icons: Array[Node] = tooltip.find_children("*", "TextureRect", true, false)
-	expect_eq(icons.size(), expected.size(), "only positive known counts have icons")
-	for i: int in mini(icons.size(), expected.size()):
-		var icon: TextureRect = icons[i] as TextureRect
-		var count: Label = icon.get_parent().get_child(1) as Label
-		expect_eq(icon.texture, AppTheme.icon(StringName(expected[i]["icon"])), "tracking uses the actual themed SVG texture")
-		expect_eq(count.text, String(expected[i]["count"]), "the icon is paired with only its count")
-		expect_eq(count.theme_type_variation, &"TooltipLabel", "tracking uses tooltip font styling")
-	tooltip.free()
+	var card: Control = existing if existing != null else chip._make_custom_tooltip(chip.tooltip_text)
+	var lines: PackedStringArray = chip.tooltip_text.split("\n")
+	var title: Label = card.get_child(0) as Label
+	expect_eq(title.text, lines[0], "the card's title is the folder")
+	expect_eq(title.theme_type_variation, &"WorktreeTooltipTitle", "the title is styled as one")
+	expect_eq((card.get_child(1).get_child(1) as Label).text, lines[1], "then the branch")
+	expect_eq((card.get_child(2).get_child(1) as Label).text, lines[2], "then the literal path")
+	var status: Node = card.get_child(3)
+	expect_eq(status.get_child_count(), status_icons.size(), "one status line per state")
+	for i: int in mini(status.get_child_count(), status_icons.size()):
+		var icon: TextureRect = status.get_child(i).get_child(0) as TextureRect
+		expect_eq(icon.texture, AppTheme.icon(status_icons[i]), "status line %d has its themed icon" % i)
+		expect_eq((status.get_child(i).get_child(1) as Label).text, lines[3 + i], "status line %d has its text" % i)
+	card.free()
 	expect_eq(chip.get_child_count(), child_count, "custom tooltips do not change persistent chip layout")
 
 

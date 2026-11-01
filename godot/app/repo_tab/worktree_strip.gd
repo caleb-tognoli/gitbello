@@ -1,21 +1,25 @@
 class_name WorktreeStrip
 extends PanelContainer
-## The row of worktree chips at the top of a repository tab (PLAN §4): the
-## main worktree first, then the linked ones by folder name, then + (new
-## worktree) right after the last chip, with a ▾ for cleanup, adding a
-## worktree for a branch and pruning. When the chips do not fit, the row
-## scrolls and a ▾ at its end lists them all.
+## The row of worktree chips at the top of a repository tab (PLAN §4): a
+## worktree icon that lists them all, the main worktree, a thin line, the
+## linked ones by folder name, then + (new worktree) right after the last
+## chip, with a ▾ for cleanup, adding a worktree for a branch and pruning.
+## When the chips do not fit, the row scrolls.
 
 ## A chip was activated: show worktree `path`.
 signal worktree_chosen(path: String)
 ## A chip's context menu was requested; `at_position` is on the screen.
 signal worktree_menu_requested(worktree: Dictionary, at_position: Vector2)
+## A chip was middle-clicked: show its folder.
+signal worktree_reveal_requested(worktree: Dictionary)
 
 const TASK_MENU: Array[StringName] = [&"worktree.cleanup", &"worktree.add_existing", &"", &"worktree.prune"]
 
 var _row: HBoxContainer = HBoxContainer.new()
 var _scroll: ScrollContainer = ScrollContainer.new()
 var _chips: HBoxContainer = HBoxContainer.new()
+## Between the main worktree's chip and the linked ones.
+var _separator: VSeparator = VSeparator.new()
 ## Takes the room right of the buttons while the chips fit.
 var _spacer: Control = Control.new()
 ## New worktree and its ▾, joined into one split chip.
@@ -24,7 +28,8 @@ var _new_task: Button = Button.new()
 var _task_menu_button: Button = Button.new()
 var _task_menu: PopupMenu = PopupMenu.new()
 var _task_ids: Array[StringName] = []
-var _all_button: Button = Button.new()
+## The worktree icon starting the row: lists every worktree.
+var _list_button: Button = Button.new()
 var _all_menu: PopupMenu = PopupMenu.new()
 var _worktrees: Array[Dictionary] = []
 var _selected: String = ""
@@ -45,15 +50,19 @@ func _ready() -> void:
 	_chips.theme_type_variation = &"ChipRow"
 	_chips.minimum_size_changed.connect(_update_overflow)
 	_chips.sort_children.connect(_queue_reveal)
+	_separator.theme_type_variation = &"ChipSeparator"
+	_separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_separator.hide()
+	_chips.add_child(_separator)
+	_list_button.icon = AppTheme.icon(&"GitWorktree")
+	_list_button.theme_type_variation = &"WorktreeRowIcon"
+	_list_button.focus_mode = Control.FOCUS_ALL
+	_list_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_list_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_list_button.pressed.connect(_open_all_menu)
+	_row.add_child(_list_button)
 	_scroll.add_child(_chips)
 	_row.add_child(_scroll)
-	_all_button.icon = AppTheme.ARROW_DOWN
-	_all_button.tooltip_text = "All worktrees"
-	_all_button.theme_type_variation = &"ChipIconButton"
-	_all_button.focus_mode = Control.FOCUS_ALL
-	_all_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_all_button.pressed.connect(_open_all_menu)
-	_row.add_child(_all_button)
 	_actions.theme_type_variation = &"ChipSplit"
 	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_row.add_child(_actions)
@@ -76,6 +85,7 @@ func _ready() -> void:
 	_row.add_child(_spacer)
 	add_child(_task_menu)
 	_task_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_task_ids[id]))
+	_all_menu.theme_type_variation = &"WorktreeListMenu"
 	add_child(_all_menu)
 	_all_menu.id_pressed.connect(func(id: int) -> void:
 		worktree_chosen.emit(String(_worktrees[id]["path"])))
@@ -92,7 +102,7 @@ func _notification(what: int) -> void:
 
 
 func _update_tooltips() -> void:
-	_all_button.tooltip_text = tr("All worktrees")
+	_list_button.tooltip_text = tr("Worktrees")
 	var shortcut: String = Actions.shortcut_label(&"task.new")
 	_new_task.tooltip_text = tr("New worktree") + (" (%s)" % shortcut if not shortcut.is_empty() else "")
 	_task_menu_button.tooltip_text = tr("More worktree actions")
@@ -113,6 +123,7 @@ func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void
 			chip.chosen.connect(func() -> void: worktree_chosen.emit(chip.path()))
 			chip.menu_requested.connect(func(at: Vector2) -> void:
 				worktree_menu_requested.emit(chip.worktree, at))
+			chip.reveal_requested.connect(func() -> void: worktree_reveal_requested.emit(chip.worktree))
 			_chips.add_child(chip)
 		chip.set_worktree(_worktrees[i])
 		chip.selected = Paths.same(chip.path(), selected_path)
@@ -123,6 +134,8 @@ func show_worktrees(worktrees: Array[Dictionary], selected_path: String) -> void
 	for i: int in range(_worktrees.size(), existing.size()):
 		existing[i].hide()
 		existing[i].queue_free()
+	_separator.visible = _worktrees.size() > 1 and bool(_worktrees[0]["is_main"])
+	_chips.move_child(_separator, mini(1, _chips.get_child_count() - 1))
 	if not focused_path.is_empty():
 		if restore != null:
 			restore.grab_focus()
@@ -150,6 +163,15 @@ func new_task_button() -> Button:
 	return _new_task
 
 
+func list_button() -> Button:
+	return _list_button
+
+
+## Whether the chips are wider than the strip (it then scrolls).
+func overflows() -> bool:
+	return not _spacer.visible
+
+
 ## The main worktree first, then the linked ones by folder name.
 static func _ordered(worktrees: Array[Dictionary]) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
@@ -165,15 +187,12 @@ static func _ordered(worktrees: Array[Dictionary]) -> Array[Dictionary]:
 
 ## While the chips fit, the scroll gets their own width and the spacer the
 ## rest, so the buttons follow the last chip; past that the scroll takes it
-## all and ▾ lists every worktree.
+## all (the worktree icon still lists every worktree).
 func _update_overflow() -> void:
 	var natural: float = _chips.get_combined_minimum_size().x + _scroll.get_combined_minimum_size().x + 1.0
 	var room: float = _row.size.x - _actions.get_combined_minimum_size().x \
-			- 2.0 * float(_row.get_theme_constant(&"separation"))
+			- _list_button.get_combined_minimum_size().x - 3.0 * float(_row.get_theme_constant(&"separation"))
 	var fits: bool = natural <= room
-	if fits and _all_button.has_focus():
-		_new_task.grab_focus()
-	_all_button.visible = not fits
 	_spacer.visible = fits
 	_scroll.size_flags_stretch_ratio = natural
 	_spacer.size_flags_stretch_ratio = maxf(room - natural, 1.0)
@@ -254,7 +273,7 @@ func _open_all_menu() -> void:
 			_all_menu.set_item_icon(i, AppTheme.icon(marker))
 		_all_menu.set_item_tooltip(i, "\n".join(tooltip))
 		_all_menu.set_item_checked(i, Paths.same(String(wt["path"]), _selected))
-	_popup_under(_all_menu, _all_button)
+	_popup_under(_all_menu, _list_button)
 
 
 func _open_task_menu() -> void:

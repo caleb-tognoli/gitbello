@@ -94,7 +94,9 @@ func _check_reviewed_ui(main: Main) -> void:
 		"lock_reason": "", "changed": 2, "ahead": 1, "behind": 0, "operation": ""})
 	expect(chip.tooltip_text.contains("2 file modificati"), "compact badge tooltip translates into Italian")
 	expect_eq(chip.texts()["name"], "Open a repository", "worktree names remain user content")
-	expect_eq(chip.texts()["branch"], "No shelves", "branch names remain user content")
+	expect(chip.tooltip_text.contains("
+No shelves
+"), "branch names remain user content")
 	var filter: FilterField = preload("res://ui/filter_field/filter_field.tscn").instantiate() as FilterField
 	main.add_child(filter)
 	filter.set_options([["modified", "Modified"]], &"changes.clear_filters")

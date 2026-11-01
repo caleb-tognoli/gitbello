@@ -38,6 +38,9 @@ var _pending_delete: Dictionary = {}
 func _ready() -> void:
 	_strip.worktree_chosen.connect(func(path: String) -> void: show_worktree(path))
 	_strip.worktree_menu_requested.connect(_on_chip_menu)
+	_strip.worktree_reveal_requested.connect(func(wt: Dictionary) -> void:
+		if _active != null and not bool(wt["prunable"]):
+			_active.ops().show_in_file_manager(String(wt["path"])))
 
 
 ## Shows the worktree of `first` (taking ownership of the session).

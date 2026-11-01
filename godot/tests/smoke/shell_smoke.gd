@@ -47,15 +47,14 @@ func run() -> void:
 	var chips: Array[WorktreeChip] = strip.chips()
 	expect_eq(chips.size(), 2, "two worktree chips")
 	if chips.size() == 2:
-		expect_eq(chips[0].texts(), {"name": "repo-1", "branch": "main", "badge": "2 ↑1"}, "the main worktree's chip")
+		expect_eq(chips[0].texts(), {"name": "repo-1", "marker": "dot"}, "the main worktree's chip: its folder and a changes dot")
+		expect_eq(chips[1].texts()["name"], "feature", "the linked chip leaves out the repository's name")
 		expect(chips[0].tooltip_text.contains("2 changed files"), "the chip explains its live changed count")
+		expect(chips[0].tooltip_text.contains("1 commit ahead"), "the tooltip has the live ahead count")
 		var chip_tooltip: Control = chips[0]._make_custom_tooltip(chips[0].tooltip_text)
-		var tracking_icons: Array[Node] = chip_tooltip.find_children("*", "TextureRect", true, false)
-		expect_eq(tracking_icons.size(), 1, "the live fixture has one tracking icon")
-		if tracking_icons.size() == 1:
-			var tracking_icon: TextureRect = tracking_icons[0] as TextureRect
-			expect_eq(tracking_icon.texture, AppTheme.icon(&"GitPush"), "the live ahead count uses the themed push SVG")
-			expect_eq((tracking_icon.get_parent().get_child(1) as Label).text, "1", "the live ahead icon has its count")
+		var push_icon: bool = chip_tooltip.find_children("*", "TextureRect", true, false).any(func(node: Node) -> bool:
+			return (node as TextureRect).texture == AppTheme.icon(&"GitPush"))
+		expect(push_icon, "the live ahead count uses the themed push SVG")
 		chip_tooltip.free()
 		expect(chips[0].selected and not chips[1].selected, "the opened worktree's chip is selected")
 
@@ -93,8 +92,7 @@ func run() -> void:
 	file.close()
 	var updated: bool = await _wait(func() -> bool:
 		var now: Array[WorktreeChip] = main.page_at(0).strip().chips()
-		return not now.is_empty() and String(now[0].texts()["badge"]) == "3 ↑1" \
-				and now[0].tooltip_text.contains("3 changed files"))
+		return not now.is_empty() and now[0].tooltip_text.contains("3 changed files"))
 	expect(updated, "the chip updates after an outside change")
 
 	# Worktrees: Ctrl+2 shows the second chip in the same tab; opening a

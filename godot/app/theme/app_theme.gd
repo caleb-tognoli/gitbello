@@ -456,6 +456,10 @@ static func _add_menus(theme: Theme, p: Palette) -> void:
 			line.color = p.border
 			theme.set_stylebox(style, &"PopupMenu", line)
 	theme.set_icon(&"submenu", &"PopupMenu", ARROW_RIGHT)
+	# The worktree list: smaller state icons with more room around them
+	_variation(theme, &"WorktreeListMenu", &"PopupMenu")
+	theme.set_constant(&"icon_max_width", &"WorktreeListMenu", 12)
+	theme.set_constant(&"h_separation", &"WorktreeListMenu", 8)
 
 
 ## Trees and item lists: sunk into the background, rows shaded with the text
@@ -819,24 +823,51 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	strip.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"WorktreeStrip", strip)
 	_variation(theme, &"ChipRow", &"HBoxContainer")
-	theme.set_constant(&"separation", &"ChipRow", 6)
+	theme.set_constant(&"separation", &"ChipRow", 2)
+	# Worktree chips: plain text with a hover background, the shown one filled
 	var chip: Vector4 = Vector4(10, 4, 10, 4)
-	for entry: Array in [[&"WorktreeChip", Color.TRANSPARENT, p.border],
-			[&"WorktreeChipHover", p.hover, p.border],
-			[&"WorktreeChipSelected", Color(p.accent, 0.25), p.accent]]:
+	for entry: Array in [[&"WorktreeChip", Color.TRANSPARENT], [&"WorktreeChipHover", p.hover],
+			[&"WorktreeChipSelected", Color(p.accent, 0.25)]]:
 		_variation(theme, entry[0], &"PanelContainer")
-		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 12, chip, entry[2], 1))
-		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 12, Vector4.ZERO, p.accent, 2))
-	_variation(theme, &"ChipBadge", &"Label")
-	theme.set_color(&"font_color", &"ChipBadge", p.modified)
-	theme.set_font_size(&"font_size", &"ChipBadge", 12)
+		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 6, chip))
+		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 2))
+	theme.set_constant(&"max_width", &"WorktreeChip", 200)
+	theme.set_constant(&"separation", &"WorktreeChip", 7)
+	theme.set_constant(&"marker_size", &"WorktreeChip", 12)
+	theme.set_color(&"changes_color", &"WorktreeChip", p.modified)
+	theme.set_color(&"conflict_color", &"WorktreeChip", p.error)
+	for entry: Array in [[&"WorktreeChipName", p.text_muted], [&"WorktreeChipNameSelected", p.text],
+			[&"WorktreeChipNameMissing", Color(p.text_muted, 0.55)]]:
+		_variation(theme, entry[0], &"Label")
+		theme.set_color(&"font_color", entry[0], entry[1])
+	# A chip's tooltip card: bold folder, branch, dim path, then status lines
+	_variation(theme, &"WorktreeTooltip", &"VBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeTooltip", 4)
+	theme.set_constant(&"icon_size", &"WorktreeTooltip", 16)
+	theme.set_constant(&"path_width", &"WorktreeTooltip", 480)
+	_variation(theme, &"WorktreeTooltipStatus", &"VBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeTooltipStatus", 2)
+	_variation(theme, &"WorktreeTooltipTitle", &"TooltipLabel")
+	theme.set_font(&"font", &"WorktreeTooltipTitle", bold_font())
+	_variation(theme, &"WorktreeTooltipDim", &"TooltipLabel")
+	theme.set_color(&"font_color", &"WorktreeTooltipDim", p.text_muted)
+	# The worktree icon that starts the strip, and the line after the main worktree
+	_variation(theme, &"WorktreeRowIcon", &"ToolbarButton")
+	theme.set_color(&"icon_normal_color", &"WorktreeRowIcon", Color(1, 1, 1, 0.7))
+	_variation(theme, &"ChipSeparator", &"VSeparator")
+	theme.set_constant(&"separation", &"ChipSeparator", 9)
+	var chip_line: StyleBoxLine = StyleBoxLine.new()
+	chip_line.color = p.border
+	chip_line.vertical = true
+	chip_line.grow_begin = -5.0
+	chip_line.grow_end = -5.0
+	theme.set_stylebox(&"separator", &"ChipSeparator", chip_line)
 	# New worktree │ ▾ after the chips: one chip-shaped outline split in two,
-	# quieter than a chip until hovered; the all-worktrees ▾ as a round chip
+	# quieter than a chip until hovered
 	_variation(theme, &"ChipSplit", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ChipSplit", 0)
 	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1],
-			[&"ChipActionMenu", Vector4(SPLIT_ARROW_PADDING, 4, SPLIT_ARROW_PADDING, 4), 2],
-			[&"ChipIconButton", Vector4(5, 4, 5, 4), 0]]:
+			[&"ChipActionMenu", Vector4(SPLIT_ARROW_PADDING, 4, SPLIT_ARROW_PADDING, 4), 2]]:
 		_variation(theme, entry[0], &"Button")
 		for state: Array in [[&"normal", Color.TRANSPARENT, p.border], [&"hover", p.hover, p.border],
 				[&"pressed", Color(p.accent, 0.25), p.accent], [&"hover_pressed", Color(p.accent, 0.35), p.accent],

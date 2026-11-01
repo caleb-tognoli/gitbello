@@ -108,9 +108,10 @@ func _overflow(source: WorktreeStrip) -> void:
 	await get_tree().process_frame
 	var scroll: ScrollContainer = strip.chips()[13].get_parent().get_parent() as ScrollContainer
 	expect(scroll.scroll_horizontal > 0, "focused offscreen chip scrolls into view")
-	press("Tab")
+	strip.chips()[0].grab_focus()
+	press("Shift+Tab")
 	var all: Button = get_viewport().gui_get_focus_owner() as Button
-	expect(all != null and all.tooltip_text == "All worktrees", "overflow button is in the Tab order")
+	expect(all == strip.list_button() and all.tooltip_text == "Worktrees", "the worktree icon is in the Tab order before the chips")
 	press("Enter")
 	var menu: PopupMenu = null
 	for child: Node in strip.get_children():
@@ -120,8 +121,8 @@ func _overflow(source: WorktreeStrip) -> void:
 	if menu != null:
 		await _popup_key("Down", menu)
 		await _popup_key("Escape", menu)
-		expect(not menu.visible, "Escape closes All worktrees")
-		expect(all.has_focus(), "Escape returns focus to All worktrees")
+		expect(not menu.visible, "Escape closes the worktree list")
+		expect(all.has_focus(), "Escape returns focus to the worktree icon")
 		var chosen: Array[String] = []
 		strip.worktree_chosen.connect(func(path: String) -> void: chosen.append(path))
 		press("Enter")
@@ -142,7 +143,7 @@ func _overflow(source: WorktreeStrip) -> void:
 	strip.size.x = 10000.0
 	await get_tree().process_frame
 	await get_tree().process_frame
-	expect(not all.visible and strip.new_task_button().has_focus(), "resizing away overflow preserves focus on New worktree")
+	expect(not strip.overflows() and all.visible and all.has_focus(), "resizing away overflow keeps the worktree icon and its focus")
 	strip.queue_free()
 	await get_tree().process_frame
 

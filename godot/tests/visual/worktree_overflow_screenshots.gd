@@ -39,7 +39,7 @@ func _ready() -> void:
 	for choice: String in ["dark", "light"]:
 		Actions.run_action(StringName("view.theme_" + choice))
 		await _settle()
-		page.strip()._all_button.pressed.emit()
+		page.strip().list_button().pressed.emit()
 		await _settle()
 		var menu: PopupMenu = page.strip()._all_menu
 		var path: String = out.path_join("%s_%s.png" % [phase, choice])
