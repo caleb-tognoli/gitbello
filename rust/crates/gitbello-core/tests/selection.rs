@@ -55,6 +55,11 @@ fn line(diff: &FileDiff, kind: LineKind, text: &str) -> usize {
 }
 
 fn commit(rt: &mut Runtime, key: &Path, message: &str, amend: bool) {
+    // A late watcher event (macOS reports file changes slowly) re-reads an
+    // amend's changes, and commit waits for that.
+    poll_until(rt, |rt, _| {
+        rt.repo(key).is_some_and(|s| s.can_commit(amend)) && rt.pending_jobs() == 0
+    });
     let job = rt.commit(key, format!("{message}\n"), amend);
     succeed(rt, key, job);
 }
