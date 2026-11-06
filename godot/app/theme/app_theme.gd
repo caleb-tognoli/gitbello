@@ -1162,16 +1162,22 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"ListHeaderStatus", &"Label")
 	theme.set_font_size(&"font_size", &"ListHeaderStatus", 13)
 	theme.set_constant(&"icon_size", &"ListHeaderStatus", 14)
-	# The filter over the changed files: one field (outlined like a text box,
-	# in the accent colour while focused) with a search icon, a flat text box,
-	# a divider and the options button
+	# The filter over a list: one field filling the bar, with a search icon
+	# (in line with the list's checkboxes), a flat text box, a divider and the
+	# options button. A line under it, in the accent colour and thicker while
+	# focused. Its own vertical padding sets the bar's height.
 	_variation(theme, &"FilterBar", &"PanelContainer")
-	theme.set_stylebox(&"panel", &"FilterBar", _box(p.background, 0, Vector4(8, 2, 8, 6)))
-	var filter_margins: Vector4 = Vector4(8, 0, 2, 0)
+	theme.set_stylebox(&"panel", &"FilterBar", _box(p.background))
+	var filter: StyleBoxFlat = _box(p.raised, 0, Vector4(8, 6, 4, 6))
+	filter.border_color = p.border
+	filter.border_width_bottom = 1
 	_variation(theme, &"FilterField", &"PanelContainer")
-	theme.set_stylebox(&"panel", &"FilterField", _box(p.raised, 4, filter_margins, p.border, 1))
+	theme.set_stylebox(&"panel", &"FilterField", filter)
+	var filter_focus: StyleBoxFlat = filter.duplicate() as StyleBoxFlat
+	filter_focus.border_color = p.accent
+	filter_focus.border_width_bottom = 2
 	_variation(theme, &"FilterFieldFocus", &"FilterField")
-	theme.set_stylebox(&"panel", &"FilterFieldFocus", _box(p.raised, 4, filter_margins, p.accent, 1))
+	theme.set_stylebox(&"panel", &"FilterFieldFocus", filter_focus)
 	theme.set_color(&"icon_color", &"FilterField", p.text_muted)
 	theme.set_constant(&"icon_size", &"FilterField", 14)
 	_variation(theme, &"FilterFieldRow", &"HBoxContainer")
