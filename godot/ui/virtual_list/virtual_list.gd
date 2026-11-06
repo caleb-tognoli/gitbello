@@ -148,9 +148,17 @@ func selected_rows() -> PackedInt32Array:
 	return rows
 
 
+## Selects `row` alone and puts the cursor on it; a row outside the list
+## clears the selection and the cursor.
 func select_only(row: int) -> void:
+	# A data source's change signal can reach the caller before this list's own
+	# refresh: re-read the count so a new row gets the fill, not only the outline.
+	if row >= _row_count:
+		refresh()
 	_selected.clear()
-	if row >= 0 and row < _row_count:
+	if row < 0 or row >= _row_count:
+		row = -1
+	else:
 		_selected[row] = true
 	_anchor = row
 	cursor = row

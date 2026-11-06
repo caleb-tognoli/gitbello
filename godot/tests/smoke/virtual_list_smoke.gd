@@ -61,6 +61,15 @@ func run() -> void:
 	list._gui_input(select_all)
 	expect_eq(list.selected_rows().size(), list.count, "Ctrl+A still selects all rows")
 
+	# Rows added without a refresh yet (a data signal reaching the caller
+	# first): the selection still gets the fill, not only the cursor outline.
+	list.count += 5
+	list.select_only(list.count - 1)
+	expect_eq(list.cursor, list.count - 1, "selecting a row added before refresh moves the cursor")
+	expect(list.is_selected(list.cursor), "selecting a row added before refresh fills it")
+	list.select_only(list.count + 10)
+	expect(list.cursor == -1 and list.selected_rows().is_empty(), "a row past the end clears the cursor")
+
 	list.drawn.clear()
 	list.set_scroll_offset(50_000 * list.row_height())
 	await get_tree().process_frame
