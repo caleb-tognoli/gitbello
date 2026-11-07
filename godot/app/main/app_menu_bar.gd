@@ -25,18 +25,18 @@ const MENUS: Array[Array] = [
 		&"view.find", &"history.next_match", &"history.previous_match"]],
 	["Repository", [&"sync.fetch", &"sync.pull", &"sync.push", &"", &"task.new",
 		["Worktrees", [&"worktree.add_existing", &"worktree.cleanup", &"worktree.prune"]], &"",
-		&"repo.open_in_editor", &"repo.open_terminal", &"repo.show_in_file_manager", &"",
+		&"repo.open_terminal", &"repo.show_in_file_manager", &"",
 		["Remotes and tags", [&"repo.remotes", &"repo.tags"]], &"repo.ignore_rules",
 		["Shelves", [&"changes.shelve", &"shelf.restore_left"]], &"",
 		&"operation.continue", &"operation.open_resolver", &"operation.abort", &"", &"repo.refresh"]],
 	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"", &"branch.rename", &"branch.set_upstream"]],
-	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_side_by_side", &"diff.toggle_whole_file",
+	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_whole_file",
 		&"diff.toggle_minimap", &"",
 		&"app.command_palette", &"view.toggle_git_log"]],
 	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
 ]
 const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves"]
-const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_side_by_side", &"diff.toggle_whole_file",
+const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_whole_file",
 	&"diff.toggle_minimap", &"view.toggle_git_log"]
 const OPERATION_ACTIONS: Array[StringName] = [&"operation.continue", &"operation.open_resolver", &"operation.abort"]
 

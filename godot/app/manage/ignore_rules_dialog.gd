@@ -246,13 +246,11 @@ func press(id: String) -> void:
 				_ops.confirm_untrack(_source, _line, int(line["tracked_count"]), String(line["text"]))
 
 
-## Opens source `index`'s file in the editor (else the system's app).
+## Opens source `index`'s file in its default app (like Open).
 func open_source(index: int) -> void:
 	if index < 0 or index >= _source_rows.size() or not bool(_source_rows[index]["exists"]):
 		return
-	var path: String = String(_source_rows[index]["path"])
-	if not Core.open_in_editor(path).is_empty():
-		OS.shell_open(path)
+	RepoOps.opener.call(String(_source_rows[index]["path"]))
 
 
 func _chip_nodes() -> Array[IgnoreSourceChip]:

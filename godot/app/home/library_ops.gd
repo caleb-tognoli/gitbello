@@ -387,12 +387,6 @@ func show_in_file_manager(path: String) -> void:
 	OS.shell_show_in_file_manager(path)
 
 
-func open_in_editor(path: String) -> void:
-	var error: String = Core.open_in_editor(path)
-	if not error.is_empty():
-		_toast_error("Cannot open the editor", L10n.launch_error(error))
-
-
 func open_terminal(path: String) -> void:
 	var error: String = Core.open_terminal(path)
 	if not error.is_empty():

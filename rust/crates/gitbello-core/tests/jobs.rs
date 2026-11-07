@@ -141,6 +141,13 @@ impl GitBackend for FakeBackend {
     ) -> Result<(), GitError> {
         Ok(())
     }
+    fn unstaged_numstat(
+        &self,
+        _: &Path,
+        _: &CancelToken,
+    ) -> Result<Vec<(PathBuf, u32, u32)>, GitError> {
+        Ok(Vec::new())
+    }
     fn init(&self, _: &Path, _: &str, _: bool, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }

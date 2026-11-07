@@ -181,3 +181,30 @@ paging, frame time             p50 43.4 ms with the minimap, 43.3 ms without
 
 Word ranges cost about 0.2 to 0.3 ms a tile. They are computed only for
 tiles: computing them for every row of the overview took it to 66 ms.
+
+## M7.8 P2 — image diffs
+
+`res://tests/perf/image_bench.tscn -- --repo=<root> --file=big.png,photo.jpg`
+(windowed, Windows 11, Compatibility renderer) on a throwaway repo where both
+files are modified: `big.png` 4096×4096 (15.1 MiB, both sides) and
+`photo.jpg` 4600×3200 (19.6 MiB, just under the 20 MiB preview limit, both
+sides). The release and debug gdext builds give the same times: the diff
+job is bound by git.
+
+```text
+                          4096² PNG    19.6 MiB JPG
+diff job (git + bytes)    311 ms       484 ms
+first picture             568 ms       715 ms
+longest frame meanwhile   16.0 ms      16.4 ms   (idle: 8.5 ms)
+show_info (bytes copied)  13.0 ms      15.0 ms
+again, from the cache     308 ms       481 ms    (longest frame 8.5 ms)
+```
+
+The diff job is `git diff` (235–270 ms for a 20 MB binary: git hashes the
+working file) and `git cat-file` of the old blob (about 130 ms), so the
+300 ms target to the first picture is missed for files this large;
+decoding both sides on worker threads adds about 250 ms. The main thread
+target is met: an image larger than 2048 px shows a 2048 px preview with
+mipmaps made on the worker, one texture uploads a frame, and the full image
+uploads only when zoomed in past the preview (uploading a full 4096² texture
+took 31–39 ms, and both sides landed in one frame: 85–119 ms before).

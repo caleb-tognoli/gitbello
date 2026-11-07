@@ -49,8 +49,17 @@ static func from_event(event: InputEventKey) -> String:
 	return "+".join(parts)
 
 
-## Text to show users (`Cmd` instead of `Ctrl` on macOS).
+## Key names shown as their symbols.
+const SYMBOLS: Dictionary[String, String] = {"Equal": "=", "Minus": "-", "Plus": "+",
+		"Kp Add": "Num +", "Kp Subtract": "Num -", "Kp 0": "Num 0"}
+
+
+## Text to show users (`Cmd` instead of `Ctrl` on macOS, `=` for `Equal`).
 static func display(text: String) -> String:
+	var parts: PackedStringArray = text.split("+")
+	if not parts.is_empty() and SYMBOLS.has(parts[parts.size() - 1]):
+		parts[parts.size() - 1] = SYMBOLS[parts[parts.size() - 1]]
+		text = "+".join(parts)
 	if OS.has_feature("macos"):
 		return text.replace("Ctrl+", "Cmd+")
 	return text

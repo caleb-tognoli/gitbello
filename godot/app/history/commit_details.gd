@@ -10,7 +10,10 @@ const THEME_TYPE: StringName = &"CommitDetails"
 const HASH_LENGTH: int = 10
 const PARENT_LENGTH: int = 7
 ## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.toggle_minimap"]
+const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file", &"",
+	&"diff.toggle_minimap"]
+## The file list's context menu: its actions, by item id.
+const FILE_MENU_ACTIONS: Array[StringName] = [&"diff.open_file"]
 
 var session: RepoSession = null:
 	set = set_session
@@ -20,6 +23,7 @@ var date_format: Callable = Callable()
 signal parent_requested(source: String, oid: String, origin: LinkButton)
 
 var _menu: PopupMenu = PopupMenu.new()
+var _file_menu: PopupMenu = PopupMenu.new()
 var _parent_links: Array[LinkButton] = []
 var _shown_oid: String = ""
 var _requested_oid: String = ""
@@ -53,6 +57,8 @@ func _ready() -> void:
 	_files.current_changed.connect(_on_file_changed)
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.commit_diff_lines(start, count) if session != null else [])
+	_diff_panel.set_image_source(func(side: String) -> Dictionary:
+		return session.image_side("commit", side) if session != null else {})
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("commit", start, count) if session != null else [])
 	_diff_panel.set_minimap_sources(
@@ -78,8 +84,14 @@ func _ready() -> void:
 	_files.gui_input.connect(_on_files_key)
 	_diff_panel.view().gui_input.connect(_on_diff_key)
 	_diff_panel.view().context_menu_requested.connect(_show_diff_menu)
+	_diff_panel.open_side_requested.connect(func(side: String) -> void:
+		if session != null:
+			session.open_version("commit", side))
 	add_child(_menu)
 	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(DIFF_MENU_ACTIONS[id]))
+	_files.context_menu_requested.connect(_show_file_menu)
+	add_child(_file_menu)
+	_file_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(FILE_MENU_ACTIONS[id]))
 	show_placeholder()
 
 
@@ -296,6 +308,27 @@ func _show_diff_menu(_row: int, at_position: Vector2) -> void:
 ## The diff's context menu, for tests.
 func diff_menu() -> PopupMenu:
 	return _menu
+
+
+## The file list's context menu (the right-clicked file is selected): Open.
+func _show_file_menu(_row: int, at_position: Vector2) -> void:
+	_file_menu.clear()
+	for i: int in FILE_MENU_ACTIONS.size():
+		_file_menu.add_icon_item(Actions.icon(FILE_MENU_ACTIONS[i]), Actions.get_action(FILE_MENU_ACTIONS[i]).label, i)
+		_file_menu.set_item_disabled(_file_menu.item_count - 1, not Actions.is_enabled(FILE_MENU_ACTIONS[i]))
+	_file_menu.position = Vector2i(_files.get_screen_position() + at_position)
+	_file_menu.reset_size()
+	_file_menu.popup()
+
+
+## The file list's context menu, for tests.
+func file_menu() -> PopupMenu:
+	return _file_menu
+
+
+## The file list (for tests).
+func files() -> CommitFileList:
+	return _files
 
 
 ## Right in the file list moves into the diff.

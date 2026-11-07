@@ -29,16 +29,17 @@ impl ChangeList {
 
     /// The files `filter` shows (`selection` answers its pick options).
     pub fn filtered(status: &RepoStatus, selection: &Selection, filter: &ChangeFilter) -> Self {
-        Self::grouped(status, selection, filter, &[])
+        Self::grouped(status, selection, filter, &[], &HashSet::new())
     }
 
     /// [`Self::filtered`], with the files in `resolved` listed among the
-    /// conflicted ones.
+    /// conflicted ones; `endings_only` answers the line-endings option.
     pub fn grouped(
         status: &RepoStatus,
         selection: &Selection,
         filter: &ChangeFilter,
         resolved: &[PathBuf],
+        endings_only: &HashSet<PathBuf>,
     ) -> Self {
         let total = status
             .changes
@@ -48,6 +49,7 @@ impl ChangeList {
         let mut indices: Vec<usize> = (0..status.changes.len())
             .filter(|&i| filter.matches(&status.changes[i], selection))
             .collect();
+        indices.retain(|&i| !filter.endings_only || endings_only.contains(&status.changes[i].path));
         // Conflicted (and resolved) files, the other changes, then ignored ones.
         indices.sort_by(|&a, &b| {
             let (a, b) = (&status.changes[a], &status.changes[b]);
@@ -114,6 +116,9 @@ pub struct ChangeFilter {
     /// Modified, renamed, copied and type-changed files.
     pub modified: bool,
     pub deleted: bool,
+    /// Modified files whose only changes are line endings or the final
+    /// newline (narrows the rest).
+    pub endings_only: bool,
     /// Also lists ignored files (only the text narrows them).
     pub ignored: bool,
 }
@@ -121,7 +126,7 @@ pub struct ChangeFilter {
 impl ChangeFilter {
     /// Whether it hides anything.
     pub fn is_active(&self) -> bool {
-        !self.text.trim().is_empty() || self.uses_picks() || self.uses_kinds()
+        !self.text.trim().is_empty() || self.uses_picks() || self.uses_kinds() || self.endings_only
     }
 
     /// Whether including or leaving out a file can change what is shown.
@@ -796,6 +801,7 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
             &Selection::default(),
             &ChangeFilter::default(),
             &resolved,
+            &HashSet::new(),
         );
         let paths: Vec<String> = list
             .indices()

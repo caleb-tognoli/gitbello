@@ -7,7 +7,8 @@ extends VirtualList
 ## `{index, kind, old, new, text, no_newline, hl, syntax}` (kind 0 = hunk
 ## header, 1 = context, 2 = added, 3 = removed; `hl` = changed `[start, end)`;
 ## `syntax` = `start, end, token` triples; `index` -1 for an unchanged line
-## outside the hunks). Side-by-side rows come from
+## outside the hunks; kind 5 = a marker row, `marker` `no_newline` or
+## `line_endings` with `from`, `to` and `lines`). Side-by-side rows come from
 ## `split_source.call(start, count)` as `{left, right}` lines (or {}).
 ## Only a window around the visible rows is fetched.
 ##
@@ -50,6 +51,9 @@ const KIND_ADDED: int = 2
 const KIND_REMOVED: int = 3
 ## The base of a conflict block (between ours and theirs).
 const KIND_BASE: int = 4
+## A note between lines: no newline at the end of the file, or (after the
+## last line) line endings changed. Not text: never selected or copied.
+const KIND_MARKER: int = 5
 ## A conflict header's buttons: what each keeps (`%s` is the side's name)
 ## and the action whose shortcut its tooltip names.
 const BLOCK_TIPS: Dictionary[String, String] = {
@@ -68,7 +72,6 @@ const FLASH_MSEC: int = 1200
 const CHOICE_UNDO_MSEC: int = 6000
 ## Longest side name a block button shows before it is shortened with "…".
 const BLOCK_NAME_CHARS: int = 18
-const NO_NEWLINE_MARK: String = "   \\ no newline at end of file"
 ## Theme colors of `highlight::TokenKind` ids 0..4.
 const SYNTAX_COLORS: Array[StringName] = [
 	&"syntax_keyword", &"syntax_type", &"syntax_string", &"syntax_number", &"syntax_comment",
@@ -512,7 +515,7 @@ func selected_text() -> String:
 	var parts: PackedStringArray = PackedStringArray()
 	for row: int in range(ends[0].x, mini(ends[1].x, row_count() - 1) + 1):
 		var data: Dictionary = _side_line(row, _sel_side)
-		if data.is_empty() or int(data.get("kind", KIND_HUNK)) == KIND_HUNK:
+		if data.is_empty() or int(data.get("kind", KIND_HUNK)) in [KIND_HUNK, KIND_MARKER]:
 			continue
 		var text: String = String(data.get("text", ""))
 		var from: int = ends[0].y if row == ends[0].x else 0
@@ -709,7 +712,7 @@ func _side_line(row: int, side: int) -> Dictionary:
 ## Characters of `row`'s text on `side` (0 for headers and empty sides).
 func _line_length(row: int, side: int) -> int:
 	var data: Dictionary = _side_line(row, side)
-	if data.is_empty() or int(data.get("kind", KIND_HUNK)) == KIND_HUNK:
+	if data.is_empty() or int(data.get("kind", KIND_HUNK)) in [KIND_HUNK, KIND_MARKER]:
 		return 0
 	return String(data.get("text", "")).length()
 
@@ -1072,7 +1075,7 @@ func _draw_line_row(data: Dictionary, index: int, rect: Rect2) -> void:
 		return
 	var left: Dictionary = data["left"]
 	var right: Dictionary = data["right"]
-	if int(left.get("kind", -1)) in [KIND_HUNK, KIND_BASE]:
+	if int(left.get("kind", -1)) in [KIND_HUNK, KIND_BASE] or String(left.get("marker", "")) == "line_endings":
 		_draw_side(left, index, 0, rect, 1)
 		return
 	var half: float = floorf(rect.size.x / 2.0)
@@ -1123,6 +1126,9 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 	var bg: Color = _row_bg(kind, conflict_side)
 	if bg.a > 0.0:
 		draw_rect(rect, bg)
+	if kind == KIND_MARKER:
+		_draw_marker(data, rect, gutter)
+		return
 	var baseline: float = _baseline(rect)
 	if kind == KIND_HUNK and int(data.get("block", -1)) >= 0:
 		_draw_block_header(data, row, rect)
@@ -1163,6 +1169,39 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 		draw_string(_font, Vector2(x + (column + _char_width) * columns, baseline), mark,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, mark_color)
 	_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
+
+
+## A marker row, drawn like a hunk header: what it notes in the code font,
+## muted, where the lines' text starts.
+func _draw_marker(data: Dictionary, rect: Rect2, gutter: float) -> void:
+	var left: float = rect.position.x + gutter
+	draw_string(_font, Vector2(left, _baseline(rect)), marker_label(data), HORIZONTAL_ALIGNMENT_LEFT,
+			maxf(0.0, rect.end.x - _padding - left), _font_size, _colors[&"hunk_color"])
+
+
+## What a marker row says: "No newline at end of file", or "Line endings:
+## CRLF → LF (6 lines)".
+static func marker_label(data: Dictionary) -> String:
+	if String(data.get("marker", "")) == "line_endings":
+		return endings_label(data)
+	return TranslationServer.translate("No newline at end of file")
+
+
+## "Line endings: CRLF → LF (6 lines)" from `endings` (`from`, `to`, `lines`).
+static func endings_label(endings: Dictionary) -> String:
+	var change: String = String(TranslationServer.translate("Line endings: %s → %s")) % [
+		endings_name(String(endings.get("from", ""))), endings_name(String(endings.get("to", "")))]
+	return "%s (%s)" % [change, lines_text(int(endings.get("lines", 0)))]
+
+
+## "1 line" or "N lines".
+static func lines_text(lines: int) -> String:
+	return String(TranslationServer.translate("1 line")) if lines == 1 else String(TranslationServer.translate("%d lines")) % lines
+
+
+## `LF`, `CRLF`, or "Mixed" for `mixed`.
+static func endings_name(id: String) -> String:
+	return String(TranslationServer.translate("Mixed")) if id == "mixed" else id
 
 
 ## Draws a header's expander buttons and what they show (right-aligned; on
@@ -1250,8 +1289,6 @@ func _draw_block_header(data: Dictionary, row: int, rect: Rect2) -> void:
 func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, rect: Rect2, baseline: float) -> void:
 	var text: String = String(data["text"])
 	var length: int = text.length()
-	if bool(data.get("no_newline", false)):
-		text += NO_NEWLINE_MARK
 	var skip: int = int(_h_scroll.value / _char_width) if _char_width > 0.0 and kind != KIND_HUNK else 0
 	var right: float = rect.end.x
 	var column_x: Callable = func(column: int) -> float: return left + (column - skip) * _char_width
@@ -1312,6 +1349,8 @@ func _row_bg(kind: int, side: String = "") -> Color:
 	match kind:
 		KIND_HUNK:
 			return _colors[&"block_header_bg"] if side == "header" else _colors[&"hunk_bg"]
+		KIND_MARKER:
+			return _colors[&"hunk_bg"]
 		KIND_ADDED:
 			return _colors[&"added_bg"]
 		KIND_REMOVED:

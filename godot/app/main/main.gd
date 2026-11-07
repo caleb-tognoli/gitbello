@@ -97,7 +97,6 @@ func _ready() -> void:
 		&"view.changes": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.CHANGES,
 		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
-		&"diff.toggle_side_by_side": func() -> bool: return Core.diff_side_by_side(),
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
 		&"diff.toggle_whole_file": func() -> bool:
 			var panel: DiffPanel = _shown_diff_panel()
@@ -555,8 +554,27 @@ func _register_actions() -> void:
 	_register_merge_actions()
 	_register_worktree_actions()
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings, PackedStringArray(["Ctrl+Comma"]))
-	Actions.register(&"diff.toggle_side_by_side", "Side-by-side diff", "View",
-			_toggle_side_by_side, PackedStringArray(["Ctrl+Shift+D"]))
+	Actions.register(&"diff.cycle_mode", "Next diff mode", "View",
+			func() -> void: _mode_diff_panel().cycle_mode(), PackedStringArray(["Ctrl+Shift+D"]),
+			func() -> bool: return _mode_diff_panel() != null)
+	Actions.register(&"image.zoom_in", "Zoom in", "View",
+			func() -> void: _zoomable_images().zoom_in(), PackedStringArray(["Ctrl+Equal", "Ctrl+Plus", "Ctrl+Kp Add"]),
+			func() -> bool: return _zoomable_images() != null)
+	Actions.register(&"image.zoom_out", "Zoom out", "View",
+			func() -> void: _zoomable_images().zoom_out(), PackedStringArray(["Ctrl+Minus", "Ctrl+Kp Subtract"]),
+			func() -> bool: return _zoomable_images() != null)
+	Actions.register(&"image.zoom_actual", "Actual size", "View",
+			func() -> void: _zoomable_images().actual_size(), PackedStringArray(["Ctrl+0", "Ctrl+Kp 0"]),
+			func() -> bool: return _zoomable_images() != null)
+	Actions.register(&"image.zoom_fit", "Fit to the view", "View",
+			func() -> void: _zoomable_images().fit(), PackedStringArray(),
+			func() -> bool: return _zoomable_images() != null)
+	Actions.register(&"diff.open_file", "Open", "View",
+			func() -> void:
+				var page: RepoTab = current_page()
+				page.session.open_version("commit" if page.view == WorktreeView.View.HISTORY else "changes", "shown"),
+			PackedStringArray(), func() -> bool: return _open_panel() != null,
+			_says("Select a file first."))
 	Actions.register(&"diff.copy", "Copy", "Edit",
 			func() -> void: _focused_diff().copy_selection(), PackedStringArray(["Ctrl+C"]),
 			func() -> bool: return _focused_diff() != null and _focused_diff().has_selection())
@@ -670,8 +688,6 @@ func _register_change_actions() -> void:
 				return bool(history_ready.call()) and not (focus is LineEdit or focus is TextEdit) \
 						and current_page().history().can_go_to_current_commit())
 	current_commit.hidden = true
-	Actions.register(&"changes.open_file", "Open file", "Changes",
-			func() -> void: changes.call().open_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
 			func() -> void: changes.call().show_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.copy_path", "Copy file path", "Changes",
@@ -683,6 +699,10 @@ func _register_change_actions() -> void:
 			PackedStringArray(["Ctrl+Shift+M"]), repo_ready)
 	Actions.register(&"changes.discard", "Discard selected changes…", "Changes",
 			func() -> void: changes.call().discard_selection(), PackedStringArray(["Delete"]), in_changes)
+	Actions.register(&"changes.restore_line_endings", "Restore line endings", "Changes",
+			func() -> void: changes.call().restore_line_endings(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().can_restore_line_endings(),
+			_says("No line endings to restore."))
 	Actions.register(&"changes.undo_discard", "Undo last discard", "Changes",
 			func() -> void: changes.call().undo_discard(), PackedStringArray(["Ctrl+Z"]),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard(),
@@ -819,8 +839,6 @@ func _register_sync_actions() -> void:
 	Actions.register(&"operation.abort", "Abort the operation in progress…", "Repository",
 			func() -> void: ops.call().abort_operation(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and not session.call().operation().is_empty())
-	Actions.register(&"repo.open_in_editor", "Open in editor", "Repository",
-			func() -> void: ops.call().open_in_editor(), PackedStringArray(["Ctrl+Shift+E"]), is_ready)
 	Actions.register(&"repo.open_terminal", "Open terminal here", "Repository",
 			func() -> void: ops.call().open_terminal(), PackedStringArray(["Ctrl+Shift+T"]), is_ready)
 	Actions.register(&"repo.show_in_file_manager", "Show in file manager", "Repository",
@@ -1073,9 +1091,6 @@ func _register_worktree_actions() -> void:
 	Actions.register(&"worktree.open", "Show worktree", "Worktrees",
 			func() -> void: current_page().show_worktree(String(worktree.call()["path"])), PackedStringArray(),
 			func() -> bool: return openable.call() and not bool(worktree.call()["is_head"]))
-	Actions.register(&"worktree.open_in_editor", "Open in editor", "Worktrees",
-			func() -> void: ops.call().open_in_editor(String(worktree.call()["path"])), PackedStringArray(),
-			openable)
 	Actions.register(&"worktree.open_terminal", "Open terminal", "Worktrees",
 			func() -> void: ops.call().open_terminal(String(worktree.call()["path"])), PackedStringArray(),
 			openable)
@@ -1195,10 +1210,42 @@ func _shown_diff_panel() -> DiffPanel:
 	return null
 
 
-func _toggle_side_by_side() -> void:
-	var value: bool = not Core.diff_side_by_side()
-	Core.set_diff_side_by_side(value)
-	get_tree().call_group(DiffPanel.GROUP, &"set_side_by_side", value)
+## The diff panel whose mode the cycle shortcut changes: the focused diff's,
+## else the first on screen; null when it offers fewer than two modes.
+func _mode_diff_panel() -> DiffPanel:
+	var focused: DiffView = _focused_diff()
+	var panels: Array[Node] = get_tree().get_nodes_in_group(DiffPanel.GROUP)
+	if focused != null:
+		for node: Node in panels:
+			var panel: DiffPanel = node as DiffPanel
+			if panel != null and panel.view() == focused:
+				return panel if panel.can_cycle_mode() else null
+	for node: Node in panels:
+		var panel: DiffPanel = node as DiffPanel
+		if panel != null and panel.can_cycle_mode():
+			return panel
+	return null
+
+
+## The diff panel of the current view when it shows a file (Open opens
+## it), or null.
+func _open_panel() -> DiffPanel:
+	var page: RepoTab = current_page()
+	if page == null or page.session == null or not page.session.is_ready():
+		return null
+	var panel: DiffPanel = page.history().details().diff_panel() if page.view == WorktreeView.View.HISTORY \
+			else page.changes().diff_panel()
+	return panel if not panel.shown_path().is_empty() else null
+
+
+## The image viewer on screen that the zoom actions act on, or null.
+func _zoomable_images() -> ImageDiffView:
+	for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
+		var panel: DiffPanel = node as DiffPanel
+		var images: ImageDiffView = panel.zoomable_images() if panel != null else null
+		if images != null:
+			return images
+	return null
 
 
 func _toggle_minimap() -> void:

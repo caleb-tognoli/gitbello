@@ -39,6 +39,31 @@ pub fn data_dir() -> Option<PathBuf> {
     .map(|dir| dir.join(APP))
 }
 
+/// Where files the app can delete live (versions written for Open), or
+/// `GITBELLO_CACHE_DIR` when set (tests):
+/// - Windows: `%LOCALAPPDATA%\gitbello\cache`
+/// - macOS: `~/Library/Caches/gitbello`
+/// - Linux and others: `$XDG_CACHE_HOME/gitbello` or `~/.cache/gitbello`
+pub fn cache_dir() -> Option<PathBuf> {
+    if let Some(dir) = env_dir("GITBELLO_CACHE_DIR") {
+        return Some(dir);
+    }
+    if cfg!(windows) {
+        env_dir("LOCALAPPDATA").map(|dir| dir.join(APP).join("cache"))
+    } else if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library").join("Caches").join(APP))
+    } else {
+        env_dir("XDG_CACHE_HOME")
+            .or_else(|| home().map(|h| h.join(".cache")))
+            .map(|dir| dir.join(APP))
+    }
+}
+
+/// Where Open writes versions of files from the index or commits.
+pub fn versions_dir() -> Option<PathBuf> {
+    cache_dir().map(|dir| dir.join("versions"))
+}
+
 /// Default config file path.
 pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("config.toml"))
@@ -67,5 +92,8 @@ mod tests {
             assert!(dir.ends_with(APP), "{dir:?}");
         }
         assert!(config_file().is_some_and(|f| f.ends_with("gitbello/config.toml")));
+        if let Some(dir) = versions_dir() {
+            assert!(dir.is_absolute() && dir.ends_with("versions"), "{dir:?}");
+        }
     }
 }

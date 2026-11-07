@@ -71,22 +71,9 @@ toggle_mode = true
 
 [node name="LayoutSwitch" type="HBoxContainer" parent="DiffHeaderPanel/DiffHeader"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 theme_type_variation = &"IconSwitch"
-
-[node name="UnifiedButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_type_variation = &"IconSegmentFirst"
-toggle_mode = true
-
-[node name="SplitButton" type="Button" parent="DiffHeaderPanel/DiffHeader/LayoutSwitch"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_type_variation = &"IconSegmentLast"
-toggle_mode = true
 
 [node name="DiffStack" type="Control" parent="."]
 layout_mode = 2

@@ -123,7 +123,7 @@ func run() -> void:
 			"the dialog previews the conflict again")
 	form.submit()
 	expect(await wait_until(func() -> bool: return changes.has_conflict_blocks()), "the resolver shows again")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	var diff: DiffView = changes.diff_view()
 	expect(await wait_until(func() -> bool: return diff.side_by_side and diff.find_block_header(-1, true) >= 0),
 			"side by side has the block header")
@@ -135,7 +135,7 @@ func run() -> void:
 	diff.press_block(row, "ours")
 	expect(await wait_until(func() -> bool: return int(session.operation_info().get("resolved", 0)) == 1),
 			"the block button resolved the file")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	expect(Actions.run_action(&"operation.abort"), "Abort runs")
 	var confirm: ConfirmationDialog = ops.confirm_dialog()
 	expect(await wait_until(func() -> bool: return confirm.visible), "Abort asks first")

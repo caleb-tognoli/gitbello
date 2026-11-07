@@ -4,6 +4,7 @@
 //! Rows are kept as runs, so a large diff costs a few entries, not one per
 //! line.
 
+use super::eol::Marker;
 use super::{DiffContent, FileDiff, Hunk, LineKind};
 
 /// Lines one click on an expander shows.
@@ -210,6 +211,8 @@ pub enum LayoutRow {
     /// After the last hunk, where more of the file follows (shown once the
     /// old file says so).
     End,
+    /// A note between lines: no newline at the end, line endings changed.
+    Marker(Marker),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +221,7 @@ enum Run {
     Header(usize),
     Hidden { old: u32, new: u32, count: u32 },
     End,
+    Marker(Marker),
 }
 
 impl Run {
@@ -225,7 +229,7 @@ impl Run {
         match *self {
             Run::Diff { count, .. } => count,
             Run::Hidden { count, .. } => count as usize,
-            Run::Header(_) | Run::End => 1,
+            Run::Header(_) | Run::End | Run::Marker(_) => 1,
         }
     }
 }
@@ -263,6 +267,7 @@ impl Runs {
                 }
             }
             Run::End => LayoutRow::End,
+            Run::Marker(marker) => LayoutRow::Marker(marker),
         })
     }
 }
@@ -290,6 +295,26 @@ pub struct DiffLayout {
 fn span(start: u32, count: u32) -> (u32, u32) {
     let first = if count == 0 { start + 1 } else { start };
     (first, first + count)
+}
+
+/// Adds diff lines (or side-by-side rows) `first..first + count`, with the
+/// marker rows that follow any of them.
+fn push_lines(runs: &mut Runs, first: usize, count: usize, markers: &[(usize, Marker)]) {
+    let end = first + count;
+    let mut at = first;
+    let from = markers.partition_point(|(after, _)| *after < first);
+    for &(after, marker) in markers[from..].iter().take_while(|(after, _)| *after < end) {
+        runs.push(Run::Diff {
+            first: at,
+            count: after + 1 - at,
+        });
+        runs.push(Run::Marker(marker));
+        at = after + 1;
+    }
+    runs.push(Run::Diff {
+        first: at,
+        count: end - at,
+    });
 }
 
 /// Start of a range in a hunk header: the line before it when it is empty.
@@ -368,19 +393,23 @@ impl DiffLayout {
                 .hunks
                 .get(index + 1)
                 .map_or(diff.line_count(), |next| next.line);
-            layout.unified.push(Run::Diff {
-                first: hunk.line + 1,
-                count: line_end.saturating_sub(hunk.line + 1),
-            });
+            push_lines(
+                &mut layout.unified,
+                hunk.line + 1,
+                line_end.saturating_sub(hunk.line + 1),
+                diff.markers(),
+            );
             let split_first = header_rows.get(index).map_or(0, |r| r + 1);
             let split_end = header_rows
                 .get(index + 1)
                 .copied()
                 .unwrap_or(diff.split_row_count());
-            layout.split.push(Run::Diff {
-                first: split_first,
-                count: split_end.saturating_sub(split_first),
-            });
+            push_lines(
+                &mut layout.split,
+                split_first,
+                split_end.saturating_sub(split_first),
+                diff.split_markers(),
+            );
             layout.count(open, old_end - old_first, new_end - new_first);
             previous = Some(hunk);
         }
@@ -398,6 +427,11 @@ impl DiffLayout {
         };
         let down = size.map_or(0, |size| opened(diff.hunks.len())[0].min(size));
         layout.hidden(last.0, i64::from(last.1) - i64::from(last.0), down, open);
+        // The line-endings row follows the last line shown.
+        if let Some(marker) = diff.endings().marker() {
+            layout.unified.push(Run::Marker(marker));
+            layout.split.push(Run::Marker(marker));
+        }
         let hidden = size.map(|size| size - down);
         layout.gaps.push(Gap { hidden });
         if hidden.is_some_and(|hidden| hidden > 0) {
@@ -582,8 +616,66 @@ index 1111111..2222222 100644
                 LayoutRow::Header(h) => h.text(diff),
                 LayoutRow::Hidden { old, new } => format!("~{old}/{new}"),
                 LayoutRow::End => "end".to_owned(),
+                LayoutRow::Marker(m) => format!("{m:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn the_endings_row_follows_the_last_line_shown() {
+        let diff = parse_diff(
+            b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,4 +1,4 @@\n-l1\r\n+l1\n l2\n l3\n l4\n",
+        )
+        .unwrap();
+        let old = OldFile::new("1", b"l1\r\nl2\nl3\nl4\nl5\nl6\n".to_vec());
+        let endings = "LineEndings { from: Crlf, to: Lf, lines: 1 }";
+        let closed = DiffLayout::build(&diff, &Expansion::default(), Some(&old));
+        let rows = describe(&diff, &closed, false);
+        assert_eq!(rows[rows.len() - 2..], [endings, "end"]);
+        let mut whole = Expansion::default();
+        whole.set_whole(true);
+        let open = DiffLayout::build(&diff, &whole, Some(&old));
+        let rows = describe(&diff, &open, false);
+        assert_eq!(rows[rows.len() - 3..], ["~5/5", "~6/6", endings]);
+        let rows = describe(&diff, &open, true);
+        assert_eq!(rows.last().map(String::as_str), Some(endings));
+    }
+
+    #[test]
+    fn marker_rows_follow_their_lines_in_both_layouts() {
+        let diff = parse_diff(
+            b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,3 @@\n-a\r\n-b\n\\ No newline at end of file\n+a\n+b\n+c\n",
+        )
+        .unwrap();
+        let layout = DiffLayout::build(&diff, &Expansion::default(), None);
+        let no_newline = "NoNewline { old: true, new: false }";
+        // a's ending changed and c is an LF line in a CRLF block: two lines.
+        let endings = "LineEndings { from: Crlf, to: Lf, lines: 2 }";
+        assert_eq!(
+            describe(&diff, &layout, false),
+            [
+                "@@ -1,2 +1,3 @@",
+                "a\r",
+                "b",
+                no_newline,
+                "a",
+                "b",
+                "c",
+                endings
+            ]
+        );
+        // Split rows: a|a, b|b (old side without newline), |c.
+        assert_eq!(
+            describe(&diff, &layout, true),
+            [
+                "@@ -1,2 +1,3 @@",
+                "row 1",
+                "row 2",
+                no_newline,
+                "row 3",
+                endings
+            ]
+        );
     }
 
     #[test]

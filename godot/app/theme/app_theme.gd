@@ -820,6 +820,30 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"padding", &"ChangeList", 8)
 	theme.set_constant(&"code_width", &"ChangeList", 22)
 	theme.set_constant(&"icon_size", &"ChangeList", 14)
+	# The `EOL` chip of a file whose only changes are line endings.
+	theme.set_color(&"chip_color", &"ChangeList", p.text_muted)
+	theme.set_color(&"chip_bg", &"ChangeList", Color(p.text_muted, 0.16))
+	theme.set_font_size(&"chip_font_size", &"ChangeList", 10)
+	theme.set_constant(&"chip_radius", &"ChangeList", 3)
+	# The image viewer (M7.8): a checkerboard behind transparent pixels, each
+	# image's outline, the swipe divider and the difference highlight.
+	var checker_light: Color = p.background.lerp(Color.WHITE, 0.12 if p.light else 0.06)
+	var checker_dark: Color = p.background.lerp(Color.BLACK, 0.06 if p.light else 0.12)
+	theme.set_color(&"checker_light", &"ImageDiff", checker_light)
+	theme.set_color(&"checker_dark", &"ImageDiff", checker_dark)
+	theme.set_color(&"outline_color", &"ImageDiff", p.border)
+	theme.set_color(&"divider_color", &"ImageDiff", p.accent)
+	theme.set_color(&"changed_color", &"ImageDiff", Color(1.0, 0.2, 0.75) if not p.light else Color(0.85, 0.0, 0.55))
+	theme.set_color(&"caption_color", &"ImageDiff", p.text_muted)
+	theme.set_color(&"message_color", &"ImageDiff", p.text_muted)
+	theme.set_constant(&"checker_size", &"ImageDiff", 8)
+	theme.set_constant(&"margin", &"ImageDiff", 12)
+	theme.set_constant(&"gap", &"ImageDiff", 12)
+	theme.set_constant(&"handle_size", &"ImageDiff", 14)
+	theme.set_constant(&"card_preview_height", &"ImageDiff", 200)
+	# Behind the zoom bar's buttons, which float over the image.
+	_variation(theme, &"ImageZoomBar", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"ImageZoomBar", _box(p.background, 4))
 	# Diff backgrounds are the git colours blended into the background, so they
 	# follow both themes.
 	theme.set_font(&"font", &"DiffView", mono_font())
@@ -1077,7 +1101,8 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"IconSwitch", &"HBoxContainer")
 	theme.set_constant(&"separation", &"IconSwitch", 0)
 	var icon_segment: Vector4 = Vector4(7, 4, 7, 4)
-	for entry: Array in [[&"IconSegmentFirst", "first"], [&"IconSegmentLast", "last"], [&"IconToggle", "alone"]]:
+	for entry: Array in [[&"IconSegmentFirst", "first"], [&"IconSegmentMiddle", "middle"],
+			[&"IconSegmentLast", "last"], [&"IconToggle", "alone"]]:
 		_variation(theme, entry[0], &"SegmentButton")
 		for state: Array in [[&"normal", p.raised], [&"hover", p.hover],
 				[&"pressed", Color(p.accent, 0.35)], [&"hover_pressed", Color(p.accent, 0.4)]]:
@@ -1085,10 +1110,13 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 			if entry[1] == "first":
 				box.corner_radius_top_right = 0
 				box.corner_radius_bottom_right = 0
-			elif entry[1] == "last":
+			elif entry[1] in ["middle", "last"]:
 				box.corner_radius_top_left = 0
 				box.corner_radius_bottom_left = 0
 				box.border_width_left = 0
+				if entry[1] == "middle":
+					box.corner_radius_top_right = 0
+					box.corner_radius_bottom_right = 0
 			theme.set_stylebox(state[0], entry[0], box)
 	# Panes: the left columns, a status line, details
 	_variation(theme, &"PaneColumn", &"VBoxContainer")

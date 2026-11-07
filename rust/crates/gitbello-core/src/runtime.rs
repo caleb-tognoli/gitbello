@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange};
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
+use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
+use crate::diff::version::{self, VersionSide};
 use crate::diff::{
     build_patch, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand, Expansion,
     FileDiff, OldFile, PatchMode, LARGE_DIFF_BYTES,
@@ -42,8 +44,8 @@ use crate::ops::{
     NEW_TASK_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
 };
 use crate::repo::{
-    shelf_message, shelves, CommitDetails, FileState, Head, Operation, Ref, RefKind, Remote,
-    RepoPaths, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
+    shelf_message, shelves, Change, CommitDetails, FileChange, FileState, Head, Operation, Ref,
+    RefKind, Remote, RepoPaths, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
 use crate::scan::{self, ScanHit};
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
@@ -91,6 +93,8 @@ pub const DIFF_JOB_LABEL: &str = "load diff";
 pub const COMMIT_DIFF_JOB_LABEL: &str = "load commit diff";
 /// Reads the old side of a diff to show the lines between its hunks.
 pub const OLD_FILE_JOB_LABEL: &str = "read old file";
+/// Open: writes the version of a file to open (see [`Runtime::open_version`]).
+pub const VERSION_JOB_LABEL: &str = "open file";
 /// Old files larger than this are not read: their gaps stay closed.
 pub const OLD_FILE_LIMIT: usize = 16 * 1024 * 1024;
 pub const COMMIT_DETAILS_JOB_LABEL: &str = "read commit";
@@ -100,6 +104,14 @@ pub const UNSTAGE_JOB_LABEL: &str = "unstage";
 pub const COMMIT_JOB_LABEL: &str = "commit";
 pub const DISCARD_JOB_LABEL: &str = "discard";
 pub const UNDO_DISCARD_JOB_LABEL: &str = "undo discard";
+
+/// Labels of the line-ending jobs (PLAN M7.9).
+pub const RESTORE_ENDINGS_JOB_LABEL: &str = "restore line endings";
+pub const ENDINGS_SCAN_JOB_LABEL: &str = "scan line endings";
+
+/// Files with as many lines added as removed that the line-endings scan
+/// reads the diffs of, at most, after a status refresh.
+pub const ENDINGS_SCAN_MAX_FILES: usize = 200;
 
 /// Labels of the shelf jobs (PLAN §4 Shelves).
 pub const SHELVE_JOB_LABEL: &str = "shelve";
@@ -168,6 +180,7 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     RESTORE_SHELF_FILE_JOB_LABEL,
     DISCARD_SHELF_FILE_JOB_LABEL,
     UNDO_SHELF_DISCARD_JOB_LABEL,
+    RESTORE_ENDINGS_JOB_LABEL,
     IGNORE_JOB_LABEL,
     UNDO_IGNORE_JOB_LABEL,
     REMOVE_IGNORE_RULE_JOB_LABEL,
@@ -302,6 +315,12 @@ pub enum RuntimeEvent {
     SummaryLoaded {
         repo: PathBuf,
     },
+    /// The file [`Runtime::open_version`] asked for: where it is, or why it
+    /// could not be read.
+    VersionReady {
+        repo: PathBuf,
+        result: Result<PathBuf, GitError>,
+    },
 }
 
 /// What the commit box does, after the operation in progress.
@@ -349,6 +368,8 @@ pub struct ConflictState {
     resolved_before: Vec<Vec<Range<usize>>>,
     /// Hash of the content `resolved` belongs to.
     resolved_for: Option<u64>,
+    /// Ours and theirs of a conflicted image.
+    images: Option<ImageSides>,
 }
 
 impl ConflictState {
@@ -364,11 +385,17 @@ impl ConflictState {
             resolved: Vec::new(),
             resolved_before: Vec::new(),
             resolved_for: None,
+            images: None,
         }
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Ours (`old`) and theirs (`new`) of a conflicted image, once read.
+    pub fn images(&self) -> Option<&ImageSides> {
+        self.images.as_ref()
     }
 
     pub fn kind(&self) -> ConflictKind {
@@ -473,6 +500,9 @@ pub struct RepoState {
     commit_diff: Option<DiffState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
+    /// Modified files whose only unstaged changes are line endings or the
+    /// final newline (the line-endings scan after each status).
+    endings_only: HashSet<PathBuf>,
     history_scope: crate::graph::HistoryScope,
     graph: Option<GraphLoader>,
     graph_dirty_since: Option<Instant>,
@@ -532,6 +562,7 @@ impl RepoState {
             commit_requested: None,
             commit_diff: None,
             discards: Vec::new(),
+            endings_only: HashSet::new(),
             history_scope: crate::graph::HistoryScope::default(),
             graph: None,
             graph_dirty_since: None,
@@ -939,7 +970,41 @@ impl RepoState {
         };
         let in_flow = self.operation.is_some() || status.has_conflicts();
         let resolved: &[PathBuf] = if in_flow { &self.resolved } else { &[] };
-        self.changes = ChangeList::grouped(status, &self.selection, &self.change_filter, resolved);
+        self.changes = ChangeList::grouped(
+            status,
+            &self.selection,
+            &self.change_filter,
+            resolved,
+            &self.endings_only,
+        );
+    }
+
+    /// Whether `path` is a modified file whose only unstaged changes are
+    /// line endings or the final newline.
+    pub fn is_endings_only(&self, path: &Path) -> bool {
+        self.endings_only.contains(path)
+    }
+
+    /// Whether Restore line endings has something to do in `paths`: a file
+    /// whose only changes are endings, or the Changes diff's file when it
+    /// shows ending or final-newline changes.
+    pub fn can_restore_endings(&self, paths: &[PathBuf]) -> bool {
+        paths.iter().any(|path| {
+            self.endings_only.contains(path)
+                || self.diff.as_ref().is_some_and(|d| {
+                    d.target().path == *path
+                        && d.diff().is_some_and(|f| {
+                            // A final newline comes back only with its line's text.
+                            let e = f.endings();
+                            e.changed.is_some() || (e.final_newline.is_some() && e.only)
+                        })
+                })
+        }) && self.status.as_ref().is_some_and(|status| {
+            status
+                .changes
+                .iter()
+                .any(|c| paths.contains(&c.path) && has_unstaged_edit(c))
+        })
     }
 
     /// The commit selection (PLAN §3.10).
@@ -1208,6 +1273,8 @@ pub struct DiffState {
     old_failed: Option<String>,
     /// Rows to show: the diff and the open gaps.
     layout: DiffLayout,
+    /// Both sides, when the image viewer shows the diff.
+    images: Option<ImageSides>,
 }
 
 impl DiffState {
@@ -1224,11 +1291,17 @@ impl DiffState {
             old_loading: false,
             old_failed: None,
             layout: DiffLayout::default(),
+            images: None,
         }
     }
 
     pub fn target(&self) -> &DiffTarget {
         &self.target
+    }
+
+    /// Both sides of an image diff, once read (see [`image::read_sides`]).
+    pub fn images(&self) -> Option<&ImageSides> {
+        self.images.as_ref()
     }
 
     /// The rows to show (empty until the diff loaded).
@@ -1327,6 +1400,8 @@ pub struct Runtime {
     /// Folders (normalized) of removed worktrees that git could not fully
     /// delete; removing one again deletes the rest.
     leftover_worktrees: Arc<Mutex<HashSet<PathBuf>>>,
+    /// Where Open writes versions from the index and commits.
+    versions_dir: Option<PathBuf>,
 }
 
 impl Runtime {
@@ -1385,7 +1460,46 @@ impl Runtime {
             scans: HashMap::new(),
             locations: HashMap::new(),
             leftover_worktrees: Arc::default(),
+            versions_dir: crate::paths::versions_dir(),
         }
+    }
+
+    /// Where Open writes versions (tests use a temporary folder).
+    pub fn set_versions_dir(&mut self, dir: PathBuf) {
+        self.versions_dir = Some(dir);
+    }
+
+    /// Open: the file of `side` in diff `slot` (in Changes, the conflicted
+    /// file when one shows), as [`RuntimeEvent::VersionReady`]. The working
+    /// copy is used as it is; other versions are written to the versions
+    /// folder.
+    pub fn open_version(&self, key: &Path, slot: DiffSlot, side: VersionSide) -> Option<JobId> {
+        let state = self.repos.get(key).filter(|s| s.is_ready())?;
+        let target = match (slot, state.conflict()) {
+            (DiffSlot::Changes, Some(conflict)) => DiffTarget {
+                kind: DiffKind::Unstaged,
+                path: conflict.path().to_path_buf(),
+                original_path: None,
+                commit: None,
+            },
+            (DiffSlot::Changes, None) => state.diff()?.target().clone(),
+            (DiffSlot::Commit, _) => state.commit_diff()?.target().clone(),
+        };
+        let dir = self.versions_dir.clone()?;
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, VERSION_JOB_LABEL, move |ctx| {
+                    version::open_version(
+                        ctx.backend(),
+                        ctx.repo(),
+                        &target,
+                        side,
+                        &dir,
+                        ctx.cancel_token(),
+                    )
+                    .map(JobOutput::Version)
+                })),
+        )
     }
 
     pub fn git_version(&self) -> GitVersion {
@@ -1735,6 +1849,7 @@ impl Runtime {
             next.old = keep.old;
             next.old_failed = keep.old_failed;
             next.layout = keep.layout;
+            next.images = keep.images;
         }
         *current = Some(next);
         self.diff_generation += 1;
@@ -2025,6 +2140,55 @@ impl Runtime {
                 let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
                 let backups = backend.backup(&toplevel, &paths, cancel)?;
                 backend.discard(&toplevel, &tracked, &untracked, cancel)?;
+                Ok(JobOutput::Discarded(backups))
+            },
+        )))
+    }
+
+    /// Puts back the line endings (and final newline) the unstaged changes
+    /// of `paths` changed, keeping their text (see
+    /// [`crate::diff::eol::restore_endings`]), after backing the files up
+    /// for [`Runtime::undo_discard`]. Untracked files and staged changes
+    /// are left alone.
+    pub fn restore_line_endings(&self, key: &Path, paths: Vec<PathBuf>) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let status = self.repos.get(key)?.status()?;
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|p| {
+                status
+                    .changes
+                    .iter()
+                    .any(|c| c.path == *p && has_unstaged_edit(c))
+            })
+            .collect();
+        if paths.is_empty() {
+            return None;
+        }
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            RESTORE_ENDINGS_JOB_LABEL,
+            RefreshSet::EMPTY.with(RefreshKind::Status),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let mut restored = Vec::new();
+                for path in &paths {
+                    if let Some(bytes) = restored_endings(backend, &toplevel, path, cancel)? {
+                        restored.push((path.clone(), bytes));
+                    }
+                }
+                let changed: Vec<PathBuf> = restored.iter().map(|(p, _)| p.clone()).collect();
+                let backups = backend.backup(&toplevel, &changed, cancel)?;
+                for (path, bytes) in restored {
+                    let target = toplevel.join(&path);
+                    fs::write(&target, bytes).map_err(|err| {
+                        GitError::new(
+                            format!("write {}", target.display()),
+                            GitErrorKind::Io,
+                            err.to_string(),
+                        )
+                    })?;
+                }
                 Ok(JobOutput::Discarded(backups))
             },
         )))
@@ -3130,6 +3294,24 @@ impl Runtime {
             }
             return;
         }
+        if label == VERSION_JOB_LABEL {
+            match kind {
+                EventKind::Finished(Ok(JobOutput::Version(path))) => {
+                    out.push(RuntimeEvent::VersionReady {
+                        repo,
+                        result: Ok(path),
+                    });
+                }
+                EventKind::Finished(Err(error)) if error.kind != GitErrorKind::Cancelled => {
+                    out.push(RuntimeEvent::VersionReady {
+                        repo,
+                        result: Err(error),
+                    });
+                }
+                _ => {}
+            }
+            return;
+        }
         if label == COMMIT_DETAILS_JOB_LABEL {
             match kind {
                 EventKind::Finished(Ok(JobOutput::Commit(details)))
@@ -3170,6 +3352,17 @@ impl Runtime {
         }
         if label == CONFLICT_JOB_LABEL {
             apply_conflict(&self.scheduler, state, kind, &repo, out);
+            return;
+        }
+        if label == ENDINGS_SCAN_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::EndingsOnly(paths))) = kind {
+                let found: HashSet<PathBuf> = paths.into_iter().collect();
+                if found != state.endings_only {
+                    state.endings_only = found;
+                    state.rebuild_changes();
+                    out.push(RuntimeEvent::SelectionChanged { repo });
+                }
+            }
             return;
         }
         if label == CONFLICT_SCAN_JOB_LABEL {
@@ -3251,6 +3444,7 @@ impl Runtime {
                 EventKind::Finished(Ok(output)) => {
                     apply_refresh(state, output);
                     if refresh == RefreshKind::Status {
+                        submit_endings_scan(&self.scheduler, state);
                         refresh_amend(&self.scheduler, state);
                         reload_ignore_rules(&self.scheduler, state);
                         out.push(RuntimeEvent::SelectionChanged { repo: repo.clone() });
@@ -3594,6 +3788,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Summary(_)
         | JobOutput::Scan(_)
         | JobOutput::Location(_)
+        | JobOutput::Version(_)
         | JobOutput::Diff { .. }
         | JobOutput::OldFile { .. }
         | JobOutput::HeadMessage(_)
@@ -3601,6 +3796,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::AmendChanges { .. }
         | JobOutput::Commit(_)
         | JobOutput::Discarded(_)
+        | JobOutput::EndingsOnly(_)
         | JobOutput::ShelfFiles(..)
         | JobOutput::ShelfDropped { .. }
         | JobOutput::MergePreview(_)
@@ -3836,9 +4032,21 @@ fn submit_conflict(scheduler: &JobScheduler, state: &mut RepoState, generation: 
         let file = ctx
             .backend()
             .conflict_file(&toplevel, &path, kind, ctx.cancel_token())?;
+        let images = if file.kind == ConflictKind::Binary {
+            image::read_conflict_sides(
+                ctx.backend(),
+                &toplevel,
+                &path,
+                Some(MAX_IMAGE_BYTES),
+                ctx.cancel_token(),
+            )?
+        } else {
+            None
+        };
         Ok(JobOutput::Conflict {
             generation,
             file: Box::new(file),
+            images: images.map(Box::new),
         })
     }));
 }
@@ -3858,11 +4066,14 @@ fn apply_conflict(
         return;
     };
     match kind {
-        EventKind::Finished(Ok(JobOutput::Conflict { generation, file }))
-            if generation == conflict.generation && file.path == conflict.path =>
-        {
+        EventKind::Finished(Ok(JobOutput::Conflict {
+            generation,
+            file,
+            images,
+        })) if generation == conflict.generation && file.path == conflict.path => {
             conflict.loading = false;
             conflict.error = None;
+            conflict.images = images.map(|i| *i);
             if file.is_resolved_text() {
                 resolved = Some(file.path.clone());
             }
@@ -3971,6 +4182,113 @@ fn after_status_conflicts(scheduler: &JobScheduler, state: &mut RepoState, gener
     }));
 }
 
+/// A tracked file with unstaged edits to its content.
+fn has_unstaged_edit(change: &FileChange) -> bool {
+    !change.submodule
+        && matches!(
+            change.state,
+            FileState::Tracked {
+                worktree: Change::Modified,
+                ..
+            }
+        )
+}
+
+/// The working copy of `path` with the line endings its unstaged changes
+/// changed put back, or `None` when there are none (or it is not text).
+fn restored_endings(
+    backend: &dyn GitBackend,
+    toplevel: &Path,
+    path: &Path,
+    cancel: &CancelToken,
+) -> Result<Option<Vec<u8>>, GitError> {
+    let target = toplevel.join(path);
+    let working = fs::read(&target).map_err(|err| {
+        GitError::new(
+            format!("read {}", target.display()),
+            GitErrorKind::Io,
+            err.to_string(),
+        )
+    })?;
+    let diff = backend.diff(
+        toplevel,
+        &unstaged_target(path),
+        Some(OLD_FILE_LIMIT),
+        cancel,
+    )?;
+    if diff.content != DiffContent::Text {
+        return Ok(None);
+    }
+    crate::diff::eol::restore_endings(&diff, &working).map_err(|_| {
+        GitError::new(
+            format!("restore line endings {}", path.display()),
+            GitErrorKind::Stale,
+            "the file changed while its line endings were restored; try again",
+        )
+    })
+}
+
+fn unstaged_target(path: &Path) -> DiffTarget {
+    DiffTarget {
+        kind: DiffKind::Unstaged,
+        path: path.to_path_buf(),
+        original_path: None,
+        commit: None,
+    }
+}
+
+/// After a status refresh: finds the modified files whose only unstaged
+/// changes are line endings or the final newline. Such a file adds as many
+/// lines as it removes, so `--numstat` picks the files whose diffs are read.
+fn submit_endings_scan(scheduler: &JobScheduler, state: &mut RepoState) {
+    let modified: HashSet<PathBuf> = state
+        .status
+        .as_ref()
+        .map(|s| {
+            s.changes
+                .iter()
+                .filter(|c| has_unstaged_edit(c))
+                .map(|c| c.path.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if modified.is_empty() {
+        if !state.endings_only.is_empty() {
+            state.endings_only.clear();
+            state.rebuild_changes();
+        }
+        return;
+    }
+    let (Some(toplevel), key) = (state.toplevel.clone(), state.key.clone()) else {
+        return;
+    };
+    scheduler.submit(JobSpec::read(&key, ENDINGS_SCAN_JOB_LABEL, move |ctx| {
+        let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+        let candidates: Vec<PathBuf> = backend
+            .unstaged_numstat(&toplevel, cancel)?
+            .into_iter()
+            .filter(|(path, added, removed)| {
+                added == removed && *added > 0 && modified.contains(path)
+            })
+            .map(|(path, ..)| path)
+            .take(ENDINGS_SCAN_MAX_FILES)
+            .collect();
+        let mut found = Vec::new();
+        for path in candidates {
+            let diff = backend.diff(
+                &toplevel,
+                &unstaged_target(&path),
+                Some(LARGE_DIFF_BYTES),
+                cancel,
+            )?;
+            if diff.content == DiffContent::Text && diff.endings().only {
+                found.push(path);
+            }
+        }
+        Ok(JobOutput::EndingsOnly(found))
+    }));
+}
+
 /// What the shelve and restore jobs refresh: the files and the stash list.
 fn shelf_refresh() -> RefreshSet {
     RefreshSet::EMPTY
@@ -4053,9 +4371,11 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
     diff.loading = true;
     let target = diff.target.clone();
     let limit = (!diff.full).then_some(LARGE_DIFF_BYTES);
+    let image_limit = (!diff.full).then_some(MAX_IMAGE_BYTES);
     scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
         let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
         let diff = backend.diff(&toplevel, &target, limit, cancel)?;
+        let images = image::read_sides(backend, &toplevel, &target, &diff, image_limit, cancel)?;
         let staged = if as_staged {
             let staged = DiffTarget {
                 kind: if target.kind == DiffKind::Amend {
@@ -4073,6 +4393,7 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
             generation,
             diff: Box::new(diff),
             staged,
+            images: images.map(Box::new),
         })
     }));
 }
@@ -4179,9 +4500,11 @@ fn apply_diff(
             generation,
             diff,
             staged,
+            images,
         })) if generation == current.generation => {
             current.loading = false;
             current.diff = Some(*diff);
+            current.images = images.map(|i| *i);
             current.error = None;
             current.relayout();
             resolve = staged;

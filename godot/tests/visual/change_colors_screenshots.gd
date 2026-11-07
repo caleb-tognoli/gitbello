@@ -36,8 +36,7 @@ func _ready() -> void:
 	get_window().size = Vector2i(1400, 820)
 	Core.set_settings({"added_color": "", "removed_color": ""})
 	Actions.run_action(&"view.theme_dark")
-	if Core.diff_side_by_side():
-		Actions.run_action(&"diff.toggle_side_by_side")
+	Core.set_diff_mode("text", "unified")
 	_main = MAIN.instantiate() as Main
 	add_child(_main)
 	await get_tree().process_frame

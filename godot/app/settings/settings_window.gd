@@ -13,7 +13,6 @@ const CATEGORIES: Array = [
 			[&"pull_mode", "Pull", &"option", ["Fast-forward only", "Merge", "Rebase"],
 				["ff-only", "merge", "rebase"]],
 			[&"auto_fetch_minutes", "Auto-fetch", &"spin", [0, 99999, 1, " min"]],
-			[&"editor_command", "Editor", &"line", "code {path}"],
 			[&"terminal_command", "Terminal", &"line", "Platform default"],
 			[&"clone_folder", "Clone folder", &"line", "Folder of the last clone"],
 			[&"ignore_hint", "Suggest folders to ignore", &"check"],
@@ -42,7 +41,6 @@ const CATEGORIES: Array = [
 const DETAILS: Dictionary = {
 	&"pull_mode": "How Pull integrates the remote branch into the current branch",
 	&"auto_fetch_minutes": "Minutes between automatic fetches; 0 turns auto-fetch off",
-	&"editor_command": "The command for Open in editor; {path} is replaced by the folder",
 	&"terminal_command": "The command for Open terminal here; {path} is replaced by the folder. Leave empty for the platform's terminal.",
 	&"clone_folder": "Where Clone puts repositories. Empty uses the folder of the last clone.",
 	&"worktree_template": "Relative paths start at the repository root. {repo_parent}, {repo_name}, {repo}, {branch_slug} and {branch} are filled in.",
@@ -58,7 +56,6 @@ const DETAILS: Dictionary = {
 const DEFAULTS: Dictionary = {
 	&"pull_mode": "ff-only",
 	&"auto_fetch_minutes": 10,
-	&"editor_command": "code {path}",
 	&"terminal_command": "",
 	&"clone_folder": "",
 	&"worktree_template": ".worktrees/{branch_slug}",
@@ -379,8 +376,6 @@ func _set_value(key: StringName, value: Variant) -> bool:
 func _validation_error(key: StringName, value: Variant) -> String:
 	var text: String = str(value).strip_edges()
 	match key:
-		&"editor_command":
-			return "Enter an editor command." if text.is_empty() else ""
 		&"worktree_template":
 			return "Enter a worktree folder template." if text.is_empty() else ""
 		&"branch_prefix":

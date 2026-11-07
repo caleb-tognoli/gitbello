@@ -20,6 +20,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use crate::backend::{GitBackend, ShelfChange};
+use crate::diff::image::ImageSides;
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::library::{LocationCheck, RepoSummary};
@@ -153,6 +154,8 @@ pub enum JobOutput {
         diff: Box<FileDiff>,
         /// The staged diff loaded alongside (see `Selection::resolve_as_staged`).
         staged: Option<Box<FileDiff>>,
+        /// Both sides, when the image viewer shows the diff.
+        images: Option<Box<ImageSides>>,
     },
     /// The old side of a diff (blob `oid`); `None` when it was too large.
     OldFile {
@@ -172,6 +175,9 @@ pub enum JobOutput {
     Cleanup(Vec<CleanupCandidate>),
     /// A discard finished; these `(path, blob id)` backups can undo it.
     Discarded(Vec<(PathBuf, String)>),
+    /// The modified files whose only unstaged changes are line endings or
+    /// the final newline.
+    EndingsOnly(Vec<PathBuf>),
     /// The files of shelf `oid`.
     ShelfFiles(String, Vec<ShelfFile>),
     /// Shelf `oid` was dropped; storing it again with `subject` undoes it.
@@ -202,6 +208,8 @@ pub enum JobOutput {
     Conflict {
         generation: u64,
         file: Box<ConflictFile>,
+        /// Ours and theirs of a conflicted image.
+        images: Option<Box<ImageSides>>,
     },
     /// The resolved files (resolve-undo) and the conflicted text files
     /// whose markers are gone (to stage).
@@ -226,6 +234,9 @@ pub enum JobOutput {
     Scan(Vec<ScanHit>),
     /// Where a chosen folder leads (Add existing folder, Change location).
     Location(Box<LocationCheck>),
+    /// The file Open hands to the default app (a working copy, or a version
+    /// written for it).
+    Version(PathBuf),
     /// Jobs whose effect is elsewhere (writes, graph loads).
     Done,
 }

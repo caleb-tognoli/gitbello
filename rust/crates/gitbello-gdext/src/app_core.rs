@@ -5,9 +5,11 @@ use std::time::UNIX_EPOCH;
 use gitbello_core::changes::split_message;
 use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
 use gitbello_core::diff::rename_parts;
+use gitbello_core::diff::version;
+use gitbello_core::diff::viewer::{DiffMode, Viewer};
 use gitbello_core::git::{CommandOutcome, GitErrorKind};
 use gitbello_core::jobs::RefreshKind;
-use gitbello_core::launch::{self, LaunchKind};
+use gitbello_core::launch;
 use gitbello_core::library::{self, RepoSummary};
 use gitbello_core::new_repo::{
     init_folder_error, CloneOptions, CreateOptions, GITIGNORE_TEMPLATES,
@@ -65,6 +67,10 @@ impl INode for AppCore {
         if let Some(warning) = warning {
             self.config_warning = warning.to_string();
         }
+        // Versions written for Open by an earlier run.
+        if let Some(dir) = paths::versions_dir() {
+            version::clear_versions(&dir);
+        }
         match Runtime::new(config, config_path) {
             Ok(mut runtime) => {
                 let library = ui_dir.map(|dir| dir.join(library::FILE_NAME));
@@ -92,17 +98,18 @@ impl INode for AppCore {
             .map(|(key, session)| (key.clone(), session.clone()))
             .collect();
         // Emitting re-enters GDScript, which may call back into Core: hold
-        // `base_mut()` so those calls can bind this object again.
+        // `base_mut()` so those calls can bind this object again (pumping the
+        // graph emits too).
         let mut guard = self.base_mut();
         for event in events {
             dispatch(&mut guard, &sessions, event);
         }
-        drop(guard);
         for (_, mut session) in sessions {
             if session.is_instance_valid() {
                 session.bind_mut().pump_graph();
             }
         }
+        drop(guard);
     }
 }
 
@@ -257,6 +264,15 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                     "commit_undone",
                     &[gstr(&summary).to_variant(), gstr(&body).to_variant()],
                 );
+            }
+        }
+        RuntimeEvent::VersionReady { repo, result } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let (path, error) = match &result {
+                    Ok(path) => (path_str(path), VarDictionary::new()),
+                    Err(error) => (GString::new(), convert::error_dict(error)),
+                };
+                session.emit_signal("version_ready", &[path.to_variant(), error.to_variant()]);
             }
         }
         RuntimeEvent::CommitLoaded { repo } => {
@@ -826,16 +842,35 @@ impl AppCore {
             .collect()
     }
 
-    /// Whether diffs show side by side (saved in the config).
+    /// The saved mode of `viewer` (`text` or `image`), such as `split`.
     #[func]
-    fn diff_side_by_side(&self) -> bool {
-        runtime_cell::with(|rt| rt.config().diff_side_by_side).unwrap_or(false)
+    fn diff_mode(&self, viewer: GString) -> GString {
+        let viewer = Viewer::parse(&viewer.to_string()).unwrap_or_default();
+        let mode = runtime_cell::with(|rt| match viewer {
+            Viewer::Text => rt.config().diff_text_mode,
+            Viewer::Image => rt.config().diff_image_mode,
+            Viewer::None => viewer.default_mode(),
+        })
+        .unwrap_or(viewer.default_mode());
+        GString::from(mode.id())
     }
 
+    /// Saves `mode` for `viewer`; false when `mode` is not one of its modes
+    /// or the config could not be written.
     #[func]
-    fn set_diff_side_by_side(&mut self, value: bool) -> bool {
+    fn set_diff_mode(&mut self, viewer: GString, mode: GString) -> bool {
+        let viewer = Viewer::parse(&viewer.to_string()).unwrap_or_default();
+        let Some(mode) =
+            DiffMode::parse(&mode.to_string()).filter(|m| viewer.all_modes().contains(m))
+        else {
+            return false;
+        };
         runtime_cell::with(|rt| {
-            rt.config_mut().diff_side_by_side = value;
+            match viewer {
+                Viewer::Text => rt.config_mut().diff_text_mode = mode,
+                Viewer::Image => rt.config_mut().diff_image_mode = mode,
+                Viewer::None => return false,
+            }
             rt.save_config().is_ok()
         })
         .unwrap_or(false)
@@ -861,20 +896,6 @@ impl AppCore {
     #[func]
     fn pull_mode(&self) -> GString {
         runtime_cell::with(|rt| gstr(rt.config().pull_mode.as_str())).unwrap_or_default()
-    }
-
-    /// Opens `path` with the configured editor. Returns an error message,
-    /// or an empty string.
-    #[func]
-    fn open_in_editor(&self, path: GString) -> GString {
-        let template = runtime_cell::with(|rt| rt.config().editor_command.clone());
-        let Some(template) = template else {
-            return gstr(&self.start_error);
-        };
-        let dir = PathBuf::from(path.to_string());
-        launch::launch(&template, &dir, LaunchKind::Editor)
-            .err()
-            .map_or_else(GString::new, |e| gstr(&e.to_string()))
     }
 
     /// Opens the configured (or the platform's) terminal in `path`.
@@ -916,7 +937,7 @@ impl AppCore {
     }
 
     /// The settings the Settings dialog edits: `{pull_mode,
-    /// auto_fetch_minutes, editor_command, terminal_command,
+    /// auto_fetch_minutes, terminal_command,
     /// worktree_template, branch_prefix, language, accent, added_color,
     /// removed_color, clone_folder, diff_minimap, ignore_hint}`; an empty terminal command
     /// means the platform's, an empty colour the theme's (else `#rrggbb`), an
@@ -928,7 +949,6 @@ impl AppCore {
             vdict! {
                 "pull_mode" => c.pull_mode.as_str(),
                 "auto_fetch_minutes" => i64::from(c.auto_fetch_minutes),
-                "editor_command" => &gstr(&c.editor_command),
                 "terminal_command" => &gstr(c.terminal_command.as_deref().unwrap_or_default()),
                 "worktree_template" => &gstr(&c.worktree_template),
                 "branch_prefix" => &gstr(&c.branch_prefix),
@@ -967,10 +987,6 @@ impl AppCore {
                 None => return gstr("The auto-fetch interval must be a whole number of minutes."),
             },
         };
-        let editor = text("editor_command");
-        if editor.as_deref().is_some_and(|e| e.trim().is_empty()) {
-            return gstr("Enter an editor command.");
-        }
         let template = text("worktree_template");
         if template.as_deref().is_some_and(|t| t.trim().is_empty()) {
             return gstr("Enter a worktree folder template.");
@@ -1030,9 +1046,6 @@ impl AppCore {
             }
             if let Some(minutes) = minutes {
                 config.auto_fetch_minutes = minutes;
-            }
-            if let Some(editor) = editor {
-                config.editor_command = editor.trim().to_owned();
             }
             if let Some(terminal) = text("terminal_command") {
                 let terminal = terminal.trim();

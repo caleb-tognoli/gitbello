@@ -6,9 +6,13 @@ use std::path::PathBuf;
 
 use crate::repo::{Change, ParseError};
 
+pub mod eol;
+pub mod image;
 mod layout;
 pub mod minimap;
 mod patch;
+pub mod version;
+pub mod viewer;
 
 pub use layout::{
     DiffLayout, Expand, Expanders, Expansion, HeaderRow, LayoutRow, OldFile, CONTEXT_LINES,
@@ -247,6 +251,10 @@ pub struct FileDiff {
     /// Side-by-side rows as (left, right) line indices; a hunk header fills
     /// both sides.
     split: Vec<[u32; 2]>,
+    /// Marker rows after diff lines and after side-by-side rows (`eol`).
+    markers: Vec<(usize, eol::Marker)>,
+    split_markers: Vec<(usize, eol::Marker)>,
+    endings: eol::EndingSummary,
 }
 
 /// No line (in [`FileDiff`]'s pairing tables).
@@ -289,7 +297,23 @@ impl FileDiff {
         Some((side(left), side(right)))
     }
 
-    /// Fills the pairing tables once the lines are final.
+    /// The marker rows shown after diff lines (no newline at the end, line
+    /// endings changed), by the line they follow, in order.
+    pub fn markers(&self) -> &[(usize, eol::Marker)] {
+        &self.markers
+    }
+
+    /// The marker rows of the side-by-side layout, by the row they follow.
+    pub fn split_markers(&self) -> &[(usize, eol::Marker)] {
+        &self.split_markers
+    }
+
+    /// What the diff's ending changes add up to.
+    pub fn endings(&self) -> &eol::EndingSummary {
+        &self.endings
+    }
+
+    /// Fills the pairing tables and the markers once the lines are final.
     fn pair_lines(&mut self) {
         let n = self.lines.len();
         self.partners = vec![NONE; n];
@@ -326,6 +350,8 @@ impl FileDiff {
                 }
             }
         }
+        (self.markers, self.split_markers) = eol::markers(self);
+        self.endings = eol::summary(self);
     }
 
     /// No lines and no notes: the file matches its base, or a rename or

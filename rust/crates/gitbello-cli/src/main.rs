@@ -1,6 +1,8 @@
 //! Dev-only headless harness for `gitbello-core`.
 
+mod eol_fixture;
 mod fixture;
+mod image_fixture;
 mod repo_cmds;
 
 use std::ops::Range;
@@ -28,7 +30,8 @@ commands:
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
-  fixture <dir> [--repos N]        create throwaway repos for UI smoke tests
+  fixture <dir> [--repos N] [--images] [--eol]
+                                   create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
   in-use <dir>                     programs running files from a folder

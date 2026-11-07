@@ -5,7 +5,7 @@ extends SmokeTest
 ## the rebase choice pulls then pushes, showing its progress on the button,
 ## and ends without a success toast (the button shows the result). Also: a
 ## fetch from the keyboard shows a progress toast, branches in the palette,
-## and a missing editor reported as a toast. Uses fixture `repo-8`. Skipped
+## and a missing terminal reported as a toast. Uses fixture `repo-8`. Skipped
 ## without `--fixtures`.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
@@ -68,10 +68,10 @@ func run() -> void:
 	expect(not ("Check out: main" in palette.visible_labels()), "the checked-out branch is not")
 	palette.close()
 
-	# The smoke config's editor does not exist: a toast says so.
+	# The smoke config's terminal does not exist: a toast says so.
 	var before: int = toasts.toast_count()
-	press("Ctrl+Shift+E")
-	expect(await wait_until(func() -> bool: return toasts.toast_count() > before), "a missing editor is reported")
+	press("Ctrl+Shift+T")
+	expect(await wait_until(func() -> bool: return toasts.toast_count() > before), "a missing terminal is reported")
 
 	while main.tab_count() > 0:
 		main.close_tab(0)

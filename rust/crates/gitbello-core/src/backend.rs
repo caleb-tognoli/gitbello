@@ -194,6 +194,13 @@ pub trait GitBackend: Send + Sync {
         files: &[(PathBuf, String)],
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+    /// Lines added and removed per file by the unstaged changes (`git diff
+    /// --numstat`, no renames); binary files are left out.
+    fn unstaged_numstat(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, u32, u32)>, GitError>;
 
     /// Initializes a repository at `path`, which must be missing or empty,
     /// or with `existing`, a folder that is not a repository yet.
@@ -654,6 +661,29 @@ const DIFF_ARGS: &[&str] = &[
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
+
+/// `(path, added, removed)` from `git diff --numstat -z --no-renames`
+/// output (`added<TAB>removed<TAB>path<NUL>`); binary files (`-`) are left out.
+fn parse_numstat(output: &[u8]) -> Vec<(PathBuf, u32, u32)> {
+    let mut stats = Vec::new();
+    for record in output.split(|&b| b == 0).filter(|r| !r.is_empty()) {
+        let mut fields = record.splitn(3, |&b| b == b'\t');
+        let (Some(added), Some(removed), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let number = |field: &[u8]| std::str::from_utf8(field).ok()?.parse::<u32>().ok();
+        if let (Some(added), Some(removed)) = (number(added), number(removed)) {
+            stats.push((
+                PathBuf::from(String::from_utf8_lossy(path).into_owned()),
+                added,
+                removed,
+            ));
+        }
+    }
+    stats
+}
 
 /// The stage-0 index blob id of `path`, from `git ls-files -s -z` output.
 fn parse_index_oid(output: &[u8]) -> Option<String> {
@@ -1185,6 +1215,28 @@ impl GitBackend for CliBackend {
             fs::write(&target, &out.stdout).map_err(io)?;
         }
         Ok(())
+    }
+
+    fn unstaged_numstat(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, u32, u32)>, GitError> {
+        let out = self
+            .runner
+            .read(toplevel)
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-relative",
+                "--no-renames",
+                "--numstat",
+                "-z",
+            ])
+            .cancel_token(cancel)
+            .run()?;
+        Ok(parse_numstat(&out.stdout))
     }
 
     fn init(

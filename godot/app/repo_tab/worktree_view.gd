@@ -26,7 +26,7 @@ const REF_MENUS: Dictionary[String, Array] = {
 		&"branch.rename", &"branch.set_upstream", &"branch.delete"],
 	"remote": [&"branch.checkout", &"branch.merge", &"branch.new", &"tag.new", &"", &"branch.delete_remote"],
 	"tag": [&"commit.checkout", &"branch.merge", &"branch.new", &"", &"tag.push", &"tag.delete"],
-	"worktree": [&"worktree.open_in_editor", &"worktree.open_terminal", &"worktree.show_in_file_manager",
+	"worktree": [&"worktree.open_terminal", &"worktree.show_in_file_manager",
 		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.remove"],
 }
 ## A ref label in the graph offers fewer actions than the branch list.

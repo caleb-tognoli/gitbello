@@ -26,6 +26,7 @@ const VERBS: Dictionary[String, String] = {
 	"restore shelf": "Restoring the shelf",
 	"restore shelf file": "Restoring the shelved file",
 	"discard shelf file": "Discarding the shelved file",
+	"restore line endings": "Restoring line endings",
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
 	"merge": "Merging",

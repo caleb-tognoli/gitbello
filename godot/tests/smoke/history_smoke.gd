@@ -58,22 +58,22 @@ func run() -> void:
 	# Ctrl+Shift+D switches every diff to side by side (and back).
 	press("Ctrl+Shift+D")
 	expect(diff.side_by_side, "Ctrl+Shift+D shows the diff side by side")
-	expect(Core.diff_side_by_side(), "the layout is saved")
+	expect_eq(Core.diff_mode("text"), "split", "the layout is saved")
 	var row: Dictionary = diff.row_data(1)
 	expect(String(row.get("left", {}).get("text", "")) == "v1" and String(row.get("right", {}).get("text", "")) == "v2",
 			"v1 and v2 share a side-by-side row: %s" % [row])
 	# `v1` -> `v2` changes the line's only word: no word highlight on top.
 	expect(Array(row["right"]["hl"]).is_empty(), "a whole-line change has no word highlight: %s" % [row["right"]["hl"]])
 	press("Ctrl+Shift+D")
-	expect(not diff.side_by_side and not Core.diff_side_by_side(), "Ctrl+Shift+D switches back")
+	expect(not diff.side_by_side and Core.diff_mode("text") == "unified", "Ctrl+Shift+D switches back")
 
 	# Unified and Side by side are one choice.
-	var unified: Button = details.diff_panel().layout_button(false)
-	var split: Button = details.diff_panel().layout_button(true)
+	var unified: Button = details.diff_panel().mode_button("unified")
+	var split: Button = details.diff_panel().mode_button("split")
 	expect(unified.button_pressed and not split.button_pressed, "Unified is the chosen layout")
 	split.button_pressed = true
 	split.pressed.emit()
-	expect(diff.side_by_side and Core.diff_side_by_side(), "Side by side switches the layout")
+	expect(diff.side_by_side and Core.diff_mode("text") == "split", "Side by side switches the layout")
 	expect(not unified.button_pressed, "and Unified is no longer chosen")
 	unified.button_pressed = true
 	unified.pressed.emit()

@@ -33,8 +33,7 @@ func _ready() -> void:
 	Actions.run_action(&"view.theme_dark")
 	if not Core.diff_minimap():
 		Actions.run_action(&"diff.toggle_minimap")
-	if Core.diff_side_by_side():
-		Actions.run_action(&"diff.toggle_side_by_side")
+	Core.set_diff_mode("text", "unified")
 	var main: Main = MAIN.instantiate() as Main
 	add_child(main)
 	await get_tree().process_frame
@@ -67,9 +66,9 @@ func _ready() -> void:
 			lines.append(int(diff.line(row).get("index", -1)))
 	session.pick_lines(lines, false)
 	await _shot("left-out")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	await _shot("side-by-side")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	Actions.run_action(&"diff.toggle_minimap")
 	await _shot("minimap-off")
 	Actions.run_action(&"diff.toggle_minimap")
@@ -92,9 +91,9 @@ func _ready() -> void:
 	if not await _wait(func() -> bool: return resolver.has_conflict_blocks()):
 		return
 	await _shot("resolver")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	await _shot("resolver-side-by-side")
-	Actions.run_action(&"diff.toggle_side_by_side")
+	Actions.run_action(&"diff.cycle_mode")
 	Actions.run_action(&"view.theme_light")
 	await _shot("resolver-light")
 	Actions.run_action(&"view.theme_dark")

@@ -1,11 +1,13 @@
-//! `gitbello-cli fixture <dir> [--repos N]`: builds throwaway repositories for
+//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol]`: builds throwaway repositories for
 //! the Godot smoke tests (GDScript never runs git itself).
 //!
 //! Each `repo-<n>` has: two commits on `main`, a `feature/login` branch, a
 //! `v1.0` tag, a bare `origin` remote with `main` pushed and one commit ahead,
 //! a stash, a linked worktree and one modified plus one untracked file. The
 //! remote also has a commit (`remote.txt`) that `repo-<n>` has not fetched,
-//! so a fetch leaves `main` one ahead and one behind.
+//! so a fetch leaves `main` one ahead and one behind. `--images` adds the
+//! image repositories of `image_fixture`, `--eol` the line-endings one of
+//! `eol_fixture`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,8 @@ use gitbello_core::git::GitRunner;
 pub fn run(args: &[String]) -> Result<()> {
     let mut dir = None;
     let mut repos = 1usize;
+    let mut images = false;
+    let mut eol = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -26,6 +30,8 @@ pub fn run(args: &[String]) -> Result<()> {
                     .parse()
                     .context("--repos needs a number")?;
             }
+            "--images" => images = true,
+            "--eol" => eol = true,
             other if dir.is_none() => dir = Some(PathBuf::from(other)),
             other => bail!("unexpected argument `{other}`"),
         }
@@ -44,17 +50,35 @@ pub fn run(args: &[String]) -> Result<()> {
             .with_context(|| format!("building {}", repo.display()))?;
         println!("{}", repo.display());
     }
+    if images {
+        let git = Git {
+            runner: &runner,
+            global_config: &global_config,
+            clock: std::cell::Cell::new(1_700_000_000),
+        };
+        crate::image_fixture::build(&git, &dir).context("building the image repositories")?;
+        println!("{}", dir.join("images").display());
+    }
+    if eol {
+        let git = Git {
+            runner: &runner,
+            global_config: &global_config,
+            clock: std::cell::Cell::new(1_700_000_000),
+        };
+        crate::eol_fixture::build(&git, &dir).context("building the line-endings repository")?;
+        println!("{}", dir.join("eol").display());
+    }
     Ok(())
 }
 
-struct Git<'a> {
-    runner: &'a GitRunner,
-    global_config: &'a Path,
-    clock: std::cell::Cell<i64>,
+pub(crate) struct Git<'a> {
+    pub(crate) runner: &'a GitRunner,
+    pub(crate) global_config: &'a Path,
+    pub(crate) clock: std::cell::Cell<i64>,
 }
 
 impl Git<'_> {
-    fn run(&self, dir: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
+    pub(crate) fn run(&self, dir: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
         let time = self.clock.get();
         self.clock.set(time + 60);
         let date = format!("{time} +0000");

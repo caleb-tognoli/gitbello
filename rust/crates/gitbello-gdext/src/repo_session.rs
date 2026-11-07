@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
+use gitbello_core::diff::image::{ImageSides, SideImage};
 use gitbello_core::diff::minimap::{
     self, ConflictMinimap, DiffMinimap, MinimapPalette, MinimapSource, MinimapStyle, Rgba, StripMap,
 };
+use gitbello_core::diff::version::VersionSide;
 use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::ignore::{self, Untrack};
@@ -101,6 +103,10 @@ impl RepoSession {
     /// The worktree folder is gone; the session no longer refreshes.
     #[signal]
     fn missing();
+    /// The file `open_version` asked for: `path`, or `error` (`error_dict`)
+    /// when it could not be read.
+    #[signal]
+    fn version_ready(path: GString, error: VarDictionary);
     /// `load_cleanup` finished (`cleanup_candidates`).
     #[signal]
     fn cleanup_loaded();
@@ -1030,7 +1036,8 @@ impl RepoSession {
 
     /// Shows only the changed files whose path contains `text` (any case),
     /// narrowed by `options`: any of `included`, `excluded`, `new`,
-    /// `modified`, `deleted`, and `ignored` (also list ignored files, last). Rows change at once (no signal).
+    /// `modified`, `deleted`, `endings_only`, and `ignored` (also list ignored
+    /// files, last). Rows change at once (no signal).
     #[func]
     fn set_change_filter(&self, text: GString, options: PackedStringArray) {
         let has = |id: &str| options.as_slice().iter().any(|o| *o == id);
@@ -1041,6 +1048,7 @@ impl RepoSession {
             new: has("new"),
             modified: has("modified"),
             deleted: has("deleted"),
+            endings_only: has("endings_only"),
             ignored: has("ignored"),
         };
         runtime_cell::with(|rt| rt.set_change_filter(&self.key, filter));
@@ -1389,6 +1397,19 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.select_commit_file(&self.key, Some(&path), full));
     }
 
+    /// Open: the file of `side` (`shown`, `old` or `new`) in diff `slot`
+    /// (`changes`, where a conflict shows its file, or `commit`): the working
+    /// copy, or a version written to the cache. `version_ready` follows.
+    /// Returns whether it started.
+    #[func]
+    fn open_version(&self, slot: GString, side: GString) -> bool {
+        let Some(side) = VersionSide::parse(&side.to_string()) else {
+            return false;
+        };
+        let slot = parse_slot(&slot);
+        runtime_cell::with(|rt| rt.open_version(&self.key, slot, side).is_some()).unwrap_or(false)
+    }
+
     #[func]
     fn clear_commit_diff(&self) {
         runtime_cell::with(|rt| rt.select_commit_file(&self.key, None, false));
@@ -1399,6 +1420,26 @@ impl RepoSession {
     fn commit_diff_info(&self) -> VarDictionary {
         self.read(|s| convert::diff_info(s.commit_diff()))
             .unwrap_or_default()
+    }
+
+    /// One side (`old` or `new`; ours and theirs of a conflict) of the image
+    /// diff in `slot` (`changes` or `commit`): `diff_info`'s `image` side
+    /// plus its `bytes` (empty unless `state` is `image`). Called once per
+    /// side `id`; the UI decodes the bytes.
+    #[func]
+    fn image_side(&self, slot: GString, side: GString) -> VarDictionary {
+        let new = side == "new";
+        self.with_images(&slot, |images| {
+            let side = if new { &images.new } else { &images.old };
+            let mut info = convert::image_side_info(side);
+            let bytes = match side {
+                SideImage::Loaded { bytes, .. } => PackedByteArray::from(&bytes[..]),
+                _ => PackedByteArray::new(),
+            };
+            info.set("bytes", &bytes);
+            info
+        })
+        .unwrap_or_default()
     }
 
     /// Like `diff_lines`, for the commit file diff.
@@ -1466,6 +1507,25 @@ impl RepoSession {
             .map(|p| PathBuf::from(p.to_string()))
             .collect();
         job_id(runtime_cell::with(|rt| rt.discard_files(&self.key, paths)).flatten())
+    }
+
+    /// Puts back the line endings (and final newline) the unstaged changes
+    /// of `paths` changed, keeping their text; backed up first for
+    /// `undo_discard`. Label `restore line endings`.
+    #[func]
+    fn restore_line_endings(&self, paths: PackedStringArray) -> i64 {
+        let paths = path_list(&paths);
+        job_id(runtime_cell::with(|rt| rt.restore_line_endings(&self.key, paths)).flatten())
+    }
+
+    /// Whether `restore_line_endings(paths)` has something to restore: a
+    /// file whose only changes are line endings, or the Changes diff's file
+    /// showing ending changes.
+    #[func]
+    fn can_restore_line_endings(&self, paths: PackedStringArray) -> bool {
+        let paths = path_list(&paths);
+        self.read(|s| s.can_restore_endings(&paths))
+            .unwrap_or(false)
     }
 
     #[func]
@@ -2040,6 +2100,18 @@ impl RepoSession {
 
     /// Calls `f` with the minimap rows of `slot`'s diff, or of the
     /// resolver's file in `changes`.
+    fn with_images<R>(&self, slot: &GString, f: impl FnOnce(&ImageSides) -> R) -> Option<R> {
+        let commit = *slot == "commit";
+        self.read(|s| {
+            if let (false, Some(conflict)) = (commit, s.conflict()) {
+                return conflict.images().map(f);
+            }
+            let state = if commit { s.commit_diff() } else { s.diff() }?;
+            state.images().map(f)
+        })
+        .flatten()
+    }
+
     fn with_minimap<R>(
         &self,
         slot: &GString,
@@ -2141,6 +2213,7 @@ fn index(value: i64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
+/// `paths` from GDScript as paths.
 fn path_list(paths: &PackedStringArray) -> Vec<PathBuf> {
     paths
         .as_slice()

@@ -11,14 +11,13 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use toml::{Table, Value};
 
+use crate::diff::viewer::{DiffMode, Viewer};
 use crate::ops::PullMode;
 
 /// PLAN O3: worktrees go in the repository's locally ignored `.worktrees` folder.
 pub const DEFAULT_WORKTREE_TEMPLATE: &str = ".worktrees/{branch_slug}";
 const LEGACY_DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
 pub const DEFAULT_AUTO_FETCH_MINUTES: u32 = 10;
-/// PLAN §3.8; `{path}` is the worktree (or file) to open.
-pub const DEFAULT_EDITOR_COMMAND: &str = "code {path}";
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -60,8 +59,6 @@ pub struct Config {
     pub auto_fetch_minutes: u32,
     /// How `pull` integrates the upstream.
     pub pull_mode: PullMode,
-    /// Command for "Open in editor"; `{path}` is replaced by the folder.
-    pub editor_command: String,
     /// Command for "Open terminal here" (`{path}` as above); `None` uses the
     /// platform's terminal.
     pub terminal_command: Option<String>,
@@ -80,8 +77,11 @@ pub struct Config {
     /// [`parse_accent`]), the same in both themes; `None` uses each theme's.
     pub added_color: Option<String>,
     pub removed_color: Option<String>,
-    /// Show diffs side by side instead of unified.
-    pub diff_side_by_side: bool,
+    /// How text diffs show (`unified` or `split`); `diff_side_by_side = true`
+    /// from older versions reads as `split`.
+    pub diff_text_mode: DiffMode,
+    /// How image diffs show (`split`, `onion`, `swipe` or `difference`).
+    pub diff_image_mode: DiffMode,
     /// Show the minimap beside diffs (else only its strip of change marks).
     pub diff_minimap: bool,
     /// Offer to ignore a folder such as `node_modules/` that fills Changes.
@@ -158,7 +158,6 @@ impl Default for Config {
             branch_prefix: String::new(),
             auto_fetch_minutes: DEFAULT_AUTO_FETCH_MINUTES,
             pull_mode: PullMode::FastForwardOnly,
-            editor_command: DEFAULT_EDITOR_COMMAND.to_owned(),
             terminal_command: None,
             clone_folder: None,
             last_clone_folder: None,
@@ -167,7 +166,8 @@ impl Default for Config {
             accent: None,
             added_color: None,
             removed_color: None,
-            diff_side_by_side: false,
+            diff_text_mode: Viewer::Text.default_mode(),
+            diff_image_mode: Viewer::Image.default_mode(),
             diff_minimap: true,
             ignore_hint: true,
             keybindings: BTreeMap::new(),
@@ -196,6 +196,42 @@ pub fn parse_accent(text: &str) -> Option<String> {
     Some(format!("#{full}"))
 }
 
+/// Action ids renamed since a version that saved shortcuts for them.
+const RENAMED_ACTIONS: &[(&str, &str)] = &[
+    ("diff.toggle_side_by_side", "diff.cycle_mode"),
+    ("changes.open_file", "diff.open_file"),
+];
+
+/// Moves shortcuts saved for renamed actions to their new ids (an existing
+/// shortcut of the new id wins).
+fn migrate_keybindings(mut bindings: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    for (old, new) in RENAMED_ACTIONS {
+        if let Some(shortcut) = bindings.remove(*old) {
+            bindings.entry((*new).to_owned()).or_insert(shortcut);
+        }
+    }
+    bindings
+}
+
+/// An optional mode of `viewer` at `key` (see [`Viewer::all_modes`]).
+fn take_mode(
+    table: &mut Table,
+    key: &'static str,
+    viewer: Viewer,
+) -> Result<Option<DiffMode>, ConfigError> {
+    let expected = match viewer {
+        Viewer::Image => "\"split\", \"onion\", \"swipe\" or \"difference\"",
+        Viewer::Text | Viewer::None => "\"unified\" or \"split\"",
+    };
+    match take_string(table, key)? {
+        None => Ok(None),
+        Some(text) => DiffMode::parse(&text)
+            .filter(|mode| viewer.all_modes().contains(mode))
+            .map(Some)
+            .ok_or(ConfigError::Invalid { key, expected }),
+    }
+}
+
 /// An optional `#rrggbb` colour at `key` (see [`parse_accent`]).
 fn take_color(table: &mut Table, key: &'static str) -> Result<Option<String>, ConfigError> {
     match take_string(table, key)? {
@@ -216,6 +252,7 @@ const KEYS: &[&str] = &[
     "branch_prefix",
     "auto_fetch_minutes",
     "pull_mode",
+    // Open in editor's command (until M7.8): read and dropped.
     "editor_command",
     "terminal_command",
     "clone_folder",
@@ -226,6 +263,8 @@ const KEYS: &[&str] = &[
     "added_color",
     "removed_color",
     "diff_side_by_side",
+    "diff_text_mode",
+    "diff_image_mode",
     "diff_minimap",
     "ignore_hint",
     "keybindings",
@@ -285,8 +324,6 @@ impl Config {
                     expected: "\"ff-only\", \"merge\" or \"rebase\"",
                 })?,
             },
-            editor_command: take_string(&mut table, "editor_command")?
-                .unwrap_or(defaults.editor_command),
             terminal_command: take_string(&mut table, "terminal_command")?
                 .filter(|c| !c.trim().is_empty()),
             clone_folder: take_string(&mut table, "clone_folder")?
@@ -312,10 +349,18 @@ impl Config {
             accent: take_color(&mut table, "accent")?,
             added_color: take_color(&mut table, "added_color")?,
             removed_color: take_color(&mut table, "removed_color")?,
-            diff_side_by_side: take_bool(&mut table, "diff_side_by_side")?.unwrap_or(false),
+            diff_text_mode: match take_mode(&mut table, "diff_text_mode", Viewer::Text)? {
+                Some(mode) => mode,
+                None if take_bool(&mut table, "diff_side_by_side")? == Some(true) => {
+                    DiffMode::Split
+                }
+                None => Viewer::Text.default_mode(),
+            },
+            diff_image_mode: take_mode(&mut table, "diff_image_mode", Viewer::Image)?
+                .unwrap_or(Viewer::Image.default_mode()),
             diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
             ignore_hint: take_bool(&mut table, "ignore_hint")?.unwrap_or(true),
-            keybindings: take_string_map(&mut table, "keybindings")?,
+            keybindings: migrate_keybindings(take_string_map(&mut table, "keybindings")?),
             extra: table,
         };
         Ok(config)
@@ -343,10 +388,6 @@ impl Config {
         table.insert(
             "pull_mode".into(),
             Value::String(self.pull_mode.as_str().into()),
-        );
-        table.insert(
-            "editor_command".into(),
-            Value::String(self.editor_command.clone()),
         );
         if let Some(terminal) = &self.terminal_command {
             table.insert("terminal_command".into(), Value::String(terminal.clone()));
@@ -381,10 +422,12 @@ impl Config {
                 table.insert(key.into(), Value::String(color.clone()));
             }
         }
-        table.insert(
-            "diff_side_by_side".into(),
-            Value::Boolean(self.diff_side_by_side),
-        );
+        for (key, mode) in [
+            ("diff_text_mode", self.diff_text_mode),
+            ("diff_image_mode", self.diff_image_mode),
+        ] {
+            table.insert(key.into(), Value::String(mode.id().into()));
+        }
         table.insert("diff_minimap".into(), Value::Boolean(self.diff_minimap));
         table.insert("ignore_hint".into(), Value::Boolean(self.ignore_hint));
         if !self.keybindings.is_empty() {
@@ -521,6 +564,46 @@ mod tests {
     }
 
     #[test]
+    fn drops_the_old_editor_command() {
+        let old = Config::parse("editor_command = \"subl -n {path}\"").unwrap();
+        assert!(!old.to_toml().contains("editor_command"));
+    }
+
+    #[test]
+    fn migrates_side_by_side_to_the_text_mode() {
+        let old = Config::parse("diff_side_by_side = true").unwrap();
+        assert_eq!(old.diff_text_mode, DiffMode::Split);
+        assert!(!old.to_toml().contains("diff_side_by_side"));
+        assert_eq!(
+            Config::parse("diff_side_by_side = false")
+                .unwrap()
+                .diff_text_mode,
+            DiffMode::Unified
+        );
+        // The new key wins over the old one.
+        let both = Config::parse("diff_side_by_side = true\ndiff_text_mode = \"unified\"").unwrap();
+        assert_eq!(both.diff_text_mode, DiffMode::Unified);
+        assert_eq!(Config::default().diff_image_mode, DiffMode::Split);
+        let keys =
+            Config::parse("[keybindings]\n\"diff.toggle_side_by_side\" = \"Ctrl+Alt+S\"").unwrap();
+        assert_eq!(
+            keys.keybindings.get("diff.cycle_mode").map(String::as_str),
+            Some("Ctrl+Alt+S")
+        );
+        assert!(!keys.keybindings.contains_key("diff.toggle_side_by_side"));
+        for (text, key) in [
+            ("diff_text_mode = \"onion\"", "diff_text_mode"),
+            ("diff_image_mode = \"unified\"", "diff_image_mode"),
+            ("diff_image_mode = \"single\"", "diff_image_mode"),
+        ] {
+            assert!(
+                matches!(Config::parse(text), Err(ConfigError::Invalid { key: k, .. }) if k == key),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
     fn round_trips_every_field_with_unicode_paths() {
         let config = Config {
             git_path: Some(PathBuf::from("C:/Program Files/Git/bin/git.exe")),
@@ -534,7 +617,6 @@ mod tests {
             branch_prefix: "ädä/".into(),
             auto_fetch_minutes: 0,
             pull_mode: PullMode::Rebase,
-            editor_command: "subl -n {path}".into(),
             terminal_command: Some("wt -d \"{path}\"".into()),
             clone_folder: Some(PathBuf::from("D:\\cödé")),
             last_clone_folder: Some(PathBuf::from("/home/ädä/src")),
@@ -543,7 +625,8 @@ mod tests {
             accent: Some("#e0569a".into()),
             added_color: Some("#2bb5a0".into()),
             removed_color: Some("#d2691e".into()),
-            diff_side_by_side: true,
+            diff_text_mode: DiffMode::Split,
+            diff_image_mode: DiffMode::Swipe,
             diff_minimap: false,
             ignore_hint: false,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),

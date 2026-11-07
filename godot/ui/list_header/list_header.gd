@@ -88,14 +88,14 @@ func status_text() -> String:
 	return _status_label.text if _status.visible else ""
 
 
-## `+12` and `−3` on the right (hidden while both are zero).
+## `+12` and `−3` on the right; a zero count is left out.
 func show_counts(additions: int, deletions: int) -> void:
 	DiffPanel.show_counts(_added, _removed, additions, deletions)
 
 
-## The totals shown, as `+12 −3`, or "".
+## The totals shown, as `+12 −3`, `+12` or "".
 func counts_text() -> String:
-	return "%s %s" % [_added.text, _removed.text] if _added.get_parent().visible else ""
+	return DiffPanel.shown_counts(_added, _removed)
 
 
 ## `count` and `noun`, plural (`plural`, or `noun` + "s") unless one, with

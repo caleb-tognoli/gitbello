@@ -8,6 +8,8 @@ extends RefCounted
 ## `pick`), dimmed where it cannot be changed: a conflicted file (empty) or a
 ## `locked` row. A `resolved` file shows a tick instead of its status icon.
 ## During amend, files already in the original commit also have a commit icon.
+## A file whose only changes are line endings (`endings_only`) ends with an
+## `EOL` chip.
 ## An `ignored` row ("Show ignored files") is drawn muted, with no checkbox.
 ## Colors and sizes come from the `ChangeList` theme type.
 
@@ -56,6 +58,9 @@ var _path_color: Color = Color.WHITE
 var _dir_color: Color = Color.WHITE
 var _code_colors: Dictionary[String, Color] = {}
 var _resolved_color: Color = Color.WHITE
+var _chip_color: Color = Color.WHITE
+var _chip_font_size: int = 0
+var _chip_box: StyleBoxFlat = StyleBoxFlat.new()
 var _ignored_color: Color = Color.WHITE
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
@@ -75,6 +80,10 @@ func update_theme(control: Control) -> void:
 	_dir_color = control.get_theme_color(&"dir_color", THEME_TYPE)
 	_picks.update_theme(control)
 	_resolved_color = control.get_theme_color(&"resolved_color", THEME_TYPE)
+	_chip_color = control.get_theme_color(&"chip_color", THEME_TYPE)
+	_chip_font_size = control.get_theme_font_size(&"chip_font_size", THEME_TYPE)
+	_chip_box.bg_color = control.get_theme_color(&"chip_bg", THEME_TYPE)
+	_chip_box.set_corner_radius_all(control.get_theme_constant(&"chip_radius", THEME_TYPE))
 	_ignored_color = control.get_theme_color(&"ignored_color", THEME_TYPE)
 	_code_colors.clear()
 	for code: String in CODE_COLORS:
@@ -105,12 +114,16 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	var name: String = path.trim_suffix("/").get_file() + ("/" if path.ends_with("/") else "")
 	var lead: PackedStringArray = _lead(path, String(data.get("original_path", "")))
 	var room: float = rect.end.x - _padding - x
+	var right: float = rect.end.x - _padding
 	if bool(data.get("amending", false)) and bool(data.get("in_original_commit", false)):
 		var commit_icon: Texture2D = AppTheme.icon(&"GitCommit")
 		if commit_icon != null:
 			room -= _icon_size + _padding
+			right -= _icon_size + _padding
 			canvas.draw_texture_rect(commit_icon, Rect2(rect.end.x - _padding - _icon_size,
 					rect.position.y + (rect.size.y - _icon_size) / 2.0, _icon_size, _icon_size), false, _dir_color)
+	if bool(data.get("endings_only", false)):
+		room -= _draw_chip(canvas, "EOL", right, rect) + _padding
 	var name_color: Color = _ignored_color if ignored else _path_color
 	var name_width: float = _text_width(name)
 	var lead_width: float = _text_width(lead[0] + lead[1])
@@ -134,6 +147,20 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	canvas.draw_string(_font, Vector2(x, baseline), lead[1], HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, _dir_color)
 	canvas.draw_string(_font, Vector2(x + separator_width, baseline), name, HORIZONTAL_ALIGNMENT_LEFT, -1,
 			_font_size, name_color)
+
+
+## Draws `text` in a small chip ending at `right`, centred in `rect`;
+## returns its width.
+func _draw_chip(canvas: CanvasItem, text: String, right: float, rect: Rect2) -> float:
+	var text_size: Vector2 = _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _chip_font_size)
+	var inset: float = roundf(_padding / 2.0)
+	var chip: Rect2 = Rect2(right - text_size.x - inset * 2.0, roundf(rect.get_center().y - text_size.y / 2.0),
+			text_size.x + inset * 2.0, text_size.y)
+	canvas.draw_style_box(_chip_box, chip)
+	var baseline: float = chip.position.y + (chip.size.y + _font.get_ascent(_chip_font_size) - _font.get_descent(_chip_font_size)) / 2.0
+	canvas.draw_string(_font, Vector2(chip.position.x + inset, baseline), text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			_chip_font_size, _chip_color)
+	return chip.size.x
 
 
 ## What goes before a row's file name, muted: `[folder, separator]`, such as

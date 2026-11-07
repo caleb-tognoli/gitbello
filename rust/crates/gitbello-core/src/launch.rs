@@ -1,6 +1,6 @@
-//! "Open in editor" and "Open terminal here" (PLAN §3.8, and the §3.13
-//! fallback): user command templates such as `code {path}`, split into
-//! arguments and started without a shell, in the folder they open.
+//! "Open terminal here" (PLAN §3.8, and the §3.13 fallback): user command
+//! templates such as `wt -d {path}`, split into arguments and started without
+//! a shell, in the folder they open.
 
 use std::env;
 use std::ffi::OsString;
@@ -73,16 +73,9 @@ pub fn expand(template: &str, path: &Path) -> Result<Vec<String>, LaunchError> {
         .collect())
 }
 
-/// What is being opened; terminals that need a console get a new one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaunchKind {
-    Editor,
-    Terminal,
-}
-
-/// Starts `template` for `dir` (also its working directory) and returns
-/// without waiting for it.
-pub fn launch(template: &str, dir: &Path, kind: LaunchKind) -> Result<(), LaunchError> {
+/// Starts terminal `template` for `dir` (also its working directory) and
+/// returns without waiting for it. A console shell gets a new console.
+pub fn launch(template: &str, dir: &Path) -> Result<(), LaunchError> {
     let args = expand(template, dir)?;
     let program = find_program(&args[0]).ok_or_else(|| LaunchError::NotFound(args[0].clone()))?;
     let mut cmd = Command::new(&program);
@@ -101,14 +94,12 @@ pub fn launch(template: &str, dir: &Path, kind: LaunchKind) -> Result<(), Launch
             .map(|s| s.to_string_lossy().to_lowercase())
             .unwrap_or_default();
         let console_shell = matches!(stem.as_str(), "cmd" | "powershell" | "pwsh");
-        cmd.creation_flags(if kind == LaunchKind::Terminal && console_shell {
+        cmd.creation_flags(if console_shell {
             CREATE_NEW_CONSOLE
         } else {
             CREATE_NO_WINDOW
         });
     }
-    #[cfg(not(windows))]
-    let _ = kind;
     let mut child = cmd.spawn().map_err(|source| LaunchError::Spawn {
         program: args[0].clone(),
         source,
@@ -123,10 +114,10 @@ pub fn launch(template: &str, dir: &Path, kind: LaunchKind) -> Result<(), Launch
 /// Starts the configured terminal, or the platform's when `template` is `None`.
 pub fn launch_terminal(template: Option<&str>, dir: &Path) -> Result<(), LaunchError> {
     match template {
-        Some(template) => launch(template, dir, LaunchKind::Terminal),
+        Some(template) => launch(template, dir),
         None => {
             let template = default_terminal().ok_or(LaunchError::NoTerminal)?;
-            launch(&template, dir, LaunchKind::Terminal)
+            launch(&template, dir)
         }
     }
 }
@@ -235,11 +226,7 @@ mod tests {
             Some(OsString::from(file))
         );
         assert_eq!(find_program(&dir.join("nope").to_string_lossy()), None);
-        let missing = launch(
-            "gitbello-no-such-program-x {path}",
-            &dir,
-            LaunchKind::Editor,
-        );
+        let missing = launch("gitbello-no-such-program-x {path}", &dir);
         assert!(
             matches!(missing, Err(LaunchError::NotFound(p)) if p == "gitbello-no-such-program-x")
         );

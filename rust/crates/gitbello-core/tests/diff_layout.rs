@@ -38,6 +38,7 @@ fn rows(rt: &Runtime, key: &Path) -> Vec<String> {
                 format!("~{new} {}", String::from_utf8_lossy(text))
             }
             LayoutRow::End => "end".to_owned(),
+            LayoutRow::Marker(marker) => format!("{marker:?}"),
         })
         .collect()
 }

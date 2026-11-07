@@ -34,8 +34,7 @@ func _ready() -> void:
 	Actions.run_action(&"view.theme_dark")
 	if not Core.diff_minimap():
 		Actions.run_action(&"diff.toggle_minimap")
-	if Core.diff_side_by_side():
-		Actions.run_action(&"diff.toggle_side_by_side")
+	Core.set_diff_mode("text", "unified")
 	var main: Main = MAIN.instantiate() as Main
 	add_child(main)
 	await get_tree().process_frame

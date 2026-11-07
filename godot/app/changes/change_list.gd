@@ -218,6 +218,8 @@ func _get_tooltip(at_position: Vector2) -> String:
 		tip += "\n" + tr("Conflicts resolved")
 	elif not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
 		tip += "\n" + FileRowPainter.code_name(String(data["code"]))
+	if bool(data.get("endings_only", false)):
+		tip += "\n" + tr("Only line endings changed")
 	if bool(data.get("amending", false)):
 		tip += "\n" + (tr("Already in the original commit") if bool(data.get("in_original_commit", false)) else tr("Additional working changes"))
 	if bool(data.get("as_staged", false)):

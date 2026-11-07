@@ -3,8 +3,12 @@
 use std::path::Path;
 
 use gitbello_core::changes::{change_code, is_conflicted, FilePick};
+use gitbello_core::diff::eol::{EndingSummary, FinalNewline, Marker};
+use gitbello_core::diff::image::{ImageSides, SideImage};
 use gitbello_core::diff::{
-    changed_ranges, display_text, DiffContent, DiffKind, FileDiff, LayoutRow, LineKind,
+    changed_ranges, display_text,
+    viewer::{self, Offered},
+    DiffContent, DiffKind, FileDiff, LayoutRow, LineKind,
 };
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
@@ -397,9 +401,11 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
 }
 
 /// A Changes view row: `{path, original_path, code, pick, conflicted,
-/// resolved, as_staged, amending, in_original_commit, locked}`. `resolved`
-/// marks a file whose conflicts were resolved during the operation, `locked`
-/// a checkbox that shows the index (a merge or cherry-pick is being committed).
+/// resolved, as_staged, amending, in_original_commit, locked, endings_only}`.
+/// `resolved` marks a file whose conflicts were resolved during the
+/// operation, `locked` a checkbox that shows the index (a merge or
+/// cherry-pick is being committed), `endings_only` a modified file whose
+/// only changes are line endings or the final newline.
 pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
     let selection = state.selection();
     let mut row = vdict! {
@@ -413,6 +419,7 @@ pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
         "amending" => state.is_amending(),
         "in_original_commit" => state.in_amended_commit(&change.path),
         "locked" => state.commit_mode().locks_picks(),
+        "endings_only" => state.is_endings_only(&change.path),
     };
     if change.state == FileState::Ignored {
         row.set("ignored", true);
@@ -472,6 +479,10 @@ pub fn conflict_info(state: &ConflictState, show_base: bool) -> VarDictionary {
             info.set("line_count", to_i64(layout.unified.len()));
             info.set("split_count", to_i64(layout.split.len()));
             info.set("max_line", to_i64(file.line_count()));
+            set_offered(&mut info, &viewer::conflict_offered(file));
+            if let Some(images) = state.images() {
+                info.set("image", &images_info(images));
+            }
             info.set(
                 "conflict",
                 &vdict! {
@@ -679,8 +690,9 @@ fn diff_content_id(content: DiffContent) -> &'static str {
 
 /// `{state, path, kind, content, code, original_path, similarity, notes,
 /// additions, deletions, line_count, split_count, max_line, can_expand,
-/// whole, old_size, new_size, bytes, error}`; `state` is `none`, `loading`,
-/// `error` or `ready`. `line_count` and `split_count` count the rows shown
+/// whole, old_size, new_size, bytes, viewer, modes, error}`; `state` is
+/// `none`, `loading`, `error` or `ready`. `viewer` (`text`, `image`, `none`)
+/// and `modes` (ids in cycle order, see `diff::viewer`) come with the diff. `line_count` and `split_count` count the rows shown
 /// (see [`diff_rows`]); `can_expand` says some lines of the file are hidden
 /// and `whole` that the whole file is shown. Sizes and `similarity` are -1
 /// when unknown.
@@ -748,9 +760,97 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             info.set("old_size", old_size);
             info.set("new_size", new_size);
             info.set("bytes", bytes);
+            set_offered(&mut info, &viewer::offered(diff, &target.path));
+            if diff.content == DiffContent::Text {
+                set_endings(&mut info, diff.endings());
+            }
+            if let Some(images) = state.images() {
+                info.set("image", &images_info(images));
+            }
         }
     }
     info
+}
+
+/// `{format, old, new}` of an image diff (ours and theirs for a conflict),
+/// each side as [`image_side_info`].
+pub fn images_info(images: &ImageSides) -> VarDictionary {
+    vdict! {
+        "format" => images.format.id(),
+        "old" => &image_side_info(&images.old),
+        "new" => &image_side_info(&images.new),
+    }
+}
+
+/// `{state, size, width, height, id}` of one side of an image diff. `state`
+/// is `image`, `missing`, `too_large`, `too_many_pixels` or `unreadable`;
+/// `size` (bytes), `width` and `height` are -1 when unknown; `id` changes
+/// with the bytes (empty without them).
+pub fn image_side_info(side: &SideImage) -> VarDictionary {
+    let size = side
+        .size()
+        .map_or(-1, |s| i64::try_from(s).unwrap_or(i64::MAX));
+    let (state, dimensions, id) = match side {
+        SideImage::Missing => ("missing", None, ""),
+        SideImage::Loaded { dimensions, id, .. } => ("image", *dimensions, id.as_str()),
+        SideImage::TooLarge { .. } => ("too_large", None, ""),
+        SideImage::TooManyPixels { width, height, .. } => {
+            ("too_many_pixels", Some((*width, *height)), "")
+        }
+        SideImage::Unreadable { .. } => ("unreadable", None, ""),
+    };
+    let (width, height) = dimensions.map_or((-1, -1), |(w, h)| (i64::from(w), i64::from(h)));
+    vdict! {
+        "state" => state,
+        "size" => size,
+        "width" => width,
+        "height" => height,
+        "id" => &gstr(id),
+    }
+}
+
+/// `endings` (`{from, to, lines}`: `LF`, `CRLF` or `mixed`, and the lines
+/// whose ending changed; absent when none did), `final_newline` (`added`,
+/// `removed` or empty) and `eol_only` (nothing else changed) of a text diff.
+fn set_endings(info: &mut VarDictionary, summary: &EndingSummary) {
+    if let Some((from, to)) = summary.changed {
+        info.set(
+            "endings",
+            &vdict! {
+                "from" => from.id(),
+                "to" => to.id(),
+                "lines" => i64::from(summary.lines),
+            },
+        );
+    }
+    info.set(
+        "final_newline",
+        summary.final_newline.map_or("", FinalNewline::id),
+    );
+    info.set("eol_only", summary.only);
+}
+
+/// A marker row (`index` -1, `kind` 5): `marker` is `no_newline` or
+/// `line_endings` (with `from`, `to` and `lines`).
+fn marker_line(marker: &Marker) -> VarDictionary {
+    let mut line = plain_line(5, 0, 0, "", None);
+    match marker {
+        Marker::NoNewline { .. } => line.set("marker", "no_newline"),
+        Marker::LineEndings { from, to, lines } => {
+            line.set("marker", "line_endings");
+            line.set("from", from.id());
+            line.set("to", to.id());
+            line.set("lines", i64::from(*lines));
+        }
+    }
+    line
+}
+
+/// `viewer` and `modes` (in cycle order) of a diff or a conflict.
+fn set_offered(info: &mut VarDictionary, offered: &Offered) {
+    let modes: PackedStringArray = offered.modes.iter().map(|m| gstr(m.id())).collect();
+    info.set("viewer", offered.viewer.id());
+    info.set("modes", &modes);
 }
 
 /// The language used to color a diff of `path`.
@@ -897,6 +997,19 @@ pub fn diff_rows(
                 plain_line(0, 0, 0, "", None),
                 layout.gap_count().saturating_sub(1),
             ),
+            // Side by side, a no-newline marker shows on its side only.
+            LayoutRow::Marker(marker @ Marker::NoNewline { old, new }) if split => {
+                let side = |shown: bool| {
+                    if shown {
+                        marker_line(&marker)
+                    } else {
+                        VarDictionary::new()
+                    }
+                };
+                out.push(&vdict! { "left" => &side(old), "right" => &side(new) });
+                continue;
+            }
+            LayoutRow::Marker(marker) => marker_line(&marker),
         };
         if split {
             out.push(&vdict! { "left" => &line, "right" => &line });

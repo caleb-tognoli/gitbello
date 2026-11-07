@@ -136,12 +136,14 @@ func set_session(value: RepoSession) -> void:
 		session.job_finished.disconnect(_on_job_finished)
 		session.cleanup_loaded.disconnect(_on_cleanup_loaded)
 		session.merge_preview_ready.disconnect(_on_merge_preview)
+		session.version_ready.disconnect(_on_version_ready)
 		session.branch_delete_info_ready.disconnect(_on_delete_info)
 	session = value
 	if session != null:
 		session.job_finished.connect(_on_job_finished)
 		session.cleanup_loaded.connect(_on_cleanup_loaded)
 		session.merge_preview_ready.connect(_on_merge_preview)
+		session.version_ready.connect(_on_version_ready)
 		session.branch_delete_info_ready.connect(_on_delete_info)
 
 
@@ -1284,11 +1286,18 @@ func copy_hash(oid: String) -> void:
 		feedback.toasts.show_success(tr("Copied %s") % oid.left(7))
 
 
-## Opens `path` (this worktree when empty) in the configured editor.
-func open_in_editor(path: String = "") -> void:
-	var error: String = Core.open_in_editor(path if not path.is_empty() else session.toplevel())
-	if not error.is_empty():
-		notice.emit("Cannot open the editor", L10n.launch_error(error))
+## Opens a file Open asked for (`RepoSession.version_ready`) in its default
+## app. Tests replace it to record the paths instead.
+static var opener: Callable = func(path: String) -> Error: return OS.shell_open(path)
+
+
+func _on_version_ready(path: String, error: Dictionary) -> void:
+	if path.is_empty():
+		notice.emit("Cannot open the file", String(error.get("stderr", "")).strip_edges())
+		return
+	var result: Error = opener.call(path)
+	if result != OK:
+		notice.emit("Cannot open the file", error_string(result))
 
 
 ## Opens a terminal in `path` (this worktree when empty).

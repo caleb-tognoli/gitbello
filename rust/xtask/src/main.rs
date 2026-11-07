@@ -255,14 +255,13 @@ fn smoke(args: &[String]) -> Result<()> {
     fixture
         .arg("fixture")
         .arg(&fixtures)
-        .args(["--repos", "14"]);
+        .args(["--repos", "15", "--images", "--eol"]);
     run_status(fixture)?;
-    // No auto-fetch moving badges mid-test, and launch commands that cannot
-    // start anything.
+    // No auto-fetch moving badges mid-test, and a terminal command that
+    // cannot start anything.
     fs::write(
         fixtures.join("config.toml"),
         "auto_fetch_minutes = 0\n\
-         editor_command = \"gitbello-smoke-missing-editor {path}\"\n\
          terminal_command = \"gitbello-smoke-missing-terminal\"\n",
     )?;
 
@@ -277,6 +276,8 @@ fn smoke(args: &[String]) -> Result<()> {
         .arg(format!("--fixtures={}", fixtures.display()))
         .args(only.map(|text| format!("--only={text}")))
         .env("GITBELLO_CONFIG", fixtures.join("config.toml"))
+        // Versions written for Open go with the fixtures.
+        .env("GITBELLO_CACHE_DIR", fixtures.join("cache"))
         .env("GIT_CONFIG_GLOBAL", fixtures.join("global.gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_COUNT", "1")

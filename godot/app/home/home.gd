@@ -584,7 +584,7 @@ func _fill_add_menu() -> void:
 			popup.set_item_tooltip(popup.item_count - 1, shortcut)
 
 
-enum RowItem { OPEN, PIN, RENAME, RELOCATE, SHOW, EDITOR, TERMINAL, COPY, REMOVE }
+enum RowItem { OPEN, PIN, RENAME, RELOCATE, SHOW, TERMINAL, COPY, REMOVE }
 
 
 ## Opens the menu of library entry `row` at screen position `at` (its top
@@ -612,7 +612,6 @@ func _fill_row_menu(row: Dictionary) -> void:
 	add.call(&"Folder", "Change location…", RowItem.RELOCATE)
 	popup.add_separator()
 	add.call(&"Folder", "Show in file manager", RowItem.SHOW)
-	add.call(&"ExternalLink", "Open in editor", RowItem.EDITOR)
 	add.call(&"Terminal", "Open terminal", RowItem.TERMINAL)
 	add.call(&"ActionCopy", "Copy path", RowItem.COPY)
 	popup.add_separator()
@@ -632,8 +631,6 @@ func _on_row_menu(id: int, row: Dictionary) -> void:
 			ops.relocate(path)
 		RowItem.SHOW:
 			ops.show_in_file_manager(path)
-		RowItem.EDITOR:
-			ops.open_in_editor(path)
 		RowItem.TERMINAL:
 			ops.open_terminal(path)
 		RowItem.COPY:

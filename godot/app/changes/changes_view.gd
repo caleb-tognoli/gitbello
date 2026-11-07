@@ -25,6 +25,7 @@ const FILTER_OPTIONS: Array[Array] = [
 	["modified", "Modified files"],
 	["deleted", "Deleted files"],
 	["", ""],
+	["endings_only", "Line endings only"],
 	["ignored", "Show ignored files"],
 ]
 ## Per-repository UI state: the hash of the folder whose ignore hint was
@@ -129,6 +130,8 @@ func _ready() -> void:
 		session.show_whole_diff("changes", whole))
 	_diff_panel.set_source(func(start: int, count: int) -> Array:
 		return session.diff_lines(start, count) if session != null else [])
+	_diff_panel.set_image_source(func(side: String) -> Dictionary:
+		return session.image_side("changes", side) if session != null else {})
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("changes", start, count) if session != null else [])
 	_diff_panel.set_minimap_sources(
@@ -152,12 +155,14 @@ func _ready() -> void:
 	_diff_view.context_menu_requested.connect(_show_menu.bind(_diff_view))
 	_diff_view.block_action.connect(_on_block_action)
 	_diff_panel.card_action.connect(func(id: String) -> void:
-		if is_conflict_shown() and ops != null:
+		if id == "eol_restore":
+			restore_line_endings(PackedStringArray([String(session.diff_info().get("path", ""))]))
+		elif is_conflict_shown() and ops != null:
 			ops.resolve_file(conflict_path(), id))
 	_diff_panel.base_requested.connect(_on_base_requested)
 	_diff_panel.conflict_step_requested.connect(step_conflict)
 	_diff_view.undo_choice_requested.connect(func() -> void: Actions.run_action(&"conflict.undo"))
-	_diff_panel.open_file_requested.connect(func() -> void: Actions.run_action(&"changes.open_file"))
+	_diff_panel.open_side_requested.connect(func(side: String) -> void: session.open_version("changes", side))
 	_both_menu.add_item("Ours first", 0)
 	_both_menu.add_item("Theirs first", 1)
 	_both_menu.id_pressed.connect(func(id: int) -> void:
@@ -553,7 +558,11 @@ func _show_shelf_file_menu(row: int, at: Vector2) -> void:
 	_shelf_files.choose_path(path)
 	_menu.clear()
 	_menu_actions.clear()
-	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file"]:
+	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file", &"", &"diff.open_file"]:
+		if id == &"":
+			_menu.add_separator()
+			_menu_actions.append(&"")
+			continue
 		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
 		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(id))
 		_menu_actions.append(id)
@@ -638,12 +647,6 @@ func current_path() -> String:
 	return _list.path_at(_list.cursor)
 
 
-func open_file() -> void:
-	var path: String = current_path()
-	if not path.is_empty():
-		OS.shell_open(_absolute(path))
-
-
 func show_file() -> void:
 	var path: String = current_path()
 	if not path.is_empty():
@@ -685,6 +688,32 @@ func _discard_paths(paths: PackedStringArray) -> void:
 		if feedback != null:
 			feedback.track(session, job, "Discarding", tr("Discarded the changes in %s") % _describe(paths),
 					null, Callable(), undo_discard))
+
+
+## Restore line endings: the files get back the line endings (and final
+## newline) they had, keeping their text, with Undo like a discard. `paths`
+## defaults to the highlighted files, or the diff's file from the diff.
+func restore_line_endings(paths: PackedStringArray = PackedStringArray()) -> void:
+	if paths.is_empty():
+		paths = _restore_paths()
+	if session == null or not session.can_restore_line_endings(paths):
+		return
+	var job: int = session.restore_line_endings(paths)
+	if feedback != null:
+		feedback.track(session, job, "Restoring line endings", tr("Restored line endings in %s") % _describe(paths),
+				null, Callable(), undo_discard)
+
+
+func can_restore_line_endings() -> bool:
+	return session != null and session.can_restore_line_endings(_restore_paths())
+
+
+func _restore_paths() -> PackedStringArray:
+	var focus: Control = get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if focus != null and (focus == _diff_view or _diff_panel.is_ancestor_of(focus)):
+		var path: String = String(session.diff_info().get("path", ""))
+		return PackedStringArray([path]) if not path.is_empty() else PackedStringArray()
+	return _list.paths(_list.highlighted_rows())
 
 
 func can_undo_discard() -> bool:
@@ -917,7 +946,6 @@ func _update_empty() -> void:
 		actions.append({"id": &"sync.sync", "label": "Pull", "icon": &"GitPull", "behind": behind})
 	elif ahead > 0:
 		actions.append({"id": &"sync.sync", "label": "Push", "icon": &"GitPush", "ahead": ahead})
-	actions.append({"id": &"repo.open_in_editor", "label": "Open in editor", "icon": &"ExternalLink"})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
 	_empty.show_state("No local changes", "", actions)
@@ -932,8 +960,9 @@ func _on_operation_changed() -> void:
 
 func _on_selection_changed() -> void:
 	# With "Included" or "Excluded" on, a toggled file may leave the list; a
-	# file found resolved moves among the conflicts.
-	if _filter_uses_picks() or not session.operation_info().is_empty():
+	# file found resolved moves among the conflicts, one found changing only
+	# its line endings joins "Line endings only".
+	if _filter_uses_picks() or not session.operation_info().is_empty() or "endings_only" in _filter.options():
 		_list.reload()
 	else:
 		_list.reload_picks()
@@ -946,20 +975,21 @@ func _on_selection_changed() -> void:
 func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu.clear(true)
 	_menu_actions.clear()
-	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
+	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard", &"changes.restore_line_endings"]
 	if source == _diff_view:
-		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard"]
+		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard",
+			&"changes.restore_line_endings"]
 		if has_conflict_blocks():
 			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
 				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
-		ids.append_array([&"", &"diff.toggle_minimap"])
+		ids.append_array([&"", &"diff.open_file", &"", &"diff.toggle_minimap"])
 	if source == _list and _highlights_ignored():
 		# An ignored file is not a change: it can only be brought back or opened.
-		ids = [&"changes.stop_ignoring", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path",
+		ids = [&"changes.stop_ignoring", &"", &"diff.open_file", &"changes.show_file", &"changes.copy_path",
 			&"", &"changes.undo_ignore"]
 	elif source == _list:
 		ids.append_array([&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
-			&"changes.shelve", IGNORE_MENU, &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
+			&"changes.shelve", IGNORE_MENU, &"", &"diff.open_file", &"changes.show_file", &"changes.copy_path"])
 	if not (source == _list and _highlights_ignored()):
 		ids.append_array([&"", &"changes.undo_discard"])
 	for id: StringName in ids:

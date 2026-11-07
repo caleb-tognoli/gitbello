@@ -213,6 +213,8 @@ impl MinimapSource for DiffMinimap<'_> {
                 )
             }
             Some(LayoutRow::End) => self.both(HEADER, true),
+            // A marker row is blank; it does not end a change block.
+            Some(LayoutRow::Marker(_)) => MiniRow::default(),
         }
     }
 
@@ -708,6 +710,10 @@ pub fn change_row(source: &dyn MinimapSource, from: usize, forward: bool) -> Opt
     let mut previous = false;
     for row in 0..source.row_count() {
         let mini = source.row(row);
+        // A row with neither side (a marker row) does not split a block.
+        if mini.left.is_none() && mini.right.is_none() {
+            continue;
+        }
         let changed = [mini.left, mini.right]
             .into_iter()
             .flatten()

@@ -475,9 +475,9 @@ func _check_menus(main: Main) -> void:
 	var changes_index: int = _menu_item(view, "Changes")
 	expect(changes_index >= 0 and view.is_item_radio_checkable(changes_index) and view.is_item_checked(changes_index),
 			"the current view has a selected radio mark")
-	var split_index: int = _menu_item(view, "Side-by-side diff")
-	expect(split_index >= 0 and view.is_item_checkable(split_index) \
-			and view.is_item_checked(split_index) == Core.diff_side_by_side(), "diff layout toggle reflects its state")
+	var minimap_index: int = _menu_item(view, "Diff minimap")
+	expect(minimap_index >= 0 and view.is_item_checkable(minimap_index) \
+			and view.is_item_checked(minimap_index) == Core.diff_minimap(), "the minimap toggle reflects its state")
 	var log_index: int = _menu_item(view, "Git command log")
 	var log_shown: bool = main.git_log().visible
 	expect(log_index >= 0 and view.is_item_checkable(log_index) and view.is_item_checked(log_index) == log_shown,
