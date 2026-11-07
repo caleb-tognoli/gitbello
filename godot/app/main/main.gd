@@ -22,6 +22,7 @@ var _library: LibraryOps = LibraryOps.new()
 var _home_tab: bool = false
 var _remotes_dialog: RemotesDialog = RemotesDialog.new()
 var _tags_dialog: TagsDialog = TagsDialog.new()
+var _ignore_rules_dialog: IgnoreRulesDialog = IgnoreRulesDialog.new()
 var _about: AboutDialog = AboutDialog.new()
 ## Spins the busy tabs' icons.
 var _spinner: Timer = Timer.new()
@@ -56,7 +57,7 @@ func _ready() -> void:
 	_feedback.toasts = _toasts
 	_feedback.busy_changed.connect(func(_session: RepoSession) -> void: _update_tab_icons())
 	add_child(_feedback)
-	for dialog: Window in [_remotes_dialog, _tags_dialog, _about]:
+	for dialog: Window in [_remotes_dialog, _tags_dialog, _ignore_rules_dialog, _about]:
 		add_child(dialog)
 	_library.name = "Library"
 	_library.toasts = _toasts
@@ -318,6 +319,10 @@ func remotes_dialog() -> RemotesDialog:
 
 func tags_dialog() -> TagsDialog:
 	return _tags_dialog
+
+
+func ignore_rules_dialog() -> IgnoreRulesDialog:
+	return _ignore_rules_dialog
 
 
 ## The tab of repository or worktree `repo_path` (a session key), or null.
@@ -682,6 +687,30 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().undo_discard(), PackedStringArray(["Ctrl+Z"]),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard(),
 			_says("There is no discard to undo."))
+	# Ignore rules (M7.7a): quick rules on the highlighted files, the dialog, undo.
+	var no_ignore: Callable = _says("Select changed files that are not conflicted first.")
+	for quick: Array in [["file", "Ignore selected files"], ["extension", "Ignore files with this extension"],
+			["folder", "Ignore this folder"]]:
+		var kind: String = quick[0]
+		Actions.register(StringName("changes.ignore_" + kind), String(quick[1]), "Changes",
+				func() -> void: changes.call().ignore_quick(kind), PackedStringArray(),
+				func() -> bool: return in_changes.call() and current_page().changes().can_ignore_quick(kind),
+				no_ignore)
+	Actions.register(&"changes.ignore", "Ignore…", "Changes",
+			func() -> void: changes.call().open_ignore(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().can_ignore(), no_ignore)
+	Actions.register(&"changes.stop_ignoring", "Stop ignoring", "Changes",
+			func() -> void: changes.call().stop_ignoring(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().can_stop_ignoring(),
+			_says("Select one ignored file first (Show ignored files in the filter)."))
+	Actions.register(&"changes.ignore_hint", "Ignore the suggested folder", "Changes",
+			func() -> void: changes.call().ignore_hint_folder(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().has_ignore_hint(),
+			_says("There is no folder to suggest."))
+	Actions.register(&"changes.undo_ignore", "Undo last ignore rule", "Changes",
+			func() -> void: changes.call().undo_ignore(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and current_page().changes().can_undo_ignore(),
+			_says("There is no ignore rule to undo."))
 	Actions.register(&"changes.cancel_amend", "Cancel", "Changes",
 			func() -> void: changes.call().commit_box().cancel_amend(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().commit_box().is_amend() \
@@ -800,6 +829,9 @@ func _register_sync_actions() -> void:
 			func() -> void: _remotes_dialog.open(ops.call()), PackedStringArray(), is_ready)
 	Actions.register(&"repo.tags", "Tags…", "Repository",
 			func() -> void: _tags_dialog.open(ops.call()), PackedStringArray(), is_ready)
+	Actions.register(&"repo.ignore_rules", "Ignore rules…", "Repository",
+			func() -> void: _ignore_rules_dialog.open(current_page().changes().ignore_ops()), PackedStringArray(),
+			is_ready)
 
 
 ## Branch, tag and commit actions. They act on the ref of a context menu or

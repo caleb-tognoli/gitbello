@@ -24,7 +24,14 @@ const FILTER_OPTIONS: Array[Array] = [
 	["new", "New files"],
 	["modified", "Modified files"],
 	["deleted", "Deleted files"],
+	["", ""],
+	["ignored", "Show ignored files"],
 ]
+## Per-repository UI state: the hash of the folder whose ignore hint was
+## dismissed (0: none).
+## Repo UI state key prefix: `<prefix><folder hash>` = 1 keeps that folder out of
+## the folder hint for good.
+const HINT_STATE: String = "ignore_hint_kept/"
 
 var session: RepoSession = null:
 	set = set_session
@@ -33,6 +40,7 @@ var session: RepoSession = null:
 var feedback: Feedback = null:
 	set(value):
 		feedback = value
+		_ignore.feedback = value
 		if is_node_ready():
 			_commit_box.feedback = value
 ## Runs the shelf flows (forms, confirmations); set by the worktree view.
@@ -43,6 +51,17 @@ var _confirm: ConfirmationDialog = ConfirmationDialog.new()
 var _pending_discard: Callable = Callable()
 var _menu: PopupMenu = PopupMenu.new()
 var _menu_actions: Array[StringName] = []
+## The quick rules and the Ignore dialog (M7.7a).
+var _ignore: IgnoreOps = IgnoreOps.new()
+## Stands in the menu's action list for the Ignore submenu.
+const IGNORE_MENU: StringName = &"changes.ignore_menu"
+## The quick rules of the Ignore submenu, by item id.
+const IGNORE_KINDS: Array[String] = ["file", "extension", "folder"]
+## Suggests ignoring a folder of build output or downloads (M7.7b).
+var _hint_bar: PanelContainer = PanelContainer.new()
+var _hint_button: Button = Button.new()
+var _hint_close: Button = Button.new()
+var _hint_menu: PopupMenu = PopupMenu.new()
 ## The diff shows a shelved file (not a change): keep it over status reloads.
 var _showing_shelf: bool = false
 var _shelves_mode: bool = false
@@ -152,6 +171,7 @@ func _ready() -> void:
 	add_child(_confirm)
 	add_child(_menu)
 	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_menu_actions[id]))
+	add_child(_ignore)
 	_shelves.menu_requested.connect(_show_shelf_menu)
 	_shelves.shelf_selected.connect(_on_shelf_selected)
 	_shelf_files.current_changed.connect(func(path: String) -> void:
@@ -174,6 +194,7 @@ func _ready() -> void:
 	_apply_shelf_theme()
 	_offer_button.icon = Actions.icon(&"shelf.restore_left")
 	_offer_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.restore_left", _offer_button))
+	_build_hint_bar()
 
 
 func set_session(value: RepoSession) -> void:
@@ -187,6 +208,7 @@ func set_session(value: RepoSession) -> void:
 		session.shelf_replaced.disconnect(_on_shelf_replaced)
 		session.badge_changed.disconnect(_update_empty)
 		session.refs_changed.disconnect(_update_empty)
+		session.ignore_rules_ready.disconnect(_on_ignore_rules_ready)
 	session = value
 	if session != null:
 		session.status_changed.connect(reload)
@@ -199,8 +221,10 @@ func set_session(value: RepoSession) -> void:
 		# The remote and the commits to push or pull can arrive after the status.
 		session.badge_changed.connect(_update_empty)
 		session.refs_changed.connect(_update_empty)
+		session.ignore_rules_ready.connect(_on_ignore_rules_ready)
 	_list.session = session
 	_commit_box.session = session
+	_ignore.session = session
 	if session != null and is_node_ready():
 		session.set_change_filter(_filter.text(), _filter.options())
 	reload()
@@ -417,14 +441,15 @@ func shelve_selected() -> void:
 	var paths: PackedStringArray = PackedStringArray()
 	for index: int in _list.highlighted_rows():
 		var row: Dictionary = _list.row(index)
-		if not row.is_empty() and not bool(row.get("conflicted", false)):
+		if not row.is_empty() and not bool(row.get("conflicted", false)) and not bool(row.get("ignored", false)):
 			paths.append(String(row["path"]))
 	ops.shelve(paths)
 
 
 func can_shelve() -> bool:
 	for index: int in _list.highlighted_rows():
-		if not bool(_list.row(index).get("conflicted", true)):
+		var row: Dictionary = _list.row(index)
+		if not bool(row.get("conflicted", true)) and not bool(row.get("ignored", false)):
 			return true
 	return false
 
@@ -433,12 +458,17 @@ func can_shelve() -> bool:
 ## or commit checkboxes. Capture paths before opening a dialog.
 func shelve_listed() -> void:
 	if ops != null and session != null:
-		ops.shelve(session.change_paths(0, session.shown_change_count()))
+		ops.shelve(session.change_paths(0, _listed_changes()))
 
 
 func discard_listed() -> void:
 	if session != null:
-		_discard_paths(session.change_paths(0, session.shown_change_count()))
+		_discard_paths(session.change_paths(0, _listed_changes()))
+
+
+## Rows of changed files shown (the ignored ones after them left out).
+func _listed_changes() -> int:
+	return session.shown_change_count() - session.shown_ignored_count()
 
 
 func _show_header_menu(at: Vector2) -> void:
@@ -544,6 +574,7 @@ func reload() -> void:
 		_list.ensure_cursor()
 	_update_header()
 	_update_empty()
+	_update_hint()
 	if had_focus and _list.row_count() == 0:
 		focus_files()
 	if _list.cursor < 0 and not _showing_shelf:
@@ -636,8 +667,11 @@ func discard_selection() -> void:
 	if _diff_view.has_focus():
 		_discard_lines()
 		return
-	var paths: PackedStringArray = _list.paths(_list.highlighted_rows())
-	_discard_paths(paths)
+	var rows: PackedInt32Array = PackedInt32Array()
+	for index: int in _list.highlighted_rows():
+		if not bool(_list.row(index).get("ignored", false)):
+			rows.append(index)
+	_discard_paths(_list.paths(rows))
 
 
 func _discard_paths(paths: PackedStringArray) -> void:
@@ -805,13 +839,17 @@ static func _describe(paths: PackedStringArray) -> String:
 ## without changes (the empty state beside the list says so).
 func _update_header() -> void:
 	var count: int = session.change_count() if session != null else 0
-	var shown: int = _list.row_count()
-	var filtered: bool = _filter.is_active()
-	_filter_bar.visible = count > 0 and not _shelves_mode
+	var ignored: int = session.shown_ignored_count() if session != null else 0
+	var shown: int = _list.row_count() - ignored
+	var filtered: bool = _filter.is_active() and _filter.options() != PackedStringArray(["ignored"])
+	_filter_bar.visible = (count > 0 or _filter.is_active()) and not _shelves_mode
 	_list_header.visible = count > 0 and not _shelves_mode
 	var text: String = ListHeader.count_text(count, "changed file")
-	_list_header.set_text(tr("%d of %s") % [shown, text] if filtered else text)
-	_no_match.visible = count > 0 and shown == 0
+	var header: String = tr("%d of %s") % [shown, text] if filtered else text
+	if ignored > 0:
+		header = tr("%s, %d ignored") % [header, ignored]
+	_list_header.set_text(header)
+	_no_match.visible = count > 0 and shown + ignored == 0
 	var state: String = session.selection_state() if session != null else "none"
 	var what: String = tr("every shown file") if filtered else tr("every file")
 	var locked: bool = session != null and session.commit_mode() in ["merge", "cherry_pick"]
@@ -906,7 +944,7 @@ func _on_selection_changed() -> void:
 
 ## Context menu for the list or the diff: the actions that apply right now.
 func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
-	_menu.clear()
+	_menu.clear(true)
 	_menu_actions.clear()
 	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard"]
 	if source == _diff_view:
@@ -915,15 +953,23 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
 				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
 		ids.append_array([&"", &"diff.toggle_minimap"])
-	if source == _list:
+	if source == _list and _highlights_ignored():
+		# An ignored file is not a change: it can only be brought back or opened.
+		ids = [&"changes.stop_ignoring", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path",
+			&"", &"changes.undo_ignore"]
+	elif source == _list:
 		ids.append_array([&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
-			&"changes.shelve", &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
-	ids.append_array([&"", &"changes.undo_discard"])
+			&"changes.shelve", IGNORE_MENU, &"", &"changes.open_file", &"changes.show_file", &"changes.copy_path"])
+	if not (source == _list and _highlights_ignored()):
+		ids.append_array([&"", &"changes.undo_discard"])
 	for id: StringName in ids:
 		if id == &"":
 			if _menu.item_count > 0 and not _menu.is_item_separator(_menu.item_count - 1):
 				_menu.add_separator()
 				_menu_actions.append(&"")
+			continue
+		if id == IGNORE_MENU:
+			_add_ignore_menu()
 			continue
 		if not Actions.is_enabled(id):
 			continue
@@ -941,6 +987,214 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu.position = Vector2i(source.get_screen_position() + at_position)
 	_menu.reset_size()
 	_menu.popup()
+
+
+## The Ignore ▸ submenu of the files' menu: the quick rules for the
+## highlighted files, then the dialog.
+func _add_ignore_menu() -> void:
+	if not can_ignore():
+		return
+	var paths: PackedStringArray = ignore_paths()
+	var sub: PopupMenu = PopupMenu.new()
+	for i: int in IGNORE_KINDS.size():
+		var label: String = _ignore.quick_label(paths, IGNORE_KINDS[i])
+		if not label.is_empty():
+			sub.add_item(label, i)
+	if sub.item_count > 0:
+		sub.add_separator()
+	sub.add_item(Actions.get_action(&"changes.ignore").label, IGNORE_KINDS.size())
+	sub.id_pressed.connect(func(id: int) -> void:
+		if id < IGNORE_KINDS.size():
+			ignore_quick(IGNORE_KINDS[id])
+		else:
+			Actions.run_action(&"changes.ignore"))
+	_menu.add_submenu_node_item(tr("Ignore"), sub, _menu_actions.size())
+	_menu.set_item_icon(_menu.item_count - 1, AppTheme.icon(&"GitIgnore"))
+	_menu_actions.append(&"")
+
+
+## The highlighted files that rules can ignore (none while one is conflicted
+## or already ignored).
+func ignore_paths() -> PackedStringArray:
+	var rows: PackedInt32Array = _list.highlighted_rows()
+	for index: int in rows:
+		var row: Dictionary = _list.row(index)
+		if bool(row.get("conflicted", false)) or bool(row.get("ignored", false)):
+			return PackedStringArray()
+	return _list.paths(rows)
+
+
+## Whether a highlighted row is an ignored file ("Show ignored files").
+func _highlights_ignored() -> bool:
+	for index: int in _list.highlighted_rows():
+		if bool(_list.row(index).get("ignored", false)):
+			return true
+	return false
+
+
+## One ignored file is highlighted, with the rule behind it.
+func can_stop_ignoring() -> bool:
+	var rows: PackedInt32Array = _list.highlighted_rows()
+	if session == null or _shelves_mode or rows.size() != 1:
+		return false
+	var row: Dictionary = _list.row(rows[0])
+	return bool(row.get("ignored", false)) and row.has("ignored_source")
+
+
+func stop_ignoring() -> void:
+	if can_stop_ignoring():
+		_ignore.stop_ignoring(_list.path_at(_list.highlighted_rows()[0]))
+
+
+func _on_ignore_rules_ready(_job: int) -> void:
+	if "ignored" in _filter.options():
+		_list.reload()
+		_update_header()
+
+
+# --- Folder hint ----------------------------------------------------------------
+
+## The folder of untracked files the hint bar suggests ignoring, `{folder,
+## count}`, or {} (none, kept for that folder, or turned off in Settings).
+func ignore_hint() -> Dictionary:
+	if session == null or not session.is_ready() or _shelves_mode or not bool(Core.settings().get("ignore_hint", true)):
+		return {}
+	var hint: Dictionary = session.ignore_hint()
+	if hint.is_empty():
+		return {}
+	var kept: bool = int(Core.repo_ui_state(session.repo_path()).get(HINT_STATE + str(String(hint["folder"]).hash()), 0)) != 0
+	return {} if kept else hint
+
+
+func has_ignore_hint() -> bool:
+	return not ignore_hint().is_empty()
+
+
+## Adds the hinted folder to the root `.gitignore` (the quick folder rule).
+func ignore_hint_folder() -> void:
+	var hint: Dictionary = ignore_hint()
+	if hint.is_empty():
+		return
+	var folder: String = String(hint["folder"])
+	_ignore.ignore_folder(folder)
+
+
+## Keeps the hinted folder: never suggests it again in this repository.
+func dismiss_ignore_hint() -> void:
+	var hint: Dictionary = ignore_hint()
+	if not hint.is_empty():
+		Core.set_repo_ui_state(session.repo_path(), HINT_STATE + str(String(hint["folder"]).hash()), 1)
+	_update_hint()
+
+
+## Turns the folder hint off everywhere (Settings → General brings it back).
+func disable_ignore_hint() -> void:
+	Core.set_settings({"ignore_hint": false})
+	_update_hint()
+
+
+func hint_bar() -> Control:
+	return _hint_bar
+
+
+func hint_menu() -> PopupMenu:
+	return _hint_menu
+
+
+## The close button's menu: keep this folder, or never suggest one.
+func open_hint_menu() -> void:
+	_hint_menu.popup(Rect2i(Vector2i(_hint_close.get_screen_position() + Vector2(0.0, _hint_close.size.y)), Vector2i.ZERO))
+
+
+## The hint button's text and tooltip (for tests).
+func hint_text() -> String:
+	return "%s
+%s" % [_hint_button.text, _hint_button.tooltip_text]
+
+
+func _update_hint() -> void:
+	var hint: Dictionary = ignore_hint()
+	_hint_bar.visible = not hint.is_empty()
+	if hint.is_empty():
+		return
+	var count: int = int(hint["count"])
+	var folder: String = String(hint["folder"]) + "/"
+	_hint_button.text = tr("Ignore %s") % folder
+	_hint_button.tooltip_text = (tr("1 new file is in %s, which usually holds build output or downloads.") % folder
+			if count == 1 else tr("%d new files are in %s, which usually holds build output or downloads.") % [count, folder])
+	_hint_close.tooltip_text = tr("Keep %s") % folder
+	_hint_menu.clear()
+	_hint_menu.add_icon_item(AppTheme.icon(&"Close"), tr("Don't suggest %s again") % folder, 0)
+	_hint_menu.add_icon_item(AppTheme.icon(&"Tools"), tr("Never suggest folders to ignore"), 1)
+	_hint_menu.set_item_tooltip(1, tr("Turn it back on in Settings → General"))
+
+
+func _build_hint_bar() -> void:
+	# Only the action: what it is about is in its tooltip.
+	_hint_bar.theme_type_variation = &"OfferBar"
+	_hint_bar.visible = false
+	var row: HBoxContainer = HBoxContainer.new()
+	row.theme_type_variation = &"ListHeaderRow"
+	_hint_bar.add_child(row)
+	_hint_button.icon = AppTheme.icon(&"GitIgnore")
+	_hint_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hint_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_hint_button.flat = true
+	_hint_button.pressed.connect(ignore_hint_folder)
+	row.add_child(_hint_button)
+	_hint_close.flat = true
+	_hint_close.icon = AppTheme.icon(&"Close")
+	_hint_close.pressed.connect(open_hint_menu)
+	row.add_child(_hint_close)
+	_hint_menu.id_pressed.connect(func(id: int) -> void:
+		if id == 0:
+			dismiss_ignore_hint()
+		else:
+			disable_ignore_hint())
+	_hint_bar.add_child(_hint_menu)
+	_files.add_child(_hint_bar)
+	_files.move_child(_hint_bar, _offer_bar.get_index() + 1)
+
+
+func can_ignore() -> bool:
+	return session != null and not _shelves_mode and not ignore_paths().is_empty()
+
+
+## Whether the quick rule `kind` (`file`, `extension`, `folder`) applies to
+## the highlighted files.
+func can_ignore_quick(kind: String) -> bool:
+	return can_ignore() and not _ignore.quick_rule(ignore_paths(), kind).is_empty()
+
+
+func ignore_quick(kind: String) -> void:
+	if can_ignore():
+		_ignore.ignore_quick(ignore_paths(), kind)
+
+
+func open_ignore() -> void:
+	if can_ignore():
+		_ignore.open(ignore_paths())
+
+
+func can_undo_ignore() -> bool:
+	return _ignore.can_undo()
+
+
+func undo_ignore() -> void:
+	_ignore.undo()
+
+
+## The quick rules and the Ignore dialog, for tests.
+func ignore_ops() -> IgnoreOps:
+	return _ignore
+
+
+## The Ignore ▸ submenu of the last files' menu, or null (for tests).
+func ignore_menu() -> PopupMenu:
+	for i: int in _menu.item_count:
+		if _menu.get_item_submenu_node(i) != null:
+			return _menu.get_item_submenu_node(i)
+	return null
 
 
 ## The context menu's labels, for tests.

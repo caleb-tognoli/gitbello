@@ -5,7 +5,7 @@ use std::time::UNIX_EPOCH;
 use gitbello_core::changes::split_message;
 use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
 use gitbello_core::diff::rename_parts;
-use gitbello_core::git::CommandOutcome;
+use gitbello_core::git::{CommandOutcome, GitErrorKind};
 use gitbello_core::jobs::RefreshKind;
 use gitbello_core::launch::{self, LaunchKind};
 use gitbello_core::library::{self, RepoSummary};
@@ -227,6 +227,18 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal("merge_preview_ready", &[gstr(&target).to_variant()]);
             }
         }
+        RuntimeEvent::IgnorePreviewLoaded { repo, job } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let job = i64::try_from(job).unwrap_or(i64::MAX);
+                session.emit_signal("ignore_preview_ready", &[job.to_variant()]);
+            }
+        }
+        RuntimeEvent::IgnoreRulesLoaded { repo, job } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let job = i64::try_from(job).unwrap_or(i64::MAX);
+                session.emit_signal("ignore_rules_ready", &[job.to_variant()]);
+            }
+        }
         RuntimeEvent::HeadInfoChanged { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("head_changed", &[]);
@@ -313,12 +325,16 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 }
                 JobState::Finished(error) => {
                     let ok = error.is_none();
+                    // A refusal the UI answers with a dialog, not an error.
+                    let decision = error
+                        .as_ref()
+                        .is_some_and(|e| e.kind == GitErrorKind::TrackedMatches);
                     let error = error.as_ref().map(convert::error_dict).unwrap_or_default();
                     session.emit_signal(
                         "job_finished",
                         &[job, label, ok.to_variant(), error.to_variant()],
                     );
-                    if !ok {
+                    if !ok && !decision {
                         core.emit_signal(
                             "git_error",
                             &[path_str(&repo).to_variant(), error.to_variant()],
@@ -896,7 +912,7 @@ impl AppCore {
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, editor_command, terminal_command,
     /// worktree_template, branch_prefix, language, accent, added_color,
-    /// removed_color, clone_folder, diff_minimap}`; an empty terminal command
+    /// removed_color, clone_folder, diff_minimap, ignore_hint}`; an empty terminal command
     /// means the platform's, an empty colour the theme's (else `#rrggbb`), an
     /// empty clone folder the last one used.
     #[func]
@@ -916,6 +932,7 @@ impl AppCore {
                 "removed_color" => &gstr(c.removed_color.as_deref().unwrap_or_default()),
                 "clone_folder" => &c.clone_folder.as_deref().map_or_else(GString::new, path_str),
                 "diff_minimap" => c.diff_minimap,
+                "ignore_hint" => c.ignore_hint,
             }
         })
         .unwrap_or_default()
@@ -987,10 +1004,20 @@ impl AppCore {
                 Err(_) => return gstr("Show minimap must be true or false."),
             },
         };
+        let ignore_hint = match settings.get("ignore_hint") {
+            None => None,
+            Some(value) => match value.try_to::<bool>() {
+                Ok(shown) => Some(shown),
+                Err(_) => return gstr("Suggest folders to ignore must be true or false."),
+            },
+        };
         runtime_cell::with(|rt| {
             let config = rt.config_mut();
             if let Some(shown) = minimap {
                 config.diff_minimap = shown;
+            }
+            if let Some(shown) = ignore_hint {
+                config.ignore_hint = shown;
             }
             if let Some(mode) = pull_mode {
                 config.pull_mode = mode;

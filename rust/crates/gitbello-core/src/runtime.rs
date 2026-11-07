@@ -51,7 +51,14 @@ use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 mod amend;
+mod ignore;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
+use ignore::{apply_ignore_picks, reload_ignore_rules, IgnoreState};
+pub use ignore::{
+    IGNORE_JOB_LABEL, IGNORE_PREVIEW_JOB_LABEL, IGNORE_RULES_JOB_LABEL, IGNORE_WRITE_LABELS,
+    MAX_IGNORE_UNDO, REMOVE_IGNORE_RULE_JOB_LABEL, STOP_IGNORING_JOB_LABEL, UNDO_IGNORE_JOB_LABEL,
+    UNTRACK_IGNORED_JOB_LABEL,
+};
 
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
@@ -151,6 +158,11 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     RESTORE_SHELF_FILE_JOB_LABEL,
     DISCARD_SHELF_FILE_JOB_LABEL,
     UNDO_SHELF_DISCARD_JOB_LABEL,
+    IGNORE_JOB_LABEL,
+    UNDO_IGNORE_JOB_LABEL,
+    REMOVE_IGNORE_RULE_JOB_LABEL,
+    UNTRACK_IGNORED_JOB_LABEL,
+    STOP_IGNORING_JOB_LABEL,
 ];
 
 /// A graph reload waits this long after the last ref or HEAD change, so a
@@ -244,6 +256,17 @@ pub enum RuntimeEvent {
     MergePreviewLoaded {
         repo: PathBuf,
         target: String,
+    },
+    /// The preview of job `job`, from [`Runtime::load_ignore_preview`].
+    IgnorePreviewLoaded {
+        repo: PathBuf,
+        job: JobId,
+    },
+    /// The ignore rules of job `job`, from [`Runtime::load_ignore_rules`]
+    /// (and reloaded with each status while something shows them).
+    IgnoreRulesLoaded {
+        repo: PathBuf,
+        job: JobId,
     },
     /// The undo strip's commit or the commits HEAD lacks changed.
     HeadInfoChanged {
@@ -452,6 +475,9 @@ pub struct RepoState {
     /// The worktree folder disappeared.
     missing: bool,
     cleanup: Option<Vec<CleanupCandidate>>,
+    ignore: IgnoreState,
+    /// The status plus the ignored paths, while "Show ignored files" is on.
+    listed: Option<RepoStatus>,
 }
 
 impl RepoState {
@@ -502,6 +528,8 @@ impl RepoState {
             auto_fetch_failed: false,
             missing: false,
             cleanup: None,
+            ignore: IgnoreState::default(),
+            listed: None,
         }
     }
 
@@ -850,24 +878,45 @@ impl RepoState {
                 self.changes
                     .indices()
                     .iter()
-                    .map(|&i| status.changes[i].path.as_path()),
+                    .map(|&i| &status.changes[i])
+                    .filter(|c| c.state != FileState::Ignored)
+                    .map(|c| c.path.as_path()),
             ),
             _ => self.selection.overall_state(),
         }
     }
 
-    /// Paths of the files shown.
+    /// Paths of the files shown (ignored ones left out: they cannot be picked).
     fn shown_paths(&self) -> Vec<PathBuf> {
         self.changes_status().map_or_else(Vec::new, |status| {
             self.changes
                 .indices()
                 .iter()
-                .map(|&i| status.changes[i].path.clone())
+                .map(|&i| &status.changes[i])
+                .filter(|c| c.state != FileState::Ignored)
+                .map(|c| c.path.clone())
                 .collect()
         })
     }
 
     fn rebuild_changes(&mut self) {
+        self.listed = None;
+        if self.change_filter.ignored && self.amend.is_none() {
+            if let (Some(status), Some(rules)) = (&self.status, &self.ignore.rules) {
+                // A path that is a change shows once, as the change: the
+                // status can be newer than the rules (Stop ignoring, before
+                // they reload), and a file just untracked is both.
+                let changed: HashSet<&Path> =
+                    status.changes.iter().map(|c| c.path.as_path()).collect();
+                let ignored: Vec<_> = rules
+                    .status_rows()
+                    .filter(|row| !changed.contains(row.path.as_path()))
+                    .collect();
+                let mut listed = status.clone();
+                listed.changes.extend(ignored);
+                self.listed = Some(listed);
+            }
+        }
         let Some(status) = self.changes_status() else {
             return;
         };
@@ -1741,6 +1790,11 @@ impl Runtime {
             submit_conflict(&self.scheduler, state, self.diff_generation);
             return;
         }
+        // An ignored folder has no diff of its own.
+        if state.ignored_folder(path) {
+            self.select_diff(key, None, false);
+            return;
+        }
         let target = state.change_target(path);
         if let Some(target) = target {
             self.select_diff(key, Some(target), full);
@@ -1782,6 +1836,7 @@ impl Runtime {
             state.change_filter = filter;
             state.rebuild_changes();
         }
+        self.sync_ignore_rules(key);
     }
 
     /// Picks or unpicks lines of the Changes diff (a hunk header takes its
@@ -3107,6 +3162,9 @@ impl Runtime {
             }
             return;
         }
+        if Self::apply_ignore_event(state, job, &label, &kind, &repo, out) {
+            return;
+        }
         if label == MERGE_PREVIEW_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::MergePreview(mut preview))) = kind {
                 if state.merge_preview_requested.as_deref() != Some(preview.target.as_str()) {
@@ -3156,6 +3214,7 @@ impl Runtime {
                     apply_refresh(state, output);
                     if refresh == RefreshKind::Status {
                         refresh_amend(&self.scheduler, state);
+                        reload_ignore_rules(&self.scheduler, state);
                         out.push(RuntimeEvent::SelectionChanged { repo: repo.clone() });
                     }
                     // Staging, edits and commits all show up as a status change.
@@ -3312,6 +3371,24 @@ impl Runtime {
             CHECKOUT_JOB_LABEL,
         ]
         .contains(&label.as_str());
+        let ignore_job = IGNORE_WRITE_LABELS.contains(&label.as_str());
+        if ignore_job && matches!(kind, EventKind::Finished(_) | EventKind::Cancelled) {
+            // `info/exclude` applies to every worktree of the repository,
+            // the global excludes file to every repository.
+            let everywhere = self
+                .repos
+                .get_mut(&repo)
+                .is_some_and(|s| s.ignore.take_global(job));
+            for (other, sibling) in &self.repos {
+                if *other != repo
+                    && (everywhere
+                        || sibling.paths.as_ref().map(|p| &p.common_dir) == common.as_ref())
+                {
+                    let status = RefreshSet::EMPTY.with(RefreshKind::Status);
+                    self.scheduler.request_refresh(other, status);
+                }
+            }
+        }
         if shelf_job && matches!(kind, EventKind::Finished(_)) {
             for (other, sibling) in &self.repos {
                 if *other != repo
@@ -3436,6 +3513,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
                 session.saved_selection.reconcile(&status);
             } else {
                 state.selection.reconcile(&status);
+                apply_ignore_picks(state);
             }
             state.status = Some(status);
             state.rebuild_changes();
@@ -3492,7 +3570,10 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::ConflictScan { .. }
         | JobOutput::ConflictWritten(_)
         | JobOutput::HeadInfo(_)
-        | JobOutput::CommitUndone(_) => {}
+        | JobOutput::CommitUndone(_)
+        | JobOutput::IgnorePreview(_)
+        | JobOutput::IgnoreRules(_)
+        | JobOutput::Ignored(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }

@@ -186,6 +186,12 @@ pub enum JobOutput {
     ShelfUndone(ShelfChange),
     /// What merging a branch would do (see `Runtime::load_merge_preview`).
     MergePreview(Box<MergePreview>),
+    /// What an ignore rule would do (see `Runtime::load_ignore_preview`).
+    IgnorePreview(Box<crate::ignore::IgnorePreview>),
+    /// The rules viewer's model (`Runtime::load_ignore_rules`).
+    IgnoreRules(Box<crate::ignore::IgnoreRules>),
+    /// An ignore rule was written; `None` when there was nothing to write.
+    Ignored(Option<Box<crate::ignore::IgnoreUndo>>),
     /// A conflicted file loaded; `generation` as for diffs.
     Conflict {
         generation: u64,

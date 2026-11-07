@@ -84,6 +84,8 @@ pub struct Config {
     pub diff_side_by_side: bool,
     /// Show the minimap beside diffs (else only its strip of change marks).
     pub diff_minimap: bool,
+    /// Offer to ignore a folder such as `node_modules/` that fills Changes.
+    pub ignore_hint: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
     pub keybindings: BTreeMap<String, String>,
     /// Keys this version does not model, kept as read.
@@ -167,6 +169,7 @@ impl Default for Config {
             removed_color: None,
             diff_side_by_side: false,
             diff_minimap: true,
+            ignore_hint: true,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
@@ -224,6 +227,7 @@ const KEYS: &[&str] = &[
     "removed_color",
     "diff_side_by_side",
     "diff_minimap",
+    "ignore_hint",
     "keybindings",
 ];
 
@@ -310,6 +314,7 @@ impl Config {
             removed_color: take_color(&mut table, "removed_color")?,
             diff_side_by_side: take_bool(&mut table, "diff_side_by_side")?.unwrap_or(false),
             diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
+            ignore_hint: take_bool(&mut table, "ignore_hint")?.unwrap_or(true),
             keybindings: take_string_map(&mut table, "keybindings")?,
             extra: table,
         };
@@ -381,6 +386,7 @@ impl Config {
             Value::Boolean(self.diff_side_by_side),
         );
         table.insert("diff_minimap".into(), Value::Boolean(self.diff_minimap));
+        table.insert("ignore_hint".into(), Value::Boolean(self.ignore_hint));
         if !self.keybindings.is_empty() {
             let bindings: Table = self
                 .keybindings
@@ -539,6 +545,7 @@ mod tests {
             removed_color: Some("#d2691e".into()),
             diff_side_by_side: true,
             diff_minimap: false,
+            ignore_hint: false,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };

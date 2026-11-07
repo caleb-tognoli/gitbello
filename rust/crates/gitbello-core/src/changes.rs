@@ -12,11 +12,14 @@ use crate::repo::{Change, FileChange, FileState, RepoStatus};
 /// Indices into [`RepoStatus::changes`]: conflicted files first (with the
 /// ones resolved during the operation, so they keep their place), then the
 /// rest, each sorted by path. Ignored files are left out, and so are the
-/// files a [`ChangeFilter`] hides (`total` still counts them).
+/// files a [`ChangeFilter`] hides (`total` still counts them); with
+/// [`ChangeFilter::ignored`], ignored files come last (not counted).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChangeList {
     indices: Vec<usize>,
     total: usize,
+    /// Ignored files among those shown (the last ones).
+    ignored: usize,
 }
 
 impl ChangeList {
@@ -37,17 +40,37 @@ impl ChangeList {
         filter: &ChangeFilter,
         resolved: &[PathBuf],
     ) -> Self {
+        let total = status
+            .changes
+            .iter()
+            .filter(|c| c.state != FileState::Ignored)
+            .count();
         let mut indices: Vec<usize> = (0..status.changes.len())
-            .filter(|&i| status.changes[i].state != FileState::Ignored)
+            .filter(|&i| filter.matches(&status.changes[i], selection))
             .collect();
-        let total = indices.len();
-        indices.retain(|&i| filter.matches(&status.changes[i], selection));
+        // Conflicted (and resolved) files, the other changes, then ignored ones.
         indices.sort_by(|&a, &b| {
             let (a, b) = (&status.changes[a], &status.changes[b]);
-            let first = |c: &FileChange| is_conflicted(c) || resolved.contains(&c.path);
-            (!first(a), &a.path).cmp(&(!first(b), &b.path))
+            let group = |c: &FileChange| {
+                if c.state == FileState::Ignored {
+                    2
+                } else if is_conflicted(c) || resolved.contains(&c.path) {
+                    0
+                } else {
+                    1
+                }
+            };
+            (group(a), &a.path).cmp(&(group(b), &b.path))
         });
-        Self { indices, total }
+        let ignored = indices
+            .iter()
+            .filter(|&&i| status.changes[i].state == FileState::Ignored)
+            .count();
+        Self {
+            indices,
+            total,
+            ignored,
+        }
     }
 
     pub fn indices(&self) -> &[usize] {
@@ -66,6 +89,11 @@ impl ChangeList {
     /// Changed files, shown or not.
     pub fn total(&self) -> usize {
         self.total
+    }
+
+    /// Ignored files shown ("Show ignored files"); they come last.
+    pub fn ignored(&self) -> usize {
+        self.ignored
     }
 }
 
@@ -86,6 +114,8 @@ pub struct ChangeFilter {
     /// Modified, renamed, copied and type-changed files.
     pub modified: bool,
     pub deleted: bool,
+    /// Also lists ignored files (only the text narrows them).
+    pub ignored: bool,
 }
 
 impl ChangeFilter {
@@ -112,6 +142,9 @@ impl ChangeFilter {
         {
             return false;
         }
+        if change.state == FileState::Ignored {
+            return self.ignored;
+        }
         if self.uses_picks() && (selection.state(&change.path) != PickState::None) != self.included
         {
             return false;
@@ -130,6 +163,17 @@ impl ChangeFilter {
 
 pub fn is_conflicted(change: &FileChange) -> bool {
     matches!(change.state, FileState::Unmerged(_))
+}
+
+/// Removed from the index with nothing else changed (`D.`).
+fn is_staged_removal(change: &FileChange) -> bool {
+    matches!(
+        change.state,
+        FileState::Tracked {
+            index: Change::Deleted,
+            worktree: Change::Unmodified,
+        }
+    )
 }
 
 /// Whether the index holds a rename of `change.original_path` to its path.
@@ -167,7 +211,8 @@ pub fn change_code(change: &FileChange) -> &'static str {
 pub fn diff_target(status: &RepoStatus, path: &Path) -> DiffTarget {
     let change = find(status, path);
     let kind = match change.map(|c| c.state) {
-        Some(FileState::Untracked) => DiffKind::Untracked,
+        // An ignored file ("Show ignored files") shows as a new one.
+        Some(FileState::Untracked | FileState::Ignored) => DiffKind::Untracked,
         Some(FileState::Unmerged(_)) => DiffKind::Unstaged,
         _ => DiffKind::Head,
     };
@@ -507,6 +552,17 @@ impl Selection {
                 .filter(|_| is_staged_rename(change));
             match pick {
                 FilePick::Excluded => {}
+                // A staged removal whose file is still on disk (untracked
+                // with `git rm --cached`, often now ignored): `add -A` would
+                // add the file back, or refuse it as ignored.
+                FilePick::Included if is_staged_removal(change) => {
+                    let zeros = change.index_oid.as_ref().map_or(40, String::len);
+                    plan.staged.push(IndexEntry {
+                        mode: "0".into(),
+                        oid: "0".repeat(zeros),
+                        path: change.path.clone(),
+                    });
+                }
                 FilePick::Included => {
                     plan.whole.push(change.path.clone());
                     plan.whole.extend(source);
@@ -1065,13 +1121,11 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
         let mut selection = Selection::default();
         selection.reconcile(&status);
         let plan = selection.plan(&status);
+        // A staged deletion is written as a removal, not added from the
+        // working tree, where the file may still be (`git rm --cached`).
         assert_eq!(
             plan.whole,
-            [
-                PathBuf::from("gone.txt"),
-                PathBuf::from("moved.txt"),
-                PathBuf::from("from.txt")
-            ]
+            [PathBuf::from("moved.txt"), PathBuf::from("from.txt")]
         );
         let staged: Vec<(&str, &str, &str)> = plan
             .staged
@@ -1084,7 +1138,14 @@ u UU N... 100644 100644 100644 100644 a b c clash.txt\0\
                 )
             })
             .collect();
-        assert_eq!(staged, [("100644", "e", "new.txt"), ("0", "0", "old.txt")]);
+        assert_eq!(
+            staged,
+            [
+                ("100644", "e", "new.txt"),
+                ("0", "0", "old.txt"),
+                ("0", "0000", "gone.txt")
+            ]
+        );
         assert_eq!(plan.paths().len(), 5);
     }
 

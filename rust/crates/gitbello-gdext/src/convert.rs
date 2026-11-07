@@ -8,6 +8,9 @@ use gitbello_core::diff::{
 };
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
+use gitbello_core::ignore::{
+    IgnoreLine, IgnorePreview, IgnoreRule, IgnoreRules, IgnoreTarget, Suggestion,
+};
 use gitbello_core::merge::{
     ConflictFile, ConflictKind, ConflictRow, ConflictRowKind, MergePreview,
 };
@@ -55,6 +58,7 @@ pub fn error_kind_id(kind: GitErrorKind) -> &'static str {
         GitErrorKind::AlreadyExists => "already_exists",
         GitErrorKind::InUse => "in_use",
         GitErrorKind::FolderLeft => "folder_left",
+        GitErrorKind::TrackedMatches => "tracked_matches",
         _ => "other",
     }
 }
@@ -398,7 +402,7 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
 /// a checkbox that shows the index (a merge or cherry-pick is being committed).
 pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
     let selection = state.selection();
-    vdict! {
+    let mut row = vdict! {
         "path" => &path_str(&change.path),
         "original_path" => &change.original_path.as_deref().map_or_else(GString::new, path_str),
         "code" => change_code(change),
@@ -409,7 +413,17 @@ pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
         "amending" => state.is_amending(),
         "in_original_commit" => state.in_amended_commit(&change.path),
         "locked" => state.commit_mode().locks_picks(),
+    };
+    if change.state == FileState::Ignored {
+        row.set("ignored", true);
+        row.set("ignored_dir", state.ignored_folder(&change.path));
+        if let Some((source, line)) = state.ignored_by(&change.path) {
+            row.set("ignored_source", &gstr(&source.name));
+            row.set("ignored_line", to_i64(line.number));
+            row.set("ignored_pattern", &gstr(&line.text));
+        }
     }
+    row
 }
 
 /// The resolver's `diff_info` (see [`diff_info`]): `kind` and `content` are
@@ -913,4 +927,143 @@ pub fn labels(labels: &[RefLabel]) -> Array<VarDictionary> {
         });
     }
     out
+}
+
+/// `{kind, pattern, subject, level}` per suggestion; `kind` is `file`,
+/// `name`, `extension`, `extension_below` or `folder`.
+pub fn ignore_suggestions(list: &[Suggestion]) -> Array<VarDictionary> {
+    list.iter()
+        .map(|s| {
+            vdict! {
+                "kind" => &gstr(s.kind.id()),
+                "pattern" => &gstr(&s.pattern),
+                "subject" => &gstr(&s.subject),
+                "level" => i64::from(s.level),
+            }
+        })
+        .collect()
+}
+
+/// A rule from `{pattern, target: "shared"|"local", dir}` (`dir` for shared
+/// rules: the `.gitignore`'s folder, "" for the root one).
+pub fn ignore_rule(dict: &VarDictionary) -> Option<IgnoreRule> {
+    let text = |key: &str| {
+        dict.get(key)
+            .and_then(|v| v.try_to::<GString>().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    };
+    let target = match text("target").as_str() {
+        "shared" | "" => IgnoreTarget::Shared {
+            dir: text("dir").into(),
+        },
+        "local" => IgnoreTarget::Local,
+        "global" => IgnoreTarget::Global,
+        _ => return None,
+    };
+    Some(IgnoreRule {
+        pattern: text("pattern"),
+        target,
+    })
+}
+
+fn ignore_target_id(target: &IgnoreTarget) -> &'static str {
+    match target {
+        IgnoreTarget::Shared { .. } => "shared",
+        IgnoreTarget::Local => "local",
+        IgnoreTarget::Global => "global",
+    }
+}
+
+/// The rules viewer's sources: `{kind: root|nested|local|global, name,
+/// path, dir, exists, hidden_count, tracked_count, rule_count}`.
+pub fn ignore_sources(rules: &IgnoreRules) -> Array<VarDictionary> {
+    rules
+        .sources
+        .iter()
+        .map(|s| {
+            let rule_count = s
+                .lines
+                .iter()
+                .filter(|l| {
+                    matches!(
+                        l.kind,
+                        gitbello_core::ignore::LineKind::Rule
+                            | gitbello_core::ignore::LineKind::Negation
+                    )
+                })
+                .count();
+            vdict! {
+                "kind" => s.kind.id(),
+                "name" => &gstr(&s.name),
+                "path" => &path_str(&s.file),
+                "dir" => &path_str(&s.dir),
+                "exists" => s.exists,
+                "hidden_count" => to_i64(s.hidden_count()),
+                "tracked_count" => to_i64(s.tracked_count()),
+                "rule_count" => to_i64(rule_count),
+            }
+        })
+        .collect()
+}
+
+/// A source's lines: `{number, text, kind: rule|negation|comment|blank,
+/// hidden_files, hidden_folders, tracked_count, reincluded, unused}`.
+pub fn ignore_lines(lines: &[IgnoreLine]) -> Array<VarDictionary> {
+    lines
+        .iter()
+        .map(|l| {
+            vdict! {
+                "number" => to_i64(l.number),
+                "text" => &gstr(&l.text),
+                "kind" => l.kind.id(),
+                "hidden_files" => to_i64(l.hidden_files()),
+                "hidden_folders" => to_i64(l.hidden_folders()),
+                "tracked_count" => to_i64(l.tracked.len()),
+                "reincluded" => to_i64(l.reincluded),
+                "unused" => l.unused(),
+            }
+        })
+        .collect()
+}
+
+/// Rows `start..start + count` of what a line decides: its tracked matches
+/// first, then what it hides; `{path, is_dir, tracked}`.
+pub fn ignore_hidden(line: &IgnoreLine, start: usize, count: usize) -> Array<VarDictionary> {
+    let tracked = line.tracked.iter().map(|p| (p.as_path(), false, true));
+    let hidden = line
+        .hidden
+        .iter()
+        .map(|h| (h.path.as_path(), h.is_dir, false));
+    tracked
+        .chain(hidden)
+        .skip(start)
+        .take(count)
+        .map(|(path, is_dir, tracked)| {
+            vdict! {
+                "path" => &path_str(path),
+                "is_dir" => is_dir,
+                "tracked" => tracked,
+            }
+        })
+        .collect()
+}
+
+/// `{pattern, target, dir, exists, warning, hidden_count, hidden_sample,
+/// tracked_count, tracked_sample}`; `warning` is "" or a `PatternWarning` id.
+pub fn ignore_preview(preview: &IgnorePreview) -> VarDictionary {
+    let paths = |list: &[std::path::PathBuf]| -> PackedStringArray {
+        list.iter().map(|p| path_str(p)).collect()
+    };
+    vdict! {
+        "pattern" => &gstr(&preview.rule.pattern),
+        "target" => &gstr(ignore_target_id(&preview.rule.target)),
+        "dir" => &path_str(preview.rule.target.dir()),
+        "exists" => preview.exists,
+        "warning" => &gstr(preview.warning.map_or("", |w| w.id())),
+        "hidden_count" => to_i64(preview.hidden_count),
+        "hidden_sample" => &paths(&preview.hidden_sample),
+        "tracked_count" => to_i64(preview.tracked_count),
+        "tracked_sample" => &paths(&preview.tracked_sample),
+    }
 }

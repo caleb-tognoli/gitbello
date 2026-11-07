@@ -16,6 +16,7 @@ use crate::diff::{
 use crate::git::{
     CancelToken, GitCommand, GitError, GitErrorKind, GitOutput, GitRunner, GitStream, Progress,
 };
+use crate::ignore::IgnoreMatch;
 use crate::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
     UndoMode,
@@ -32,6 +33,7 @@ use crate::repo::{
 use crate::worktrees::new_worktree_path_error;
 
 mod amend;
+mod ignore;
 mod merge;
 mod shelf_files;
 
@@ -410,6 +412,100 @@ pub trait GitBackend: Send + Sync {
         mode: UndoMode,
         cancel: &CancelToken,
     ) -> Result<String, GitError>;
+
+    /// The untracked files among `paths` that `patterns` (in the
+    /// `ls-files -x` form of [`crate::ignore::match_form`]) match.
+    fn untracked_matching(
+        &self,
+        _toplevel: &Path,
+        _paths: &[PathBuf],
+        _patterns: &[String],
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// The tracked files that `patterns` match.
+    fn tracked_matching(
+        &self,
+        _toplevel: &Path,
+        _patterns: &[String],
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// The stage-0 index entries of `paths`, to put back after [`Self::untrack`].
+    fn index_entries(
+        &self,
+        _toplevel: &Path,
+        _paths: &[PathBuf],
+        _cancel: &CancelToken,
+    ) -> Result<Vec<IndexEntry>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// Stops tracking `paths` (`git rm --cached`), leaving them on disk.
+    fn untrack(
+        &self,
+        _toplevel: &Path,
+        _paths: &[PathBuf],
+        _cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// Writes `entries` into the index as they are.
+    fn restore_index_entries(
+        &self,
+        _toplevel: &Path,
+        _entries: &[IndexEntry],
+        _cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// Untracked paths git ignores; a folder whose contents are all ignored
+    /// is listed once, with a trailing `/` (`ls-files --directory`).
+    fn ignored_entries(
+        &self,
+        _toplevel: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// Tracked files an ignore rule matches.
+    fn tracked_ignored(
+        &self,
+        _toplevel: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// The line that decides each of `paths` (`check-ignore -v`), negations
+    /// included; `tracked` for tracked files.
+    fn ignore_matches(
+        &self,
+        _toplevel: &Path,
+        _paths: &[PathBuf],
+        _tracked: bool,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<IgnoreMatch>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// The `.gitignore` files git reads (tracked, or untracked and not
+    /// ignored), sorted.
+    fn ignore_files(
+        &self,
+        _toplevel: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
+    /// The user's excludes file: `core.excludesFile`, or git's default
+    /// (which may not exist yet).
+    fn global_excludes_file(
+        &self,
+        _toplevel: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Option<PathBuf>, GitError> {
+        Err(unsupported("ignore rules"))
+    }
 }
 
 /// Receives `--progress` updates of a running fetch, pull or push.
@@ -1735,6 +1831,102 @@ impl GitBackend for CliBackend {
     ) -> Result<String, GitError> {
         self.undo_commit_impl(toplevel, oid, mode, cancel)
     }
+
+    fn untracked_matching(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        patterns: &[String],
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.untracked_matching_impl(toplevel, paths, patterns, cancel)
+    }
+
+    fn tracked_matching(
+        &self,
+        toplevel: &Path,
+        patterns: &[String],
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.tracked_matching_impl(toplevel, patterns, cancel)
+    }
+
+    fn index_entries(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Vec<IndexEntry>, GitError> {
+        self.index_entries_impl(toplevel, paths, cancel)
+    }
+
+    fn untrack(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.untrack_impl(toplevel, paths, cancel)
+    }
+
+    fn restore_index_entries(
+        &self,
+        toplevel: &Path,
+        entries: &[IndexEntry],
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.restore_index_entries_impl(toplevel, entries, cancel)
+    }
+    fn ignored_entries(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.ignored_entries_impl(toplevel, cancel)
+    }
+
+    fn tracked_ignored(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.tracked_ignored_impl(toplevel, cancel)
+    }
+
+    fn ignore_matches(
+        &self,
+        toplevel: &Path,
+        paths: &[PathBuf],
+        tracked: bool,
+        cancel: &CancelToken,
+    ) -> Result<Vec<IgnoreMatch>, GitError> {
+        self.ignore_matches_impl(toplevel, paths, tracked, cancel)
+    }
+
+    fn ignore_files(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.ignore_files_impl(toplevel, cancel)
+    }
+
+    fn global_excludes_file(
+        &self,
+        toplevel: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Option<PathBuf>, GitError> {
+        self.global_excludes_file_impl(toplevel, cancel)
+    }
+}
+
+/// The error of an operation a backend does not support.
+fn unsupported(what: &str) -> GitError {
+    GitError::new(
+        what,
+        GitErrorKind::Other,
+        format!("{what} are not supported by this backend"),
+    )
 }
 
 /// Paths for `git worktree` arguments, with forward slashes.

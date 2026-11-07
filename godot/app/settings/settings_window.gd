@@ -16,6 +16,7 @@ const CATEGORIES: Array = [
 			[&"editor_command", "Editor", &"line", "code {path}"],
 			[&"terminal_command", "Terminal", &"line", "Platform default"],
 			[&"clone_folder", "Clone folder", &"line", "Folder of the last clone"],
+			[&"ignore_hint", "Suggest folders to ignore", &"check"],
 		],
 	],
 	[
@@ -51,6 +52,7 @@ const DETAILS: Dictionary = {
 	&"accent": "Used for selections, focused fields and active controls",
 	&"added_color": "Added lines in diffs, the minimap and change counts, in both themes",
 	&"removed_color": "Removed lines in diffs, the minimap and change counts, in both themes",
+	&"ignore_hint": "Offers to ignore a folder such as node_modules/ when it fills Changes",
 	&"diff_minimap": "A small picture of the whole diff beside it. Off, only the strip of change marks shows.",
 }
 const DEFAULTS: Dictionary = {
@@ -67,6 +69,7 @@ const DEFAULTS: Dictionary = {
 	&"added_color": "",
 	&"removed_color": "",
 	&"diff_minimap": true,
+	&"ignore_hint": true,
 }
 
 var categories: ItemList = ItemList.new()

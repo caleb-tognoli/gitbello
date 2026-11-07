@@ -8,6 +8,7 @@ extends RefCounted
 ## `pick`), dimmed where it cannot be changed: a conflicted file (empty) or a
 ## `locked` row. A `resolved` file shows a tick instead of its status icon.
 ## During amend, files already in the original commit also have a commit icon.
+## An `ignored` row ("Show ignored files") is drawn muted, with no checkbox.
 ## Colors and sizes come from the `ChangeList` theme type.
 
 const THEME_TYPE: StringName = &"ChangeList"
@@ -20,6 +21,7 @@ const CODE_COLORS: Dictionary[String, StringName] = {
 	"C": &"renamed_color",
 	"?": &"untracked_color",
 	"U": &"conflict_color",
+	"!": &"ignored_color",
 }
 ## Status icon and name of each code.
 const CODE_ICONS: Dictionary[String, StringName] = {
@@ -31,6 +33,7 @@ const CODE_ICONS: Dictionary[String, StringName] = {
 	"C": &"FileRenamed",
 	"?": &"FileAdded",
 	"U": &"FileConflict",
+	"!": &"GitIgnore",
 }
 const CODE_NAMES: Dictionary[String, String] = {
 	"M": "Modified",
@@ -41,6 +44,7 @@ const CODE_NAMES: Dictionary[String, String] = {
 	"C": "Copied",
 	"?": "Untracked",
 	"U": "Conflicted",
+	"!": "Ignored",
 }
 
 var _font: Font = null
@@ -52,6 +56,7 @@ var _path_color: Color = Color.WHITE
 var _dir_color: Color = Color.WHITE
 var _code_colors: Dictionary[String, Color] = {}
 var _resolved_color: Color = Color.WHITE
+var _ignored_color: Color = Color.WHITE
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
 var _picks: PickPainter = PickPainter.new()
@@ -70,6 +75,7 @@ func update_theme(control: Control) -> void:
 	_dir_color = control.get_theme_color(&"dir_color", THEME_TYPE)
 	_picks.update_theme(control)
 	_resolved_color = control.get_theme_color(&"resolved_color", THEME_TYPE)
+	_ignored_color = control.get_theme_color(&"ignored_color", THEME_TYPE)
 	_code_colors.clear()
 	for code: String in CODE_COLORS:
 		_code_colors[code] = control.get_theme_color(CODE_COLORS[code], THEME_TYPE)
@@ -80,10 +86,12 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 		return
 	var baseline: float = rect.position.y + (rect.size.y + _font.get_ascent(_font_size) - _font.get_descent(_font_size)) / 2.0
 	var x: float = rect.position.x + _padding
+	var ignored: bool = bool(data.get("ignored", false))
 	if show_picks:
 		var conflicted: bool = bool(data.get("conflicted", false))
-		_picks.draw(canvas, _picks.box_rect(rect, x), "none" if conflicted else String(data.get("pick", "none")),
-				conflicted or bool(data.get("locked", false)))
+		if not ignored:
+			_picks.draw(canvas, _picks.box_rect(rect, x), "none" if conflicted else String(data.get("pick", "none")),
+					conflicted or bool(data.get("locked", false)))
 		x += pick_width()
 	var code: String = String(data.get("code", ""))
 	var resolved: bool = bool(data.get("resolved", false))
@@ -93,8 +101,8 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 		canvas.draw_texture_rect(icon, Rect2(x, top, _icon_size, _icon_size), false,
 				_resolved_color if resolved else _code_colors.get(code, _dir_color))
 	x += _code_width
-	var path: String = String(data["path"])
-	var name: String = path.get_file()
+	var path: String = String(data["path"]) + ("/" if bool(data.get("ignored_dir", false)) else "")
+	var name: String = path.trim_suffix("/").get_file() + ("/" if path.ends_with("/") else "")
 	var lead: PackedStringArray = _lead(path, String(data.get("original_path", "")))
 	var room: float = rect.end.x - _padding - x
 	if bool(data.get("amending", false)) and bool(data.get("in_original_commit", false)):
@@ -103,6 +111,7 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 			room -= _icon_size + _padding
 			canvas.draw_texture_rect(commit_icon, Rect2(rect.end.x - _padding - _icon_size,
 					rect.position.y + (rect.size.y - _icon_size) / 2.0, _icon_size, _icon_size), false, _dir_color)
+	var name_color: Color = _ignored_color if ignored else _path_color
 	var name_width: float = _text_width(name)
 	var lead_width: float = _text_width(lead[0] + lead[1])
 	var text_top: float = rect.position.y + (rect.size.y - _font.get_height(_font_size)) / 2.0
@@ -111,27 +120,27 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 		canvas.draw_string(_font, Vector2(x, baseline), lead[0] + lead[1], HORIZONTAL_ALIGNMENT_LEFT, -1,
 				_font_size, _dir_color)
 		canvas.draw_string(_font, Vector2(x + lead_width, baseline), name, HORIZONTAL_ALIGNMENT_LEFT, -1,
-				_font_size, _path_color)
+				_font_size, name_color)
 		return
 	# Too narrow: the folder gives way first (`src/compo…/file.rs`), then the name.
 	var separator_width: float = _text_width(lead[1])
 	var folder_room: float = room - name_width - separator_width
 	if lead[0].is_empty() or folder_room < _text_width("…") * 3.0:
-		_trimmed(name, room).draw(canvas_item, Vector2(x, text_top), _path_color)
+		_trimmed(name, room).draw(canvas_item, Vector2(x, text_top), name_color)
 		return
 	var folder: TextLine = _trimmed(lead[0], folder_room)
 	folder.draw(canvas_item, Vector2(x, text_top), _dir_color)
 	x += minf(folder.get_line_width(), folder_room)
 	canvas.draw_string(_font, Vector2(x, baseline), lead[1], HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, _dir_color)
 	canvas.draw_string(_font, Vector2(x + separator_width, baseline), name, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			_font_size, _path_color)
+			_font_size, name_color)
 
 
 ## What goes before a row's file name, muted: `[folder, separator]`, such as
 ## `["src/ui", "/"]`. A renamed file reads `docs/old.md → new.md`, a moved
 ## one `{src → lib}/util.rs` (see `rename_dir`), both `{src → lib}/a.rs → b.rs`.
 static func path_lead(path: String, original: String) -> PackedStringArray:
-	var dir: String = path.get_base_dir()
+	var dir: String = path.trim_suffix("/").get_base_dir()
 	if original.is_empty() or original == path:
 		return PackedStringArray([dir, "/" if not dir.is_empty() else ""])
 	var old_dir: String = original.get_base_dir()

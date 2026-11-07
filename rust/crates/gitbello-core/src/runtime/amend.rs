@@ -22,6 +22,7 @@ impl RepoState {
             .as_ref()
             .and_then(|a| a.snapshot.as_ref())
             .map(|a| &a.status)
+            .or(self.listed.as_ref())
             .or(self.status.as_ref())
     }
 

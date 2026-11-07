@@ -130,7 +130,7 @@ func toggle_rows(rows: PackedInt32Array) -> void:
 	var picked: PackedInt32Array = PackedInt32Array()
 	for index: int in rows:
 		var data: Dictionary = row(index)
-		if data.is_empty() or bool(data.get("conflicted", false)):
+		if data.is_empty() or bool(data.get("conflicted", false)) or bool(data.get("ignored", false)):
 			continue
 		picked.append(index)
 		include = include or String(data.get("pick", "none")) != "all"
@@ -207,6 +207,11 @@ func _get_tooltip(at_position: Vector2) -> String:
 	if data.is_empty():
 		return ""
 	var tip: String = String(data["path"])
+	if bool(data.get("ignored", false)):
+		if data.has("ignored_source"):
+			return tip + "\n" + tr("Ignored by %s, line %d: %s") % [String(data["ignored_source"]),
+					int(data["ignored_line"]), String(data["ignored_pattern"])]
+		return tip + "\n" + tr("Ignored")
 	if bool(data.get("conflicted", false)):
 		tip += "\n" + tr("Conflicted: resolve it before committing.")
 	elif bool(data.get("resolved", false)):

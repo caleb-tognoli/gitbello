@@ -61,6 +61,10 @@ pub enum GitErrorKind {
     /// git unregistered a worktree but could not delete all of its folder.
     #[error("the worktree's folder could not be fully deleted")]
     FolderLeft,
+    /// An ignore rule matches tracked files and the caller asked to decide
+    /// about them first; nothing was written.
+    #[error("the rule matches tracked files")]
+    TrackedMatches,
     #[error("git failed")]
     Other,
 }

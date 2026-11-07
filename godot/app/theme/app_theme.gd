@@ -814,6 +814,7 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 		theme.set_color(StringName("%s_color" % entry[0]), &"ChangeList", entry[1])
 	theme.set_color(&"resolved_color", &"ChangeList", p.added)
 	theme.set_color(&"divider_color", &"ChangeList", p.border)
+	theme.set_color(&"ignored_color", &"ChangeList", Color(p.text_muted, 0.75))
 	theme.set_constant(&"padding", &"ChangeList", 8)
 	theme.set_constant(&"code_width", &"ChangeList", 22)
 	theme.set_constant(&"icon_size", &"ChangeList", 14)
@@ -1130,6 +1131,15 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	# Remotes… and Tags…
 	theme.set_constant(&"width", &"ManageDialog", 620)
 	theme.set_constant(&"height", &"ManageDialog", 380)
+	# Repository → Ignore rules…
+	theme.set_constant(&"width", &"IgnoreRulesDialog", 960)
+	theme.set_constant(&"height", &"IgnoreRulesDialog", 560)
+	theme.set_constant(&"lines_width", &"IgnoreRulesDialog", 480)
+	theme.set_constant(&"recap_separation", &"IgnoreRulesDialog", 6)
+	theme.set_color(&"comment_color", &"IgnoreRulesDialog", p.text_muted)
+	theme.set_color(&"negation_color", &"IgnoreRulesDialog", p.added)
+	theme.set_color(&"tracked_color", &"IgnoreRulesDialog", p.modified)
+	theme.set_color(&"unused_color", &"IgnoreRulesDialog", Color(p.text_muted, 0.8))
 	theme.set_constant(&"bottom_margin", &"Toasts", 40)
 
 

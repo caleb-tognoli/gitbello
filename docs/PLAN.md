@@ -770,6 +770,30 @@ Scope settled in the Q&A of 2026-11-01. Two independent parts, each ending with 
 
 M7.6 is complete: P1, P2 and P3 are done.
 
+### M7.7 — Ignore rules (≈2 weeks)
+
+Scope settled in the Q&A of 2026-11-02; design, interface and tests in `docs/IGNORE_RULES.md` (interface awaiting approval).
+
+#### a — Ignore from Changes (≈1 week)
+- [x] Core `ignore.rs`: pattern suggestions (file, name, extension everywhere or below a folder, each parent folder, custom) with escaping and multi-select; preview job; add-rule write (root `.gitignore` by default, a nested one by choice, or `info/exclude`), keeping line endings; untrack (`rm --cached`); undo
+- [x] Changes right-click Ignore submenu (quick entries write to the shared root `.gitignore`; a tracked file opens the dialog) and the Ignore… dialog with live preview, target choice and the untrack checkbox (on for shared, off for local) with its pull warning
+- [x] After untracking, `.gitignore` and the removed files are included in the commit; the user commits
+- [x] Actions `changes.ignore_file`, `changes.ignore_extension`, `changes.ignore_folder`, `changes.ignore`; toast with Undo; English and Italian strings
+
+*Result (2026-11-06):* as `docs/IGNORE_RULES.md` §4, with the changes listed there under "As built". Committing a staged deletion whose file is still on disk now writes a removal instead of `add -A` (which re-added the file, or refused it as ignored); this was a bug before M7.7 for anything untracked with `git rm --cached`. Tests: `ignore.rs` unit tests, `tests/ignore.rs` (10 cases on real repositories), `ignore_smoke.gd` on fixture `repo-14`; shots: `tests/visual/ignore_screenshots.tscn`.
+
+#### b — Ignore rules viewer (≈1 week)
+- [x] Repository → Ignore rules…: every source (root and nested `.gitignore`, `info/exclude`, the global file), lines with what each hides, unused rules, tracked files that match (Stop tracking…), remove rule with undo
+- [x] "Show ignored files" filter in Changes with the rule behind each file and Stop ignoring
+- [x] Global excludes file as a third dialog target ("All my repositories"); read-only in a
+- [x] Missing lines from the `.gitignore` templates; offer to ignore a folder that fills Changes
+
+*Result (2026-11-07):* as `docs/IGNORE_RULES.md` §4.5, with the changes listed there under "As built (b)". The viewer is `godot/app/manage/ignore_rules_dialog.gd` (Repository → Ignore rules…, action `repo.ignore_rules`); the rules reload with each status change while it is open. Tests: `ignore/rules.rs` unit tests, `tests/ignore_rules.rs` (11 cases on real repositories, a scratch global file included), `ignore_rules_smoke.gd`; shots: `tests/visual/ignore_rules_screenshots.tscn`.
+
+M7.7 is complete: a and b are done. Skip-worktree is the follow-up (decision 6 in `docs/IGNORE_RULES.md`).
+
+Follow-up after b: "Keep tracked, ignore my local edits" (skip-worktree) as its own action, listed in the viewer.
+
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit
 - [ ] File history (`git log --follow`) with per-commit diffs

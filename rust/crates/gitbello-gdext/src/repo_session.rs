@@ -6,6 +6,7 @@ use gitbello_core::diff::minimap::{
 };
 use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
+use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
@@ -116,6 +117,14 @@ impl RepoSession {
     /// (`merge_preview`).
     #[signal]
     fn merge_preview_ready(target: GString);
+    /// The preview `load_ignore_preview` returned `job` for arrived
+    /// (`ignore_preview`).
+    #[signal]
+    fn ignore_preview_ready(job: i64);
+    /// The ignore rules arrived (`load_ignore_rules`, and again after each
+    /// status while the viewer or "Show ignored files" shows them).
+    #[signal]
+    fn ignore_rules_ready(job: i64);
     /// HEAD's undoable commit or the commits HEAD lacks changed
     /// (`undoable_commit`, `in_head` in `graph_rows`).
     #[signal]
@@ -908,9 +917,16 @@ impl RepoSession {
         self.read(|s| to_i64(s.changes().len())).unwrap_or(0)
     }
 
+    /// Ignored files among the rows shown ("Show ignored files"); they are
+    /// the last rows.
+    #[func]
+    fn shown_ignored_count(&self) -> i64 {
+        self.read(|s| to_i64(s.changes().ignored())).unwrap_or(0)
+    }
+
     /// Shows only the changed files whose path contains `text` (any case),
     /// narrowed by `options`: any of `included`, `excluded`, `new`,
-    /// `modified`, `deleted`. Rows change at once (no signal).
+    /// `modified`, `deleted`, and `ignored` (also list ignored files, last). Rows change at once (no signal).
     #[func]
     fn set_change_filter(&self, text: GString, options: PackedStringArray) {
         let has = |id: &str| options.as_slice().iter().any(|o| *o == id);
@@ -921,6 +937,7 @@ impl RepoSession {
             new: has("new"),
             modified: has("modified"),
             deleted: has("deleted"),
+            ignored: has("ignored"),
         };
         runtime_cell::with(|rt| rt.set_change_filter(&self.key, filter));
     }
@@ -1358,6 +1375,235 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.undo_discard(&self.key)).flatten())
     }
 
+    // --- Ignore rules (M7.7a, docs/IGNORE_RULES.md) ---------------------------
+
+    /// The rules offered for `paths`, relative to the `.gitignore` in `dir`
+    /// ("" for the root), narrowest first. See `convert::ignore_suggestions`.
+    #[func]
+    fn ignore_suggestions(&self, paths: PackedStringArray, dir: GString) -> Array<VarDictionary> {
+        let list = ignore::suggestions(&path_list(&paths), Path::new(&dir.to_string()));
+        convert::ignore_suggestions(&list)
+    }
+
+    /// Folders with a `.gitignore` above every one of `paths`, "" (the root,
+    /// listed even without one) first.
+    #[func]
+    fn ignore_files(&self, paths: PackedStringArray) -> PackedStringArray {
+        runtime_cell::with(|rt| rt.ignore_files(&self.key, &path_list(&paths)))
+            .unwrap_or_default()
+            .iter()
+            .map(|p| path_str(p))
+            .collect()
+    }
+
+    /// Works out what `rule` (`{pattern, target, dir}`, see
+    /// `convert::ignore_rule`) would do; `ignore_preview_ready(job)` follows.
+    #[func]
+    fn load_ignore_preview(&self, rule: VarDictionary) -> i64 {
+        let Some(rule) = convert::ignore_rule(&rule) else {
+            return -1;
+        };
+        job_id(runtime_cell::with(|rt| rt.load_ignore_preview(&self.key, rule)).flatten())
+    }
+
+    /// See `convert::ignore_preview`; empty until it arrived.
+    #[func]
+    fn ignore_preview(&self) -> VarDictionary {
+        runtime_cell::with(|rt| rt.ignore_preview(&self.key).map(convert::ignore_preview))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Adds `rule` to its file. `untrack` is `keep`, `remove` (stop tracking
+    /// the files it matches) or `refuse` (fail with `tracked_matches` when
+    /// any are tracked). Label `ignore`.
+    #[func]
+    fn add_ignore_rule(&self, rule: VarDictionary, untrack: GString) -> i64 {
+        let untrack = match untrack.to_string().as_str() {
+            "keep" => Untrack::Keep,
+            "remove" => Untrack::Remove,
+            "refuse" => Untrack::RefuseIfTracked,
+            _ => return -1,
+        };
+        let Some(rule) = convert::ignore_rule(&rule) else {
+            return -1;
+        };
+        job_id(runtime_cell::with(|rt| rt.add_ignore_rule(&self.key, rule, untrack)).flatten())
+    }
+
+    #[func]
+    fn can_undo_ignore(&self) -> bool {
+        runtime_cell::with(|rt| rt.can_undo_ignore(&self.key)).unwrap_or(false)
+    }
+
+    /// Takes back the most recent ignore edit. Label `undo ignore`.
+    #[func]
+    fn undo_ignore(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_ignore(&self.key)).flatten())
+    }
+
+    // --- Ignore rules viewer (M7.7b) ------------------------------------------
+
+    /// Works out every ignore file, its lines and what each decides;
+    /// `ignore_rules_ready(job)` follows.
+    #[func]
+    fn load_ignore_rules(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.load_ignore_rules(&self.key)).flatten())
+    }
+
+    /// While `open`, the rules are reloaded after every status (the viewer).
+    #[func]
+    fn watch_ignore_rules(&self, open: bool) {
+        runtime_cell::with(|rt| rt.watch_ignore_rules(&self.key, open));
+    }
+
+    #[func]
+    fn has_ignore_rules(&self) -> bool {
+        self.read(|s| s.ignore_rules().is_some()).unwrap_or(false)
+    }
+
+    /// See `convert::ignore_sources`; empty until the rules arrived.
+    #[func]
+    fn ignore_sources(&self) -> Array<VarDictionary> {
+        self.read(|s| s.ignore_rules().map(convert::ignore_sources))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Lines of source `source` (an index into `ignore_sources`); see
+    /// `convert::ignore_lines`.
+    #[func]
+    fn ignore_lines(&self, source: i64) -> Array<VarDictionary> {
+        let source = usize::try_from(source).unwrap_or(usize::MAX);
+        self.read(|s| {
+            let src = s.ignore_rules()?.source(source)?;
+            Some(convert::ignore_lines(&src.lines))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Rows `ignore_hidden` has for line `line` of source `source`.
+    #[func]
+    fn ignore_hidden_count(&self, source: i64, line: i64) -> i64 {
+        let (source, line) = (index(source), index(line));
+        self.read(|s| {
+            let line = s.ignore_rules()?.line(source, line)?;
+            Some(to_i64(line.tracked.len() + line.hidden.len()))
+        })
+        .flatten()
+        .unwrap_or(0)
+    }
+
+    /// Rows `start..start + count` of what line `line` of source `source`
+    /// decides; see `convert::ignore_hidden`.
+    #[func]
+    fn ignore_hidden(
+        &self,
+        source: i64,
+        line: i64,
+        start: i64,
+        count: i64,
+    ) -> Array<VarDictionary> {
+        let (source, line) = (index(source), index(line));
+        let (start, count) = (index(start), index(count));
+        self.read(|s| {
+            let line = s.ignore_rules()?.line(source, line)?;
+            Some(convert::ignore_hidden(line, start, count))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Removes a rule line (undoable). Label `remove ignore rule`; -1 for a
+    /// comment or blank line.
+    #[func]
+    fn remove_ignore_rule(&self, source: i64, line: i64) -> i64 {
+        let (source, line) = (index(source), index(line));
+        job_id(runtime_cell::with(|rt| rt.remove_ignore_rule(&self.key, source, line)).flatten())
+    }
+
+    /// Stops tracking the tracked files a line matches (undoable). Label
+    /// `stop tracking ignored files`.
+    #[func]
+    fn untrack_ignored(&self, source: i64, line: i64) -> i64 {
+        let (source, line) = (index(source), index(line));
+        job_id(runtime_cell::with(|rt| rt.untrack_ignored(&self.key, source, line)).flatten())
+    }
+
+    /// Makes git stop ignoring `path`, a row of "Show ignored files"
+    /// (undoable). Label `stop ignoring`.
+    #[func]
+    fn stop_ignoring(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.stop_ignoring(&self.key, &path)).flatten())
+    }
+
+    /// How Stop ignoring would go for `path`: `{action: "remove"|"negate",
+    /// source, line, pattern, negation, target}`; empty when it cannot.
+    #[func]
+    fn stop_ignoring_plan(&self, path: GString) -> VarDictionary {
+        let path = PathBuf::from(path.to_string());
+        self.read(|s| {
+            let rules = s.ignore_rules()?;
+            let (source, line) = rules.ignored_by(&path)?;
+            let (src, at) = (rules.source(source)?, rules.line(source, line)?);
+            let entry = rules
+                .ignored
+                .iter()
+                .map(|(e, _)| e)
+                .find(|e| e.path == path)?;
+            let mut out = vdict! {
+                "source" => &gstr(&src.name),
+                "line" => to_i64(at.number),
+                "pattern" => &gstr(&at.text),
+            };
+            match ignore::unignore(src, at, entry) {
+                ignore::Unignore::RemoveLine => out.set("action", "remove"),
+                ignore::Unignore::Negate { target, line } => {
+                    out.set("action", "negate");
+                    out.set("negation", &gstr(&line));
+                    out.set(
+                        "target",
+                        match target {
+                            ignore::IgnoreTarget::Shared { .. } => "shared",
+                            ignore::IgnoreTarget::Local => "local",
+                            ignore::IgnoreTarget::Global => "global",
+                        },
+                    );
+                }
+            }
+            Some(out)
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// The rule lines of template `name` the root `.gitignore` lacks, one
+    /// per line ("" when it has them all, or before the rules arrived).
+    #[func]
+    fn ignore_template_lines(&self, name: GString) -> GString {
+        runtime_cell::with(|rt| rt.ignore_template_lines(&self.key, &name.to_string()))
+            .flatten()
+            .map(|s| gstr(&s))
+            .unwrap_or_default()
+    }
+
+    /// A folder of untracked files worth ignoring: `{folder, count}`, or
+    /// empty.
+    #[func]
+    fn ignore_hint(&self) -> VarDictionary {
+        runtime_cell::with(|rt| rt.ignore_hint(&self.key))
+            .flatten()
+            .map(|(folder, count)| {
+                vdict! {
+                    "folder" => &path_str(&folder),
+                    "count" => to_i64(count),
+                }
+            })
+            .unwrap_or_default()
+    }
+
     /// Whether `commit(…, amend)` can run now (the summary aside).
     #[func]
     fn can_commit(&self, amend: bool) -> bool {
@@ -1784,4 +2030,17 @@ impl RepoSession {
             .graph_loaded()
             .emit(to_i64(rows), &gstr(&error));
     }
+}
+
+/// A GDScript index (negative ones match nothing).
+fn index(value: i64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
+fn path_list(paths: &PackedStringArray) -> Vec<PathBuf> {
+    paths
+        .as_slice()
+        .iter()
+        .map(|p| PathBuf::from(p.to_string()))
+        .collect()
 }
