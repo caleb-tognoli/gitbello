@@ -41,7 +41,7 @@ func run() -> void:
 	# Shelve app.txt (highlighted first) under a name.
 	var list: ChangeList = view.list()
 	expect_eq(list.path_at(list.cursor), "app.txt", "app.txt is highlighted")
-	expect(Actions.run_action(&"changes.shelve"), "Shelve selected files… runs")
+	expect(Actions.run_action(&"changes.shelve"), "Shelve… runs")
 	var ops: RepoOps = page.ops()
 	var form: FormDialog = ops.form()
 	expect(await wait_until(func() -> bool: return form.visible), "the shelve form asks for a name")
@@ -211,8 +211,8 @@ func run() -> void:
 	var header_label: Control = view.list_header().get_node("%Label") as Control
 	_click_at(header_label.get_global_rect().get_center(), MOUSE_BUTTON_RIGHT)
 	expect(view.context_menu().visible, "right-clicking the changed-file count opens its menu")
-	expect_eq(view.menu_labels(), PackedStringArray(["Shelve all", "Discard all"]),
-			"the header offers operations on the whole list")
+	expect_eq(view.menu_labels(), PackedStringArray(["Shelve selected…", "Shelve all…", "Discard selected…", "Discard all…"]),
+			"the header offers operations on the checked files and the whole list")
 	view.context_menu().hide()
 	expect(Actions.run_action(&"changes.shelve_listed"), "header Shelve runs")
 	expect(form.visible, "bulk shelving asks for a name")

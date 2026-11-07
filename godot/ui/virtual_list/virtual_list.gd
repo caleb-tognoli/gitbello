@@ -5,7 +5,8 @@ extends Control
 ## Subclasses override `_get_row_count()`, `_draw_row()` and optionally
 ## `_prepare_rows()`, then call `refresh()` when the row count changes.
 ## Handles scrolling (with middle-click autoscroll, see `AutoScroll`), keyboard
-## navigation, multi-select (Ctrl/Shift) and context-menu requests.
+## navigation, multi-select (Ctrl/Shift, unless `multi_select` is off) and
+## context-menu requests.
 
 signal selection_changed()
 signal row_activated(row: int)
@@ -21,6 +22,9 @@ var cursor: int = -1
 var draws_selection: bool = true
 ## Keep the cursor's outline when the list does not have keyboard focus.
 var draws_unfocused_cursor: bool = false
+## Ctrl/Shift clicks, Shift+arrows and Ctrl+A highlight several rows (off for a
+## list that keeps one highlighted row).
+var multi_select: bool = true
 ## Show the scroll bar when the rows overflow (off for a subclass that draws
 ## its own scroll column; the bar still holds the offset).
 var shows_scroll_bar: bool = true:
@@ -217,6 +221,8 @@ func _handle_mouse(mouse: InputEventMouseButton) -> void:
 				return
 			if mouse.double_click:
 				row_activated.emit(row)
+			elif not multi_select:
+				select_only(row)
 			elif mouse.shift_pressed and _anchor >= 0:
 				_select_range(_anchor, row, mouse.is_command_or_control_pressed())
 				cursor = row
@@ -255,7 +261,7 @@ func _handle_key(key: InputEventKey) -> void:
 		row_activated.emit(cursor)
 		accept_event()
 		return
-	elif key.keycode == KEY_A and key.is_command_or_control_pressed() and not key.shift_pressed and not key.alt_pressed:
+	elif multi_select and key.keycode == KEY_A and key.is_command_or_control_pressed() and not key.shift_pressed and not key.alt_pressed:
 		_select_range(0, _row_count - 1, false)
 		accept_event()
 		return
@@ -266,7 +272,7 @@ func _handle_key(key: InputEventKey) -> void:
 
 
 func _move_cursor(row: int, extend: bool) -> void:
-	if extend and _anchor >= 0:
+	if extend and multi_select and _anchor >= 0:
 		_select_range(_anchor, row, false)
 		cursor = row
 	else:

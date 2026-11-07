@@ -480,6 +480,12 @@ fn runtime_filters_changes_and_checks_only_the_shown_files() {
     let state = rt.repo(&key).unwrap();
     assert_eq!(state.shown_selection_state(), PickState::None);
     assert_eq!(state.selection().overall_state(), PickState::Partial);
+    assert!(state.shown_picked_paths().is_empty());
+    rt.pick_files(&key, &[PathBuf::from("src/new.rs")], true);
+    // Checked files hidden by the filter (notes.txt) are left out.
+    let state = rt.repo(&key).unwrap();
+    assert_eq!(state.shown_picked_paths(), [PathBuf::from("src/new.rs")]);
+    rt.pick_files(&key, &[PathBuf::from("src/new.rs")], false);
 
     // The filter holds over status reloads.
     repo.write(

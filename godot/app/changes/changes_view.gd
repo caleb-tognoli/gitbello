@@ -9,8 +9,8 @@ extends HSplitContainer
 ## take the diff's place. The Shelves view reuses the preview pane with a
 ## dedicated shelf browser and details, without commit controls. A conflicted
 ## file shows the resolver in the diff's place (PLAN §4 Conflict resolver).
-## Keyboard: arrows move, Space or Enter toggle the checkboxes of the
-## highlighted files or diff lines (a hunk header takes its hunk), Right and
+## Keyboard: arrows move, Space or Enter toggle the checkbox of the
+## highlighted file or diff lines (a hunk header takes its hunk), Right and
 ## Left move between the list and the diff, Delete discards, Ctrl+Z undoes the
 ## last discard; see the `changes.*` actions for the rest.
 
@@ -439,7 +439,7 @@ func _on_shelf_replaced(old_oid: String, new_oid: String) -> void:
 	_shelves.replace_shelf(old_oid, new_oid)
 
 
-## Shelves the highlighted files after asking for a name.
+## Shelves the highlighted file after asking for a name.
 func shelve_selected() -> void:
 	if ops == null:
 		return
@@ -459,8 +459,9 @@ func can_shelve() -> bool:
 	return false
 
 
-## Header actions cover the currently listed files, not the highlighted rows
-## or commit checkboxes. Capture paths before opening a dialog.
+## Header actions cover the listed files ("all") or the checked ones among
+## them ("selected"), never the highlighted row. Capture paths before opening
+## a dialog.
 func shelve_listed() -> void:
 	if ops != null and session != null:
 		ops.shelve(session.change_paths(0, _listed_changes()))
@@ -471,6 +472,16 @@ func discard_listed() -> void:
 		_discard_paths(session.change_paths(0, _listed_changes()))
 
 
+func shelve_checked() -> void:
+	if ops != null and session != null:
+		ops.shelve(session.shown_picked_paths())
+
+
+func discard_checked() -> void:
+	if session != null:
+		_discard_paths(session.shown_picked_paths())
+
+
 ## Rows of changed files shown (the ignored ones after them left out).
 func _listed_changes() -> int:
 	return session.shown_change_count() - session.shown_ignored_count()
@@ -478,9 +489,13 @@ func _listed_changes() -> int:
 
 func _show_header_menu(at: Vector2) -> void:
 	_menu.clear()
-	_menu_actions.assign([&"changes.shelve_listed", &"changes.discard_listed"])
+	_menu_actions.assign([&"changes.shelve_checked", &"changes.shelve_listed", &"",
+		&"changes.discard_checked", &"changes.discard_listed"])
 	for index: int in _menu_actions.size():
 		var id: StringName = _menu_actions[index]
+		if id == &"":
+			_menu.add_separator()
+			continue
 		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, index)
 		_menu.set_item_disabled(index, not Actions.is_enabled(id))
 		_menu.set_item_tooltip(index, Actions.tooltip(id))
@@ -664,7 +679,7 @@ func _absolute(path: String) -> String:
 
 
 ## Discards the focused selection after a confirmation: diff lines, or the
-## highlighted files (back to the last commit; `undo_discard` brings them
+## highlighted file (back to the last commit; `undo_discard` brings them
 ## back, untracked files included).
 func discard_selection() -> void:
 	if _diff_view.has_focus():
@@ -976,23 +991,24 @@ func _on_selection_changed() -> void:
 func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	_menu.clear(true)
 	_menu_actions.clear()
-	var ids: Array[StringName] = [&"changes.toggle_selected", &"changes.discard", &"changes.restore_line_endings"]
+	# The files' menu acts on the highlighted file: open it, resolve it, ignore
+	# it, then shelve or discard it. The checked files' actions are in the
+	# header's.
+	var ids: Array[StringName] = [&"diff.open_file", &"changes.show_file", &"changes.copy_path", &"",
+		&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
+		IGNORE_MENU, &"changes.restore_line_endings", &"", &"changes.shelve", &"changes.discard",
+		&"changes.undo_discard"]
 	if source == _diff_view:
-		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.toggle_selected", &"changes.discard",
-			&"changes.restore_line_endings"]
+		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.restore_line_endings", &"changes.discard",
+			&"changes.undo_discard"]
 		if has_conflict_blocks():
 			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
 				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
 		ids.append_array([&"", &"diff.open_file", &"", &"diff.toggle_minimap"])
-	if source == _list and _highlights_ignored():
-		# An ignored file is not a change: it can only be brought back or opened.
-		ids = [&"changes.stop_ignoring", &"", &"diff.open_file", &"changes.show_file", &"changes.copy_path",
-			&"", &"changes.undo_ignore"]
-	elif source == _list:
-		ids.append_array([&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
-			&"changes.shelve", IGNORE_MENU, &"", &"diff.open_file", &"changes.show_file", &"changes.copy_path"])
-	if not (source == _list and _highlights_ignored()):
-		ids.append_array([&"", &"changes.undo_discard"])
+	elif _highlights_ignored():
+		# An ignored file is not a change: it can only be opened or brought back.
+		ids = [&"diff.open_file", &"changes.show_file", &"changes.copy_path", &"",
+			&"changes.stop_ignoring", &"changes.undo_ignore"]
 	for id: StringName in ids:
 		if id == &"":
 			if _menu.item_count > 0 and not _menu.is_item_separator(_menu.item_count - 1):

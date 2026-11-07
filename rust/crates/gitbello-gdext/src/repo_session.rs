@@ -1110,6 +1110,14 @@ impl RepoSession {
         .unwrap_or(-1)
     }
 
+    /// Paths of the checked files the filter shows (all or part picked),
+    /// conflicted ones left out.
+    #[func]
+    fn shown_picked_paths(&self) -> PackedStringArray {
+        self.read(|s| s.shown_picked_paths().iter().map(|p| path_str(p)).collect())
+            .unwrap_or_default()
+    }
+
     /// Files the next commit takes something of.
     #[func]
     fn picked_count(&self) -> i64 {

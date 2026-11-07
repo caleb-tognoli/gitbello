@@ -632,12 +632,21 @@ func _register_change_actions() -> void:
 	var no_file: Callable = _says("Select a changed file first.")
 	var has_listed: Callable = func() -> bool:
 		return in_changes.call() and current_page().session.shown_change_count() > 0
-	Actions.register(&"changes.shelve_listed", "Shelve all", "Changes",
+	Actions.register(&"changes.shelve_listed", "Shelve all…", "Changes",
 			func() -> void: changes.call().shelve_listed(), PackedStringArray(), has_listed,
 			_says("No changed files are listed."))
-	Actions.register(&"changes.discard_listed", "Discard all", "Changes",
+	Actions.register(&"changes.discard_listed", "Discard all…", "Changes",
 			func() -> void: changes.call().discard_listed(), PackedStringArray(), has_listed,
 			_says("No changed files are listed."))
+	# "Selected" files are the checked ones the list shows.
+	var has_checked: Callable = func() -> bool:
+		return in_changes.call() and not current_page().session.shown_picked_paths().is_empty()
+	Actions.register(&"changes.shelve_checked", "Shelve selected…", "Changes",
+			func() -> void: changes.call().shelve_checked(), PackedStringArray(), has_checked,
+			_says("Check files first."))
+	Actions.register(&"changes.discard_checked", "Discard selected…", "Changes",
+			func() -> void: changes.call().discard_checked(), PackedStringArray(), has_checked,
+			_says("Check files first."))
 	Actions.register(&"changes.clear_filters", "Clear all filters", "Changes",
 			func() -> void: changes.call().filter_field().clear_filters(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().filter_field().is_active())
@@ -690,16 +699,16 @@ func _register_change_actions() -> void:
 				return bool(history_ready.call()) and not (focus is LineEdit or focus is TextEdit) \
 						and current_page().history().can_go_to_current_commit())
 	current_commit.hidden = true
-	Actions.register(&"changes.show_file", "Show file in file manager", "Changes",
+	Actions.register(&"changes.show_file", "Show in file manager", "Changes",
 			func() -> void: changes.call().show_file(), PackedStringArray(), has_file, no_file)
-	Actions.register(&"changes.copy_path", "Copy file path", "Changes",
+	Actions.register(&"changes.copy_path", "Copy path", "Changes",
 			func() -> void: changes.call().copy_path(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.focus_message", "Write commit message", "Changes",
 			func() -> void:
 				current_page().show_view(WorktreeView.View.CHANGES)
 				changes.call().focus_message(),
 			PackedStringArray(["Ctrl+Shift+M"]), repo_ready)
-	Actions.register(&"changes.discard", "Discard selected changes…", "Changes",
+	Actions.register(&"changes.discard", "Discard…", "Changes",
 			func() -> void: changes.call().discard_selection(), PackedStringArray(["Delete"]), in_changes)
 	Actions.register(&"changes.restore_line_endings", "Restore line endings", "Changes",
 			func() -> void: changes.call().restore_line_endings(), PackedStringArray(),
@@ -737,12 +746,12 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().commit_box().cancel_amend(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().commit_box().is_amend() \
 					and not changes.call().commit_box().is_busy())
-	# Shelves (PLAN §4 Shelves): on the highlighted files, the selected shelf,
+	# Shelves (PLAN §4 Shelves): on the highlighted file, the selected shelf,
 	# or the newest one left on this branch by a switch.
-	Actions.register(&"changes.shelve", "Shelve selected files…", "Shelves",
+	Actions.register(&"changes.shelve", "Shelve…", "Shelves",
 			func() -> void: changes.call().shelve_selected(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_shelve(),
-			_says("Select changed files in the Changes view first."))
+			_says("Select a changed file first."))
 	var has_shelf: Callable = func() -> bool:
 		return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES \
 				and not current_page().changes().selected_shelf().is_empty()
@@ -1043,8 +1052,8 @@ func _register_merge_actions() -> void:
 			return {}
 		var list: ChangeList = changes.call().list()
 		return list.row(list.cursor)
-	for entry: Array in [[&"conflict.file_ours", "Use ours for the whole file", "ours"],
-			[&"conflict.file_theirs", "Use theirs for the whole file", "theirs"]]:
+	for entry: Array in [[&"conflict.file_ours", "Use ours for file", "ours"],
+			[&"conflict.file_theirs", "Use theirs for file", "theirs"]]:
 		var choice: String = entry[2]
 		Actions.register(entry[0], entry[1], "Conflicts",
 				func() -> void: ops.call().resolve_file(String(row.call()["path"]), choice), PackedStringArray(),

@@ -151,6 +151,52 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "Ctrl+Shift+S includes everything")
 	expect_eq(box.block_reason(), "Write a summary", "a summary is still needed")
 
+	# The checkboxes are the only multi-file selection: Ctrl/Shift clicks and
+	# Shift+arrows keep one row highlighted, a checkbox click highlights its row.
+	_click(list, 0, false, true)
+	expect_eq(list.selected_rows(), PackedInt32Array([0]), "Ctrl+click highlights one row")
+	_click(list, 1, false, false, true)
+	expect_eq(list.selected_rows(), PackedInt32Array([1]), "Shift+click highlights one row")
+	press("Shift+Up")
+	expect_eq(list.selected_rows(), PackedInt32Array([0]), "Shift+Up highlights one row")
+	expect(await wait_until(func() -> bool: return String(list.row(1).get("pick", "")) == "all"),
+			"the list shows notes.txt included")
+	_click(list, 1, true)
+	expect_eq(list.cursor, 1, "a checkbox click moves the cursor to its row")
+	expect_eq(list.selected_rows(), PackedInt32Array([1]), "a checkbox click highlights its row")
+	expect(await wait_until(func() -> bool: return session.picked_count() == 1), "and toggles its file")
+	expect(await wait_until(func() -> bool: return String(list.row(1).get("pick", "")) == "none"),
+			"the list shows notes.txt left out")
+	_click(list, 1, true)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "a second click includes it again")
+	_click(list, 0, false, false, false, MOUSE_BUTTON_RIGHT)
+	var labels: PackedStringArray = view.menu_labels()
+	expect(not "Include or leave out the selection" in labels, "the files' menu has no selection toggle: %s" % labels)
+	expect(labels.find("Show in file manager") >= 0 and labels.find("Show in file manager") < labels.find("Copy path")
+			and labels.find("Copy path") < labels.find("Ignore") and labels.find("Ignore") < labels.find("Shelve…")
+			and labels.find("Shelve…") < labels.find("Discard…"),
+			"the files' menu goes open, ignore, then shelve and discard: %s" % labels)
+	expect(not "Shelve all…" in labels and not "Discard selected…" in labels, "and acts on its file only")
+	view.context_menu().hide()
+
+	# The header's "selected" actions take the checked files, not the highlight.
+	session.pick_files(PackedStringArray(["app.txt"]), false)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 1), "only notes.txt is checked")
+	expect_eq(list.selected_rows(), PackedInt32Array([0]), "while app.txt is highlighted")
+	expect_eq(session.shown_picked_paths(), PackedStringArray(["notes.txt"]), "selected means checked")
+	expect(Actions.is_enabled(&"changes.discard_checked") and Actions.is_enabled(&"changes.shelve_checked"),
+			"the header's selected actions are on")
+	session.pick_all(false)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 0), "nothing is checked")
+	expect(not Actions.is_enabled(&"changes.discard_checked"), "Discard selected needs checked files")
+	expect_eq(Actions.disabled_reason(&"changes.discard_checked"), "Check files first.", "and says so")
+	session.pick_all(true)
+	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "both are checked again")
+	view.diff_view().context_menu_requested.emit(0, Vector2.ZERO)
+	expect(not view.menu_labels().is_empty() and not "Include or leave out the selection" in view.menu_labels(),
+			"the diff's menu has no selection toggle: %s" % view.menu_labels())
+	view.context_menu().hide()
+
 	# Write the message and commit.
 	press("Ctrl+Shift+M")
 	type_text("Add notes")
@@ -360,6 +406,19 @@ func run() -> void:
 		_main.close_tab(0)
 	_main.queue_free()
 	await get_tree().process_frame
+
+
+## Sends a press to `row` of `list`: on its checkbox or in the middle of the row.
+func _click(list: ChangeList, row: int, on_pick: bool, ctrl: bool = false, shift: bool = false,
+		button: MouseButton = MOUSE_BUTTON_LEFT) -> void:
+	var event: InputEventMouseButton = InputEventMouseButton.new()
+	event.button_index = button
+	event.pressed = true
+	event.ctrl_pressed = ctrl
+	event.shift_pressed = shift
+	var x: float = 2.0 if on_pick else list.content_width() * 0.5
+	event.position = Vector2(x, (row + 0.5) * list.row_height() - list.scroll_offset())
+	list._gui_input(event)
 
 
 func _clear_filter_index(menu: PopupMenu) -> int:

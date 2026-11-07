@@ -146,7 +146,7 @@ func run() -> void:
 	list.select_only(session.change_index("a.log"))
 	list.context_menu_requested.emit(list.cursor, Vector2(8, 8))
 	expect("Stop ignoring" in view.menu_labels(), "the menu offers Stop ignoring: %s" % view.menu_labels())
-	expect(not ("Discard selected changes…" in view.menu_labels()), "and no discard")
+	expect(not ("Discard…" in view.menu_labels()), "and no discard")
 	view.context_menu().hide()
 	expect(not Actions.is_enabled(&"changes.ignore"), "an ignored file cannot be ignored again")
 	Actions.run_action(&"changes.stop_ignoring")

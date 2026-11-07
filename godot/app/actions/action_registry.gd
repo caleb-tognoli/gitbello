@@ -69,6 +69,8 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"changes.shelve": &"GitShelf",
 	&"changes.shelve_listed": &"GitShelf",
 	&"changes.discard_listed": &"Remove",
+	&"changes.shelve_checked": &"GitShelf",
+	&"changes.discard_checked": &"Remove",
 	&"view.shelves": &"GitShelf",
 	&"shelf.restore": &"Undo",
 	&"shelf.restore_file": &"Undo",

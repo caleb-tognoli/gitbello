@@ -934,6 +934,16 @@ impl RepoState {
         }
     }
 
+    /// Paths of the checked files shown (all or part of them picked),
+    /// conflicted ones left out: what the list header's "selected" actions
+    /// take.
+    pub fn shown_picked_paths(&self) -> Vec<PathBuf> {
+        self.shown_paths()
+            .into_iter()
+            .filter(|p| !self.is_unmerged(p) && self.pick_state(p) != PickState::None)
+            .collect()
+    }
+
     /// Paths of the files shown (ignored ones left out: they cannot be picked).
     fn shown_paths(&self) -> Vec<PathBuf> {
         self.changes_status().map_or_else(Vec::new, |status| {

@@ -6,9 +6,10 @@ extends VirtualList
 ## around the visible range only.
 ## During a merge or other operation, a line under the conflicted and resolved
 ## files sets them apart from the rest.
-## Highlighting rows (click, Shift, Ctrl) drives the diff and the context menu;
-## the checkboxes are separate: clicking one toggles its file, Space, Enter or
-## a double-click toggles the highlighted files.
+## The checkboxes are the only multi-file selection: one row is highlighted at
+## a time (it drives the diff and the context menu). Clicking a checkbox
+## highlights its row and toggles its file; Space, Enter or a double-click
+## toggles the highlighted file.
 
 ## The user toggled the checkboxes of `paths`.
 signal pick_toggled(paths: PackedStringArray, include: bool)
@@ -35,6 +36,7 @@ var _divider_color: Color = Color.WHITE
 func _ready() -> void:
 	super()
 	_painter.show_picks = true
+	multi_select = false
 	_update_theme()
 	selection_changed.connect(_on_selection_changed)
 	row_activated.connect(func(_row: int) -> void: toggle_selection())
@@ -119,8 +121,7 @@ func highlighted_rows() -> PackedInt32Array:
 	return rows
 
 
-## Toggles the checkboxes of the highlighted rows: all included unless they
-## all already are. Conflicted files are skipped.
+## Toggles the checkbox of the highlighted row. Conflicted files are skipped.
 func toggle_selection() -> void:
 	toggle_rows(highlighted_rows())
 
@@ -178,13 +179,15 @@ func _find(path: String) -> int:
 	return session.change_index(path)
 
 
-## A click on a checkbox toggles that file without moving the highlight.
+## A click on a checkbox highlights its row and toggles that file.
 func _gui_input(event: InputEvent) -> void:
 	var mouse: InputEventMouseButton = event as InputEventMouseButton
 	if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT and not mouse.double_click:
 		var index: int = row_at(mouse.position)
 		if index >= 0 and _painter.is_on_pick(Rect2(0.0, 0.0, content_width(), row_height()), mouse.position):
 			grab_focus()
+			if cursor != index or not is_selected(index):
+				select_only(index)
 			toggle_rows(PackedInt32Array([index]))
 			accept_event()
 			return

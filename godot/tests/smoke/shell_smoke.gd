@@ -451,9 +451,9 @@ func _check_menus(main: Main) -> void:
 			"Repository groups Remotes and Tags: %s" % [repository])
 	expect("Worktrees" in repository and "Add worktree for a branch…" in repository,
 			"Repository groups worktree management")
-	expect("Shelves" in repository and "Shelve selected files… (disabled)" in repository,
+	expect("Shelves" in repository and "Shelve… (disabled)" in repository,
 			"Shelves moved out of Branch")
-	expect(not "Shelve selected files…" in bar.labels("Branch"), "Branch keeps only branch operations")
+	expect(not "Shelve…" in bar.labels("Branch"), "Branch keeps only branch operations")
 	expect(not "Continue the operation in progress" in repository and not "Abort the operation in progress…" in repository,
 			"operation-only commands are hidden while idle")
 	expect("Push" in repository, "Push is enabled with commits to push: %s" % [repository])
