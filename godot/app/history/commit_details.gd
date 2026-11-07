@@ -114,8 +114,8 @@ func _align_baseline(control: Control) -> void:
 ## How far above its centre a centred control's baseline is, times two.
 func _baseline_lift(control: Control) -> float:
 	var font: Font = control.get_theme_font(&"font")
-	var size: int = control.get_theme_font_size(&"font_size")
-	return font.get_ascent(size) - font.get_descent(size)
+	var font_size: int = control.get_theme_font_size(&"font_size")
+	return font.get_ascent(font_size) - font.get_descent(font_size)
 
 
 func _notification(what: int) -> void:
