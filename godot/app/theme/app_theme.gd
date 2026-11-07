@@ -666,6 +666,8 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"label_width", &"JobsBar", 380)
 	theme.set_constant(&"separation", &"JobsBar", 8)
 	theme.set_constant(&"width", &"FormDialog", 560)
+	# Delete forms: as narrow as their rows
+	theme.set_constant(&"narrow_width", &"FormDialog", 360)
 	theme.set_constant(&"label_width", &"FormDialog", 140)
 	theme.set_constant(&"text_height", &"FormDialog", 90)
 	theme.set_constant(&"note_width", &"FormDialog", 380)

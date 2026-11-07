@@ -171,6 +171,10 @@ pub enum RefOp {
     DeleteTag {
         name: String,
     },
+    /// Deletes ref `name` (full name), such as a stale remote branch.
+    DeleteRef {
+        name: String,
+    },
     AddRemote {
         name: String,
         url: String,
@@ -206,6 +210,7 @@ impl RefOp {
             Self::SetUpstream { .. } => "set upstream",
             Self::CreateTag { .. } => "create tag",
             Self::DeleteTag { .. } => "delete tag",
+            Self::DeleteRef { .. } => "delete ref",
             Self::AddRemote { .. } => "add remote",
             Self::RenameRemote { .. } => "rename remote",
             Self::RemoveRemote { .. } => "remove remote",

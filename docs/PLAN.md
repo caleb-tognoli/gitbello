@@ -300,14 +300,14 @@ Not in scope for M7.5: custom groups or tags (pin and folder groups only), listi
 **Worktree strip.** One row: a worktree icon (it lists all worktrees), the main worktree's chip, a thin line, then the linked ones by folder name.
 - A chip is borderless text (the shown one filled): the folder name without the repository's name in front (`shop-login` → `login`; core's `worktrees::short_name`), capped in width with "…", then one marker: a missing-folder, conflict/operation (in the conflict colour) or lock icon, else a dot when it has changed files. Its tooltip card has the folder, branch (or detached commit), path, changed and conflicted files, ↑ahead ↓behind, the operation and the lock reason. Middle-click shows its folder in the file manager.
 - Selecting a chip switches the whole tab content. Each worktree keeps its own view, selection and scroll positions.
-- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Delete… (also for the shown worktree, which moves to the main one; offers to delete its branch too, on by default).
+- Chip context menu: Open in editor, Open terminal, Show in file manager, Copy path, Lock/Unlock, Delete… (also for the shown worktree, which moves to the main one; offers to delete its branch too, on by default, saying what it would lose, and its remote branch; see **Deleting branches**).
 - Right after the last chip, **+** (New worktree) runs the new-task flow. Its ▾ offers Clean up merged worktrees…, Add worktree for an existing branch… and Prune.
 - When the chips don't fit, the strip scrolls; the worktree icon still lists all worktrees. Selection and chip-layout changes reveal the selected chip with minimal scrolling; unchanged refreshes preserve manual scrolling.
 
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
 - A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Each branch row has a branch icon, except the current branch uses a checkmark instead. Section arrows line up with top-level rows. The list opens with the current branch selected (nothing when it is not listed); while filtering, the first match is. Enter or a single click checks out. An unmatched search shows a quiet "No matching branches" message in the list area; changing or clearing the search restores the matching rows.
 - A branch checked out in another worktree has a worktree icon instead (its tooltip names the folder); choosing it selects that worktree's chip instead of checking out.
-- A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge into current… and Rebase current onto… come with M7.
+- A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge into current… and Rebase current onto… come with M7. A remote branch's menu offers Delete remote branch…. Delete on a row deletes it, like the menu.
 - **Remotes and tags** are a couple of steps away: Repository → Remotes… and Tags… open management dialogs (add, rename, remove; create, delete, push tags).
 - **Graph menus keep a few actions:** a commit offers Check out, Create branch here, Tag here, Cherry-pick and Copy SHA; a ref label offers check out, push tag and delete.
 
@@ -360,7 +360,15 @@ Not in scope for M7.5: custom groups or tags (pin and folder groups only), listi
 
 This runs as a single job with rollback if any step fails.
 
-**Cleanup merged worktrees.** Lists worktrees whose branch is merged into the base branch, or whose upstream is gone. It also shows dirty or unpushed warnings. Selected worktrees are removed (`git worktree remove`), with an option to delete their branches too. Squash-merged branches are detected as "upstream gone" and labelled "probably merged".
+**Cleanup merged worktrees.** Lists worktrees whose branch is merged into the base branch, or whose upstream is gone. It also shows dirty or unpushed warnings. Selected worktrees are removed (`git worktree remove`), with an option to delete their branches too, and then on the default remote (on). Squash-merged branches are detected as "upstream gone" and labelled "probably merged".
+
+**Deleting branches** (approved 2026-11-07). One dialog, which first reads what the branch would lose (`load_branch_delete_info`: commits the base lacks, commits not pushed, its remote branch, its worktree), so an unmerged branch is deleted in one step with the loss shown, not refused and asked again:
+- The dialog lists what goes as rows (`FormDialog.add_item`): a check box, an icon (branch, worktree folder, remote, tag), the name in a chip and short facts at the end, warnings amber ("2 commits not in main · 1 not pushed") and "merged into main" green. What the dialog is about is a fixed, ticked row; the others can be unticked. No "Delete X?" sentence: the title says it. Delete dialogs are narrow (`narrow_width`).
+- The remote branch's row shows while the remote still has the branch: ticked, unless the branch has commits the base lacks (deleting both would lose them). Not remembered.
+- The branch checked out here can always go: in the main worktree it switches to the base's local branch first (the usual switch, asking about local changes); in a linked worktree it deletes the worktree with it and the main one shows. A branch checked out in another linked worktree goes with that worktree. It cannot go while it is the base's branch checked out here, or checked out in the main worktree; the action says why.
+- One job (`delete_branch_with`): the worktree, then the remote branch (a failure keeps the local branch; a remote that lost it already is fine), then the local branch. The toast offers Undo: the local branch at its commit, the remote branch pushed back with a plain push (never over commits pushed since), the upstream. A worktree's folder does not come back.
+- Delete remote branch… on remote branches ("gone for everyone"), offering the local branch that tracks it (ticked when it has nothing the remote lacks). Delete tag offers its remote, off.
+- Clean up lists a row per worktree (merged or upstream gone, and what it would lose) with two toggles, Branches and On origin; Delete counts the ticked rows. The toast says "Deleted x here and on origin".
 
 **Merge with preview** (M7, Q&A 2026-10-31).
 - **Scope:** merge into the current branch only (the active worktree's branch). Rebase has no action yet; a rebase in progress (from Pull and rebase or the CLI) gets banner support only. Dragging a branch onto another comes later.
@@ -793,6 +801,14 @@ Scope settled in the Q&A of 2026-11-02; design, interface and tests in `docs/IGN
 M7.7 is complete: a and b are done. Skip-worktree is the follow-up (decision 6 in `docs/IGNORE_RULES.md`).
 
 Follow-up after b: "Keep tracked, ignore my local edits" (skip-worktree) as its own action, listed in the viewer.
+
+#### Delete flows (approved 2026-11-07)
+- [x] One delete dialog that says what is lost (commits not in the base, not pushed, the worktree) and deletes unmerged branches in one step; "Also delete origin/x" ticked unless the branch has commits the base lacks
+- [x] The current branch can be deleted (switching to the base's branch first, or with its linked worktree); a branch in another worktree goes with it; disabled deletes say why
+- [x] Undo on the delete toast, pushing the remote branch back
+- [x] Delete remote branch…, Delete in the branch list, tags and cleanup on the remote too
+
+*Result (2026-11-07):* core `runtime/branch_delete.rs` (info read, the delete job, undo, tag delete on the remote; cleanup deletes remote branches through the same job). Tests: `tests/branch_delete.rs` (9 cases with a local bare remote), `branches_smoke.gd` (one-step unmerged delete, Undo, the current branch, the tag dialog) and `worktrees_smoke.gd`; shots: `tests/visual/branch_delete_screenshots.tscn` after `branch_delete_prep.sh`.
 
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit

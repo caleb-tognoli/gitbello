@@ -1,7 +1,7 @@
 extends SmokeTest
 ## M6, reworked in M6.5 P2: worktrees as chips in one repository tab. A chip
 ## shows its worktree; a branch checked out in another worktree jumps there
-## from the branch list and cannot be deleted; Ctrl+T runs the new-task flow
+## from the branch list and deleting it offers its worktree too; Ctrl+T runs the new-task flow
 ## (the folder follows the branch name) and shows the result; a chip's menu
 ## locks, unlocks and removes (on Windows, not while a program runs from the
 ## worktree); cleanup removes merged worktrees with their
@@ -39,8 +39,8 @@ func run() -> void:
 			"overflow selection opens the linked fixture worktree")
 	strip.chips()[0].chosen.emit()
 
-	# A branch checked out in a worktree: the list says where, cannot delete
-	# it, and choosing it shows that worktree.
+	# A branch checked out in a worktree: the list says where, deleting it
+	# deletes its worktree too, and choosing it shows that worktree.
 	var view: WorktreeView = page.active_view()
 	var popover: BranchPopover = view.branch_popover()
 	press("Ctrl+B")
@@ -52,7 +52,8 @@ func run() -> void:
 	expect_eq(login_row.get_icon(0), AppTheme.icon(&"GitWorktree"), "a branch in another worktree has the worktree icon")
 	expect_eq(login_row.get_text(1), "", "with no in-worktree badge")
 	popover.menu_requested.emit(login, Vector2.ZERO)
-	expect(not ("Delete branch…" in page.menu_labels()), "no delete for a branch in a worktree: %s" % [page.menu_labels()])
+	await get_tree().process_frame
+	expect("Delete branch…" in page.menu_labels(), "a branch in a worktree can be deleted: %s" % [page.menu_labels()])
 	page.close_menu()
 	popover.branch_chosen.emit(login)
 	popover.hide()
@@ -172,7 +173,7 @@ func run() -> void:
 	var delete_form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return delete_form.visible), "delete asks first")
 	var with_branch: CheckBox = delete_form.field("delete_branch") as CheckBox
-	expect(with_branch != null and with_branch.button_pressed and with_branch.text.contains("spare"),
+	expect(with_branch != null and with_branch.button_pressed and with_branch.accessibility_name == "spare",
 			"deleting the branch too is offered, on")
 	expect_eq(delete_form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
 	press("Enter")

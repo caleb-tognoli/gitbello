@@ -877,13 +877,23 @@ func _register_branch_actions() -> void:
 	Actions.register(&"branch.rename", "Rename branch…", "Branches",
 			func() -> void: ops.call().rename_branch(branch.call()), PackedStringArray(["F2"]),
 			func() -> bool: return not String(branch.call()).is_empty(), _says("There is no branch checked out."))
-	# A branch checked out in another worktree cannot be deleted; remove the
-	# worktree first.
+	# The menu's branch, else the checked-out one. Deleting the branch checked
+	# out here switches to the base's branch first; one checked out in a
+	# linked worktree goes with its worktree (see `RepoOps.branch_delete_block`).
+	var delete_block: Callable = func() -> String:
+		var target: String = branch.call()
+		if target.is_empty():
+			return tr("There is no branch checked out.")
+		return ops.call().branch_delete_block(target)
 	Actions.register(&"branch.delete", "Delete branch…", "Branches",
-			func() -> void: ops.call().delete_branch(String(ref.call()["short"])), PackedStringArray(),
+			func() -> void: ops.call().delete_branch(branch.call()), PackedStringArray(),
 			func() -> bool:
-				return ref_is.call("branch") and not bool(ref.call()["is_head"]) \
-						and String(ref.call().get("worktree", "")).is_empty())
+				return (ref.call().is_empty() or ref_is.call("branch")) and is_ready.call() \
+						and String(delete_block.call()).is_empty(),
+			delete_block)
+	Actions.register(&"branch.delete_remote", "Delete remote branch…", "Branches",
+			func() -> void: ops.call().delete_remote_branch(String(ref.call()["short"])), PackedStringArray(),
+			func() -> bool: return ref_is.call("remote") and not String(ref.call()["short"]).ends_with("/HEAD"))
 	Actions.register(&"branch.set_upstream", "Set upstream…", "Branches",
 			func() -> void: ops.call().set_upstream(branch.call()), PackedStringArray(),
 			func() -> bool: return not String(branch.call()).is_empty() and not current_page().session.remotes().is_empty(),

@@ -7,6 +7,8 @@ extends ConfirmationDialog
 ## field introduce the form, later ones are hints under the field above.
 ## `set_menu` joins a ▾ to OK with other ways to submit (a split button).
 ## The buttons sit on the right, Cancel then OK.
+## Delete forms list what goes as item rows (`add_item`): a check box, an
+## icon, the name in a chip and short facts coloured by tone.
 
 ## The user changed field `key` (code setting a value does not count).
 signal field_changed(key: String)
@@ -33,6 +35,8 @@ var _menu_runs: Array[Callable] = []
 var _menu_labels: PackedStringArray = PackedStringArray()
 ## OK and the ▾, joined.
 var _split: HBoxContainer = HBoxContainer.new()
+## The least width (the theme's `width`, or `narrow_width` after `narrow`).
+var _width: int = 0
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
@@ -102,6 +106,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_ref_names.clear()
 	_pickers.clear()
 	_error = ""
+	_width = get_theme_constant(&"width", THEME_TYPE)
 	set_menu([])
 
 
@@ -269,6 +274,133 @@ func _browse(key: String) -> void:
 	dialog.popup_centered_ratio(0.6)
 
 
+## A row naming one thing the form acts on: a check box, `icon`, `text` in a
+## chip and `facts` at the right end (`{text, tone}`; tone `&"warning"`,
+## `&"success"`, `&"error"` or `&""` for dim). A `fixed` row is always ticked
+## (what the form is about); others are field `key`. `indent` puts the row
+## under the one above (a part of it). Clicking anywhere on it toggles it.
+func add_item(key: String, icon: StringName, text: String, value: bool = true, fixed: bool = false,
+		facts: Array = [], indent: bool = false, tooltip: String = "") -> CheckBox:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.tooltip_text = tooltip
+	var check: CheckBox = CheckBox.new()
+	check.button_pressed = value or fixed
+	check.disabled = fixed
+	check.mouse_filter = Control.MOUSE_FILTER_PASS
+	# The chip shows the name; screen readers and tests read it here.
+	check.accessibility_name = text
+	if indent:
+		row.add_child(_check_gap())
+	row.add_child(check)
+	row.add_child(_icon(icon))
+	var chip: PanelContainer = PanelContainer.new()
+	chip.theme_type_variation = &"RefChip"
+	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	var name_label: Label = Label.new()
+	name_label.text = text
+	chip.add_child(name_label)
+	row.add_child(chip)
+	var spacer: Control = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spacer.custom_minimum_size.x = float(get_theme_constant(&"separation", THEME_TYPE) * 2)
+	spacer.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(spacer)
+	for fact: Dictionary in facts:
+		_add_fact(row, String(fact["text"]), StringName(fact.get("tone", &"")))
+	row.gui_input.connect(func(event: InputEvent) -> void:
+		var click: InputEventMouseButton = event as InputEventMouseButton
+		if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT and not check.disabled:
+			check.button_pressed = not check.button_pressed
+			row.accept_event())
+	if not fixed:
+		check.toggled.connect(func(_on: bool) -> void: _touch(key))
+	_add_label("")
+	_box.add_child(row)
+	if not key.is_empty():
+		_fields[key] = check
+	return check
+
+
+## A dim line with `icon`: what else happens ("Switches to main").
+func add_aside(icon: StringName, text: String) -> Label:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_child(_check_gap())
+	row.add_child(_icon(icon, &"DimLabel"))
+	var label: Label = Label.new()
+	label.text = text
+	label.theme_type_variation = &"DimLabel"
+	row.add_child(label)
+	_add_label("")
+	_box.add_child(row)
+	return label
+
+
+## Check boxes side by side, each with an icon: options that apply to every
+## item above (`{key, icon, label, value}`).
+func add_toggles(entries: Array) -> void:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override(&"separation", get_theme_constant(&"separation", THEME_TYPE) * 2)
+	for entry: Dictionary in entries:
+		var key: String = String(entry["key"])
+		var check: CheckBox = CheckBox.new()
+		check.text = tr(String(entry["label"]))
+		check.icon = AppTheme.icon(StringName(entry["icon"]))
+		# The tick shows it is on; the icon keeps the text's colour.
+		for state: StringName in [&"icon_pressed_color", &"icon_hover_pressed_color", &"icon_focus_color"]:
+			check.add_theme_color_override(state, check.get_theme_color(&"icon_normal_color", &"CheckBox"))
+		check.button_pressed = bool(entry.get("value", true))
+		check.toggled.connect(func(_on: bool) -> void: _touch(key))
+		row.add_child(check)
+		_fields[key] = check
+	_add_label("")
+	_box.add_child(row)
+
+
+## Keeps the dialog as narrow as its rows (until the next `begin`).
+func narrow() -> void:
+	_width = get_theme_constant(&"narrow_width", THEME_TYPE)
+
+
+## Space as wide as an item row's check box, to line up under its icon.
+func _check_gap() -> Control:
+	var gap: Control = Control.new()
+	gap.custom_minimum_size.x = float(get_theme_icon(&"checked", &"CheckBox").get_width()
+			+ get_theme_constant(&"separation", &"HBoxContainer"))
+	return gap
+
+
+## One fact at the end of an item row, coloured by `tone`.
+func _add_fact(row: HBoxContainer, text: String, tone: StringName) -> void:
+	var color_name: StringName = StringName(String(tone) + "_color")
+	if tone == &"warning" or tone == &"error":
+		row.add_child(_icon(&"StatusWarning", THEME_TYPE, color_name))
+	elif tone == &"success":
+		row.add_child(_icon(&"StatusSuccess", THEME_TYPE, color_name))
+	var label: Label = Label.new()
+	label.text = text
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	if tone.is_empty():
+		label.theme_type_variation = &"DimLabel"
+	else:
+		label.add_theme_color_override(&"font_color", get_theme_color(color_name, THEME_TYPE))
+	row.add_child(label)
+
+
+## An icon sized for a form line, tinted with `color` of `type` (unless "").
+func _icon(icon: StringName, type: StringName = &"", color: StringName = &"font_color") -> TextureRect:
+	var rect: TextureRect = TextureRect.new()
+	var side: float = float(get_theme_constant(&"icon_size", THEME_TYPE))
+	rect.texture = AppTheme.icon(icon)
+	rect.custom_minimum_size = Vector2(side, side)
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rect.mouse_filter = Control.MOUSE_FILTER_PASS
+	if not type.is_empty():
+		rect.modulate = get_theme_color(color, type)
+	return rect
+
+
 func add_check(key: String, label: String, value: bool = false) -> CheckBox:
 	var check: CheckBox = CheckBox.new()
 	check.text = tr(label)
@@ -398,7 +530,7 @@ func open() -> void:
 	_fit_label_column()
 	# Shrink to this form's fields (an earlier, larger form set the size).
 	reset_size()
-	popup_centered(Vector2i(get_theme_constant(&"width", THEME_TYPE), 0))
+	popup_centered(Vector2i(_width, 0))
 	# Wrapped notes measure themselves tall until laid out at full width.
 	_shrink_to_content.call_deferred()
 	for key: String in _fields:
@@ -465,7 +597,7 @@ func _fit_label_column() -> void:
 func _shrink_to_content() -> void:
 	if visible:
 		# The dialog wraps its contents: a zero height becomes the least that fits.
-		size = Vector2i(maxi(size.x, get_theme_constant(&"width", THEME_TYPE)), 0)
+		size = Vector2i(maxi(size.x, _width), 0)
 
 
 func _add_label(text: String, top: bool = false) -> void:

@@ -16,7 +16,7 @@ signal worktree_open_requested(path: String)
 ## A worktree is about to be removed: its view should close.
 signal worktree_close_requested(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
-signal worktree_delete_requested(path: String, force: bool, branch: String)
+signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String)
 
 enum View { HISTORY, CHANGES, SHELVES }
 
@@ -24,7 +24,7 @@ enum View { HISTORY, CHANGES, SHELVES }
 const REF_MENUS: Dictionary[String, Array] = {
 	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.new", &"tag.new", &"",
 		&"branch.rename", &"branch.set_upstream", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge", &"branch.new", &"tag.new"],
+	"remote": [&"branch.checkout", &"branch.merge", &"branch.new", &"tag.new", &"", &"branch.delete_remote"],
 	"tag": [&"commit.checkout", &"branch.merge", &"branch.new", &"", &"tag.push", &"tag.delete"],
 	"worktree": [&"worktree.open_in_editor", &"worktree.open_terminal", &"worktree.show_in_file_manager",
 		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.remove"],
@@ -32,7 +32,7 @@ const REF_MENUS: Dictionary[String, Array] = {
 ## A ref label in the graph offers fewer actions than the branch list.
 const LABEL_MENUS: Dictionary[String, Array] = {
 	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge"],
+	"remote": [&"branch.checkout", &"branch.merge", &"", &"branch.delete_remote"],
 	"tag": [&"branch.merge", &"", &"tag.push", &"tag.delete"],
 }
 const COMMIT_MENU: Array[StringName] = [&"commit.amend", &"commit.checkout", &"branch.new", &"tag.new", &"",
@@ -149,8 +149,8 @@ func _ready() -> void:
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
 	_ops.close_requested.connect(func(path: String) -> void: worktree_close_requested.emit(path))
-	_ops.delete_requested.connect(func(path: String, force: bool, branch: String) -> void:
-		worktree_delete_requested.emit(path, force, branch))
+	_ops.delete_requested.connect(func(path: String, force: bool, branch: String, remote: String) -> void:
+		worktree_delete_requested.emit(path, force, branch, remote))
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
 	_menu.popup_hide.connect(func() -> void:
@@ -160,6 +160,7 @@ func _ready() -> void:
 	_sync_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_sync_ids[id], _sync_button))
 	add_child(_popover)
 	_popover.branch_chosen.connect(_on_branch_chosen)
+	_popover.delete_requested.connect(_on_branch_delete_key)
 	_popover.menu_requested.connect(func(ref: Dictionary, at: Vector2) -> void:
 		_menu.reparent(_popover)
 		show_ref_menu.call_deferred(ref, at))
@@ -501,6 +502,19 @@ func _on_label_menu(label: Dictionary, at_position: Vector2) -> void:
 
 
 ## A branch from the list: switch to it, or show the worktree that has it.
+## Delete in the branch list: the branch's (or remote branch's) delete, when
+## it can run.
+func _on_branch_delete_key(ref: Dictionary) -> void:
+	var id: StringName = &"branch.delete" if String(ref["type"]) == "branch" else &"branch.delete_remote"
+	_menu_ref = ref
+	_menu_commit = {}
+	_menu_active = true
+	if Actions.is_enabled(id):
+		_popover.hide()
+		Actions.run_action(id)
+	_menu_active = false
+
+
 func _on_branch_chosen(ref: Dictionary) -> void:
 	var worktree: String = String(ref.get("worktree", ""))
 	if not worktree.is_empty():

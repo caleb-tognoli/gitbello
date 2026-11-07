@@ -325,7 +325,8 @@ fn cleanup_finds_merged_and_gone_worktrees_and_removes_them() {
         (gone.clone(), "gone".to_owned(), false),
         (dirty.clone(), "dirty".to_owned(), false),
     ];
-    let err = outcome(&mut rt, &key, |rt| rt.cleanup(&key, items, true)).expect("dirty refuses");
+    let err =
+        outcome(&mut rt, &key, |rt| rt.cleanup(&key, items, true, false)).expect("dirty refuses");
     assert!(err.stderr.contains("modified or untracked"), "{err}");
     settle_worktrees(&mut rt, &key);
     let state = rt.repo(&key).unwrap();

@@ -4,6 +4,21 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 (`workspace.package.version`), `godot/project.godot` (`application/config/version`) and
 `godot/export_presets.cfg`, and shown in Help > About.
 
+## Unreleased
+
+### Deleting branches
+- Deleting a branch says what it would lose (commits not in the main branch, commits not
+  pushed, its worktree) and deletes it in one step, merged or not.
+- It offers to delete the branch on its remote too, ticked unless the branch has commits
+  the main branch lacks. Worktree deletes and Clean up merged worktrees offer the same.
+- Delete dialogs list what goes as compact rows: an icon, the name and what it would
+  lose, warnings in amber and merged branches in green.
+- The checked-out branch can be deleted: gitbello switches to the main branch first, or,
+  in a linked worktree, deletes the worktree with it and shows the main one.
+- Undo on the toast brings the branch back, and pushes its remote branch back.
+- Remote branches can be deleted from their menu, Delete deletes the selected branch in
+  the branch list, and deleting a tag can delete it on the remote too.
+
 ## 1.0.0
 
 The first release. gitbello is a Git GUI for people who keep many repositories and

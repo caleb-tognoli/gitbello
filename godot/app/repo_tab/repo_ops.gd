@@ -16,9 +16,9 @@ signal open_requested(path: String)
 ## A worktree is about to be removed: close its view, if open.
 signal close_requested(path: String)
 ## The user confirmed deleting worktree `path` (`force` for changes or a
-## lock), then `branch` unless empty: run it from another worktree (see
-## `delete_worktree`).
-signal delete_requested(path: String, force: bool, branch: String)
+## lock), with `branch` unless empty (and remote branch `remote`, `origin/x`,
+## unless empty): run it from another worktree (see `delete_worktree`).
+signal delete_requested(path: String, force: bool, branch: String, remote: String)
 ## The Changes view should show; with `conflicts`, at the first conflicted file.
 signal changes_requested(conflicts: bool)
 ## A commit message to offer in the commit box (after a squash merge).
@@ -40,14 +40,17 @@ var _on_confirm: Callable = Callable()
 ## Checkouts started here: job id -> `{name, start, origin}`; `start` is
 ## `func(changes: String) -> int` (`keep`, `bring` or `leave`).
 var _checkouts: Dictionary[int, Dictionary] = {}
-## Branch deletes started here: job id -> branch name.
-var _deletes: Dictionary[int, String] = {}
 ## Tags to push once created: job id -> tag name.
 var _tag_pushes: Dictionary[int, String] = {}
-## Branches to delete once their worktree is deleted: job id -> branch.
-var _worktree_branches: Dictionary[int, String] = {}
+## The delete info being loaded (`load_branch_delete_info`), and what for:
+## `{job, kind}` with kind `branch` or `worktree` (then `worktree`, the
+## chip's ref).
+var _delete_info: Dictionary = {}
+## Run with the checkout's success (`func(ok: bool)`) by the next checkout
+## `_checkout` starts (deleting the current branch switches first).
+var _switch_then: Callable = Callable()
 ## Worktree deletions started here, to try again with the same choices:
-## path (forward slashes) -> `{force, branch}`.
+## path (forward slashes) -> `{force, branch, remote}`.
 var _worktree_deletes: Dictionary[String, Dictionary] = {}
 ## New tasks and added worktrees started here, shown once created: job id -> path.
 var _tasks: Dictionary[int, String] = {}
@@ -133,11 +136,13 @@ func set_session(value: RepoSession) -> void:
 		session.job_finished.disconnect(_on_job_finished)
 		session.cleanup_loaded.disconnect(_on_cleanup_loaded)
 		session.merge_preview_ready.disconnect(_on_merge_preview)
+		session.branch_delete_info_ready.disconnect(_on_delete_info)
 	session = value
 	if session != null:
 		session.job_finished.connect(_on_job_finished)
 		session.cleanup_loaded.connect(_on_cleanup_loaded)
 		session.merge_preview_ready.connect(_on_merge_preview)
+		session.branch_delete_info_ready.connect(_on_delete_info)
 
 
 func form() -> FormDialog:
@@ -346,15 +351,18 @@ func _checkout_detached(oid: String) -> void:
 
 func _checkout(shown: String, start: Callable) -> int:
 	var origin: Control = Actions.origin()
+	var then: Callable = _switch_then
+	_switch_then = Callable()
 	if session.change_count() > 0:
-		_ask_switch(shown, start, origin)
+		_ask_switch(shown, start, origin, then)
 		return -1
-	return _start_checkout(shown, start, "keep", origin)
+	return _start_checkout(shown, start, "keep", origin, then)
 
 
-## Asks whether to bring the local changes to `name` or leave them here.
-func _ask_switch(shown: String, start: Callable, origin: Control) -> void:
-	_pending_switch = {"name": shown, "start": start, "origin": origin}
+## Asks whether to bring the local changes to `name` or leave them here;
+## `then` follows the switch (see `_switch_then`).
+func _ask_switch(shown: String, start: Callable, origin: Control, then: Callable = Callable()) -> void:
+	_pending_switch = {"name": shown, "start": start, "origin": origin, "then": then}
 	var here: String = _here()
 	_switch.dialog_text = tr("You have local changes. Bring them to %s, or leave them on %s? Left changes are shelved and offered back when you return.") % [shown, here]
 	_switch.ok_button_text = tr("Bring them to %s") % shown
@@ -368,14 +376,18 @@ func _answer_switch(changes: String) -> void:
 		return
 	var entry: Dictionary = _pending_switch
 	_pending_switch = {}
-	_start_checkout(String(entry["name"]), entry["start"], changes, entry.get("origin") as Control)
+	_start_checkout(String(entry["name"]), entry["start"], changes, entry.get("origin") as Control,
+			entry.get("then", Callable()))
 
 
-func _start_checkout(shown: String, start: Callable, changes: String, origin: Control) -> int:
+func _start_checkout(shown: String, start: Callable, changes: String, origin: Control,
+		then: Callable = Callable()) -> int:
 	var job: int = start.call(changes)
 	if job >= 0:
-		_checkouts[job] = {"name": shown, "start": start, "origin": origin}
-	return _track(job, tr("Switching to %s") % shown, "", Callable(), origin, Callable(), "Switching")
+		_checkouts[job] = {"name": shown, "start": start, "origin": origin, "then": then}
+	# A switch that asks again about changes (see `_on_job_finished`) passes
+	# `then` on to the second try; this one only reports a failure.
+	return _track(job, tr("Switching to %s") % shown, "", then, origin, Callable(), "Switching")
 
 
 ## The current branch's name, or "this commit" when detached.
@@ -488,15 +500,214 @@ func _rename_branch(values: Dictionary, old: String) -> void:
 		_track(session.rename_branch(old, new), tr("Renaming %s") % old, tr("Renamed %s to %s") % [old, new])
 
 
+## Why local `branch` cannot be deleted, or "" when it can: deleting the
+## branch checked out here switches to the base's branch first (in a linked
+## worktree it deletes the worktree), so the base's own branch while checked
+## out here cannot go, nor a branch checked out in the main worktree.
+func branch_delete_block(branch: String) -> String:
+	var ref: Dictionary = _branch_ref("branch", branch)
+	if ref.is_empty():
+		return tr("There is no branch checked out.")
+	var holder: String = String(ref.get("worktree", ""))
+	if bool(ref["is_head"]) or (not holder.is_empty() and Paths.same(holder, session.toplevel())):
+		if not _this_worktree().is_empty() and not bool(_this_worktree()["is_main"]):
+			return ""
+		var base: String = base_branch()
+		if base.is_empty():
+			return tr("There is no main branch to switch to.")
+		if base == branch:
+			return tr("Switch to another branch to delete %s.") % branch
+		var base_holder: String = String(_branch_ref("branch", base).get("worktree", ""))
+		if not base_holder.is_empty() and not Paths.same(base_holder, session.toplevel()):
+			return tr("%s is checked out in another worktree.") % base
+		return ""
+	var wt: Dictionary = _worktree_at(holder)
+	if not wt.is_empty() and bool(wt["is_main"]):
+		return tr("%s is checked out in the main worktree.") % branch
+	return ""
+
+
+## The local branch of the base (`main` for `origin/main`), or "".
+func base_branch() -> String:
+	var base: String = session.default_base()
+	for remote: String in session.remotes():
+		if base.begins_with(remote + "/"):
+			return base.trim_prefix(remote + "/")
+	return base
+
+
+## Asks before deleting `branch`, saying what goes with it: commits merged
+## nowhere else, commits not pushed, its worktree, and its remote branch
+## (offered, ticked unless the branch has commits the base lacks).
 func delete_branch(branch: String) -> void:
-	_ask("Delete branch", tr("Delete branch %s?") % branch, "Delete", _delete_branch.bind(branch), true)
+	if not _load_delete_info(branch, {"kind": "branch"}):
+		_delete_info = {}
 
 
-func _delete_branch(branch: String) -> void:
-	var job: int = session.delete_branch(branch, false)
-	if job >= 0:
-		_deletes[job] = branch
-	_track(job, tr("Deleting %s") % branch, tr("Deleted branch %s") % branch)
+## Loads the delete info of `branch` for `what` (see `_delete_info`).
+## Returns whether it started (not when the branch is not read yet).
+func _load_delete_info(branch: String, what: Dictionary) -> bool:
+	var job: int = session.load_branch_delete_info(branch)
+	_delete_info = what
+	_delete_info["job"] = job
+	return job >= 0
+
+
+func _on_delete_info(job: int) -> void:
+	if _delete_info.is_empty() or int(_delete_info["job"]) != job:
+		return
+	var what: Dictionary = _delete_info
+	_delete_info = {}
+	var info: Dictionary = session.branch_delete_info()
+	if info.is_empty():
+		return
+	if String(what["kind"]) == "worktree":
+		_open_worktree_delete(what["worktree"] as Dictionary, info)
+	else:
+		_open_branch_delete(info)
+
+
+func _open_branch_delete(info: Dictionary) -> void:
+	var branch: String = String(info["branch"])
+	var here: bool = bool(info["is_head"])
+	var wt: Dictionary = _worktree_at(String(info["worktree"]))
+	if here and not bool(_this_worktree().get("is_main", true)):
+		wt = _this_worktree()
+	_begin_form("delete_branch", "Delete branch", "Delete", _submit_branch_delete.bind(info, wt))
+	_form.narrow()
+	_form.add_item("", &"GitBranch", branch, true, true, _branch_facts(info))
+	if not wt.is_empty():
+		_form.add_item("", &"Folder", _folder_name(String(wt["path"])), true, true, _worktree_facts(wt),
+				false, String(wt["path"]))
+	var remote: String = String(info["remote"])
+	if not remote.is_empty():
+		_form.add_item("remote", &"GitRemote", remote, int(info["not_in_base"]) == 0)
+	if wt.is_empty() and here:
+		_form.add_aside(&"GitBranch", tr("Switches to %s") % base_branch())
+	_form.make_destructive()
+	_form.open()
+
+
+## A fact of a delete form's row (see `FormDialog.add_item`).
+static func _fact(text: String, tone: StringName = &"") -> Dictionary:
+	return {"text": text, "tone": tone}
+
+
+## What deleting the branch of `info` loses: commits merged nowhere else and
+## commits not pushed (a warning), else that it is merged into main.
+func _branch_facts(info: Dictionary) -> Array[Dictionary]:
+	var losses: PackedStringArray = PackedStringArray()
+	var base: String = String(info["base"])
+	var missing: int = int(info["not_in_base"])
+	if missing > 0:
+		losses.append(tr("1 commit not in %s") % base if missing == 1 else tr("%d commits not in %s") % [missing, base])
+	var ahead: int = int(info["ahead"])
+	if ahead > 0:
+		losses.append(tr("1 not pushed") if ahead == 1 else tr("%d not pushed") % ahead)
+	var out: Array[Dictionary] = []
+	if not losses.is_empty():
+		out.append(_fact(" · ".join(losses), &"warning"))
+	elif not base.is_empty():
+		out.append(_fact(tr("merged into %s") % base, &"success"))
+	return out
+
+
+## What deleting worktree `wt` (`changed`, `locked`) loses: its changed
+## files (a warning) and its lock.
+func _worktree_facts(wt: Dictionary) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var changed: int = int(wt.get("changed", 0))
+	if changed > 0:
+		out.append(_fact(tr("1 changed file will be lost") if changed == 1
+				else tr("%d changed files will be lost") % changed, &"warning"))
+	if bool(wt.get("locked", false)):
+		out.append(_fact(tr("locked")))
+	return out
+
+
+static func _folder_name(path: String) -> String:
+	return path.replace("\\", "/").trim_suffix("/").get_file()
+
+
+func _submit_branch_delete(values: Dictionary, info: Dictionary, wt: Dictionary) -> void:
+	var branch: String = String(info["branch"])
+	var remote: String = String(info["remote"]) if bool(values.get("remote", false)) else ""
+	if not wt.is_empty():
+		var force: bool = int(wt.get("changed", 0)) > 0 or bool(wt.get("locked", false))
+		delete_requested.emit(String(wt["path"]), force, branch, remote)
+	elif bool(info["is_head"]):
+		_switch_then = func(ok: bool) -> void:
+			if ok:
+				_run_branch_delete(branch, remote, "", false)
+		var base: String = base_branch()
+		if _branch_ref("branch", base).is_empty():
+			checkout_remote("refs/remotes/" + session.default_base())
+		else:
+			checkout_branch(base)
+	else:
+		_run_branch_delete(branch, remote, "", false)
+
+
+## Deletes `branch` (unless "") with remote branch `remote` (unless "") and
+## worktree `worktree` (unless ""), offering Undo.
+func _run_branch_delete(branch: String, remote: String, worktree: String, force: bool) -> int:
+	var shown: String = branch if remote.is_empty() else remote if branch.is_empty() \
+			else tr("%s here and on %s") % [branch, _remote_of(remote)]
+	var id: String = branch if not branch.is_empty() else remote
+	var job: int = session.delete_branch_with(branch, remote, worktree, force)
+	return _track(job, tr("Deleting %s") % shown, tr("Deleted %s") % shown, Callable(), null,
+			_undo_branch_delete.bind(id, shown))
+
+
+func _undo_branch_delete(id: String, shown: String) -> void:
+	_track(session.undo_branch_delete(id), tr("Restoring %s") % shown, tr("Restored %s") % shown)
+
+
+## Asks before deleting remote branch `remote_ref` (`origin/x`), offering
+## to delete the local branch that tracks it (ticked when it has nothing
+## the remote lacks).
+func delete_remote_branch(remote_ref: String) -> void:
+	var local: Dictionary = {}
+	for ref: Dictionary in session.branch_refs():
+		if String(ref["kind"]) == "branch" and String(ref["upstream"]) == remote_ref \
+				and String(ref.get("worktree", "")).is_empty() and not bool(ref["is_head"]):
+			local = ref
+	_begin_form("delete_remote", "Delete remote branch", "Delete", func(values: Dictionary) -> void:
+		var branch: String = String(local["short_name"]) if bool(values.get("local", false)) else ""
+		_run_branch_delete(branch, remote_ref, "", false))
+	_form.narrow()
+	_form.add_item("", &"GitRemote", remote_ref, true, true, [_fact(tr("gone for everyone"), &"warning")])
+	if not local.is_empty():
+		var ahead: int = int(local["ahead"])
+		var facts: Array[Dictionary] = [_fact(tr("all pushed"), &"success")] if ahead == 0 \
+				else [_fact(tr("1 not pushed") if ahead == 1 else tr("%d not pushed") % ahead, &"warning")]
+		_form.add_item("local", &"GitBranch", String(local["short_name"]), ahead == 0, false, facts)
+	_form.make_destructive()
+	_form.open()
+
+
+## The remote of remote branch `remote_ref` (`origin` for `origin/x`).
+func _remote_of(remote_ref: String) -> String:
+	var found: String = remote_ref.get_slice("/", 0)
+	for remote: String in session.remotes():
+		if remote_ref.begins_with(remote + "/") and remote.length() > found.length():
+			found = remote
+	return found
+
+
+## The worktree at `path` (`session.worktrees()` entry), or empty.
+func _worktree_at(path: String) -> Dictionary:
+	if path.is_empty():
+		return {}
+	for wt: Dictionary in session.worktrees():
+		if Paths.same(String(wt["path"]), path):
+			return wt
+	return {}
+
+
+## This worktree's entry in `session.worktrees()`, or empty.
+func _this_worktree() -> Dictionary:
+	return _worktree_at(session.toplevel())
 
 
 ## Lets the user pick the remote branch `branch` tracks (or none).
@@ -574,9 +785,19 @@ func _check_tag_name(values: Dictionary) -> String:
 	return ""
 
 
+## Asks before deleting `tag_name`, offering to delete it on the default
+## remote too (off: tags are often releases others use).
 func delete_tag(tag_name: String) -> void:
-	_ask("Delete tag", tr("Delete tag %s? Copies already pushed to a remote stay there.") % tag_name, "Delete",
-			func() -> void: _track(session.delete_tag(tag_name), tr("Deleting tag %s") % tag_name), true)
+	var remote: String = session.default_remote()
+	_begin_form("delete_tag", "Delete tag", "Delete", func(values: Dictionary) -> void:
+		var there: String = remote if bool(values.get("remote", false)) else ""
+		_track(session.delete_tag(tag_name, there), tr("Deleting tag %s") % tag_name))
+	_form.narrow()
+	_form.add_item("", &"GitTag", tag_name, true, true)
+	if not remote.is_empty():
+		_form.add_item("remote", &"GitRemote", remote, false, false, [_fact(tr("gone for everyone"), &"warning")])
+	_form.make_destructive()
+	_form.open()
 
 
 func push_tag(tag_name: String) -> int:
@@ -1237,6 +1458,12 @@ func add_existing_worktree() -> void:
 
 
 func _on_form_field(key: String) -> void:
+	if _form_kind == "delete_worktree" and key == "delete_branch":
+		_form.set_field_visible("remote", bool(_form.values()["delete_branch"]))
+		return
+	if _form_kind == "cleanup":
+		_show_cleanup_choices()
+		return
 	if _form_kind == "existing" and key == "branch":
 		(_form.field("folder") as LineEdit).text = _shown_folder(session.worktree_path_for(String(_form.values()["branch"])))
 		return
@@ -1271,33 +1498,47 @@ func unlock_worktree(path: String) -> void:
 
 
 ## Asks before deleting `worktree` (a chip's ref: `path`, `short`, `branch`,
-## `detached`, `changed`, `locked`), offering to delete its branch too.
+## `detached`, `changed`, `locked`), offering to delete its branch too, and
+## its remote branch.
 func remove_worktree(worktree: Dictionary) -> void:
+	var branch: String = "" if bool(worktree.get("detached", false)) else String(worktree.get("branch", ""))
+	if branch.is_empty():
+		_open_worktree_delete(worktree, {})
+	elif not _load_delete_info(branch, {"kind": "worktree", "worktree": worktree}):
+		# Its refs are not read yet: offer the branch without the details.
+		_open_worktree_delete(worktree, {"branch": branch, "base": "", "not_in_base": 0, "ahead": 0, "remote": ""})
+
+
+func _open_worktree_delete(worktree: Dictionary, info: Dictionary) -> void:
 	var path: String = String(worktree["path"])
 	var changed: int = int(worktree.get("changed", 0))
 	var locked: bool = bool(worktree.get("locked", false))
-	var branch: String = "" if bool(worktree.get("detached", false)) else String(worktree.get("branch", ""))
+	var branch: String = String(info.get("branch", ""))
+	var remote: String = String(info.get("remote", ""))
 	_begin_form("delete_worktree", "Delete worktree", "Delete", func(values: Dictionary) -> void:
-		delete_requested.emit(path, changed > 0 or locked, branch if bool(values.get("delete_branch", false)) else ""))
-	var text: String = tr("Delete %s and its folder?") % String(worktree.get("short", path.get_file()))
-	if changed > 0:
-		text += tr(" Its %d changed file will be lost.") % changed if changed == 1 else tr(" Its %d changed files will be lost.") % changed
-	if locked:
-		text += tr(" It is locked.")
-	_form.add_note(text)
+		var with_branch: bool = not branch.is_empty() and bool(values.get("delete_branch", false))
+		var there: String = remote if with_branch and bool(values.get("remote", false)) else ""
+		delete_requested.emit(path, changed > 0 or locked, branch if with_branch else "", there))
+	_form.narrow()
+	_form.add_item("", &"Folder", String(worktree.get("short", _folder_name(path))), true, true,
+			_worktree_facts(worktree), false, path)
 	if not branch.is_empty():
-		_form.add_check("delete_branch", tr("Also delete the branch %s") % branch, true)
+		_form.add_item("delete_branch", &"GitBranch", branch, true, false, _branch_facts(info))
+		if not remote.is_empty():
+			_form.add_item("remote", &"GitRemote", remote, int(info["not_in_base"]) == 0, false, [], true)
 	_form.make_destructive()
 	_form.open()
 
 
-## Deletes worktree `path` from this worktree, then `branch` unless empty
-## (asking again if it has commits merged nowhere else).
-func delete_worktree(path: String, force: bool, branch: String) -> void:
-	_worktree_deletes[path.replace("\\", "/")] = {"force": force, "branch": branch}
-	var job: int = _track(session.remove_worktree(path, force), tr("Deleting %s") % path.get_file())
-	if job >= 0 and not branch.is_empty():
-		_worktree_branches[job] = branch
+## Deletes worktree `path` from this worktree, with `branch` unless empty
+## (merged or not: the dialog said what goes) and remote branch `remote`
+## unless empty; deleting the branch offers Undo.
+func delete_worktree(path: String, force: bool, branch: String, remote: String = "") -> void:
+	_worktree_deletes[path.replace("\\", "/")] = {"force": force, "branch": branch, "remote": remote}
+	if branch.is_empty():
+		_track(session.remove_worktree(path, force), tr("Deleting %s") % path.get_file())
+	else:
+		_run_branch_delete(branch, remote, path, force)
 
 
 ## Deletes again the worktree whose deletion failed with `error` (a program
@@ -1305,7 +1546,8 @@ func delete_worktree(path: String, force: bool, branch: String) -> void:
 func retry_worktree_delete(error: Dictionary) -> void:
 	var path: String = removed_worktree(error)
 	var choice: Dictionary = _worktree_deletes.get(path, {})
-	delete_worktree(path, bool(choice.get("force", false)), String(choice.get("branch", "")))
+	delete_worktree(path, bool(choice.get("force", false)), String(choice.get("branch", "")),
+			String(choice.get("remote", "")))
 
 
 ## The worktree a failed `git worktree remove` was deleting, or "".
@@ -1339,27 +1581,44 @@ func _on_cleanup_loaded() -> void:
 		notice.emit("Nothing to clean up", tr("No worktree's branch is merged into %s or has lost its upstream.") % base)
 		return
 	_begin_form("cleanup", "Clean up worktrees", "Delete", _run_cleanup)
-	_form.add_note(tr("Merged into %s, or their upstream is gone:") % base)
+	_form.narrow()
 	for i: int in _cleanup_list.size():
 		var item: Dictionary = _cleanup_list[i]
-		var warnings: PackedStringArray = PackedStringArray()
-		if int(item["changed"]) > 0:
-			warnings.append(tr("1 changed file will be lost") if int(item["changed"]) == 1
-					else tr("%d changed files will be lost") % int(item["changed"]))
+		var facts: Array[Dictionary] = []
+		if String(item["reason"]) == "merged":
+			facts.append(_fact(tr("merged into %s") % base_branch(), &"success"))
+		else:
+			facts.append(_fact(tr("upstream gone")))
+		var safe: bool = int(item["changed"]) == 0 and int(item["ahead"]) == 0 and not bool(item["locked"])
 		if int(item["ahead"]) > 0:
-			warnings.append(tr("1 commit not pushed") if int(item["ahead"]) == 1
-					else tr("%d commits not pushed") % int(item["ahead"]))
-		if bool(item["locked"]):
-			warnings.append(tr("locked"))
-		var label: String = "%s  (%s)" % [String(item["branch"]),
-				tr("merged") if String(item["reason"]) == "merged" else tr("upstream gone, probably merged")]
-		if not warnings.is_empty():
-			label += " · " + ", ".join(warnings)
-		_form.add_check("wt%d" % i, label, warnings.is_empty())
-	_form.add_check("delete_branches", "Also delete their branches", true)
+			facts.append(_fact(tr("1 not pushed") if int(item["ahead"]) == 1
+					else tr("%d not pushed") % int(item["ahead"]), &"warning"))
+		facts.append_array(_worktree_facts(item))
+		_form.add_item("wt%d" % i, &"GitWorktree", String(item["branch"]), safe, false, facts, false,
+				String(item["path"]))
+	var toggles: Array[Dictionary] = [{"key": "delete_branches", "icon": &"GitBranch", "label": "Branches"}]
+	var remote: String = session.default_remote()
+	if not remote.is_empty():
+		toggles.append({"key": "delete_remotes", "icon": &"GitRemote", "label": tr("On %s") % remote})
+	_form.add_toggles(toggles)
 	_form.validator = _check_cleanup
 	_form.make_destructive()
+	_show_cleanup_choices()
 	_form.open()
+
+
+## The cleanup form's remote toggle (only with branches) and its count on
+## Delete.
+func _show_cleanup_choices() -> void:
+	var values: Dictionary = _form.values()
+	var remotes: Control = _form.field("delete_remotes")
+	if remotes != null:
+		remotes.visible = bool(values["delete_branches"])
+	var count: int = 0
+	for i: int in _cleanup_list.size():
+		if bool(values.get("wt%d" % i, false)):
+			count += 1
+	_form.ok_button_text = tr("Delete %d") % count if count > 1 else tr("Delete")
 
 
 func _check_cleanup(values: Dictionary) -> String:
@@ -1385,7 +1644,8 @@ func _run_cleanup(values: Dictionary) -> void:
 			"branch": String(item["branch"]),
 			"force": int(item["changed"]) > 0 or bool(item["locked"]),
 		})
-	_track(session.cleanup(items, bool(values["delete_branches"])), "Cleaning up")
+	_track(session.cleanup(items, bool(values["delete_branches"]), bool(values.get("delete_remotes", false))),
+			"Cleaning up")
 
 
 # --- Follow-ups ---------------------------------------------------------------
@@ -1399,19 +1659,8 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		_checkouts.erase(job)
 		# Changes that appeared after the switch started: ask now.
 		if not ok and kind == "local_changes":
-			_ask_switch(String(entry["name"]), entry["start"], entry.get("origin") as Control)
-	elif _deletes.has(job):
-		var deleted: String = _deletes[job]
-		_deletes.erase(job)
-		if not ok and kind == "not_fully_merged":
-			_ask("Delete branch", tr("%s has commits that are not merged anywhere else. Delete it anyway?") % deleted,
-					"Delete anyway", func() -> void:
-						_track(session.delete_branch(deleted, true), tr("Deleting %s") % deleted, tr("Deleted branch %s") % deleted), true)
-	elif _worktree_branches.has(job):
-		var branch: String = _worktree_branches[job]
-		_worktree_branches.erase(job)
-		if ok:
-			_delete_branch(branch)
+			_ask_switch(String(entry["name"]), entry["start"], entry.get("origin") as Control,
+					entry.get("then", Callable()))
 	elif _tag_pushes.has(job):
 		var tag: String = _tag_pushes[job]
 		_tag_pushes.erase(job)

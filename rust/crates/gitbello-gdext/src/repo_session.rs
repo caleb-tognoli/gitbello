@@ -10,7 +10,7 @@ use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
-use gitbello_core::runtime::{DiffSlot, RepoState};
+use gitbello_core::runtime::{BranchDelete, DiffSlot, RepoState};
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
@@ -104,6 +104,10 @@ impl RepoSession {
     /// `load_cleanup` finished (`cleanup_candidates`).
     #[signal]
     fn cleanup_loaded();
+    /// The info `load_branch_delete_info` returned `job` for arrived
+    /// (`branch_delete_info`).
+    #[signal]
+    fn branch_delete_info_ready(job: i64);
     /// The files of shelf `oid` arrived (`shelf_files`).
     #[signal]
     fn shelf_files_loaded(oid: GString);
@@ -548,6 +552,89 @@ impl RepoSession {
         })
     }
 
+    /// Works out what deleting local `branch` would do;
+    /// `branch_delete_info_ready(job)` follows.
+    #[func]
+    fn load_branch_delete_info(&self, branch: GString) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| rt.load_branch_delete_info(&self.key, &branch.to_string()))
+                .flatten(),
+        )
+    }
+
+    /// `{branch, base, not_in_base, ahead, remote, worktree, is_head}`;
+    /// `remote` is the remote branch (`origin/x`) while the remote has it,
+    /// else "", `worktree` the other worktree that has it checked out, else
+    /// "". Empty until it arrived.
+    #[func]
+    fn branch_delete_info(&self) -> VarDictionary {
+        self.read(|s| {
+            s.branch_delete_info().map(|info| {
+                vdict! {
+                    "branch" => &gstr(&info.branch),
+                    "base" => &gstr(info.base.as_deref().unwrap_or("")),
+                    "not_in_base" => i64::from(info.not_in_base),
+                    "ahead" => i64::from(info.ahead),
+                    "remote" => &gstr(&info.remote.as_ref().map(|r| r.short_name()).unwrap_or_default()),
+                    "worktree" => &info.worktree.as_deref().map_or_else(GString::new, path_str),
+                    "is_head" => info.is_head,
+                }
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Deletes local branch `branch` (unless "", merged or not), remote
+    /// branch `remote` (`origin/x`, unless "") and first worktree `worktree`
+    /// (unless "", `force_worktree` discarding its changes or lock). A
+    /// failure stops before the local branch goes. Label `delete branch`, or
+    /// `delete remote branch` without a local branch; Undo with
+    /// `undo_branch_delete(branch, else remote)`.
+    #[func]
+    fn delete_branch_with(
+        &self,
+        branch: GString,
+        remote: GString,
+        worktree: GString,
+        force_worktree: bool,
+    ) -> i64 {
+        let (branch, remote, worktree) =
+            (branch.to_string(), remote.to_string(), worktree.to_string());
+        job_id(
+            runtime_cell::with(|rt| {
+                let remote = if remote.is_empty() {
+                    None
+                } else {
+                    Some(rt.repo(&self.key)?.split_remote_branch(&remote)?)
+                };
+                let delete = BranchDelete {
+                    branch: (!branch.is_empty()).then_some(branch),
+                    remote,
+                    worktree: (!worktree.is_empty())
+                        .then(|| (PathBuf::from(worktree), force_worktree)),
+                };
+                rt.delete_branch(&self.key, delete)
+            })
+            .flatten(),
+        )
+    }
+
+    /// Whether the delete of `id` (the local branch, else the remote branch
+    /// `origin/x`) can be undone.
+    #[func]
+    fn can_undo_branch_delete(&self, id: GString) -> bool {
+        self.read(|s| s.can_undo_branch_delete(&id.to_string()))
+            .unwrap_or(false)
+    }
+
+    /// Puts back the delete of `id` (see `can_undo_branch_delete`): the local
+    /// branch, the remote branch and the upstream. Label `undo branch delete`.
+    #[func]
+    fn undo_branch_delete(&self, id: GString) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_branch_delete(&self.key, &id.to_string())).flatten())
+    }
+
     /// Makes `branch` track `upstream` (`origin/x`); empty unsets it.
     /// Label `set upstream`.
     #[func]
@@ -573,10 +660,18 @@ impl RepoSession {
 
     /// Label `delete tag`.
     #[func]
-    fn delete_tag(&self, name: GString) -> i64 {
-        self.ref_op(RefOp::DeleteTag {
-            name: name.to_string(),
-        })
+    fn delete_tag(&self, name: GString, remote: GString) -> i64 {
+        let remote = remote.to_string();
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.delete_tag(
+                    &self.key,
+                    &name.to_string(),
+                    (!remote.is_empty()).then_some(remote),
+                )
+            })
+            .flatten(),
+        )
     }
 
     /// Applies commit `oid` on top of HEAD. Label `cherry-pick`.
@@ -885,9 +980,15 @@ impl RepoSession {
     }
 
     /// Removes worktrees (`{path, branch, force}` each) and, with
-    /// `delete_branches`, their branches. Label `clean up worktrees`.
+    /// `delete_branches`, their branches, with `delete_remotes` on their
+    /// remote too. Label `clean up worktrees`.
     #[func]
-    fn cleanup(&self, items: Array<VarDictionary>, delete_branches: bool) -> i64 {
+    fn cleanup(
+        &self,
+        items: Array<VarDictionary>,
+        delete_branches: bool,
+        delete_remotes: bool,
+    ) -> i64 {
         let items: Vec<(PathBuf, String, bool)> = items
             .iter_shared()
             .map(|item| {
@@ -899,7 +1000,10 @@ impl RepoSession {
                 (PathBuf::from(text("path")), text("branch"), force)
             })
             .collect();
-        job_id(runtime_cell::with(|rt| rt.cleanup(&self.key, items, delete_branches)).flatten())
+        job_id(
+            runtime_cell::with(|rt| rt.cleanup(&self.key, items, delete_branches, delete_remotes))
+                .flatten(),
+        )
     }
 
     // --- Changes view ---------------------------------------------------------

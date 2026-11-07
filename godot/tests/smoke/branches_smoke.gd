@@ -2,7 +2,8 @@ extends SmokeTest
 ## M5, reworked in M6.5 P2: branches, tags and cherry-pick from the keyboard,
 ## the branch list (Ctrl+B), dialogs and context menus (a branch row's, a
 ## commit's, a ref label's), including the dirty-tree checkout that stashes,
-## switches and re-applies, and deleting an unmerged branch. GDScript only writes
+## switches and re-applies, deleting an unmerged branch (one dialog saying
+## what is lost, with Undo) and the checked-out one. GDScript only writes
 ## `lines.txt`; the app runs git. Uses fixture `repo-9`. Skipped without
 ## `--fixtures`.
 
@@ -193,8 +194,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return read_file(lines_path).begins_with("topic 1\n")),
 			"the commit was picked onto main")
 
-	# Deleting renamed from its context menu: it is not merged, so a second
-	# dialog offers to delete anyway.
+	# Deleting renamed from its context menu: it is not merged, which the one
+	# dialog says; Undo brings it back.
 	press("Ctrl+B")
 	expect(await wait_until(func() -> bool: return popover.visible), "Ctrl+B opens the branch list")
 	popover.set_filter("renamed")
@@ -211,12 +212,14 @@ func run() -> void:
 	expect(page.context_menu().get_parent() == popover, "the branch menu belongs to the branch popup window")
 	expect("Delete branch…" in page.menu_labels(), "the branch menu offers delete: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete branch…"), "delete chosen from the menu")
-	expect(await wait_until(func() -> bool: return confirm.visible), "delete asks first")
+	expect(await wait_until(func() -> bool: return form.visible), "delete asks first")
+	expect(_notes(form).contains("not in"), "the dialog says what is merged nowhere else: %s" % _notes(form))
+	expect_eq(form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
 	press("Enter")
-	expect(await wait_until(func() -> bool: return confirm.visible and confirm.dialog_text.contains("not merged")),
-			"an unmerged branch needs a second confirmation: %s" % confirm.dialog_text)
-	press("Enter")
-	expect(await wait_until(func() -> bool: return not _has_branch(session, "renamed")), "renamed was deleted")
+	expect(await wait_until(func() -> bool: return not _has_branch(session, "renamed")), "renamed was deleted at once")
+	expect(await wait_until(func() -> bool: return session.can_undo_branch_delete("renamed")), "the delete can be undone")
+	session.undo_branch_delete("renamed")
+	expect(await wait_until(func() -> bool: return _has_branch(session, "renamed")), "Undo brought renamed back")
 
 	# A tag on the selected commit from its context menu, then deleted again.
 	list.grab_focus()
@@ -234,9 +237,27 @@ func run() -> void:
 			Vector2.ZERO)
 	expect("Push tag" in page.menu_labels(), "the tag menu offers push: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete tag…"), "delete tag chosen")
-	expect(await wait_until(func() -> bool: return confirm.visible), "tag delete asks first")
+	expect(await wait_until(func() -> bool: return form.visible), "tag delete asks first")
+	var on_remote: CheckBox = form.field("remote") as CheckBox
+	expect(on_remote == null or not on_remote.button_pressed, "deleting it on the remote is offered, off")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return not _has_tag(session, "v2.0")), "the tag was deleted")
+
+	# The checked-out branch: deleting it switches to main first.
+	session.create_branch("short-lived", "HEAD", true)
+	expect(await wait_until(func() -> bool: return session.current_branch() == "short-lived" and _has_branch(session, "short-lived")),
+			"on short-lived")
+	expect(Actions.run_action(&"branch.delete"), "the current branch can be deleted: %s" % Actions.disabled_reason(&"branch.delete"))
+	expect(await wait_until(func() -> bool: return form.visible), "it asks first")
+	expect(_notes(form).contains("Switches to main"), "saying it switches to main: %s" % _notes(form))
+	press("Enter")
+	if await wait_until(func() -> bool: return _ops.switch_dialog().visible, 2000):
+		_ops.switch_dialog().get_ok_button().pressed.emit()
+	expect(await wait_until(func() -> bool: return session.current_branch() == "main" and not _has_branch(session, "short-lived")),
+			"switched to main and deleted it")
+	expect(not Actions.is_enabled(&"branch.delete"), "main itself cannot be deleted while checked out")
+	expect(Actions.disabled_reason(&"branch.delete").contains("Switch to another branch"),
+			"and says why: %s" % Actions.disabled_reason(&"branch.delete"))
 
 	while main.tab_count() > 0:
 		main.close_tab(0)
@@ -370,3 +391,12 @@ func _code(session: RepoSession, path: String) -> String:
 		return ""
 	var rows: Array[Dictionary] = session.change_rows(index, 1)
 	return String(rows[0].get("code", "")) if not rows.is_empty() else ""
+
+
+## The text of `form`'s notes, rows and their facts.
+static func _notes(form: FormDialog) -> String:
+	var out: PackedStringArray = PackedStringArray()
+	for node: Node in form.find_children("*", "Label", true, false):
+		if (node as Label).is_visible_in_tree():
+			out.append((node as Label).text)
+	return "\n".join(out)

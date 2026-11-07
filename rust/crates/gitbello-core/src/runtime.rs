@@ -51,8 +51,15 @@ use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 mod amend;
+mod branch_delete;
 mod ignore;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
+use branch_delete::BranchDeleteState;
+pub use branch_delete::{
+    BranchDelete, BranchDeleteInfo, DeletedBranch, RemoteBranch, BRANCH_DELETE_INFO_JOB_LABEL,
+    DELETE_BRANCH_JOB_LABEL, DELETE_REMOTE_BRANCH_JOB_LABEL, MAX_BRANCH_UNDO,
+    UNDO_BRANCH_DELETE_JOB_LABEL,
+};
 use ignore::{apply_ignore_picks, reload_ignore_rules, IgnoreState};
 pub use ignore::{
     IGNORE_JOB_LABEL, IGNORE_PREVIEW_JOB_LABEL, IGNORE_RULES_JOB_LABEL, IGNORE_WRITE_LABELS,
@@ -144,6 +151,9 @@ const AUTO_FETCH_FIRST_DELAY: Duration = Duration::from_secs(5);
 /// conflicted pull, a checkout whose stashed changes did not re-apply).
 const REFRESH_ON_FAILURE: &[&str] = &[
     CHECKOUT_JOB_LABEL,
+    DELETE_BRANCH_JOB_LABEL,
+    DELETE_REMOTE_BRANCH_JOB_LABEL,
+    UNDO_BRANCH_DELETE_JOB_LABEL,
     PULL_JOB_LABEL,
     "cherry-pick",
     "abort",
@@ -256,6 +266,11 @@ pub enum RuntimeEvent {
     MergePreviewLoaded {
         repo: PathBuf,
         target: String,
+    },
+    /// The delete info of job `job`, from [`Runtime::load_branch_delete_info`].
+    BranchDeleteInfoLoaded {
+        repo: PathBuf,
+        job: JobId,
     },
     /// The preview of job `job`, from [`Runtime::load_ignore_preview`].
     IgnorePreviewLoaded {
@@ -476,6 +491,7 @@ pub struct RepoState {
     missing: bool,
     cleanup: Option<Vec<CleanupCandidate>>,
     ignore: IgnoreState,
+    branch_delete: BranchDeleteState,
     /// The status plus the ignored paths, while "Show ignored files" is on.
     listed: Option<RepoStatus>,
 }
@@ -529,6 +545,7 @@ impl RepoState {
             missing: false,
             cleanup: None,
             ignore: IgnoreState::default(),
+            branch_delete: BranchDeleteState::default(),
             listed: None,
         }
     }
@@ -2421,6 +2438,7 @@ impl Runtime {
                 checkout: false, ..
             }
             | RefOp::DeleteBranch { .. }
+            | RefOp::DeleteRef { .. }
             | RefOp::CreateTag { .. }
             | RefOp::DeleteTag { .. }
             | RefOp::AddRemote { .. }
@@ -2840,15 +2858,27 @@ impl Runtime {
     }
 
     /// Removes worktrees (`(path, branch, force)`; force discards local
-    /// changes) and, with `delete_branches`, their branches. Goes on past a
-    /// failure and reports the first one.
+    /// changes) and, with `delete_branches`, their branches, with
+    /// `delete_remotes` also on their remote (where it still has them). Goes
+    /// on past a failure and reports the first one.
     pub fn cleanup(
         &self,
         key: &Path,
         items: Vec<(PathBuf, String, bool)>,
         delete_branches: bool,
+        delete_remotes: bool,
     ) -> Option<JobId> {
-        self.repos.get(key).filter(|s| s.is_ready())?;
+        let state = self.repos.get(key).filter(|s| s.is_ready())?;
+        let toplevel = state.toplevel.clone()?;
+        let items: Vec<(PathBuf, String, bool, Option<RemoteBranch>)> = items
+            .into_iter()
+            .map(|(path, branch, force)| {
+                let remote = (delete_branches && delete_remotes)
+                    .then(|| state.live_upstream(&branch))
+                    .flatten();
+                (path, branch, force, remote)
+            })
+            .collect();
         let leftovers = self.leftover_worktrees.clone();
         Some(self.scheduler.submit(JobSpec::write(
             key,
@@ -2857,16 +2887,21 @@ impl Runtime {
             move |ctx| {
                 let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
                 let mut first_error = None;
-                for (path, branch, force) in items {
-                    let mut result =
-                        remove_worktree(backend, repo, &path, force, &leftovers, cancel);
-                    if result.is_ok() && delete_branches {
-                        let delete = RefOp::DeleteBranch {
-                            name: branch,
-                            force: true,
+                for (path, branch, force, remote) in items {
+                    let result = if delete_branches {
+                        let delete = BranchDelete {
+                            branch: Some(branch),
+                            remote,
+                            worktree: Some((path, force)),
                         };
-                        result = backend.ref_op(repo, &delete, cancel);
-                    }
+                        let progress = Box::new(ctx.progress_sink());
+                        branch_delete::delete_job(
+                            backend, repo, &toplevel, &delete, None, &leftovers, progress, cancel,
+                        )
+                        .map(drop)
+                    } else {
+                        remove_worktree(backend, repo, &path, force, &leftovers, cancel)
+                    };
                     if let Err(err) = result {
                         first_error.get_or_insert(err);
                     }
@@ -3163,6 +3198,9 @@ impl Runtime {
             return;
         }
         if Self::apply_ignore_event(state, job, &label, &kind, &repo, out) {
+            return;
+        }
+        if Self::apply_branch_delete_event(state, job, &label, &kind, &repo, out) {
             return;
         }
         if label == MERGE_PREVIEW_JOB_LABEL {
@@ -3573,7 +3611,10 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::CommitUndone(_)
         | JobOutput::IgnorePreview(_)
         | JobOutput::IgnoreRules(_)
-        | JobOutput::Ignored(_) => {}
+        | JobOutput::Ignored(_)
+        | JobOutput::BranchDeleteInfo(_)
+        | JobOutput::BranchDeleted(_)
+        | JobOutput::BranchRestored(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }

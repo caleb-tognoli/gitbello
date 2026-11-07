@@ -88,6 +88,7 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"branch.new": &"GitBranch",
 	&"branch.rename": &"Rename",
 	&"branch.delete": &"Remove",
+	&"branch.delete_remote": &"Remove",
 	&"branch.set_upstream": &"GitRemote",
 	&"tag.new": &"GitTag",
 	&"tag.push": &"GitPush",

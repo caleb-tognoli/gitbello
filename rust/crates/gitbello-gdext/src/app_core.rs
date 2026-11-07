@@ -227,6 +227,12 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.emit_signal("merge_preview_ready", &[gstr(&target).to_variant()]);
             }
         }
+        RuntimeEvent::BranchDeleteInfoLoaded { repo, job } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let job = i64::try_from(job).unwrap_or(i64::MAX);
+                session.emit_signal("branch_delete_info_ready", &[job.to_variant()]);
+            }
+        }
         RuntimeEvent::IgnorePreviewLoaded { repo, job } => {
             if let Some(mut session) = find(sessions, &repo) {
                 let job = i64::try_from(job).unwrap_or(i64::MAX);

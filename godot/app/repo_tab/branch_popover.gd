@@ -15,6 +15,8 @@ extends PopupPanel
 signal branch_chosen(ref: Dictionary)
 ## Right-click or the menu key on a branch; `at_position` is on the screen.
 signal menu_requested(ref: Dictionary, at_position: Vector2)
+## Delete was pressed on a branch or remote branch.
+signal delete_requested(ref: Dictionary)
 signal new_branch_requested()
 ## A branch to merge into the current one was chosen (see `open_below`).
 signal merge_chosen(ref: Dictionary)
@@ -453,6 +455,12 @@ func _on_tree_input(event: InputEvent) -> void:
 			_choose(at)
 		return
 	var item: TreeItem = _tree.get_selected()
+	var key: InputEventKey = event as InputEventKey
+	if key != null and key.pressed and not key.echo and key.keycode == KEY_DELETE \
+			and item != null and item.get_metadata(0) is Dictionary:
+		delete_requested.emit(item.get_metadata(0) as Dictionary)
+		_tree.accept_event()
+		return
 	if event.is_action_pressed("ui_up", false, true) and item != null and item == _first_ref(_tree.get_root()):
 		_filter.focus_text()
 		_tree.accept_event()

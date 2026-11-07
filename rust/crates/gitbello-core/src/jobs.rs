@@ -186,6 +186,12 @@ pub enum JobOutput {
     ShelfUndone(ShelfChange),
     /// What merging a branch would do (see `Runtime::load_merge_preview`).
     MergePreview(Box<MergePreview>),
+    /// What deleting a branch would do (`Runtime::load_branch_delete_info`).
+    BranchDeleteInfo(Box<crate::runtime::BranchDeleteInfo>),
+    /// A branch delete finished; what it removed, for undo.
+    BranchDeleted(Box<crate::runtime::DeletedBranch>),
+    /// The delete was undone.
+    BranchRestored(Box<crate::runtime::DeletedBranch>),
     /// What an ignore rule would do (see `Runtime::load_ignore_preview`).
     IgnorePreview(Box<crate::ignore::IgnorePreview>),
     /// The rules viewer's model (`Runtime::load_ignore_rules`).

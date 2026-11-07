@@ -337,6 +337,14 @@ pub trait GitBackend: Send + Sync {
         rev: &str,
         cancel: &CancelToken,
     ) -> Result<Option<String>, GitError>;
+    /// How many commits `tip` has that none of `bases` has.
+    fn count_commits(
+        &self,
+        repo: &Path,
+        bases: &[String],
+        tip: &str,
+        cancel: &CancelToken,
+    ) -> Result<u32, GitError>;
 
     /// What merging `target` (a full ref name or a commit) into HEAD would
     /// do, without touching the working tree. `branch` is the current branch
@@ -1368,6 +1376,7 @@ impl GitBackend for CliBackend {
                 .run()
                 .map(drop),
             RefOp::DeleteTag { name } => git(&["tag", "--delete", name]),
+            RefOp::DeleteRef { name } => git(&["update-ref", "-d", name]),
             RefOp::AddRemote { name, url } => git(&["remote", "add", "--", name, url]),
             RefOp::RenameRemote { old, new } => git(&["remote", "rename", "--", old, new]),
             RefOp::RemoveRemote { name } => git(&["remote", "remove", "--", name]),
@@ -1727,6 +1736,27 @@ impl GitBackend for CliBackend {
             .filter(|l| !l.is_empty())
             .map(str::to_owned)
             .collect())
+    }
+
+    fn count_commits(
+        &self,
+        repo: &Path,
+        bases: &[String],
+        tip: &str,
+        cancel: &CancelToken,
+    ) -> Result<u32, GitError> {
+        let excluded: Vec<String> = bases.iter().map(|b| format!("^{b}")).collect();
+        let mut args = vec!["rev-list", "--count", tip];
+        args.extend(excluded.iter().map(String::as_str));
+        args.push("--");
+        let out = self.read(repo, &args, cancel)?;
+        out.stdout_text().trim().parse().map_err(|_| {
+            GitError::new(
+                format!("rev-list --count {tip}"),
+                GitErrorKind::UnexpectedOutput,
+                out.stdout_text(),
+            )
+        })
     }
 
     fn resolve(

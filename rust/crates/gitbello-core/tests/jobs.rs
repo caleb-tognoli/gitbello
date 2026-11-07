@@ -236,6 +236,15 @@ impl GitBackend for FakeBackend {
     fn merged_branches(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Vec<String>, GitError> {
         Ok(Vec::new())
     }
+    fn count_commits(
+        &self,
+        _: &Path,
+        _: &[String],
+        _: &str,
+        _: &CancelToken,
+    ) -> Result<u32, GitError> {
+        Ok(0)
+    }
     fn resolve(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Option<String>, GitError> {
         Ok(None)
     }
