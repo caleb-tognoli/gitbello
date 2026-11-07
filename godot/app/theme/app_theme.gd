@@ -677,6 +677,12 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"warning_color", &"FormDialog", p.modified)
 	theme.set_color(&"error_color", &"FormDialog", p.error)
 	theme.set_constant(&"icon_size", &"FormDialog", 16)
+	# Room a dialog leaves around itself in the window (FormDialog.add_list)
+	theme.set_constant(&"window_margin", &"FormDialog", 96)
+	# A form's scrolling list (FormDialog.add_list): rows on the background
+	_variation(theme, &"FormList", &"ScrollContainer")
+	theme.set_stylebox(&"panel", &"FormList", _box(p.background, 4, Vector4(8, 6, 4, 6), p.border, 1))
+	theme.set_constant(&"scrollbar_v_separation", &"FormList", 6)
 	# A fold toggle (chevron and text) lined up with the text around it
 	_variation(theme, &"DisclosureButton", &"Button")
 	for state: StringName in [&"normal", &"hover", &"pressed", &"hover_pressed", &"focus", &"disabled"]:

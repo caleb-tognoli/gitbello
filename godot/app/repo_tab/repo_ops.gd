@@ -81,7 +81,7 @@ var _merge_spin: Tween = null
 var _merge_conflicts: VBoxContainer = null
 var _merge_callout: Label = null
 var _merge_commits: VBoxContainer = null
-var _merge_commits_toggle: Button = null
+var _merge_commits_title: Label = null
 ## Merges started here: job id -> `{target, shown, mode, commits}`.
 var _merges: Dictionary[int, Dictionary] = {}
 ## Undoing a merge commit: keep its changes (OK) or remove the merge.
@@ -867,7 +867,8 @@ func _check_remote(values: Dictionary, current: String, needs_url: bool) -> Stri
 ## full name, or a commit), shown as `shown`; it fills in once the preview
 ## arrives. One column: `shown → here`, a status line (a spinner while
 ## checking), the conflicted files, a callout for local changes the merge
-## would overwrite, the commits to merge (folded) and the message.
+## would overwrite, the commits to merge (a list that scrolls once the dialog
+## would outgrow the window) and the message.
 func merge_into_current(target: String, shown: String = "") -> void:
 	if shown.is_empty():
 		shown = target.left(7) if target.is_valid_hex_number() else target
@@ -904,26 +905,17 @@ func merge_into_current(target: String, shown: String = "") -> void:
 	callout_row.add_child(_merge_callout)
 	callout.add_child(callout_row)
 	_form.add_control("local_changes", "", callout)
-	var commits: VBoxContainer = VBoxContainer.new()
-	_merge_commits_toggle = Button.new()
-	_merge_commits_toggle.theme_type_variation = &"DisclosureButton"
-	_merge_commits_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_merge_commits_toggle.focus_mode = Control.FOCUS_NONE
-	_merge_commits_toggle.icon = AppTheme.icon(&"GuiTreeArrowRight")
+	_merge_commits_title = Label.new()
+	_merge_commits_title.theme_type_variation = &"DimLabel"
+	_form.add_control("commits_title", "", _merge_commits_title)
 	_merge_commits = VBoxContainer.new()
 	_merge_commits.add_theme_constant_override(&"separation", 2)
-	_merge_commits.hide()
-	_merge_commits_toggle.pressed.connect(func() -> void:
-		_merge_commits.visible = not _merge_commits.visible
-		_merge_commits_toggle.icon = AppTheme.icon(&"GuiTreeArrowDown" if _merge_commits.visible else &"GuiTreeArrowRight"))
-	commits.add_child(_merge_commits_toggle)
-	commits.add_child(_merge_commits)
-	_form.add_control("commits", "", commits)
+	_form.add_list("commits", "", _merge_commits)
 	# One line until the message has more: the box grows with its text.
 	var message: TextEdit = _form.add_text("message", "", "", "Merge commit message")
 	message.custom_minimum_size.y = 0.0
 	message.scroll_fit_content_height = true
-	for key: String in ["conflicts", "local_changes", "commits", "message"]:
+	for key: String in ["conflicts", "local_changes", "commits_title", "commits", "message"]:
 		_form.set_field_visible(key, false)
 	_merge_reason = tr("Checking for conflicts…")
 	_form.validator = func(_values: Dictionary) -> String: return _merge_reason
@@ -1002,10 +994,12 @@ func _on_merge_preview(target: String) -> void:
 		ok_text = "Shelve changes and merge"
 	_form.set_field_visible("local_changes", overwritten)
 	_fill_merge_commits(p["commits"], count)
-	_merge_commits_toggle.text = tr("%s · %s changed") % [_commits(count), _files(files)]
+	_merge_commits_title.text = tr("%s · %s changed") % [_commits(count), _files(files)]
+	_form.set_field_visible("commits_title", count > 0)
 	_form.set_field_visible("commits", count > 0)
 	(_form.field("message") as TextEdit).text = String(p["message"])
 	_form.set_field_visible("message", message_shown)
+	_form.fit()
 	_form.ok_button_text = ok_text
 	_form.set_ok_icon(null if bool(p["up_to_date"]) else AppTheme.icon(&"GitMerge"))
 	_form.set_menu(menu)

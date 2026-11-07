@@ -7,13 +7,16 @@ extends Node
 ## viewport like a user's. Pass --repo=<throwaway repo> --out=<directory>,
 ## set GITBELLO_CONFIG to a scratch config and launch windowed. The repo is on
 ## `main` with branches `topic` (conflicts with main), `clean` (merges
-## cleanly) and `ahead` (main plus commits: a fast-forward). It merges there:
+## cleanly) and `ahead` (main plus commits: a fast-forward); with --long, also
+## `long` (dozens of commits, for the scrolling commit list). It merges there:
 ## never point it at a real repository.
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 
 var _out: String = ""
 var _step: int = 0
+## `--long`: the repo also has `long`, many commits ahead of main.
+var _long: bool = false
 
 
 func _ready() -> void:
@@ -23,6 +26,8 @@ func _ready() -> void:
 			repo = arg.trim_prefix("--repo=")
 		elif arg.begins_with("--out="):
 			_out = arg.trim_prefix("--out=")
+		elif arg == "--long":
+			_long = true
 	if repo.is_empty() or _out.is_empty():
 		get_tree().quit(2)
 		return
@@ -57,8 +62,6 @@ func _ready() -> void:
 	await _press("Enter", popover)
 	await _wait(func() -> bool: return form.visible and form.ok_button_text != "Merge")
 	await _shot("dialog-conflicts")
-	(form.field("commits") as Control).get_child(0).emit_signal(&"pressed")
-	await _shot("dialog-commits-shown")
 	form.menu_button().show_popup()
 	await _shot("dialog-split-menu")
 	form.menu_button().get_popup().hide()
@@ -125,6 +128,25 @@ func _ready() -> void:
 	await _wait(func() -> bool: return form.visible and form.ok_button_text != "Merge")
 	await _shot("dialog-fast-forward")
 	form.hide()
+	# A long branch: the commit list scrolls in a dialog that fits the window,
+	# scrolled to its end, then in a shorter window.
+	if _long:
+		ops.merge_into_current("long", "long")
+		await _wait(func() -> bool: return form.visible and form.ok_button_text != "Merge")
+		await _shot("dialog-long-list")
+		var list: ScrollContainer = form.field("commits") as ScrollContainer
+		list.scroll_vertical = int(list.get_v_scroll_bar().max_value)
+		await _shot("dialog-long-list-end")
+		form.hide()
+		var full: Vector2i = get_window().size
+		get_window().size = Vector2i(full.x, floori(full.y * 2.0 / 3.0))
+		await get_tree().process_frame
+		ops.merge_into_current("long", "long")
+		await _wait(func() -> bool: return form.visible and form.ok_button_text != "Merge")
+		await _shot("dialog-long-list-short-window")
+		form.hide()
+		get_window().size = full
+		await get_tree().process_frame
 	# `clean` changes README.md's first line; a local edit to its last line.
 	var readme: String = FileAccess.get_file_as_string(repo.path_join("README.md"))
 	FileAccess.open(repo.path_join("README.md"), FileAccess.WRITE).store_string(readme + "Local note.\n")

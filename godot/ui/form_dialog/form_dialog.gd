@@ -37,6 +37,8 @@ var _menu_labels: PackedStringArray = PackedStringArray()
 var _split: HBoxContainer = HBoxContainer.new()
 ## The least width (the theme's `width`, or `narrow_width` after `narrow`).
 var _width: int = 0
+## Scrolling lists (see `add_list`).
+var _lists: Array[ScrollContainer] = []
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
@@ -51,6 +53,8 @@ func _ready() -> void:
 	_menu_button.tooltip_text = "More ways to do this"
 	_menu_button.get_popup().id_pressed.connect(_on_menu_id)
 	_arrange_buttons()
+	# Height the dialog gains goes to a list's row (see `add_list`).
+	_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_menu_button.hide()
 	_apply_theme()
 
@@ -105,6 +109,7 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_fields.clear()
 	_ref_names.clear()
 	_pickers.clear()
+	_lists.clear()
 	_error = ""
 	_width = get_theme_constant(&"width", THEME_TYPE)
 	set_menu([])
@@ -156,6 +161,51 @@ func add_control(key: String, label: String, control: Control) -> Control:
 	_box.add_child(control)
 	_fields[key] = control
 	return control
+
+
+## `rows` (a container of rows) as a field that scrolls: as tall as its rows
+## until the dialog would outgrow the window, then it scrolls; it takes the
+## height the dialog gains when resized. Call `fit` after its rows change.
+func add_list(key: String, label: String, rows: Control) -> ScrollContainer:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.theme_type_variation = &"FormList"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(rows)
+	add_control(key, label, scroll)
+	_lists.append(scroll)
+	return scroll
+
+
+## Sizes the lists to their rows (see `add_list`) and the dialog to its
+## fields, after fields changed, and centres it again: it may have grown.
+func fit() -> void:
+	_fit_lists()
+	_shrink_to_content()
+	if visible:
+		move_to_center()
+
+
+## Gives each shown list the height of its rows, sharing what the window has
+## left after the rest of the dialog; a list never gets less than a few rows.
+func _fit_lists() -> void:
+	var shown: Array[ScrollContainer] = []
+	for scroll: ScrollContainer in _lists:
+		scroll.custom_minimum_size.y = 0.0
+		if scroll.visible:
+			shown.append(scroll)
+	if shown.is_empty():
+		return
+	var room: float = get_tree().root.get_visible_rect().size.y \
+			- float(get_theme_constant(&"window_margin", THEME_TYPE)) - get_contents_minimum_size().y
+	var share: float = room / shown.size()
+	for scroll: ScrollContainer in shown:
+		var rows: Control = scroll.get_child(0) as Control
+		var frame: float = scroll.get_theme_stylebox(&"panel").get_minimum_size().y
+		var full: float = rows.get_combined_minimum_size().y + frame
+		var least: float = minf(full, frame + float(get_theme_constant(&"icon_size", THEME_TYPE) * 6))
+		scroll.custom_minimum_size.y = clampf(share, least, full)
 
 
 ## Other ways to submit, in a ▾ joined to OK: `{label, run, icon, disabled,
@@ -241,6 +291,7 @@ func set_field_visible(key: String, shown: bool) -> void:
 	var index: int = node.get_index()
 	if index > 0 and _box.columns == 2:
 		(_box.get_child(index - 1) as Control).visible = shown
+	_fit_lists()
 	_shrink_to_content()
 
 
@@ -528,6 +579,7 @@ func error_text() -> String:
 func open() -> void:
 	_validate()
 	_fit_label_column()
+	_fit_lists()
 	# Shrink to this form's fields (an earlier, larger form set the size).
 	reset_size()
 	popup_centered(Vector2i(_width, 0))
