@@ -107,6 +107,7 @@ pub fn badge_dict(badge: &Badge) -> VarDictionary {
         "conflicts" => to_i64(badge.conflicts),
         "ahead" => i64::from(badge.ahead),
         "behind" => i64::from(badge.behind),
+        "unpublished" => badge.unpublished,
         "operation" => &gstr(badge.operation.map_or("", operation_label)),
         "head" => &gstr(&badge.head),
         "summary" => &gstr(&badge.summary()),
@@ -352,6 +353,7 @@ pub fn worktrees(
             "conflicts" => badge.as_ref().map_or(0, |b| to_i64(b.conflicts)),
             "ahead" => badge.as_ref().map_or(0, |b| i64::from(b.ahead)),
             "behind" => badge.as_ref().map_or(0, |b| i64::from(b.behind)),
+            "unpublished" => badge.as_ref().is_some_and(|b| b.unpublished),
             "operation" => &gstr(operation_id(badge.as_ref().and_then(|b| b.operation))),
             "path" => &path_str(&wt.path),
             "name" => &gstr(&wt.path.file_name().map_or_else(|| wt.path.to_string_lossy(), |n| n.to_string_lossy())),
@@ -371,7 +373,8 @@ pub fn worktrees(
 }
 
 /// `{oid, parents, author, email, time, committer, committer_email,
-/// commit_time, summary, body, file_count, additions, deletions}`.
+/// commit_time, summary, body, file_count, additions, deletions, coauthors}`
+/// (coauthors as `[{name, email}]`, from the `Co-authored-by` trailers).
 pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
     let parents: PackedStringArray = commit.parents.iter().map(|p| gstr(p)).collect();
     vdict! {
@@ -388,7 +391,17 @@ pub fn commit_info(commit: &CommitDetails) -> VarDictionary {
         "file_count" => to_i64(commit.files.len()),
         "additions" => i64::from(commit.additions),
         "deletions" => i64::from(commit.deletions),
+        "coauthors" => &identities(&commit.coauthors()),
     }
+}
+
+/// Co-authors as `[{name, email}, ...]`.
+pub fn identities(list: &[(&str, &str)]) -> Array<VarDictionary> {
+    let mut out = Array::new();
+    for (name, email) in list {
+        out.push(&vdict! { "name" => &gstr(name), "email" => &gstr(email) });
+    }
+    out
 }
 
 /// A commit file row: `{path, original_path, code}`.
@@ -1033,10 +1046,13 @@ pub fn labels(labels: &[RefLabel]) -> Array<VarDictionary> {
             LabelKind::RemoteBranch => "remote",
             LabelKind::Tag => "tag",
         };
+        let remotes: PackedStringArray = label.remotes.iter().map(|r| gstr(r)).collect();
         out.push(&vdict! {
             "name" => &gstr(&label.name),
             "kind" => kind,
             "is_head" => label.is_head,
+            "remote" => &gstr(label.remote.as_deref().unwrap_or("")),
+            "remotes" => &remotes,
         });
     }
     out

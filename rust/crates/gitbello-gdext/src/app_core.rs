@@ -892,6 +892,22 @@ impl AppCore {
         .unwrap_or(false)
     }
 
+    /// Whether History shows one-line rows (saved in the config); else two
+    /// lines with the author line.
+    #[func]
+    fn history_compact(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().history_compact).unwrap_or(false)
+    }
+
+    #[func]
+    fn set_history_compact(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().history_compact = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
     /// `ff-only`, `merge` or `rebase`: what a plain pull does.
     #[func]
     fn pull_mode(&self) -> GString {

@@ -84,6 +84,8 @@ pub struct Config {
     pub diff_image_mode: DiffMode,
     /// Show the minimap beside diffs (else only its strip of change marks).
     pub diff_minimap: bool,
+    /// History rows on one line (no author line), as before M7.10.
+    pub history_compact: bool,
     /// Offer to ignore a folder such as `node_modules/` that fills Changes.
     pub ignore_hint: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
@@ -169,6 +171,7 @@ impl Default for Config {
             diff_text_mode: Viewer::Text.default_mode(),
             diff_image_mode: Viewer::Image.default_mode(),
             diff_minimap: true,
+            history_compact: false,
             ignore_hint: true,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
@@ -266,6 +269,7 @@ const KEYS: &[&str] = &[
     "diff_text_mode",
     "diff_image_mode",
     "diff_minimap",
+    "history_compact",
     "ignore_hint",
     "keybindings",
 ];
@@ -359,6 +363,7 @@ impl Config {
             diff_image_mode: take_mode(&mut table, "diff_image_mode", Viewer::Image)?
                 .unwrap_or(Viewer::Image.default_mode()),
             diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
+            history_compact: take_bool(&mut table, "history_compact")?.unwrap_or(false),
             ignore_hint: take_bool(&mut table, "ignore_hint")?.unwrap_or(true),
             keybindings: migrate_keybindings(take_string_map(&mut table, "keybindings")?),
             extra: table,
@@ -429,6 +434,10 @@ impl Config {
             table.insert(key.into(), Value::String(mode.id().into()));
         }
         table.insert("diff_minimap".into(), Value::Boolean(self.diff_minimap));
+        table.insert(
+            "history_compact".into(),
+            Value::Boolean(self.history_compact),
+        );
         table.insert("ignore_hint".into(), Value::Boolean(self.ignore_hint));
         if !self.keybindings.is_empty() {
             let bindings: Table = self
@@ -628,6 +637,7 @@ mod tests {
             diff_text_mode: DiffMode::Split,
             diff_image_mode: DiffMode::Swipe,
             diff_minimap: false,
+            history_compact: true,
             ignore_hint: false,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),

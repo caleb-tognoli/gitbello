@@ -106,8 +106,9 @@ func run() -> void:
 
 	await _check_search(page.session, list)
 	await _check_search_ui(history, list, details)
-	await _check_parents(main, page)
+	await _check_parents(page)
 	await _check_merge_parents(page)
+	await _check_parent_links(main, page)
 	await _check_pending_parents(page)
 
 	while main.tab_count() > 0:
@@ -230,7 +231,7 @@ func _select_ready(history: HistoryView, row: int) -> bool:
 			and String(history.session.commit_info().get("oid", "")) == oid)
 
 
-func _check_parents(main: Main, page: RepoTab) -> void:
+func _check_parents(page: RepoTab) -> void:
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
 	var details: CommitDetails = history.details()
@@ -242,9 +243,27 @@ func _check_parents(main: Main, page: RepoTab) -> void:
 	expect(page.session.graph_parent_rows(2).is_empty(), "root rows have no parents")
 	expect(Actions.get_action(&"history.go_to_parent").hidden, "the contextual action stays out of the palette")
 	expect(not Actions.is_enabled(&"history.go_to_parent"), "there is no target between activations")
-	expect_eq(details.parent_links().size(), 1, "an ordinary commit has one link")
-	if details.parent_links().size() != 1:
+	expect(details.parent_links().is_empty(), "an ordinary commit shows no parent links")
+	expect(not (details.get_node("%Parents") as Control).visible, "an ordinary commit has no parent row")
+	expect(await _select_ready(history, 2), "the root loads")
+	expect(details.parent_links().is_empty(), "the root shows no parent links")
+	expect(not (details.get_node("%Parents") as Control).visible, "the root has no parent row")
+
+
+## Runs after `_check_merge_parents`: row 0 is a merge, the only kind of
+## commit whose details link to its parents.
+func _check_parent_links(main: Main, page: RepoTab) -> void:
+	var history: HistoryView = page.history()
+	var list: CommitList = history.commit_list()
+	var details: CommitDetails = history.details()
+	expect(await _select_ready(history, 0), "the merge loads")
+	var info: Dictionary = page.session.commit_info()
+	var parents: PackedStringArray = info["parents"]
+	expect_eq(details.parent_links().size(), 2, "a merge has two links")
+	if details.parent_links().size() != 2:
 		return
+	var parent: String = parents[0]
+	var row: int = int(page.session.graph_parent_rows(0)[parent])
 	var link: LinkButton = details.parent_links()[0]
 	expect_eq(link.text, parent.left(7), "the parent hash stays short")
 	expect(link.tooltip_text.contains(parent), "the tooltip contains the full parent OID")
@@ -252,33 +271,31 @@ func _check_parents(main: Main, page: RepoTab) -> void:
 	link.grab_focus()
 	press("Enter")
 	expect(await wait_until(func() -> bool: return details.commit_oid() == parent), "Enter opens the parent")
-	expect_eq(list.cursor, 1, "Enter selects the actual graph row")
+	expect_eq(list.cursor, row, "Enter selects the actual graph row")
 	expect_eq(String(page.commit_target().get("hash", "")), parent, "commit actions target the displayed parent")
 	expect(list.has_focus(), "navigation returns focus to the commit list")
-	var stale: LinkButton = details.parent_links()[0]
-	list.select_only(0)
+	expect(details.parent_links().is_empty(), "the ordinary parent shows no links")
+	expect(await _select_ready(history, 0), "the merge loads again")
+	var stale: LinkButton = details.parent_links()[1]
+	list.select_only(row)
 	stale.pressed.emit()
-	expect_eq(list.cursor, 0, "a removed link cannot navigate an old source")
+	expect_eq(list.cursor, row, "a link cannot navigate once its source is no longer selected")
 	expect(await _select_ready(history, 0), "the source loads again")
-	history.search_field().set_text("Improve")
+	var query: String = String(info["summary"])
+	history.search_field().set_text(query)
 	expect(await wait_until(func() -> bool: return bool(page.session.search_info().get("done", false))), "search completes")
 	details.parent_links()[0].grab_focus()
 	press("Space")
-	expect(await wait_until(func() -> bool: return list.cursor == 1 and details.commit_oid() == parent),
+	expect(await wait_until(func() -> bool: return list.cursor == row and details.commit_oid() == parent),
 			"Space can navigate to a nonmatching parent")
-	expect_eq(history.search_field().text(), "Improve", "parent navigation preserves the query")
+	expect_eq(history.search_field().text(), query, "parent navigation preserves the query")
 	expect_eq(page.session.search_match_index(list.cursor), -1, "the selected parent is not a search match")
 	press("F3")
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "F3 still visits the original search matches")
 	history.search_field().set_text("")
-	expect(await _select_ready(history, 1), "the root's child loads")
-	details.parent_links()[0].pressed.emit()
-	expect(await wait_until(func() -> bool: return list.cursor == 2 and details.parent_links().is_empty()),
-			"a parent jump to the root leaves no links")
-	expect(not (details.get_node("%Parents") as Control).visible, "the root has no parent row")
 	expect(await _select_ready(history, 0), "the source is restored before switching tabs")
 	var other: RepoTab = main.open_repo(fixtures_dir().path_join("repo-1"))
-	expect(await wait_until(func() -> bool: return other.history().details().parent_links().size() == 1),
+	expect(await wait_until(func() -> bool: return not other.history().details().commit_oid().is_empty()),
 			"another session opens")
 	details.parent_links()[0].pressed.emit()
 	expect_eq(list.cursor, 0, "an inactive tab's link cannot navigate")

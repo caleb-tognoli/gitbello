@@ -435,6 +435,9 @@ impl CliBackend {
             .lines()
             .map(str::to_owned)
             .collect()
+        } else if branch.is_some() {
+            // Unpublished, or its upstream is gone: what publishing sends.
+            self.unpublished_commits(repo, &head, cancel)?
         } else {
             Default::default()
         };

@@ -709,7 +709,7 @@ func _update_header() -> void:
 		"fetch": tr("Fetch"),
 	}[state]
 	_sync_button.show_state(caption, AppTheme.icon(SYNC_ICONS[state]), session.is_ready() and session.can_fetch())
-	var counted: bool = state in ["push", "pull", "sync"]
+	var counted: bool = state in ["publish", "push", "pull", "sync"]
 	_sync_button.set_counts(ahead if counted else 0, behind if counted else 0)
 	var tooltip: String = {
 		"publish": tr("Push %s and set its upstream") % session.current_branch(),
@@ -718,6 +718,9 @@ func _update_header() -> void:
 		"sync": tr("Pull the new commits, then push yours"),
 		"fetch": tr("Fetch from %s") % session.default_remote(),
 	}[state]
+	if state == "publish" and ahead > 0:
+		tooltip += "
+" + (tr("1 commit not on any remote") if ahead == 1 				else tr("%d commits not on any remote") % ahead)
 	if feedback != null:
 		var seconds: int = feedback.seconds_since_fetch(session.repo_path())
 		if seconds >= 0:

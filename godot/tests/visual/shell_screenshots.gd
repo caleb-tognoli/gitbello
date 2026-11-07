@@ -471,7 +471,7 @@ func _parent_capture(page: RepoTab, row: int, count: int, out: String, shot_name
 		printerr("parent_details: ", shot_name, " expected ", count, " parents, got ", parents.size())
 		return false
 	var parent_group: Control = history.details().get_node("%Parents") as Control
-	if parent_group.visible != (count > 0):
+	if parent_group.visible != (count > 1):
 		printerr("parent_details: wrong parent visibility for ", shot_name)
 		return false
 	print("PARENT BASELINE ", shot_name, " oid=", oid, " parents=", parents)

@@ -27,7 +27,7 @@ func run() -> void:
 	expect_eq(history.list_header().status_text(), "1 outgoing", "the header counts outgoing commits")
 	expect(bool(session.graph_rows(0, 1)[0]["outgoing"]), "HEAD has an outgoing marker")
 	expect(not bool(session.graph_rows(1, 1)[0]["outgoing"]), "the published ancestor has no outgoing marker")
-	expect((history.details().get_node("%Outgoing") as Label).visible, "outgoing details are visible")
+	expect(history.details().find_child("Outgoing", true, false) == null, "the details have no outgoing line")
 	expect(history.find_child("GoToHead", true, false) == null, "there is no current-commit button")
 	expect(history.find_child("Tracking", true, false) == null, "there is no tracking row")
 	var scope: PopupMenu = history.scope_menu()
@@ -59,7 +59,6 @@ func run() -> void:
 	var remote: String = list.hash_at(list.cursor)
 	expect(remote != head, "the remote commit is selected")
 	expect(not bool(session.graph_rows(list.cursor, 1)[0]["outgoing"]), "remote-only commits are not outgoing")
-	expect(not (history.details().get_node("%Outgoing") as Label).visible, "the outgoing detail clears on another commit")
 	list.grab_focus()
 	press("F")
 	expect(await wait_until(func() -> bool: return list.hash_at(list.cursor) == head), "F selects the current commit")
@@ -114,9 +113,9 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return bool(linked.session.history_info().get("ready", false)) and local.commit_list().row_count() == 2), "the linked worktree has its own current-branch scope")
 	expect(not bool(linked.session.history_info().get("all_branches", true)), "scope is independent between worktrees")
 	expect_eq(local.list_header().tooltip_text, "No upstream · Publish branch", "the header tooltip explains a missing upstream without an extra row")
-	expect(local.list_header().status_text().is_empty(), "there is no misleading outgoing count without upstream")
+	expect(local.list_header().status_text().is_empty(), "an unpublished branch whose commits are all on a remote has no outgoing count")
 	for row: Dictionary in linked.session.graph_rows(0, 2):
-		expect(not bool(row["outgoing"]), "inherited history is not all marked unpushed")
+		expect(not bool(row["outgoing"]), "commits already on a remote are not outgoing")
 	linked.show_view(WorktreeView.View.CHANGES)
 	expect(not Actions.is_enabled(jump.id), "F does not navigate outside History")
 	while main.tab_count() > 0:

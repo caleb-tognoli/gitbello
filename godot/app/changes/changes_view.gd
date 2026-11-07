@@ -945,7 +945,8 @@ func _update_empty() -> void:
 	elif behind > 0:
 		actions.append({"id": &"sync.sync", "label": "Pull", "icon": &"GitPull", "behind": behind})
 	elif ahead > 0:
-		actions.append({"id": &"sync.sync", "label": "Push", "icon": &"GitPush", "ahead": ahead})
+		var label: String = "Publish" if bool(badge.get("unpublished", false)) else "Push"
+		actions.append({"id": &"sync.sync", "label": label, "icon": &"GitPush", "ahead": ahead})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
 	_empty.show_state("No local changes", "", actions)

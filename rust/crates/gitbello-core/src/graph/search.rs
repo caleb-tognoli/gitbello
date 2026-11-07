@@ -76,16 +76,27 @@ impl CommitMatcher {
         if contains_folded(index.subject(row), &self.text) {
             return true;
         }
-        let id = index.author_id(row) as usize;
-        if id >= self.authors.len() {
-            self.authors.resize(id + 1, 0);
+        if self.identity_matches(index, index.author_id(row)) {
+            return true;
         }
-        if self.authors[id] == 0 {
-            let (name, email) = index.identity(id as u32);
+        index
+            .coauthor_ids(row)
+            .iter()
+            .any(|&id| self.identity_matches(index, id))
+    }
+
+    /// Whether an author or co-author identity matches, checked once each.
+    fn identity_matches(&mut self, index: &GraphIndex, id: u32) -> bool {
+        let slot = id as usize;
+        if slot >= self.authors.len() {
+            self.authors.resize(slot + 1, 0);
+        }
+        if self.authors[slot] == 0 {
+            let (name, email) = index.identity(id);
             let hit = contains_folded(name, &self.text) || contains_folded(email, &self.text);
-            self.authors[id] = if hit { 2 } else { 1 };
+            self.authors[slot] = if hit { 2 } else { 1 };
         }
-        self.authors[id] == 2
+        self.authors[slot] == 2
     }
 
     /// Appends the matching rows of `rows` (clamped to the loaded rows) to `out`.
@@ -356,6 +367,7 @@ mod tests {
                     author_email: Cow::Borrowed(email),
                     author_time: 0,
                     subject: Cow::Borrowed(subject),
+                    coauthors: Cow::Borrowed(""),
                 })
                 .expect("valid record");
             parent = hash;
@@ -387,6 +399,27 @@ mod tests {
         );
         assert_eq!(match_overview(&[1], 0, 4), vec![0; 4]);
         assert!(match_overview(&[1], 10, 0).is_empty());
+    }
+
+    #[test]
+    fn matches_co_authors_by_name_and_email() {
+        let mut index = GraphIndex::new();
+        for (hash, coauthors) in [("aa", "Grace Hopper <grace@navy.mil>"), ("bb", "")] {
+            index
+                .push(&LogRecord {
+                    hash: &format!("{hash:0<40}"),
+                    parents: "",
+                    author_name: Cow::Borrowed("Ada"),
+                    author_email: Cow::Borrowed("ada@example.com"),
+                    author_time: 0,
+                    subject: Cow::Borrowed("work"),
+                    coauthors: Cow::Borrowed(coauthors),
+                })
+                .expect("valid record");
+        }
+        assert_eq!(found(&index, "hopper"), [0]);
+        assert_eq!(found(&index, "NAVY"), [0]);
+        assert_eq!(found(&index, "ada"), [0, 1]);
     }
 
     #[test]

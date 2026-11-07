@@ -29,7 +29,7 @@ fn outgoing_is_relative_to_the_configured_upstream_not_any_remote() {
 }
 
 #[test]
-fn no_upstream_gone_upstream_detached_and_empty_have_no_outgoing_markers() {
+fn without_a_remote_branch_detached_or_empty_nothing_is_outgoing() {
     let repo = TestRepo::init();
     let backend = CliBackend::new(repo.app_runner());
     assert!(backend
@@ -37,16 +37,60 @@ fn no_upstream_gone_upstream_detached_and_empty_have_no_outgoing_markers() {
         .unwrap()
         .outgoing
         .is_empty());
+    // No remote branches at all: not the whole history.
     let head = repo.commit("base", "base", "base");
     let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
     assert!(info.upstream.is_none() && info.outgoing.is_empty());
     repo.add_remote();
-    repo.git(&["update-ref", "-d", "refs/remotes/origin/main"]);
-    let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
-    assert!(info.upstream_gone && info.outgoing.is_empty());
-    repo.git(&["checkout", "--detach", &head]);
+    let local = repo.commit("local", "local", "local");
+    repo.git(&["checkout", "--quiet", "--detach", &local]);
     let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
     assert!(info.upstream.is_none() && !info.upstream_gone && info.outgoing.is_empty());
+    assert_ne!(head, local);
+}
+
+#[test]
+fn unpublished_and_gone_upstream_branches_count_commits_on_no_remote() {
+    let repo = TestRepo::init();
+    let base = repo.commit("base", "base", "base");
+    repo.add_remote();
+    repo.git(&["checkout", "--quiet", "-b", "topic"]);
+    let first = repo.commit("a", "a", "first unpublished");
+    let second = repo.commit("b", "b", "second unpublished");
+    let backend = CliBackend::new(repo.app_runner());
+    let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
+    assert!(info.upstream.is_none());
+    assert_eq!(info.outgoing.len(), 2);
+    assert!(info.outgoing.contains(&first) && info.outgoing.contains(&second));
+    assert!(!info.outgoing.contains(&base));
+    let status = backend.status(repo.path(), &CancelToken::new()).unwrap();
+    assert!(status.unpublished);
+    assert_eq!((status.ahead, status.behind), (2, 0));
+
+    // On another remote branch counts as published.
+    repo.git(&["update-ref", "refs/remotes/elsewhere/topic", &first]);
+    let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
+    assert_eq!(info.outgoing.len(), 1);
+    assert!(info.outgoing.contains(&second));
+    assert_eq!(
+        backend
+            .status(repo.path(), &CancelToken::new())
+            .unwrap()
+            .ahead,
+        1
+    );
+
+    // Pushed, then every remote copy is deleted: the upstream is gone and
+    // both commits are unpublished again.
+    repo.git(&["push", "--quiet", "-u", "origin", "topic"]);
+    repo.git(&["update-ref", "-d", "refs/remotes/origin/topic"]);
+    repo.git(&["update-ref", "-d", "refs/remotes/elsewhere/topic"]);
+    let info = backend.head_info(repo.path(), &CancelToken::new()).unwrap();
+    assert!(info.upstream_gone);
+    assert_eq!(info.outgoing.len(), 2);
+    let status = backend.status(repo.path(), &CancelToken::new()).unwrap();
+    assert!(status.unpublished && status.upstream.is_some());
+    assert_eq!(status.ahead, 2);
 }
 
 #[test]

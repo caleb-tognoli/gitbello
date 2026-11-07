@@ -6,6 +6,7 @@ mod operation;
 mod refs;
 mod stash;
 mod status;
+mod trailers;
 mod worktree;
 
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ pub use stash::{
 pub use status::{
     parse_status, Change, Conflict, FileChange, FileState, Head, RepoStatus, STATUS_ARGS,
 };
+pub use trailers::{coauthor_values, distinct_coauthors, parse_identity, COAUTHOR_KEY};
 pub use worktree::{parse_worktrees, Worktree, WORKTREES_ARGS};
 
 /// Output that does not match the documented format.

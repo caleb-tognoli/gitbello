@@ -98,6 +98,7 @@ func _ready() -> void:
 		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
+		&"history.toggle_compact": func() -> bool: return Core.history_compact(),
 		&"diff.toggle_whole_file": func() -> bool:
 			var panel: DiffPanel = _shown_diff_panel()
 			return panel != null and panel.whole_file_button().button_pressed,
@@ -585,6 +586,7 @@ func _register_actions() -> void:
 			func() -> void: _shown_diff_panel().toggle_whole_file(), PackedStringArray(),
 			func() -> bool: return _shown_diff_panel() != null)
 	Actions.register(&"diff.toggle_minimap", "Diff minimap", "View", _toggle_minimap)
+	Actions.register(&"history.toggle_compact", "Compact history rows", "View", _toggle_history_compact)
 	Actions.register(&"diff.next_change", "Next change", "View",
 			func() -> void: _navigable_diff().jump_to_change(true), PackedStringArray(["F7"]),
 			func() -> bool: return _navigable_diff() != null)
@@ -1252,6 +1254,12 @@ func _toggle_minimap() -> void:
 	var value: bool = not Core.diff_minimap()
 	Core.set_diff_minimap(value)
 	get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", value)
+
+
+func _toggle_history_compact() -> void:
+	var value: bool = not Core.history_compact()
+	Core.set_history_compact(value)
+	get_tree().call_group(HistoryView.GROUP, &"set_compact", value)
 
 
 func _set_theme(choice: String) -> void:

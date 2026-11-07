@@ -1,7 +1,9 @@
 class_name CommitDetails
 extends VSplitContainer
-## The selected commit (PLAN M4b, laid out in M6.5): summary, author, date,
-## hashes and the full message on top, then its files beside the diff of the
+## The selected commit (PLAN M4b, laid out in M6.5): summary, the people
+## (M7.10: a card each with avatar, name and email for the author, every
+## co-author and a different committer), date, hashes, the commit's refs as
+## chips and the full message on top, then its files beside the diff of the
 ## selected file. The top part's height (this split) and the files' width
 ## (`files_split()`) are dragged by the user.
 
@@ -21,6 +23,9 @@ var session: RepoSession = null:
 var date_format: Callable = Callable()
 
 signal parent_requested(source: String, oid: String, origin: LinkButton)
+## A ref chip was clicked: show the menu of `label` (`RefChip.ref_target`)
+## at `at_position` (screen).
+signal label_menu_requested(label: Dictionary, at_position: Vector2)
 
 var _menu: PopupMenu = PopupMenu.new()
 var _file_menu: PopupMenu = PopupMenu.new()
@@ -34,14 +39,11 @@ var _requested_oid: String = ""
 @onready var _summary: RichTextLabel = %Summary
 @onready var _who: Control = %Who
 @onready var _ids: Control = %Ids
-@onready var _author_name: Label = %AuthorName
 @onready var _date: Label = %DateLabel
 @onready var _hash: Label = %HashLabel
 @onready var _copy_hash: Button = %CopyHash
 @onready var _parents: Control = %Parents
-@onready var _parents_icon: TextureRect = %ParentsIcon
-@onready var _committer: Control = %Committer
-@onready var _committer_label: Label = %CommitterLabel
+@onready var _refs: HFlowContainer = %Refs
 @onready var _body_separator: Control = %BodySeparator
 @onready var _body: RichTextLabel = %Body
 @onready var _files_header: ListHeader = %FilesHeader
@@ -92,7 +94,28 @@ func _ready() -> void:
 	_files.context_menu_requested.connect(_show_file_menu)
 	add_child(_file_menu)
 	_file_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(FILE_MENU_ACTIONS[id]))
+	(_hash.get_parent() as Container).sort_children.connect(func() -> void: _align_baseline(_hash))
+	(_parents as Container).sort_children.connect(func() -> void:
+		for link: LinkButton in _parent_links:
+			_align_baseline(link))
 	show_placeholder()
+
+
+## Hashes are monospace beside sans text. Boxes centre each control, and the
+## fonts split their height differently between ascent and descent, so the
+## hashes would sit off the date's and labels' baseline; move them onto it
+## (runs after each sort, as the box resets positions).
+func _align_baseline(control: Control) -> void:
+	if control.get_parent() == null:
+		return
+	control.position.y += roundf((_baseline_lift(_date) - _baseline_lift(control)) / 2.0)
+
+
+## How far above its centre a centred control's baseline is, times two.
+func _baseline_lift(control: Control) -> float:
+	var font: Font = control.get_theme_font(&"font")
+	var size: int = control.get_theme_font_size(&"font_size")
+	return font.get_ascent(size) - font.get_descent(size)
 
 
 func _notification(what: int) -> void:
@@ -105,7 +128,6 @@ func _notification(what: int) -> void:
 		if session != null:
 			_on_commit_loaded()
 			_on_diff_changed()
-			update_outgoing()
 
 
 func set_session(value: RepoSession) -> void:
@@ -163,15 +185,6 @@ func show_commit(oid: String) -> void:
 	session.load_commit(oid)
 	if String(session.commit_info().get("oid", "")) == oid:
 		_on_commit_loaded()
-	update_outgoing()
-
-
-func update_outgoing() -> void:
-	var label: Label = %Outgoing
-	label.visible = session != null and not _requested_oid.is_empty() and session.commit_is_outgoing(_requested_oid)
-	if label.visible:
-		var upstream: String = String(session.history_info().get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
-		label.text = tr("Outgoing · not in %s") % upstream
 
 
 ## Shows `text` instead of a commit (while the history loads, or when it
@@ -180,7 +193,6 @@ func show_placeholder(text: String = "") -> void:
 	_requested_oid = ""
 	_shown_oid = ""
 	_clear_parents()
-	update_outgoing()
 	_summary.text = text
 	_who.hide()
 	_ids.hide()
@@ -203,35 +215,16 @@ func _on_commit_loaded() -> void:
 	if info.is_empty() or _requested_oid.is_empty() or not String(info["oid"]).begins_with(_requested_oid):
 		return
 	_summary.text = String(info["summary"])
-	_author_name.text = String(info["author"])
-	var email: String = String(info["email"])
-	_author_name.tooltip_text = _author_name.text if email.is_empty() else "%s <%s>" % [_author_name.text, email]
+	_show_people(info)
 	_date.text = date_format.call(int(info["time"])) if date_format.is_valid() else str(info["time"])
+	_date.tooltip_text = tr("Author date")
 	var oid: String = String(info["oid"])
 	_requested_oid = oid
 	_shown_oid = oid
 	_hash.text = oid.left(HASH_LENGTH)
 	_hash.tooltip_text = oid
-	var parents: PackedStringArray = info["parents"]
-	_clear_parents()
-	for index: int in parents.size():
-		var parent: String = parents[index]
-		var link: LinkButton = LinkButton.new()
-		link.text = parent.left(PARENT_LENGTH)
-		link.tooltip_text = (tr("Go to parent %d") % (index + 1) if parents.size() > 1 \
-				else tr("Go to parent")) + "\n" + parent
-		link.theme_type_variation = &"DetailsParentLink"
-		link.underline = LinkButton.UNDERLINE_MODE_ON_HOVER
-		link.focus_mode = Control.FOCUS_ALL
-		link.pressed.connect(_request_parent.bind(oid, parent, link))
-		_parent_links.append(link)
-		_parents.add_child(link)
-	_parents.visible = not parents.is_empty()
-	_parents_icon.texture = AppTheme.icon(&"GitMerge" if parents.size() > 1 else &"GitCommit")
-	_parents_icon.tooltip_text = tr("Parents") if parents.size() > 1 else tr("Parent")
-	_committer.visible = String(info["committer"]) != String(info["author"])
-	_committer_label.text = String(info["committer"])
-	_committer_label.tooltip_text = tr("Committed by %s") % String(info["committer"])
+	_show_parents(oid, info["parents"])
+	_show_refs(info.get("refs", []))
 	_who.show()
 	_ids.show()
 	_show_body(String(info["body"]).strip_edges())
@@ -245,6 +238,98 @@ func _on_commit_loaded() -> void:
 		_diff_panel.clear()
 
 
+## The people's cards: `{name, email, role}` with role "", "co-author" or
+## "committer", for tests.
+func people() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for card: Node in _who.get_children():
+		out.append(card.get_meta(&"person"))
+	return out
+
+
+## The ref chips shown, for tests.
+func ref_chips() -> Array[RefChip]:
+	var out: Array[RefChip] = []
+	for chip: Node in _refs.get_children():
+		out.append(chip as RefChip)
+	return out
+
+
+## A card per person: the author, each co-author, and the committer when
+## they are someone else.
+func _show_people(info: Dictionary) -> void:
+	for card: Node in _who.get_children():
+		_who.remove_child(card)
+		card.queue_free()
+	var author: String = String(info["author"])
+	var email: String = String(info["email"])
+	_who.add_child(_person_card(author, email, ""))
+	for person: Dictionary in info.get("coauthors", []):
+		_who.add_child(_person_card(String(person["name"]), String(person["email"]), "co-author"))
+	var committer: String = String(info.get("committer", ""))
+	var committer_email: String = String(info.get("committer_email", ""))
+	if committer != author or committer_email.to_lower() != email.to_lower():
+		var card: Control = _person_card(committer, committer_email, "committer")
+		var when: int = int(info.get("commit_time", 0))
+		if when > 0 and date_format.is_valid():
+			card.tooltip_text += "\n" + String(date_format.call(when))
+		_who.add_child(card)
+
+
+func _person_card(person: String, email: String, role: String) -> Control:
+	var card: HBoxContainer = HBoxContainer.new()
+	card.theme_type_variation = &"DetailsPerson"
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	card.set_meta(&"person", {"name": person, "email": email, "role": role})
+	card.tooltip_text = CommitList.identity_text(person, email)
+	var avatar: AvatarView = AvatarView.new(person, email, float(get_theme_constant(&"avatar_size", THEME_TYPE)))
+	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	card.add_child(avatar)
+	var lines: VBoxContainer = VBoxContainer.new()
+	lines.theme_type_variation = &"DetailsPersonLines"
+	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lines.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	card.add_child(lines)
+	var top: HBoxContainer = HBoxContainer.new()
+	top.theme_type_variation = &"DetailsGroup"
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lines.add_child(top)
+	top.add_child(_card_label(person if not person.is_empty() else email, &"DetailsName"))
+	if not role.is_empty():
+		top.add_child(_card_label(tr("Co-author") if role == "co-author" else tr("Committer"), &"DetailsRole"))
+	if not person.is_empty() and not email.is_empty():
+		lines.add_child(_card_label(email, &"DetailsMeta"))
+	return card
+
+
+func _card_label(text: String, variation: StringName) -> Label:
+	var label: Label = Label.new()
+	label.text = text
+	label.theme_type_variation = variation
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
+
+
+## A chip per ref of the commit, after its hashes; a click opens its menu.
+func _show_refs(refs: Array) -> void:
+	for chip: Node in _refs.get_children():
+		_refs.remove_child(chip)
+		chip.queue_free()
+	for ref_label: Dictionary in refs:
+		var chip: RefChip = RefChip.new()
+		chip.label = ref_label
+		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		chip.gui_input.connect(func(event: InputEvent) -> void:
+			var mouse: InputEventMouseButton = event as InputEventMouseButton
+			if mouse != null and mouse.pressed and mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+				chip.accept_event()
+				label_menu_requested.emit(RefChip.ref_target(ref_label),
+						chip.get_screen_transform() * Vector2(0.0, chip.size.y)))
+		_refs.add_child(chip)
+	_refs.visible = not refs.is_empty()
+
+
 func parent_links() -> Array[LinkButton]:
 	return _parent_links.duplicate()
 
@@ -254,11 +339,37 @@ func commit_oid() -> String:
 
 
 func _clear_parents() -> void:
-	for link: LinkButton in _parent_links:
-		_parents.remove_child(link)
-		link.queue_free()
+	for child: Node in _parents.get_children():
+		_parents.remove_child(child)
+		child.queue_free()
 	_parent_links.clear()
 	_parents.hide()
+
+
+## Only merges show their parents: "Merges 5346dbe → 748e3dc", the parents
+## it brings in, an arrow, and the one they were merged into (the first).
+## Each hash is a link to that commit; `parent_links()` keeps Git's order.
+func _show_parents(oid: String, parents: PackedStringArray) -> void:
+	_clear_parents()
+	if parents.size() < 2:
+		return
+	for index: int in parents.size():
+		var parent: String = parents[index]
+		var link: LinkButton = LinkButton.new()
+		link.text = parent.left(PARENT_LENGTH)
+		link.tooltip_text = tr("Go to parent %d") % (index + 1) + "\n" + parent
+		link.theme_type_variation = &"DetailsParentLink"
+		link.underline = LinkButton.UNDERLINE_MODE_ON_HOVER
+		link.focus_mode = Control.FOCUS_ALL
+		link.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		link.pressed.connect(_request_parent.bind(oid, parent, link))
+		_parent_links.append(link)
+	_parents.add_child(_card_label(tr("Merges"), &"DetailsMeta"))
+	for index: int in range(1, _parent_links.size()):
+		_parents.add_child(_parent_links[index])
+	_parents.add_child(_card_label("→", &"DetailsMeta"))
+	_parents.add_child(_parent_links[0])
+	_parents.show()
 
 
 func _request_parent(source: String, oid: String, origin: LinkButton) -> void:
@@ -363,8 +474,7 @@ func _apply_theme() -> void:
 	_copy_hash.icon = AppTheme.icon(&"ActionCopy")
 	var tint: Color = get_theme_color(&"icon_tint", THEME_TYPE)
 	var icon_size: float = float(get_theme_constant(&"icon_size", THEME_TYPE))
-	for entry: Array in [[%AuthorIcon, &"User"], [%DateIcon, &"Clock"], [%HashIcon, &"GitCommit"],
-			[_parents_icon, &""], [%CommitterIcon, &"User"]]:
+	for entry: Array in [[%DateIcon, &"Clock"], [%HashIcon, &"GitCommit"]]:
 		var rect: TextureRect = entry[0]
 		if entry[1] != &"":
 			rect.texture = AppTheme.icon(entry[1])

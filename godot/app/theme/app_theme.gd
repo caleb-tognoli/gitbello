@@ -734,13 +734,53 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"label_gap", &"CommitList", 4)
 	theme.set_constant(&"outgoing_icon_size", &"CommitList", 14)
 	theme.set_color(&"outgoing_color", &"CommitList", p.accent)
-	theme.set_font_size(&"label_font_size", &"CommitList", 12)
-	theme.set_color(&"label_color", &"CommitList", DARK_TEXT)
-	for entry: Array in [[&"head", p.label_head], [&"branch", p.label_branch],
-			[&"remote", p.label_remote], [&"tag", p.label_tag]]:
-		theme.set_stylebox(StringName("label_%s" % entry[0]), &"CommitList",
-				_box(entry[1], 3, Vector4(6, 1, 6, 1)))
+	# Two-line rows (M7.10): the subject, then avatars and "Author +N · when".
+	theme.set_constant(&"two_line_row_height", &"CommitList", 50)
+	theme.set_constant(&"line_gap", &"CommitList", 3)
+	theme.set_font_size(&"meta_font_size", &"CommitList", 12)
+	theme.set_color(&"meta_color", &"CommitList", p.text_muted)
+	theme.set_color(&"divider_color", &"CommitList", Color(p.border, 0.7))
+	theme.set_constant(&"avatar_size", &"CommitList", 20)
+	theme.set_constant(&"avatar_overlap", &"CommitList", 4)
+	theme.set_constant(&"avatar_gap", &"CommitList", 6)
+	# Compact rows: the author's avatar on the right, after the ref icons.
+	theme.set_constant(&"compact_avatar_size", &"CommitList", 18)
+	_add_avatars(theme, p)
+	_add_ref_chips(theme, p)
 	_add_commit_details(theme, p)
+
+
+## Ref chips (`RefChip`, M7.10): branches square-cornered, tags round pills,
+## each with its icon; a remote branch's "origin/" in a lighter ink; "+N"
+## an outline in the muted text colour.
+static func _add_ref_chips(theme: Theme, p: Palette) -> void:
+	theme.set_font_size(&"font_size", &"RefChip", 12)
+	theme.set_color(&"text_color", &"RefChip", DARK_TEXT)
+	theme.set_color(&"prefix_color", &"RefChip", Color(DARK_TEXT, 0.65))
+	theme.set_color(&"more_color", &"RefChip", p.text_muted)
+	theme.set_constant(&"icon_size", &"RefChip", 12)
+	theme.set_constant(&"icon_gap", &"RefChip", 3)
+	theme.set_constant(&"max_width", &"RefChip", 160)
+	for entry: Array in [[&"head", p.label_head], [&"branch", p.label_branch], [&"remote", p.label_remote]]:
+		theme.set_stylebox(StringName("chip_%s" % entry[0]), &"RefChip", _box(entry[1], 3, Vector4(5, 1, 6, 1)))
+	theme.set_stylebox(&"chip_tag", &"RefChip", _box(p.label_tag, 9, Vector4(6, 1, 8, 1)))
+	theme.set_stylebox(&"chip_more", &"RefChip", _box(Color.TRANSPARENT, 9, Vector4(6, 0, 6, 0), p.border, 1))
+
+
+## Avatars without a picture: initials on one of these colours, chosen
+## from the email (`AvatarPainter`). Muted mid tones with light text in the
+## dark theme, pale ones with dark text in the light theme, so they read on
+## the lists and the selection without competing with the graph lanes.
+static func _add_avatars(theme: Theme, p: Palette) -> void:
+	const HUES: Array[float] = [0.02, 0.08, 0.15, 0.30, 0.45, 0.55, 0.66, 0.76, 0.86, 0.94]
+	theme.set_constant(&"colors", &"Avatar", HUES.size())
+	for i: int in HUES.size():
+		var fill: Color = Color.from_ok_hsl(HUES[i], 0.65, 0.76) if p.light 				else Color.from_ok_hsl(HUES[i], 0.42, 0.42)
+		var text: Color = Color.from_ok_hsl(HUES[i], 0.70, 0.28) if p.light 				else Color.from_ok_hsl(HUES[i], 0.30, 0.94)
+		theme.set_color(StringName("color_%d" % i), &"Avatar", fill)
+		theme.set_color(StringName("text_%d" % i), &"Avatar", text)
+	# Around avatars that overlap: the list's background.
+	theme.set_color(&"ring_color", &"Avatar", p.background)
 
 
 ## The commit details, from most to least prominent: the summary, who and
@@ -756,6 +796,21 @@ static func _add_commit_details(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"v_separation", &"DetailsRow", 4)
 	_variation(theme, &"DetailsGroup", &"HBoxContainer")
 	theme.set_constant(&"separation", &"DetailsGroup", 6)
+	# The people (M7.10): a card each, avatar beside name (and role) over email.
+	_variation(theme, &"DetailsPeople", &"HFlowContainer")
+	theme.set_constant(&"h_separation", &"DetailsPeople", 20)
+	theme.set_constant(&"v_separation", &"DetailsPeople", 8)
+	_variation(theme, &"DetailsPerson", &"HBoxContainer")
+	theme.set_constant(&"separation", &"DetailsPerson", 8)
+	_variation(theme, &"DetailsPersonLines", &"VBoxContainer")
+	theme.set_constant(&"separation", &"DetailsPersonLines", 0)
+	_variation(theme, &"DetailsRole", &"Label")
+	theme.set_color(&"font_color", &"DetailsRole", p.text_muted)
+	theme.set_font_size(&"font_size", &"DetailsRole", 12)
+	theme.set_constant(&"avatar_size", &"CommitDetails", 30)
+	_variation(theme, &"DetailsRefs", &"HFlowContainer")
+	theme.set_constant(&"h_separation", &"DetailsRefs", 4)
+	theme.set_constant(&"v_separation", &"DetailsRefs", 4)
 	_variation(theme, &"DetailsName", &"Label")
 	theme.set_font(&"font", &"DetailsName", bold_font())
 	_variation(theme, &"DetailsMeta", &"Label")
@@ -767,9 +822,6 @@ static func _add_commit_details(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"font_color", &"DetailsHash", p.accent_text)
 	_variation(theme, &"DetailsId", &"DetailsHash")
 	theme.set_color(&"font_color", &"DetailsId", p.text_muted)
-	_variation(theme, &"DetailsParents", &"HFlowContainer")
-	theme.set_constant(&"h_separation", &"DetailsParents", 6)
-	theme.set_constant(&"v_separation", &"DetailsParents", 4)
 	_variation(theme, &"DetailsParentLink", &"LinkButton")
 	theme.set_font(&"font", &"DetailsParentLink", mono_font())
 	theme.set_font_size(&"font_size", &"DetailsParentLink", 13)

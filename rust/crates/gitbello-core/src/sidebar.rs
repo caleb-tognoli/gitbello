@@ -1,7 +1,7 @@
 //! Display models derived from repository state: tab and row badges, the
 //! branch tree grouped by prefix, and ref labels for graph rows (PLAN §4).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::repo::{FileState, Head, Operation, Ref, RefKind, RepoStatus};
 
@@ -13,6 +13,8 @@ pub struct Badge {
     pub conflicts: usize,
     pub ahead: u32,
     pub behind: u32,
+    /// No upstream (or a gone one): `ahead` counts commits on no remote.
+    pub unpublished: bool,
     pub operation: Option<Operation>,
     /// Branch name, `(detached)` or empty when unknown.
     pub head: String,
@@ -37,6 +39,7 @@ impl Badge {
                 .count(),
             ahead: status.ahead,
             behind: status.behind,
+            unpublished: status.unpublished,
             operation,
             head: match &status.head {
                 Head::Branch(name) => name.clone(),
@@ -184,34 +187,79 @@ pub struct RefLabel {
     pub kind: LabelKind,
     /// The branch checked out in this worktree.
     pub is_head: bool,
+    /// A remote branch's remote (`origin`), so its prefix can be drawn apart.
+    pub remote: Option<String>,
+    /// For a local branch, the remote branches at the same commit that it
+    /// tracks (or that share its name, without an upstream), such as
+    /// `origin/main`. They get no label of their own.
+    pub remotes: Vec<String>,
 }
 
 /// Labels per commit hash (hex), for decorating graph rows. Within a commit:
-/// the checked-out branch first, then branches, remote branches, tags.
+/// the checked-out branch first, then branches, remote branches, tags. A
+/// local branch and its remote branch at the same commit are one label.
 pub fn labels_by_commit(refs: &[Ref]) -> HashMap<String, Vec<RefLabel>> {
-    let mut map: HashMap<String, Vec<RefLabel>> = HashMap::new();
+    let mut by_commit: HashMap<&str, Vec<&Ref>> = HashMap::new();
     for r in refs {
-        if r.symref_target.is_some() {
+        if r.symref_target.is_some() || matches!(r.kind, RefKind::Stash | RefKind::Other) {
             continue;
         }
-        let kind = match r.kind {
-            RefKind::Branch => LabelKind::Branch,
-            RefKind::RemoteBranch { .. } => LabelKind::RemoteBranch,
-            RefKind::Tag => LabelKind::Tag,
-            RefKind::Stash | RefKind::Other => continue,
+        by_commit.entry(r.commit()).or_default().push(r);
+    }
+    by_commit
+        .into_iter()
+        .map(|(commit, refs)| (commit.to_owned(), commit_labels(&refs)))
+        .collect()
+}
+
+/// The labels of the refs at one commit, sorted for display.
+fn commit_labels(refs: &[&Ref]) -> Vec<RefLabel> {
+    let mut merged: HashSet<&str> = HashSet::new();
+    let mut labels = Vec::with_capacity(refs.len());
+    for local in refs.iter().filter(|r| r.kind == RefKind::Branch) {
+        let mut remotes = Vec::new();
+        for remote in refs {
+            if !merged.contains(remote.name.as_str()) && tracks(local, remote) {
+                merged.insert(remote.name.as_str());
+                remotes.push(remote.short_name.clone());
+            }
+        }
+        remotes.sort_by_key(|name| name.to_lowercase());
+        labels.push(RefLabel {
+            name: local.short_name.clone(),
+            kind: LabelKind::Branch,
+            is_head: local.is_head,
+            remote: None,
+            remotes,
+        });
+    }
+    for r in refs {
+        let (kind, remote) = match &r.kind {
+            RefKind::RemoteBranch { remote } if !merged.contains(r.name.as_str()) => {
+                (LabelKind::RemoteBranch, Some(remote.clone()))
+            }
+            RefKind::Tag => (LabelKind::Tag, None),
+            _ => continue,
         };
-        map.entry(r.commit().to_owned())
-            .or_default()
-            .push(RefLabel {
-                name: r.short_name.clone(),
-                kind,
-                is_head: r.is_head,
-            });
+        labels.push(RefLabel {
+            name: r.short_name.clone(),
+            kind,
+            is_head: false,
+            remote,
+            remotes: Vec::new(),
+        });
     }
-    for labels in map.values_mut() {
-        labels.sort_by_key(|l| (!l.is_head, l.kind as u8, l.name.to_lowercase()));
+    labels.sort_by_key(|l| (!l.is_head, l.kind as u8, l.name.to_lowercase()));
+    labels
+}
+
+/// Whether `remote` is `local`'s remote branch: its upstream, or one with the
+/// same name when it has none.
+fn tracks(local: &Ref, remote: &Ref) -> bool {
+    match &local.upstream {
+        Some(upstream) => *upstream == remote.name,
+        None => remote.remote_branch_name() == Some(local.short_name.as_str()),
     }
-    map
 }
 
 #[cfg(test)]
@@ -321,10 +369,61 @@ mod tests {
         ];
         let labels = labels_by_commit(&refs);
         let names: Vec<&str> = labels["a"].iter().map(|l| l.name.as_str()).collect();
-        assert_eq!(names, ["main", "zeta", "origin/main", "v1"]);
+        assert_eq!(names, ["main", "zeta", "v1"]);
         assert!(labels["a"][0].is_head);
+        assert_eq!(labels["a"][0].remotes, ["origin/main"]);
         assert!(!labels.contains_key("s"));
         assert_eq!(labels["b"].len(), 1);
+    }
+
+    #[test]
+    fn a_local_branch_and_its_remote_branch_at_the_same_commit_are_one_label() {
+        let remote = |name: &str, remote: &str, commit: &str| {
+            branch(
+                &format!("refs/remotes/{remote}/{name}"),
+                RefKind::RemoteBranch {
+                    remote: remote.into(),
+                },
+                commit,
+                false,
+            )
+        };
+        let mut renamed = branch("refs/heads/topic", RefKind::Branch, "a", false);
+        renamed.upstream = Some("refs/remotes/origin/feature/topic".into());
+        let mut tracked = branch("refs/heads/main", RefKind::Branch, "a", true);
+        tracked.upstream = Some("refs/remotes/origin/main".into());
+        let refs = vec![
+            tracked,
+            renamed,
+            // No upstream: the same name on any remote counts.
+            branch("refs/heads/docs", RefKind::Branch, "a", false),
+            remote("main", "origin", "a"),
+            remote("main", "upstream", "a"),
+            remote("feature/topic", "origin", "a"),
+            remote("docs", "origin", "a"),
+            remote("docs", "fork", "a"),
+            // Its remote branch moved on: two labels.
+            branch("refs/heads/stale", RefKind::Branch, "a", false),
+            remote("stale", "origin", "b"),
+        ];
+        let labels = labels_by_commit(&refs);
+        let at_a: Vec<(&str, Vec<String>, Option<String>)> = labels["a"]
+            .iter()
+            .map(|l| (l.name.as_str(), l.remotes.clone(), l.remote.clone()))
+            .collect();
+        assert_eq!(
+            at_a,
+            [
+                ("main", vec!["origin/main".to_owned()], None),
+                ("docs", vec!["fork/docs".into(), "origin/docs".into()], None),
+                ("stale", vec![], None),
+                ("topic", vec!["origin/feature/topic".into()], None),
+                // Not main's upstream, so its own label.
+                ("upstream/main", vec![], Some("upstream".into())),
+            ]
+        );
+        assert_eq!(labels["b"][0].name, "origin/stale");
+        assert_eq!(labels["b"][0].kind, LabelKind::RemoteBranch);
     }
 
     #[test]
@@ -344,6 +443,7 @@ mod tests {
             upstream: Some("origin/main".into()),
             ahead: 2,
             behind: 1,
+            unpublished: false,
             stash_count: 0,
             changes: vec![
                 change(

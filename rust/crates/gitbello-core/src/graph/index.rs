@@ -66,6 +66,8 @@ pub struct CommitRow<'a> {
     pub author_email: &'a str,
     pub author_time: i64,
     pub subject: &'a str,
+    /// `Co-authored-by` identities (name, email), without the author.
+    pub coauthors: Vec<(&'a str, &'a str)>,
     /// Rows of the parents that are loaded (missing ones are not loaded yet or
     /// lie outside a shallow clone).
     pub parent_rows: Vec<usize>,
@@ -120,6 +122,12 @@ pub struct GraphIndex {
     subject_start: Vec<u32>,
     subjects: String,
     identities: Interner,
+    /// Rows that have co-authors, ascending (most have none, so this is sparse).
+    coauthor_rows: Vec<u32>,
+    /// `coauthor_start[i]..coauthor_start[i + 1]` indexes `coauthor_ids` for
+    /// `coauthor_rows[i]`.
+    coauthor_start: Vec<u32>,
+    coauthor_ids: Vec<u32>,
 
     /// Hashes seen as parents whose commit has not been loaded yet. In topological
     /// order a commit never appears after its own row, so this is only the frontier.
@@ -135,6 +143,7 @@ impl GraphIndex {
         Self {
             parent_start: vec![0],
             subject_start: vec![0],
+            coauthor_start: vec![0],
             ..Self::default()
         }
     }
@@ -196,6 +205,15 @@ impl GraphIndex {
         self.author_time.push(record.author_time);
         self.subjects.push_str(&record.subject);
         self.subject_start.push(offset(self.subjects.len()));
+        let coauthors = record.coauthor_identities();
+        if !coauthors.is_empty() {
+            for (name, email) in coauthors {
+                let id = self.identities.intern(name, email);
+                self.coauthor_ids.push(id);
+            }
+            self.coauthor_rows.push(offset(row));
+            self.coauthor_start.push(offset(self.coauthor_ids.len()));
+        }
 
         self.lanes.step(node, &self.parents[first_parent..], None);
         self.max_width = self.max_width.max(self.lanes.width());
@@ -214,6 +232,11 @@ impl GraphIndex {
             author_email,
             author_time: self.author_time[row],
             subject: self.subject(row),
+            coauthors: self
+                .coauthor_ids(row)
+                .iter()
+                .map(|&id| self.identities.get(id))
+                .collect(),
             parent_rows: self
                 .parent_nodes(row)
                 .iter()
@@ -248,6 +271,20 @@ impl GraphIndex {
     /// Author identity of `row` (which must be loaded), for [`GraphIndex::identity`].
     pub fn author_id(&self, row: usize) -> u32 {
         self.author[row]
+    }
+
+    /// Co-author identities of `row`, for [`GraphIndex::identity`].
+    pub fn coauthor_ids(&self, row: usize) -> &[u32] {
+        let Ok(row) = u32::try_from(row) else {
+            return &[];
+        };
+        match self.coauthor_rows.binary_search(&row) {
+            Ok(i) => {
+                &self.coauthor_ids
+                    [self.coauthor_start[i] as usize..self.coauthor_start[i + 1] as usize]
+            }
+            Err(_) => &[],
+        }
     }
 
     /// Name and email of an author identity.
@@ -294,6 +331,12 @@ impl GraphIndex {
             + vec_bytes(self.author.capacity(), size_of::<u32>())
             + vec_bytes(self.author_time.capacity(), size_of::<i64>())
             + vec_bytes(self.subject_start.capacity(), size_of::<u32>())
+            + vec_bytes(
+                self.coauthor_rows.capacity()
+                    + self.coauthor_start.capacity()
+                    + self.coauthor_ids.capacity(),
+                size_of::<u32>(),
+            )
             // hashbrown: one control byte plus the entry per bucket.
             + self.pending.capacity() * (size_of::<(Oid, NodeId)>() + 1)
             + checkpoints;
@@ -314,6 +357,9 @@ impl GraphIndex {
         self.author_time.shrink_to_fit();
         self.subject_start.shrink_to_fit();
         self.subjects.shrink_to_fit();
+        self.coauthor_rows.shrink_to_fit();
+        self.coauthor_start.shrink_to_fit();
+        self.coauthor_ids.shrink_to_fit();
         self.pending.shrink_to_fit();
         self.checkpoints.shrink_to_fit();
     }
@@ -453,6 +499,7 @@ mod tests {
                 author_email: Cow::Borrowed("a@example.com"),
                 author_time: 1_700_000_000 - i as i64,
                 subject: Cow::Owned(format!("commit {i}")),
+                coauthors: Cow::Borrowed(""),
             };
             index.push(&record).unwrap();
         }
@@ -509,6 +556,43 @@ mod tests {
     }
 
     #[test]
+    fn coauthors_are_kept_only_for_the_rows_that_have_them() {
+        let mut index = GraphIndex::new();
+        let hashes: Vec<String> = (0..4).map(|i| format!("{i:0>40}")).collect();
+        let trailers = [
+            "",
+            "Ada <ada@example.com>\x1eBob <bob@example.com>",
+            "",
+            "Ada Again <ADA@example.com>\x1eMe <me@example.com>",
+        ];
+        for (hash, coauthors) in hashes.iter().zip(trailers) {
+            index
+                .push(&LogRecord {
+                    hash,
+                    parents: "",
+                    author_name: Cow::Borrowed("Me"),
+                    author_email: Cow::Borrowed("me@example.com"),
+                    author_time: 0,
+                    subject: Cow::Borrowed("s"),
+                    coauthors: Cow::Borrowed(coauthors),
+                })
+                .unwrap();
+        }
+        assert!(index.commit(0).unwrap().coauthors.is_empty());
+        assert_eq!(
+            index.commit(1).unwrap().coauthors,
+            vec![("Ada", "ada@example.com"), ("Bob", "bob@example.com")]
+        );
+        assert!(index.coauthor_ids(2).is_empty());
+        // The author is left out; another spelling of an identity is its own.
+        assert_eq!(
+            index.commit(3).unwrap().coauthors,
+            vec![("Ada Again", "ADA@example.com")]
+        );
+        assert!(index.coauthor_ids(99).is_empty());
+    }
+
+    #[test]
     fn index_stays_under_the_memory_target() {
         let mut index = build(&synthetic_history(20_000));
         index.shrink_to_fit();
@@ -527,6 +611,7 @@ mod tests {
             author_email: Cow::Borrowed("e"),
             author_time: 0,
             subject: Cow::Borrowed("s"),
+            coauthors: Cow::Borrowed(""),
         };
         assert!(matches!(
             index.push(&record("xyz")),

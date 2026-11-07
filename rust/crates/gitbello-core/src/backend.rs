@@ -5,6 +5,7 @@
 //! Commands that take paths run in the worktree root with literal pathspecs,
 //! so status paths can be passed back unchanged.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -582,6 +583,53 @@ impl CliBackend {
         self.runner.read(repo).args(args).cancel_token(cancel).run()
     }
 
+    /// Whether the repository has any remote-tracking branch (without one,
+    /// `--not --remotes` would count the whole history as unpublished).
+    fn has_remote_branches(&self, repo: &Path, cancel: &CancelToken) -> Result<bool, GitError> {
+        let out = self.read(
+            repo,
+            &["for-each-ref", "--count=1", "--format=x", "refs/remotes/"],
+            cancel,
+        )?;
+        Ok(!out.stdout_text().trim().is_empty())
+    }
+
+    /// Commits of `oid` on no remote branch: what publishing its branch
+    /// sends. 0 when the repository has no remote branches.
+    fn unpublished_count(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<u32, GitError> {
+        if !self.has_remote_branches(repo, cancel)? {
+            return Ok(0);
+        }
+        let args = ["rev-list", "--count", oid, "--not", "--remotes", "--"];
+        let out = self.read(repo, &args, cancel)?;
+        out.stdout_text().trim().parse().map_err(|_| {
+            GitError::new(
+                "rev-list --count",
+                GitErrorKind::UnexpectedOutput,
+                out.stdout_text().trim(),
+            )
+        })
+    }
+
+    /// The commits [`Self::unpublished_count`] counts.
+    pub(crate) fn unpublished_commits(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<HashSet<String>, GitError> {
+        if !self.has_remote_branches(repo, cancel)? {
+            return Ok(HashSet::new());
+        }
+        let out = self.read(repo, &["rev-list", oid, "--not", "--remotes", "--"], cancel)?;
+        Ok(out.stdout_text().lines().map(str::to_owned).collect())
+    }
+
     /// Keeps nested worktrees out of status without changing a tracked `.gitignore`.
     fn exclude_default_worktrees(
         &self,
@@ -748,7 +796,13 @@ impl GitBackend for CliBackend {
 
     fn status(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoStatus, GitError> {
         let out = self.read(repo, STATUS_ARGS, cancel)?;
-        parse_status(&out.stdout).map_err(|e| unexpected(STATUS_ARGS, e))
+        let mut status = parse_status(&out.stdout).map_err(|e| unexpected(STATUS_ARGS, e))?;
+        if status.unpublished {
+            if let Some(oid) = status.oid.clone() {
+                status.ahead = self.unpublished_count(repo, &oid, cancel)?;
+            }
+        }
+        Ok(status)
     }
 
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError> {

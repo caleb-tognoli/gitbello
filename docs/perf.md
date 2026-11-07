@@ -208,3 +208,22 @@ target is met: an image larger than 2048 px shows a 2048 px preview with
 mipmaps made on the worker, one texture uploads a frame, and the full image
 uploads only when zoomed in past the preview (uploading a full 4096² texture
 took 31–39 ms, and both sides landed in one frame: 85–119 ms before).
+
+## M7.10 — co-authors in the graph load
+
+2026-11-07, git/git (fresh clone, 86,059 commits, 238 `Co-authored-by`
+trailers), git 2.53.0, release `gitbello-cli graph-bench`, three runs each.
+The log format gains `%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1e)`.
+
+```text
+                before            after
+first page      623 to 677 ms     658 to 665 ms (one cold outlier: 1065 ms)
+full index      795 to 861 ms     998 to 1003 ms
+index memory    58.5 bytes/commit 58.5 bytes/commit
+string memory   4.13 MiB          4.14 MiB
+```
+
+The extra ~190 ms is git's: `git log` alone takes 833 to 1011 ms with the
+old format, 980 to 1033 ms with the trailers and 1077 to 1167 ms with the
+whole body (`%b`). Co-authors are stored only for the rows that have them
+(three `u32` vectors), so the index does not grow per commit.

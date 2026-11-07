@@ -8,9 +8,11 @@ use thiserror::Error;
 const FIELD_SEP: u8 = 0x1f;
 /// Record separator between commits (`-z`).
 const RECORD_SEP: u8 = 0;
+/// Separator between the co-author trailer values (`%x1e`).
+const COAUTHOR_SEP: char = '\x1e';
 
 /// Arguments for the graph log (PLAN §3.3). Fields: hash, parents, author name,
-/// author email, author time, subject.
+/// author email, author time, subject, `Co-authored-by` trailer values.
 pub const LOG_ARGS: &[&str] = &[
     "log",
     // Stashes are listed separately; their commits would clutter the graph.
@@ -18,12 +20,12 @@ pub const LOG_ARGS: &[&str] = &[
     "--all",
     "--topo-order",
     "-z",
-    "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s",
+    "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1e)",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LogParseError {
-    #[error("commit record has {0} fields, expected 6")]
+    #[error("commit record has {0} fields, expected 7")]
     FieldCount(usize),
     #[error("invalid object id `{0}`")]
     BadObjectId(String),
@@ -43,14 +45,23 @@ pub struct LogRecord<'a> {
     pub author_email: Cow<'a, str>,
     pub author_time: i64,
     pub subject: Cow<'a, str>,
+    /// `Co-authored-by` values separated by `\x1e`; empty without any.
+    pub coauthors: Cow<'a, str>,
 }
 
 impl<'a> LogRecord<'a> {
     pub fn parse(record: &'a [u8]) -> Result<Self, LogParseError> {
         let mut fields = record.split(|&b| b == FIELD_SEP);
         let mut next = || fields.next();
-        let (Some(hash), Some(parents), Some(name), Some(email), Some(time), Some(subject)) =
-            (next(), next(), next(), next(), next(), next())
+        let (
+            Some(hash),
+            Some(parents),
+            Some(name),
+            Some(email),
+            Some(time),
+            Some(subject),
+            Some(coauthors),
+        ) = (next(), next(), next(), next(), next(), next(), next())
         else {
             return Err(LogParseError::FieldCount(
                 record.split(|&b| b == FIELD_SEP).count(),
@@ -80,7 +91,16 @@ impl<'a> LogRecord<'a> {
             author_email: String::from_utf8_lossy(email),
             author_time,
             subject: String::from_utf8_lossy(subject),
+            coauthors: String::from_utf8_lossy(coauthors),
         })
+    }
+
+    /// The distinct co-authors as `(name, email)`, the author left out.
+    pub fn coauthor_identities(&self) -> Vec<(&str, &str)> {
+        if self.coauthors.is_empty() {
+            return Vec::new();
+        }
+        crate::repo::distinct_coauthors(self.coauthors.split(COAUTHOR_SEP), &self.author_email)
     }
 
     pub fn parent_hashes(&self) -> impl Iterator<Item = &'a str> {
@@ -153,8 +173,8 @@ mod tests {
     use super::*;
 
     // Captured from `git log` with LOG_ARGS (fields joined by \x1f, records by \0).
-    const CAPTURED: &[u8] = b"9f2c7c1d0e5a8b3f4c6d7e8f9a0b1c2d3e4f5a6b\x1f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b 2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c\x1fJ\xc3\xa9r\xc3\xb4me\x1fjerome@example.com\x1f1700000000\x1fMerge branch 'topic'\x00\
-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b\x1f\x1fAda\x1fada@example.com\x1f1699990000\x1fInitial commit\x00";
+    const CAPTURED: &[u8] = b"9f2c7c1d0e5a8b3f4c6d7e8f9a0b1c2d3e4f5a6b\x1f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b 2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c\x1fJ\xc3\xa9r\xc3\xb4me\x1fjerome@example.com\x1f1700000000\x1fMerge branch 'topic'\x1fAda <ada@example.com>\x1eBob <bob@example.com>\x1eAda Again <ADA@example.com>\x00\
+1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b\x1f\x1fAda\x1fada@example.com\x1f1699990000\x1fInitial commit\x1f\x00";
 
     fn split_all(input: &[u8], chunk: usize) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
@@ -203,15 +223,20 @@ mod tests {
         assert_eq!(merge.author_email, "jerome@example.com");
         assert_eq!(merge.author_time, 1_700_000_000);
         assert_eq!(merge.subject, "Merge branch 'topic'");
+        assert_eq!(
+            merge.coauthor_identities(),
+            vec![("Ada", "ada@example.com"), ("Bob", "bob@example.com")]
+        );
 
         let root = LogRecord::parse(&records[1]).unwrap();
         assert_eq!(root.parent_hashes().count(), 0);
         assert_eq!(root.subject, "Initial commit");
+        assert!(root.coauthor_identities().is_empty());
     }
 
     #[test]
     fn keeps_subject_with_odd_characters_and_invalid_utf8() {
-        let record = b"aa\x1f\x1fN\x1fe\x1f1\x1fsubject with \xff and \ttab";
+        let record = b"aa\x1f\x1fN\x1fe\x1f1\x1fsubject with \xff and \ttab\x1f";
         let parsed = LogRecord::parse(record).unwrap();
         assert_eq!(parsed.subject, "subject with \u{fffd} and \ttab");
     }
@@ -223,11 +248,11 @@ mod tests {
             Err(LogParseError::FieldCount(2))
         );
         assert_eq!(
-            LogRecord::parse(b"a\x1f\x1fn\x1fe\x1f1\x1fs\x1fextra"),
-            Err(LogParseError::FieldCount(7))
+            LogRecord::parse(b"a\x1f\x1fn\x1fe\x1f1\x1fs\x1fc\x1fextra"),
+            Err(LogParseError::FieldCount(8))
         );
         assert!(matches!(
-            LogRecord::parse(b"a\x1f\x1fn\x1fe\x1fnot-a-time\x1fs"),
+            LogRecord::parse(b"a\x1f\x1fn\x1fe\x1fnot-a-time\x1fs\x1f"),
             Err(LogParseError::BadTime(_))
         ));
     }

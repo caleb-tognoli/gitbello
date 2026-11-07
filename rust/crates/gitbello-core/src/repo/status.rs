@@ -30,6 +30,10 @@ pub struct RepoStatus {
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
+    /// HEAD is on a branch without an upstream, or its upstream is gone (no
+    /// `# branch.ab`). The backend then counts in `ahead` the commits on no
+    /// remote branch: what publishing it would send.
+    pub unpublished: bool,
     pub stash_count: u32,
     pub changes: Vec<FileChange>,
 }
@@ -146,10 +150,11 @@ const WHAT: &str = "status";
 
 pub fn parse_status(output: &[u8]) -> Result<RepoStatus, ParseError> {
     let mut status = RepoStatus::default();
+    let mut saw_ab = false;
     let mut records = output.split(|&b| b == 0).filter(|r| !r.is_empty());
     while let Some(record) = records.next() {
         match record.first() {
-            Some(b'#') => parse_header(record, &mut status)?,
+            Some(b'#') => saw_ab |= parse_header(record, &mut status)?,
             Some(b'1') => status.changes.push(parse_ordinary(record)?),
             Some(b'2') => {
                 let mut change = parse_renamed(record)?;
@@ -170,10 +175,12 @@ pub fn parse_status(output: &[u8]) -> Result<RepoStatus, ParseError> {
             }
         }
     }
+    status.unpublished = matches!(status.head, Head::Branch(_)) && !saw_ab;
     Ok(status)
 }
 
-fn parse_header(record: &[u8], status: &mut RepoStatus) -> Result<(), ParseError> {
+/// Applies one `#` header; returns whether it was `branch.ab`.
+fn parse_header(record: &[u8], status: &mut RepoStatus) -> Result<bool, ParseError> {
     let line = text(record);
     let mut parts = line.splitn(3, ' ');
     let _hash = parts.next();
@@ -200,6 +207,7 @@ fn parse_header(record: &[u8], status: &mut RepoStatus) -> Result<(), ParseError
                 }
                 _ => return Err(ParseError::new(WHAT, format!("bad branch.ab `{value}`"))),
             }
+            return Ok(true);
         }
         "stash" => {
             status.stash_count = value
@@ -209,7 +217,7 @@ fn parse_header(record: &[u8], status: &mut RepoStatus) -> Result<(), ParseError
         // Unknown headers are allowed by the format; ignore them.
         _ => {}
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Splits `record` into `n` space-separated fields; the last keeps any spaces
@@ -342,7 +350,21 @@ mod tests {
         assert_eq!(status.oid.as_deref().map(str::len), Some(40));
         assert_eq!(status.upstream.as_deref(), Some("origin/feature/wörk"));
         assert_eq!((status.ahead, status.behind), (3, 1));
+        assert!(!status.unpublished);
         assert_eq!(status.stash_count, 2);
+    }
+
+    #[test]
+    fn a_branch_without_ahead_behind_is_unpublished() {
+        let none = parse_status(b"# branch.oid abc # branch.head topic ").unwrap();
+        assert!(none.unpublished && none.upstream.is_none());
+        // A gone upstream keeps its name but has no `branch.ab`.
+        let gone =
+            parse_status(b"# branch.oid abc # branch.head topic # branch.upstream origin/topic ")
+                .unwrap();
+        assert!(gone.unpublished && gone.upstream.is_some());
+        let detached = parse_status(b"# branch.oid abc # branch.head (detached) ").unwrap();
+        assert!(!detached.unpublished);
     }
 
     #[test]

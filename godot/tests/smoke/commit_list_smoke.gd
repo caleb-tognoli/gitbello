@@ -33,7 +33,7 @@ func run() -> void:
 	expect_eq(first.size(), mini(3, rows), "graph_rows returns the requested slice")
 	if not first.is_empty():
 		var row: Dictionary = first[0]
-		for key: String in ["row", "hash", "subject", "author", "email", "time", "column",
+		for key: String in ["row", "hash", "subject", "author", "email", "time", "coauthors", "column",
 				"color", "width", "segments", "refs"]:
 			expect(row.has(key), "row has `%s`" % key)
 		expect_eq(String(row.get("hash", "")).length(), 40, "full hash")

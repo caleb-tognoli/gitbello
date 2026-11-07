@@ -1,8 +1,14 @@
 class_name CommitList
 extends VirtualList
-## History rows (graph, ref labels and subject) driven by
-## `RepoSession.graph_rows()`. Only a window around the visible rows is fetched.
-## Hash, author and date are in the commit details. While a search is on
+## History rows driven by `RepoSession.graph_rows()`. Only a window around
+## the visible rows is fetched. Rows have two lines (M7.10): the subject, then
+## the author's avatar with the co-authors' after it, "Author +N · 3 h ago"
+## and the ref chips on the right: the first branch and the first tag, each
+## with "+N" for the others (`RefChip.summarize`), which emits
+## `refs_requested`. `compact` keeps one line: the graph, the subject, and
+## on the right an icon-only chip per kind of ref (`RefChip.shape_icons`)
+## and the author's avatar.
+## While a search is on
 ## (`set_search`), rows it does not match are dimmed (subject and graph dot)
 ## and the query is highlighted in the subjects of the rows it matches,
 ## and a `MarkStrip` beside the scroll bar shows where the matches are (the
@@ -11,15 +17,20 @@ extends VirtualList
 const LIST_THEME_TYPE: StringName = &"CommitList"
 ## Rows fetched beyond each edge of the visible range.
 const FETCH_MARGIN: int = 64
-const LABEL_STYLES: Dictionary[String, StringName] = {
-	"head": &"label_head",
-	"branch": &"label_branch",
-	"remote": &"label_remote",
-	"tag": &"label_tag",
-}
+## Height of the tallest letters (b, d, l) above the baseline, in ems of the
+## UI font: two-line rows centre what is drawn, not the line boxes, whose
+## ascent leaves empty space above the subject.
+const INK_ASCENT: float = 0.75
+
+## A "+N" chip of `row` (or a compact row's ref icons) was clicked: show all
+## its refs at `at_position` (local), under the chip.
+signal refs_requested(row: int, at_position: Vector2)
 
 var session: RepoSession = null:
 	set = set_session
+## One-line rows (no author line); see `set_compact`.
+var compact: bool = false:
+	set = set_compact
 
 ## Time spent in the last `_draw()`, for benchmarks.
 var last_draw_usec: int = 0
@@ -36,10 +47,13 @@ var _query: String = ""
 class RowText:
 	extends RefCounted
 	var subject: TextLine
-	var labels: Array[TextLine] = []
-	var label_styles: Array[StringName] = []
-	## Width the labels take before the subject, including gaps.
+	## The chips and what each stands for (`RefChip.summarize` entries).
+	var chips: Array[RefChip.Shaped] = []
+	var chip_items: Array[Dictionary] = []
+	## Width the chips take, including gaps.
 	var labels_width: float = 0.0
+	## "Author +N · 3 h ago" (two-line rows only).
+	var meta: TextLine = null
 
 
 var _graph: GraphView = GraphView.new()
@@ -63,17 +77,31 @@ func _init() -> void:
 # Theme values, cached because `_draw_row` runs for every visible row each frame.
 var _font: Font = null
 var _font_size: int = 0
-var _label_font_size: int = 0
 var _padding: float = 0.0
 var _label_gap: float = 0.0
 var _subject_color: Color = Color.WHITE
 var _dim_subject_color: Color = Color.WHITE
 var _dim_node_alpha: float = 1.0
 var _match_color: Color = Color.WHITE
-var _label_color: Color = Color.WHITE
-var _label_boxes: Dictionary[StringName, StyleBox] = {}
-## Ref label pills drawn last frame: row -> `[[Rect2, label dict], ...]`.
+## Ref chips drawn last frame: row -> `[[Rect2, summarize entry], ...]`.
 var _label_rects: Dictionary[int, Array] = {}
+## The author line drawn last frame (avatars and text): row -> Rect2.
+var _meta_rects: Dictionary[int, Rect2] = {}
+var _meta_font_size: int = 0
+var _meta_color: Color = Color.WHITE
+var _divider_color: Color = Color.TRANSPARENT
+var _avatar_size: float = 0.0
+var _avatar_step: float = 0.0
+var _avatar_gap: float = 0.0
+var _compact_avatar_size: float = 0.0
+var _line_gap: float = 0.0
+var _ring_color: Color = Color.WHITE
+var _selection_color: Color = Color.WHITE
+## Avatars drawn per row: the author and up to this many co-authors.
+const MAX_AVATARS: int = 3
+## "Now" for the relative dates, in whole minutes: the shaped author lines
+## are rebuilt when it changes.
+var _now_minute: int = -1
 
 
 func _ready() -> void:
@@ -93,22 +121,58 @@ func _notification(what: int) -> void:
 		_geometry.clear()
 		_text.clear()
 		queue_redraw()
+	elif what == NOTIFICATION_TRANSLATION_CHANGED:
+		# The author lines' dates are translated.
+		_text.clear()
+		queue_redraw()
 
 
 func _update_theme() -> void:
 	_graph.update_theme(self)
 	_font = get_theme_font(&"font", &"Label")
 	_font_size = get_theme_font_size(&"font_size", &"Label")
-	_label_font_size = get_theme_font_size(&"label_font_size", LIST_THEME_TYPE)
 	_padding = float(get_theme_constant(&"padding", LIST_THEME_TYPE))
 	_label_gap = float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
 	_subject_color = get_theme_color(&"subject_color", LIST_THEME_TYPE)
 	_dim_subject_color = get_theme_color(&"dim_subject_color", LIST_THEME_TYPE)
 	_dim_node_alpha = get_theme_color(&"dim_node_color", LIST_THEME_TYPE).a
 	_match_color = get_theme_color(&"match_color", LIST_THEME_TYPE)
-	_label_color = get_theme_color(&"label_color", LIST_THEME_TYPE)
-	for style: StringName in LABEL_STYLES.values():
-		_label_boxes[style] = get_theme_stylebox(style, LIST_THEME_TYPE)
+	_meta_font_size = get_theme_font_size(&"meta_font_size", LIST_THEME_TYPE)
+	_meta_color = get_theme_color(&"meta_color", LIST_THEME_TYPE)
+	_divider_color = get_theme_color(&"divider_color", LIST_THEME_TYPE)
+	_avatar_size = float(get_theme_constant(&"avatar_size", LIST_THEME_TYPE))
+	_avatar_step = _avatar_size - float(get_theme_constant(&"avatar_overlap", LIST_THEME_TYPE))
+	_avatar_gap = float(get_theme_constant(&"avatar_gap", LIST_THEME_TYPE))
+	_compact_avatar_size = float(get_theme_constant(&"compact_avatar_size", LIST_THEME_TYPE))
+	_line_gap = float(get_theme_constant(&"line_gap", LIST_THEME_TYPE))
+	_ring_color = get_theme_color(&"ring_color", AvatarPainter.THEME_TYPE)
+	_selection_color = get_theme_color(&"selection_color", THEME_TYPE)
+
+
+## Two-line rows are taller (`two_line_row_height`); compact ones use the
+## list's row height.
+func row_height() -> float:
+	if compact:
+		return super()
+	return float(maxi(1, get_theme_constant(&"two_line_row_height", LIST_THEME_TYPE)))
+
+
+## Switches between one-line and two-line rows, keeping the cursor's row
+## in view.
+func set_compact(value: bool) -> void:
+	if compact == value:
+		return
+	var anchor: int = cursor if cursor >= 0 else first_visible_row()
+	compact = value
+	_geometry.clear()
+	_text.clear()
+	_text_layout_width = -1.0
+	if not is_node_ready():
+		return
+	refresh()
+	if anchor >= 0:
+		set_scroll_offset(anchor * row_height() - size.y * 0.5 + row_height() * 0.5)
+	queue_redraw()
 
 
 func set_session(value: RepoSession) -> void:
@@ -139,11 +203,52 @@ func row_data(row: int) -> Dictionary:
 
 
 func _get_tooltip(at_position: Vector2) -> String:
-	var data: Dictionary = row_data(row_at(at_position))
-	if not bool(data.get("outgoing", false)) or session == null:
+	var row: int = row_at(at_position)
+	var data: Dictionary = row_data(row)
+	if data.is_empty() or session == null:
 		return ""
-	var upstream: String = String(session.history_info().get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
-	return tr("Outgoing · not in %s") % upstream
+	if (_meta_rects.get(row, Rect2()) as Rect2).has_point(at_position):
+		return people_text(data)
+	var item: Dictionary = _chip_item_at(row, at_position)
+	if item.has("label"):
+		return RefChip.tooltip(item["label"])
+	if item.has("labels"):
+		return RefChip.group_tooltip(item["labels"])
+	if item.has("more"):
+		var names: PackedStringArray = PackedStringArray()
+		for ref_label: Dictionary in item["more"]:
+			names.append(String(ref_label["name"]))
+		return "\n".join(names)
+	if not bool(data.get("outgoing", false)):
+		return ""
+	return CommitList.outgoing_text(session.history_info())
+
+
+## The author line's tooltip: "Name <email>", each co-author, the exact time.
+func people_text(data: Dictionary) -> String:
+	var lines: PackedStringArray = PackedStringArray([CommitList.identity_text(
+			String(data.get("author", "")), String(data.get("email", "")))])
+	for person: Dictionary in data.get("coauthors", []):
+		lines.append(tr("Co-author: %s") % CommitList.identity_text(
+				String(person["name"]), String(person["email"])))
+	lines.append(date_text(int(data.get("time", 0))))
+	return "\n".join(lines)
+
+
+## "Name <email>", or the one of them there is.
+static func identity_text(person: String, email: String) -> String:
+	if email.is_empty():
+		return person
+	return "<%s>" % email if person.is_empty() else "%s <%s>" % [person, email]
+
+
+## "Outgoing · not in origin/main", or "· not on any remote" without an
+## upstream (or with a gone one).
+static func outgoing_text(info: Dictionary) -> String:
+	var upstream: String = String(info.get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
+	if upstream.is_empty() or bool(info.get("gone", false)):
+		return TranslationServer.translate("Outgoing · not on any remote")
+	return TranslationServer.translate("Outgoing · not in %s") % upstream
 
 
 ## Full hash of a row (fetched when it is outside the cached window), or "".
@@ -159,14 +264,49 @@ func hash_at(row: int) -> String:
 ## The ref label drawn at `at` (local coordinates) on `row`: `{name, kind,
 ## is_head}` with the full ref name, or empty.
 func label_at(row: int, at: Vector2) -> Dictionary:
+	var item: Dictionary = _chip_item_at(row, at)
+	if item.has("label"):
+		return RefChip.ref_target(item["label"])
+	if item.has("labels") and (item["labels"] as Array).size() == 1:
+		return RefChip.ref_target(item["labels"][0])
+	return {}
+
+
+## Whether `at` (local coordinates) is on a chip that opens the popover of
+## `row`'s refs: a "+N", or a compact row's ref icons.
+func more_at(row: int, at: Vector2) -> bool:
+	var item: Dictionary = _chip_item_at(row, at)
+	return item.has("more") or item.has("labels")
+
+
+## Where `row`'s chips were drawn last frame: `[[Rect2, summarize entry]]`.
+func chip_rects(row: int) -> Array:
+	return _label_rects.get(row, [])
+
+
+func _chip_item_at(row: int, at: Vector2) -> Dictionary:
 	for hit: Array in _label_rects.get(row, []):
 		if (hit[0] as Rect2).has_point(at):
-			var label: Dictionary = hit[1]
-			var short: String = String(label["name"])
-			var kind: String = String(label["kind"])
-			var prefix: String = {"branch": "refs/heads/", "remote": "refs/remotes/", "tag": "refs/tags/"}.get(kind, "")
-			return {"name": prefix + short, "short": short, "kind": kind, "is_head": bool(label["is_head"])}
+			return hit[1]
 	return {}
+
+
+func _gui_input(event: InputEvent) -> void:
+	var mouse: InputEventMouseButton = event as InputEventMouseButton
+	if mouse != null and mouse.pressed and mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+		var row: int = row_at(mouse.position)
+		for hit: Array in _label_rects.get(row, []):
+			var rect: Rect2 = hit[0]
+			var item: Dictionary = hit[1]
+			# A click on +N or the icons lists the refs; a right-click on an
+			# icon of one ref is that ref's menu (`label_at`).
+			var lists: bool = item.has("more") or (item.has("labels") and (mouse.button_index == MOUSE_BUTTON_LEFT
+					or (item["labels"] as Array).size() > 1))
+			if rect.has_point(mouse.position) and lists:
+				accept_event()
+				refs_requested.emit(row, Vector2(rect.position.x, rect.end.y))
+				return
+	super(event)
 
 
 ## Dims the rows `query` does not match ("" ends it). The match flags
@@ -258,38 +398,113 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 
 	var subject_x: float = rect.position.x + _graph.width_for(_graph_lanes) + _padding
 	var icon_size: float = float(get_theme_constant(&"outgoing_icon_size", LIST_THEME_TYPE))
-	var subject_width: float = rect.end.x - _padding - subject_x - icon_size - _label_gap
+	# Two-line rows keep a column for the push icon; compact ones put it
+	# before the subject, only on the commits to push.
+	var subject_width: float = rect.end.x - _padding - subject_x
+	if not compact:
+		subject_width -= icon_size + _label_gap
+	var minute: int = floori(Time.get_unix_time_from_system() / 60.0)
+	if subject_width != _text_layout_width or (not compact and minute != _now_minute):
+		_text.clear()
+		_text_layout_width = subject_width
+		_now_minute = minute
+	var text: RowText = _text.get(row)
+	if text == null:
+		text = _shape_row(data, subject_width, rect.end.x - _padding - subject_x)
+		_text[row] = text
+	# The subject's line: the whole row when compact, else its top line.
+	var band: Rect2 = rect
+	var meta_band: Rect2 = Rect2()
+	if not compact:
+		var subject_height: float = text.subject.get_size().y
+		var meta_height: float = maxf(text.meta.get_size().y, _avatar_size)
+		# Same space above the subject's letters as below the avatars, with
+		# the divider's pixel left out at the bottom.
+		var slack: float = maxf(0.0, text.subject.get_line_ascent() - _font_size * INK_ASCENT)
+		var ink_height: float = subject_height - slack + _line_gap + meta_height
+		var top: float = roundf(rect.position.y + (rect.size.y - 1.0 - ink_height) * 0.5 - slack)
+		band = Rect2(rect.position.x, top, rect.size.x, subject_height)
+		meta_band = Rect2(rect.position.x, top + subject_height + _line_gap, rect.size.x, meta_height)
 	if bool(data.get("outgoing", false)):
-		var icon_rect: Rect2 = Rect2(rect.end.x - _padding - icon_size,
-				rect.position.y + (rect.size.y - icon_size) * 0.5, icon_size, icon_size)
+		var icon_x: float = subject_x if compact else rect.end.x - _padding - icon_size
+		var icon_rect: Rect2 = Rect2(icon_x, band.position.y + (band.size.y - icon_size) * 0.5, icon_size, icon_size)
 		var color: Color = get_theme_color(&"outgoing_color", LIST_THEME_TYPE)
 		if dimmed:
 			color.a *= _dim_node_alpha
 		draw_texture_rect(AppTheme.icon(&"GitPush"), icon_rect, false, color)
-	if subject_width != _text_layout_width:
-		_text.clear()
-		_text_layout_width = subject_width
-	var text: RowText = _text.get(row)
-	if text == null:
-		text = _shape_row(data, subject_width)
-		_text[row] = text
+	if compact:
+		_draw_compact_text(row, data, text, rect, subject_x, subject_width, dimmed)
+	else:
+		_draw_two_line_text(row, data, text, band, meta_band, subject_x, subject_width, dimmed, _selected_row)
+		_draw_divider(row, rect, subject_x)
 
+
+## The line under a two-line row, from where its text starts (the graph
+## stays unbroken), so each author line reads with its subject. Left out
+## after the last row and beside a selected row, whose highlight already
+## separates it.
+func _draw_divider(row: int, rect: Rect2, subject_x: float) -> void:
+	if row + 1 >= row_count() or is_selected(row) or is_selected(row + 1):
+		return
+	var y: float = rect.end.y - 0.5
+	draw_line(Vector2(subject_x, y), Vector2(rect.end.x - _padding, y), _divider_color, 1.0)
+
+
+## The two-line row's text: the subject on `band`; on `meta_band` the
+## avatars, "Author +N · when" and the ref labels on the right.
+func _draw_two_line_text(row: int, data: Dictionary, text: RowText, band: Rect2, meta_band: Rect2,
+		subject_x: float, subject_width: float, dimmed: bool, selected: bool) -> void:
 	var canvas: RID = get_canvas_item()
+	var origin: Vector2 = Vector2(subject_x, band.position.y)
+	if not _query.is_empty() and not dimmed:
+		_draw_match(text.subject, String(data["subject"]), origin, subject_width)
+	text.subject.draw(canvas, origin, _dim_subject_color if dimmed else _subject_color)
+
+	var alpha: float = _dim_node_alpha if dimmed else 1.0
+	var right: float = meta_band.end.x - _padding
+	_draw_chips(row, text, right - maxf(0.0, text.labels_width - _label_gap), meta_band)
+
+	var people: Array[Dictionary] = [{"name": String(data.get("author", "")), "email": String(data.get("email", ""))}]
+	for person: Dictionary in data.get("coauthors", []):
+		if people.size() >= MAX_AVATARS:
+			break
+		people.append(person)
+	var center_y: float = meta_band.position.y + meta_band.size.y * 0.5
+	var ring: Color = _ring_color.blend(_selection_color) if selected else _ring_color
+	# Right to left, so each avatar overlaps the next.
+	for i: int in range(people.size() - 1, -1, -1):
+		var center: Vector2 = Vector2(subject_x + _avatar_size * 0.5 + i * _avatar_step, center_y)
+		AvatarPainter.draw(self, self, center, _avatar_size, String(people[i]["name"]),
+				String(people[i]["email"]), AppTheme.bold_font(),
+				ring if people.size() > 1 else Color(0, 0, 0, 0), 2.0, alpha)
+	var avatars_width: float = _avatar_size + (people.size() - 1) * _avatar_step
+	var meta_x: float = subject_x + avatars_width + _avatar_gap
+	var meta_color: Color = _meta_color
+	meta_color.a *= alpha
+	text.meta.draw(canvas, Vector2(meta_x, center_y - text.meta.get_size().y * 0.5), meta_color)
+	_meta_rects[row] = Rect2(subject_x, meta_band.position.y,
+			meta_x - subject_x + text.meta.get_size().x, meta_band.size.y)
+
+
+## The compact row: the subject (after the push icon on a commit to push),
+## then on the right the ref icons and the author's avatar (its tooltip
+## names the people).
+func _draw_compact_text(row: int, data: Dictionary, text: RowText, rect: Rect2,
+		subject_x: float, subject_width: float, dimmed: bool) -> void:
+	var canvas: RID = get_canvas_item()
+	var right: float = subject_x + subject_width
+	var center: Vector2 = Vector2(right - _compact_avatar_size * 0.5, rect.position.y + rect.size.y * 0.5)
+	AvatarPainter.draw(self, self, center, _compact_avatar_size, String(data.get("author", "")),
+			String(data.get("email", "")), AppTheme.bold_font(), Color(0, 0, 0, 0), 0.0,
+			_dim_node_alpha if dimmed else 1.0)
+	_meta_rects[row] = Rect2(right - _compact_avatar_size, rect.position.y, _compact_avatar_size, rect.size.y)
+	var chips_x: float = right - _compact_avatar_size - _avatar_gap - maxf(0.0, text.labels_width - _label_gap)
+	_draw_chips(row, text, chips_x, rect)
 	var top: float = rect.position.y + (rect.size.y - text.subject.get_size().y) * 0.5
-	var x: float = subject_x
-	var hits: Array = []
-	var labels: Array = data.get("refs", [])
-	for i: int in text.labels.size():
-		var width: float = _draw_label(canvas, text.labels[i], text.label_styles[i], x, rect)
-		if i < labels.size():
-			hits.append([Rect2(x, rect.position.y, width, rect.size.y), labels[i]])
-		x += width + _label_gap
-	_label_rects[row] = hits
-	if subject_width - text.labels_width > 0.0:
-		var origin: Vector2 = Vector2(subject_x + text.labels_width, top)
-		if not _query.is_empty() and not dimmed:
-			_draw_match(text.subject, String(data["subject"]), origin, subject_width - text.labels_width)
-		text.subject.draw(canvas, origin, _dim_subject_color if dimmed else _subject_color)
+	var origin: Vector2 = Vector2(subject_x + _outgoing_width(data), top)
+	if not _query.is_empty() and not dimmed:
+		_draw_match(text.subject, String(data["subject"]), origin, text.subject.width)
+	text.subject.draw(canvas, origin, _dim_subject_color if dimmed else _subject_color)
 
 
 ## Highlights where the query appears in a subject (none when the row
@@ -307,51 +522,90 @@ func _draw_match(line: TextLine, subject: String, origin: Vector2, width: float)
 			draw_rect(Rect2(origin.x + left, origin.y, right - left, height), _match_color)
 
 
-## Draws one ref label pill at `x`; returns its width.
-func _draw_label(canvas: RID, line: TextLine, style: StringName, x: float, rect: Rect2) -> float:
-	var box: StyleBox = _label_boxes[style]
-	var label_size: Vector2 = line.get_size()
-	var pill: Rect2 = Rect2(
-			x,
-			rect.position.y + (rect.size.y - label_size.y - box.get_minimum_size().y) * 0.5,
-			label_size.x + box.get_minimum_size().x,
-			label_size.y + box.get_minimum_size().y)
-	draw_style_box(box, pill)
-	line.draw(canvas, pill.position + Vector2(box.get_margin(SIDE_LEFT), box.get_margin(SIDE_TOP)), _label_color)
-	return pill.size.x
+## Draws `row`'s chips from `x`, centred on `band`, and keeps where they are.
+func _draw_chips(row: int, text: RowText, x: float, band: Rect2) -> void:
+	var hits: Array = []
+	for i: int in text.chips.size():
+		var chip: RefChip.Shaped = text.chips[i]
+		RefChip.paint(self, self, chip, Vector2(x, roundf(band.position.y + (band.size.y - chip.size.y) * 0.5)))
+		hits.append([Rect2(x, band.position.y, chip.size.x, band.size.y), text.chip_items[i]])
+		x += chip.size.x + _label_gap
+	_label_rects[row] = hits
 
 
-func _shape_row(data: Dictionary, subject_width: float) -> RowText:
+## Shapes a row's text: in a compact row the labels share the subject's
+## `subject_width`; in a two-line row the subject has all of it and the
+## author line `line_width` less the avatars and the labels.
+func _shape_row(data: Dictionary, subject_width: float, line_width: float) -> RowText:
 	var text: RowText = RowText.new()
-	for label: Dictionary in data.get("refs", []):
-		var line: TextLine = TextLine.new()
-		line.add_string(String(label["name"]), _font, _label_font_size)
-		var style: StringName = LABEL_STYLES["head"] if bool(label["is_head"]) \
-				else LABEL_STYLES.get(String(label["kind"]), &"label_branch")
-		text.labels.append(line)
-		text.label_styles.append(style)
-		text.labels_width += line.get_size().x + _label_boxes[style].get_minimum_size().x + _label_gap
-	text.subject = _shape(data["subject"], subject_width - text.labels_width)
+	var refs: Array = data.get("refs", [])
+	for item: Dictionary in RefChip.group_kinds(refs) if compact else RefChip.summarize(refs):
+		var chip: RefChip.Shaped
+		if item.has("labels"):
+			chip = RefChip.shape_icons(self, item["labels"])
+		elif item.has("label"):
+			chip = RefChip.shape(self, item["label"])
+		else:
+			chip = RefChip.shape_more(self, (item["more"] as Array).size())
+		text.chips.append(chip)
+		text.chip_items.append(item)
+		text.labels_width += chip.size.x + _label_gap
+	if compact:
+		text.subject = _shape(data["subject"], subject_width - _outgoing_width(data)
+				- text.labels_width - _compact_avatar_size - _avatar_gap)
+		return text
+	text.subject = _shape(data["subject"], subject_width)
+	var coauthors: int = (data.get("coauthors", []) as Array).size()
+	var avatars: int = mini(1 + coauthors, MAX_AVATARS)
+	var avatars_width: float = _avatar_size + (avatars - 1) * _avatar_step + _avatar_gap
+	text.meta = _shape(meta_text(data), line_width - avatars_width - text.labels_width,
+			_meta_font_size)
 	return text
 
 
-func _shape(value: String, width: float) -> TextLine:
+## Room the push icon takes before a compact row's subject: none unless the
+## commit is to push.
+func _outgoing_width(data: Dictionary) -> float:
+	if not bool(data.get("outgoing", false)):
+		return 0.0
+	return float(get_theme_constant(&"outgoing_icon_size", LIST_THEME_TYPE)) + _label_gap
+
+
+## "Author +2 · 3 h ago": the author (or their email), how many co-authors
+## and the relative date.
+func meta_text(data: Dictionary) -> String:
+	var author: String = String(data.get("author", ""))
+	if author.is_empty():
+		author = String(data.get("email", ""))
+	var coauthors: int = (data.get("coauthors", []) as Array).size()
+	if coauthors > 0:
+		author += " +%d" % coauthors
+	var now: int = int(Time.get_unix_time_from_system())
+	return "%s · %s" % [author, RelativeDate.text(int(data.get("time", 0)), now, _offset())]
+
+
+func _shape(value: String, width: float, font_size: int = -1) -> TextLine:
 	var line: TextLine = TextLine.new()
-	line.add_string(value, _font, _font_size)
+	line.add_string(value, _font, _font_size if font_size < 0 else font_size)
 	line.width = maxf(0.0, width)
 	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	return line
 
 
 func _date(unix_time: int) -> String:
+	return RelativeDate.exact(unix_time, _offset())
+
+
+func _offset() -> int:
 	if not _utc_offset_known:
-		_utc_offset_seconds = int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+		_utc_offset_seconds = RelativeDate.local_offset()
 		_utc_offset_known = true
-	return Time.get_datetime_string_from_unix_time(unix_time + _utc_offset_seconds, true).left(16)
+	return _utc_offset_seconds
 
 
 func _clear_window() -> void:
 	_label_rects.clear()
+	_meta_rects.clear()
 	_rows.clear()
 	_geometry.clear()
 	_text.clear()

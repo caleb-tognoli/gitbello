@@ -1364,12 +1364,19 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.load_commit(&self.key, &oid.to_string()));
     }
 
-    /// See `convert::commit_info`; empty until a commit loaded.
+    /// See `convert::commit_info`, plus `refs` (the commit's labels, as in
+    /// `graph_rows`); empty until a commit loaded.
     #[func]
     fn commit_info(&self) -> VarDictionary {
-        self.read(|s| s.commit().map(convert::commit_info))
-            .flatten()
-            .unwrap_or_default()
+        self.read(|s| {
+            s.commit().map(|commit| {
+                let mut info = convert::commit_info(commit);
+                info.set("refs", &convert::labels(s.labels(&commit.oid)));
+                info
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
     }
 
     /// Files of the loaded commit, rows `start..start + count`:
@@ -1896,10 +1903,13 @@ impl RepoSession {
     }
 
     /// Visible slice of the graph. Each row is a Dictionary with `row`, `hash`,
-    /// `subject`, `author`, `email`, `time` (unix seconds), `column`, `color`,
+    /// `subject`, `author`, `email`, `time` (unix seconds), `coauthors`
+    /// (`[{name, email}]`, the author left out), `column`, `color`,
     /// `width` (columns used), `segments` (PackedInt32Array of
     /// `kind, from, to, color` quadruples; kind 0 = pass, 1 = in, 2 = out),
-    /// `refs` (`{name, kind, is_head}` labels; kind is branch, remote or tag)
+    /// `refs` (`{name, kind, is_head, remote, remotes}` labels; kind is branch,
+    /// remote or tag; `remote` names a remote branch's remote; `remotes` lists
+    /// the remote branches merged into a local one)
     /// and `match` (whether the history search matches it; false without one).
     #[func]
     fn graph_rows(&self, start: i64, count: i64) -> Array<VarDictionary> {
@@ -1934,6 +1944,7 @@ impl RepoSession {
                     "author" => &gstr(commit.author_name),
                     "email" => &gstr(commit.author_email),
                     "time" => commit.author_time,
+                    "coauthors" => &convert::identities(&commit.coauthors),
                     "column" => i64::from(layout.column),
                     "color" => i64::from(layout.color),
                     "width" => i64::from(layout.width()),
@@ -1949,7 +1960,7 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Finds the commits whose subject, author name or email contains `query`
+    /// Finds the commits whose subject, author or co-author name or email contains `query`
     /// (any case), or whose hash starts with it (4+ hex digits). Results
     /// arrive with `search_changed`; the search follows the graph as it loads
     /// and reruns when it reloads. A blank query ends it.

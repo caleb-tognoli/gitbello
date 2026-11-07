@@ -286,3 +286,45 @@ fn scheduler_graph_job_reports_git_errors() {
     );
     assert!(matches!(loader.progress().state, LoadState::Failed(_)));
 }
+
+#[test]
+fn reads_co_authors_from_trailers_in_the_graph_and_the_details() {
+    use gitbello_core::backend::{CliBackend, GitBackend};
+    use gitbello_core::git::CancelToken;
+
+    let repo = TestRepo::init();
+    repo.commit(
+        "a.txt",
+        "a\n",
+        "Plain\n\nCo-authored-by: In The Body <body@example.com>\nmore text",
+    );
+    let paired = repo.commit(
+        "b.txt",
+        "b\n",
+        "Pair on it\n\nBody.\n\nSigned-off-by: Ada <ada@example.com>\nCo-authored-by: Bob Ünïcode <bob@example.com>\nco-authored-by: Carol <carol@example.com>\nCo-authored-by: Bob again <BOB@example.com>\n",
+    );
+
+    let loader = wait_done(load(&repo));
+    let index = loader.index();
+    assert_eq!(
+        index.commit(0).unwrap().coauthors,
+        vec![
+            ("Bob Ünïcode", "bob@example.com"),
+            ("Carol", "carol@example.com")
+        ]
+    );
+    // Only the trailer block counts.
+    assert!(index.commit(1).unwrap().coauthors.is_empty());
+
+    let backend = CliBackend::new(repo.app_runner());
+    let details = backend
+        .commit_details(repo.path(), &paired, &CancelToken::new())
+        .unwrap();
+    assert_eq!(
+        details.coauthors(),
+        vec![
+            ("Bob Ünïcode", "bob@example.com"),
+            ("Carol", "carol@example.com")
+        ]
+    );
+}

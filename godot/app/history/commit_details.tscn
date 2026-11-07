@@ -34,50 +34,30 @@ autowrap_mode = 3
 context_menu_enabled = true
 selection_enabled = true
 
-[node name="Outgoing" type="Label" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-theme_type_variation = &"DetailsMeta"
-
 [node name="Who" type="HFlowContainer" parent="InfoPanel/Info"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"DetailsRow"
-
-[node name="Author" type="HBoxContainer" parent="InfoPanel/Info/Who"]
-layout_mode = 2
-theme_type_variation = &"DetailsGroup"
-
-[node name="AuthorIcon" type="TextureRect" parent="InfoPanel/Info/Who/Author"]
-unique_name_in_owner = true
-layout_mode = 2
-stretch_mode = 5
-
-[node name="AuthorName" type="Label" parent="InfoPanel/Info/Who/Author"]
-unique_name_in_owner = true
-layout_mode = 2
-mouse_filter = 1
-theme_type_variation = &"DetailsName"
-
-[node name="Date" type="HBoxContainer" parent="InfoPanel/Info/Who"]
-layout_mode = 2
-theme_type_variation = &"DetailsGroup"
-
-[node name="DateIcon" type="TextureRect" parent="InfoPanel/Info/Who/Date"]
-unique_name_in_owner = true
-layout_mode = 2
-stretch_mode = 5
-
-[node name="DateLabel" type="Label" parent="InfoPanel/Info/Who/Date"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsMeta"
+theme_type_variation = &"DetailsPeople"
 
 [node name="Ids" type="HFlowContainer" parent="InfoPanel/Info"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DetailsRow"
+
+[node name="Date" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
+layout_mode = 2
+theme_type_variation = &"DetailsGroup"
+
+[node name="DateIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Date"]
+unique_name_in_owner = true
+layout_mode = 2
+stretch_mode = 5
+
+[node name="DateLabel" type="Label" parent="InfoPanel/Info/Ids/Date"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 1
+theme_type_variation = &"DetailsMeta"
 
 [node name="Hash" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
 layout_mode = 2
@@ -100,33 +80,17 @@ size_flags_vertical = 4
 focus_mode = 0
 theme_type_variation = &"DetailsIconButton"
 
-[node name="Parents" type="HFlowContainer" parent="InfoPanel/Info/Ids"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_type_variation = &"DetailsParents"
-
-[node name="ParentsIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Parents"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 4
-stretch_mode = 5
-
-[node name="Committer" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
+[node name="Parents" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DetailsGroup"
 
-[node name="CommitterIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Committer"]
+[node name="Refs" type="HFlowContainer" parent="InfoPanel/Info/Ids"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
-stretch_mode = 5
-
-[node name="CommitterLabel" type="Label" parent="InfoPanel/Info/Ids/Committer"]
-unique_name_in_owner = true
-layout_mode = 2
-mouse_filter = 1
-theme_type_variation = &"DetailsMeta"
+size_flags_horizontal = 3
+theme_type_variation = &"DetailsRefs"
 
 [node name="BodySeparator" type="HSeparator" parent="InfoPanel/Info"]
 unique_name_in_owner = true

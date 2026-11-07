@@ -12,6 +12,9 @@ extends HSplitContainer
 ## through the matches.
 
 signal repo_loaded(row_count: int, error: String)
+
+## Every History view, for `set_compact` across tabs.
+const GROUP: StringName = &"history_views"
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
 signal commit_menu_requested(at_position: Vector2)
 ## Right-click on a ref label: `{name, short, kind, is_head}`, screen position.
@@ -43,6 +46,11 @@ var _follow_head: bool = false
 
 var _scope_menu: PopupMenu = null
 var _scope_button: Button = null
+## The header's row switch: two-line and compact rows.
+var _rows_switch: HBoxContainer = null
+var _two_line_button: Button = null
+var _compact_button: Button = null
+var _refs_popover: RefsPopover = null
 @onready var _commit_list: CommitList = %CommitList
 @onready var _list_header: ListHeader = %ListHeader
 @onready var _search: FilterField = %SearchField
@@ -60,8 +68,18 @@ func _ready() -> void:
 			commit_menu_requested.emit(_commit_list.get_screen_position() + at)
 		else:
 			label_menu_requested.emit(label, _commit_list.get_screen_position() + at))
+	# Made here, not with the view, so a view freed outside the tree frees it too.
+	_refs_popover = RefsPopover.new()
+	add_child(_refs_popover)
+	_commit_list.refs_requested.connect(func(row: int, at: Vector2) -> void:
+		_refs_popover.open_at(_commit_list.row_data(row).get("refs", []),
+				_commit_list.get_screen_transform() * at))
+	_refs_popover.menu_requested.connect(func(ref: Dictionary, at: Vector2) -> void:
+		label_menu_requested.emit(ref, at))
 	_details.file_list().gui_input.connect(_on_files_key)
 	_details.parent_requested.connect(_on_parent_requested)
+	_details.label_menu_requested.connect(func(label: Dictionary, at: Vector2) -> void:
+		label_menu_requested.emit(label, at))
 	for entry: Array in [[&"ChevronUp", "Previous match (Shift+Enter)", false], [&"ChevronDown", "Next match (Enter)", true]]:
 		var button: Button = _search.add_button(entry[0], entry[1])
 		button.pressed.connect(step_match.bind(entry[2]))
@@ -80,7 +98,56 @@ func _ready() -> void:
 		Actions.run_action(&"history.all_branches" if id == 1 else &"history.current_branch", _scope_button))
 	_scope_menu.about_to_popup.connect(_update_scope)
 	add_child(_scope_menu)
+	add_to_group(GROUP)
+	_add_rows_switch()
+	set_compact(Core.history_compact())
 	_apply_theme()
+
+
+## The switch at the right of the commit count: two-line rows or compact
+## ones (`history.toggle_compact`, saved for every tab).
+func _add_rows_switch() -> void:
+	_rows_switch = HBoxContainer.new()
+	_rows_switch.theme_type_variation = &"IconSwitch"
+	var group: ButtonGroup = ButtonGroup.new()
+	for entry: Array in [[&"IconSegmentFirst", false], [&"IconSegmentLast", true]]:
+		var button: Button = Button.new()
+		button.theme_type_variation = entry[0]
+		button.toggle_mode = true
+		button.button_group = group
+		button.focus_mode = Control.FOCUS_NONE
+		var compact: bool = entry[1]
+		button.pressed.connect(func() -> void:
+			if _commit_list.compact != compact:
+				Actions.run_action(&"history.toggle_compact", button))
+		_rows_switch.add_child(button)
+		if compact:
+			_compact_button = button
+		else:
+			_two_line_button = button
+	_list_header.add_tool(_rows_switch)
+	_update_rows_switch()
+
+
+## Two-line rows (with the author line) or compact one-line rows.
+func set_compact(value: bool) -> void:
+	_commit_list.compact = value
+	_update_rows_switch()
+
+
+func rows_switch() -> HBoxContainer:
+	return _rows_switch
+
+
+func _update_rows_switch() -> void:
+	if _two_line_button == null:
+		return
+	_two_line_button.set_pressed_no_signal(not _commit_list.compact)
+	_compact_button.set_pressed_no_signal(_commit_list.compact)
+	_two_line_button.icon = AppTheme.icon(&"RowsTwoLine")
+	_compact_button.icon = AppTheme.icon(&"RowsOneLine")
+	_two_line_button.tooltip_text = tr("Rows with authors")
+	_compact_button.tooltip_text = tr("Compact rows")
 
 
 func _notification(what: int) -> void:
@@ -92,6 +159,7 @@ func _notification(what: int) -> void:
 		_cancel_parent_navigation()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		_update_header()
+		_update_rows_switch()
 		for i: int in _match_buttons.size():
 			_match_buttons[i].tooltip_text = tr("Previous match (Shift+Enter)") if i == 0 else tr("Next match (Enter)")
 
@@ -172,7 +240,6 @@ func _show_scope_menu() -> void:
 
 func _on_history_state() -> void:
 	_commit_list.reload_matches()
-	_details.update_outgoing()
 	_update_scope()
 	_select_newest_if_none()
 
@@ -201,15 +268,23 @@ func _update_scope() -> void:
 		_list_header.tooltip_text = tr("Detached HEAD · no upstream comparison")
 	elif not bool(info.get("ready", false)):
 		_list_header.tooltip_text = tr("Checking upstream…")
-	elif bool(info.get("gone", false)):
-		_list_header.tooltip_text = tr("Upstream gone")
-	elif String(info.get("upstream", "")).is_empty():
-		_list_header.tooltip_text = tr("No upstream · Publish branch")
-	elif int(info.get("outgoing", 0)) > 0:
-		var upstream: String = String(info["upstream"]).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
-		_list_header.show_status(AppTheme.icon(&"GitPush"), tr("%d outgoing") % int(info["outgoing"]),
-				get_theme_color(&"outgoing_color", CommitList.LIST_THEME_TYPE),
-				tr("Commits on the current branch that are not in %s. Based on local refs; fetch to refresh.") % upstream)
+	else:
+		var gone: bool = bool(info.get("gone", false))
+		var upstream: String = String(info.get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
+		var unpublished: bool = gone or upstream.is_empty()
+		if unpublished:
+			_list_header.tooltip_text = tr("Upstream gone") if gone else tr("No upstream · Publish branch")
+		if int(info.get("outgoing", 0)) > 0:
+			_list_header.show_status(AppTheme.icon(&"GitPush"), tr("%d outgoing") % int(info["outgoing"]),
+					get_theme_color(&"outgoing_color", CommitList.LIST_THEME_TYPE),
+					(tr("Commits on the current branch that are not on any remote. Based on local refs; fetch to refresh.")
+					if unpublished else
+					tr("Commits on the current branch that are not in %s. Based on local refs; fetch to refresh.") % upstream))
+
+
+## The popover of a row's refs (its "+N" chip).
+func refs_popover() -> RefsPopover:
+	return _refs_popover
 
 
 func commit_list() -> CommitList:
@@ -431,6 +506,7 @@ func _on_files_key(event: InputEvent) -> void:
 func _apply_theme() -> void:
 	_left.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
 	_update_scope()
+	_update_rows_switch()
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:

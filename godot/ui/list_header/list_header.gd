@@ -83,6 +83,12 @@ func hide_status() -> void:
 	_status.hide()
 
 
+## Puts `control` (a small button or switch) at the right end of the header.
+func add_tool(control: Control) -> void:
+	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	$Row.add_child(control)
+
+
 ## The status shown, or "".
 func status_text() -> String:
 	return _status_label.text if _status.visible else ""

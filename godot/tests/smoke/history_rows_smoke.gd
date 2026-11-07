@@ -1,0 +1,218 @@
+extends SmokeTest
+## M7.10: two-line history rows. Initials and their colours, the relative
+## dates, the author line with co-authors, the ref chips (one branch and one
+## tag plus "+N", the merged remote branch, the popover of all refs and its
+## menus), the details' people cards and ref chips, and the compact switch (saved in the scratch config, applied to
+## every History view). Read-only on the
+## fixture `repo-5`; skipped without `--fixtures`.
+
+const MAIN: PackedScene = preload("res://app/main/main.tscn")
+const DAY: int = 86400
+
+
+func run() -> void:
+	_check_initials()
+	_check_dates()
+	_check_summary()
+	var fixtures: String = fixtures_dir()
+	if fixtures.is_empty():
+		print("history_rows_smoke: no --fixtures, skipped the views")
+		return
+	var was_compact: bool = Core.history_compact()
+	if was_compact:
+		Core.set_history_compact(false)
+	var main: Main = MAIN.instantiate() as Main
+	add_child(main)
+	await get_tree().process_frame
+	var page: RepoTab = main.open_repo(fixtures.path_join("repo-5"))
+	page.show_view(WorktreeView.View.HISTORY)
+	var history: HistoryView = page.history()
+	var list: CommitList = history.commit_list()
+	expect(await wait_until(func() -> bool: return list.row_count() == 3), "three commits")
+	expect(not list.compact, "rows have two lines by default")
+	var tall: float = list.row_height()
+	expect_eq(tall, float(list.get_theme_constant(&"two_line_row_height", CommitList.LIST_THEME_TYPE)),
+			"two-line rows use their own height")
+
+	var row: Dictionary = list.row_data(0)
+	var meta: String = list.meta_text(row)
+	expect(meta.begins_with(String(row["author"]) + " · "), "the author line starts with the author: %s" % meta)
+	var paired: Dictionary = row.duplicate()
+	paired["coauthors"] = [{"name": "Grace Hopper", "email": "grace@navy.mil"}, {"name": "", "email": "bot@x.org"}]
+	expect(list.meta_text(paired).begins_with(String(row["author"]) + " +2 · "),
+			"co-authors are counted: %s" % list.meta_text(paired))
+	var tooltip: String = list.people_text(paired)
+	expect(tooltip.contains("Co-author: Grace Hopper <grace@navy.mil>") and tooltip.contains("<bot@x.org>"),
+			"the tooltip lists the co-authors: %s" % tooltip)
+	expect(tooltip.ends_with(list.date_text(int(row["time"]))), "the tooltip ends with the exact time")
+
+	await _check_chips(list, history, page)
+	await _check_details(list, history, page)
+
+	# The switch beside the commit count, and the View menu action.
+	var switch: HBoxContainer = history.rows_switch()
+	expect(switch != null and switch.get_child_count() == 2, "the header has the rows switch")
+	var two_line: Button = switch.get_child(0) as Button
+	var one_line: Button = switch.get_child(1) as Button
+	expect(two_line.button_pressed and not one_line.button_pressed, "the switch shows two-line rows")
+	one_line.pressed.emit()
+	expect(list.compact and Core.history_compact(), "the compact segment switches and saves")
+	expect(one_line.button_pressed and not two_line.button_pressed, "the switch follows")
+	expect(list.row_height() < tall, "compact rows are shorter")
+	# Compact rows: the ref icons and the author's avatar on the right.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var compact_hits: Array = list.chip_rects(0)
+	expect(not compact_hits.is_empty() and (compact_hits[0][1] as Dictionary).has("labels"),
+			"compact rows draw icon chips: %s" % [compact_hits])
+	if not compact_hits.is_empty():
+		var icons: Rect2 = compact_hits[compact_hits.size() - 1][0]
+		expect(icons.end.x > list.size.x * 0.5, "on the right")
+		var avatar_at: Vector2 = Vector2(icons.end.x + list.get_theme_constant(&"avatar_gap", CommitList.LIST_THEME_TYPE)
+				+ 2.0, icons.get_center().y)
+		expect(list.get_tooltip(avatar_at).begins_with(String(row["author"])),
+				"the avatar after them names the author: %s" % list.get_tooltip(avatar_at))
+	var other: RepoTab = main.open_repo(fixtures.path_join("repo-1"))
+	other.show_view(WorktreeView.View.HISTORY)
+	expect(other.history().commit_list().compact, "a new tab opens compact")
+	Actions.run_action(&"history.toggle_compact")
+	expect(not list.compact and not other.history().commit_list().compact,
+			"the action switches every History view back")
+	expect(not Core.history_compact(), "and saves it")
+
+	if was_compact:
+		Core.set_history_compact(true)
+	while main.tab_count() > 0:
+		main.close_tab(0)
+	main.queue_free()
+	await get_tree().process_frame
+
+
+func _check_initials() -> void:
+	expect_eq(AvatarPainter.initials("Ada Lovelace", "ada@example.com"), "AL", "first and last names")
+	expect_eq(AvatarPainter.initials("Jérôme Le Gall", ""), "JG", "accents and middle names")
+	expect_eq(AvatarPainter.initials("  caleb ", ""), "C", "a single name")
+	expect_eq(AvatarPainter.initials("", "bot@example.com"), "B", "the email without a name")
+	expect_eq(AvatarPainter.initials("(bot)", ""), "B", "punctuation is skipped")
+	expect_eq(AvatarPainter.initials("", ""), "?", "nothing to go on")
+	var a: int = AvatarPainter.color_index("Ada", "Ada@Example.com", 10)
+	expect_eq(a, AvatarPainter.color_index("Someone", " ada@example.com", 10), "the colour follows the email")
+	expect(a >= 0 and a < 10, "the index is in the palette")
+
+
+func _check_dates() -> void:
+	var now: int = Time.get_unix_time_from_datetime_string("2026-11-07T12:00:00")
+	expect_eq(RelativeDate.text(now - 20, now, 0), "just now", "seconds")
+	expect_eq(RelativeDate.text(now - 600, now, 0), "10 min ago", "minutes")
+	expect_eq(RelativeDate.text(now - 3 * 3600, now, 0), "3 h ago", "hours")
+	expect_eq(RelativeDate.text(now - DAY - 60, now, 0), "yesterday", "a day")
+	expect_eq(RelativeDate.text(now - 12 * DAY, now, 0), "12 days ago", "days")
+	expect_eq(RelativeDate.text(now - 40 * DAY, now, 0), "Sep 28", "a date this year")
+	expect_eq(RelativeDate.text(now - 400 * DAY, now, 0), "2025-10-03", "an older date")
+	expect_eq(RelativeDate.text(now + 3600, now, 0), "Nov 7", "a future date is shown as a date")
+	expect_eq(RelativeDate.exact(now, 3600), "2026-11-07 13:00", "the exact time in local time")
+
+
+const MAIN_LABEL: Dictionary = {"name": "main", "kind": "branch", "is_head": true, "remote": "",
+	"remotes": ["origin/main"]}
+const TOPIC: Dictionary = {"name": "topic", "kind": "branch", "is_head": false, "remote": "", "remotes": []}
+const ONLY_REMOTE: Dictionary = {"name": "origin/fix", "kind": "remote", "is_head": false,
+	"remote": "origin", "remotes": []}
+const TAG: Dictionary = {"name": "v1.0", "kind": "tag", "is_head": false, "remote": "", "remotes": []}
+const TAG_2: Dictionary = {"name": "v1.0.1", "kind": "tag", "is_head": false, "remote": "", "remotes": []}
+
+
+func _check_summary() -> void:
+	var items: Array[Dictionary] = RefChip.summarize([MAIN_LABEL, TOPIC, ONLY_REMOTE, TAG, TAG_2])
+	expect_eq(items.size(), 4, "one branch, +N, one tag, +N")
+	expect_eq(items[0].get("label"), MAIN_LABEL, "the current branch comes first")
+	expect_eq((items[1]["more"] as Array).size(), 2, "the other branches are in +2")
+	expect_eq(items[2].get("label"), TAG, "then the first tag")
+	expect_eq((items[3]["more"] as Array).size(), 1, "and +1 for the other tag")
+	expect_eq(RefChip.summarize([TAG]).size(), 1, "a lone tag has no +N")
+	expect(RefChip.summarize([]).is_empty(), "no refs, no chips")
+	var kinds: Array[Dictionary] = RefChip.group_kinds([MAIN_LABEL, TOPIC, ONLY_REMOTE, TAG])
+	expect(kinds.size() == 2 and (kinds[0]["labels"] as Array).size() == 3 and (kinds[1]["labels"] as Array).size() == 1,
+			"compact rows group the refs by kind")
+	expect(RefChip.group_tooltip([TOPIC, ONLY_REMOTE]) == "topic\norigin/fix","an icon's tooltip names its refs")
+	expect_eq(RefChip.icon_name(MAIN_LABEL), &"GitRemote", "the cloud replaces the branch icon when merged")
+	expect_eq(RefChip.icon_name(TOPIC), &"GitBranch", "a local-only branch has the branch icon")
+	expect_eq(RefChip.icon_name(ONLY_REMOTE), &"GitRemote", "a remote branch has the cloud")
+	expect_eq(RefChip.icon_name(TAG), &"GitTag", "a tag has the tag icon")
+	expect_eq(RefChip.ref_target(ONLY_REMOTE)["name"], "refs/remotes/origin/fix", "menus get the full ref name")
+	expect_eq(RefChip.ref_target(TAG)["short"], "v1.0", "and the short one")
+
+
+func _check_chips(list: CommitList, history: HistoryView, page: RepoTab) -> void:
+	var probe: Control = Control.new()
+	add_child(probe)
+	expect(RefChip.tooltip(MAIN_LABEL).contains("origin/main"), "the merged chip names its remote branch")
+	expect(RefChip.shape_icons(probe, [TOPIC]).text == null, "one ref: just the icon")
+	var counted: RefChip.Shaped = RefChip.shape_icons(probe, [TOPIC, ONLY_REMOTE, MAIN_LABEL])
+	expect(counted.text != null and counted.text.get_size().x > 0.0, "several: the icon and their count")
+	expect_eq(counted.icon, &"GitBranch", "the first ref's icon")
+	var remote_chip: RefChip.Shaped = RefChip.shape(probe, ONLY_REMOTE)
+	expect(remote_chip.prefix != null, "a remote branch's prefix is shaped apart")
+	var long: Dictionary = TOPIC.duplicate()
+	long["name"] = "feature/" + "very-long-branch-name-".repeat(6)
+	expect(RefChip.shape(probe, long).size.x <= float(probe.get_theme_constant(&"max_width", RefChip.THEME_TYPE)) + 0.5,
+			"a long name is cut to the chip's width")
+	probe.queue_free()
+
+	# Drawn chips: the newest row of repo-5 carries main.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var hits: Array = list.chip_rects(0)
+	expect(not hits.is_empty(), "the newest row draws its chips")
+	if not hits.is_empty():
+		var center: Vector2 = (hits[0][0] as Rect2).get_center()
+		var target: Dictionary = list.label_at(0, center)
+		expect(String(target.get("name", "")).begins_with("refs/heads/"), "a chip gives its ref: %s" % [target])
+		expect(not list.more_at(0, center), "a ref chip is not +N")
+
+	# The popover: every ref, a row's menu goes to the History view's signal.
+	var popover: RefsPopover = history.refs_popover()
+	var asked: Array[Dictionary] = []
+	var on_menu: Callable = func(label: Dictionary, _at: Vector2) -> void: asked.append(label)
+	history.label_menu_requested.connect(on_menu)
+	popover.open_at([TOPIC, ONLY_REMOTE, TAG], Vector2(100, 100))
+	expect(popover.visible, "+N opens the popover")
+	expect_eq(popover.names(), PackedStringArray(["topic", "origin/fix", "v1.0"]), "it lists every ref")
+	popover.choose(2)
+	expect(not popover.visible, "choosing a ref closes it")
+	await get_tree().process_frame
+	expect(asked.size() == 1 and String(asked[0]["name"]) == "refs/tags/v1.0",
+			"and asks for that ref's menu: %s" % [asked])
+	expect("Push tag" in page.menu_labels(), "the fixture's tag gets its menu: %s" % [page.menu_labels()])
+	page.close_menu()
+	history.label_menu_requested.disconnect(on_menu)
+
+
+func _check_details(list: CommitList, history: HistoryView, page: RepoTab) -> void:
+	var details: CommitDetails = history.details()
+	list.select_only(0)
+	var row: Dictionary = list.row_data(0)
+	expect(await wait_until(func() -> bool: return details.commit_oid() == String(row["hash"])),
+			"the newest commit's details load")
+	var people: Array[Dictionary] = details.people()
+	expect(not people.is_empty() and String(people[0]["name"]) == String(row["author"]) and String(people[0]["role"]) == "",
+			"the first card is the author: %s" % [people])
+	for person: Dictionary in people:
+		expect(String(person["role"]) in ["", "co-author", "committer"], "a card's role: %s" % [person])
+	var chips: Array[RefChip] = details.ref_chips()
+	var names: PackedStringArray = PackedStringArray()
+	for chip: RefChip in chips:
+		names.append(String(chip.label["name"]))
+	expect("main" in names, "the details show the commit's refs: %s" % [names])
+	var asked: Array[Dictionary] = []
+	var on_menu: Callable = func(label: Dictionary, _at: Vector2) -> void: asked.append(label)
+	history.label_menu_requested.connect(on_menu)
+	if not chips.is_empty():
+		var click: InputEventMouseButton = InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = true
+		chips[0].gui_input.emit(click)
+	expect(asked.size() == 1 and String(asked[0]["name"]).begins_with("refs/"),
+			"clicking a chip asks for its ref's menu: %s" % [asked])
+	page.close_menu()
+	history.label_menu_requested.disconnect(on_menu)

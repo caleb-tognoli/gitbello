@@ -133,7 +133,9 @@ func _details() -> Array[Array]:
 	if conflicts > 0:
 		out.append([&"GitConflict", tr("1 conflicted file") if conflicts == 1 else tr("%d conflicted files") % conflicts])
 	var ahead: int = int(worktree.get("ahead", 0))
-	if ahead > 0:
+	if ahead > 0 and bool(worktree.get("unpublished", false)):
+		out.append([&"GitAhead", tr("1 commit not on any remote") if ahead == 1 				else tr("%d commits not on any remote") % ahead])
+	elif ahead > 0:
 		out.append([&"GitAhead", tr("1 commit ahead") if ahead == 1 else tr("%d commits ahead") % ahead])
 	var behind: int = int(worktree.get("behind", 0))
 	if behind > 0:

@@ -49,6 +49,11 @@ impl CommitDetails {
             .trim_matches(|c: char| c == '\n' || c == '\r')
             .trim_end()
     }
+
+    /// The `Co-authored-by` identities (name, email), without the author.
+    pub fn coauthors(&self) -> Vec<(&str, &str)> {
+        super::distinct_coauthors(super::coauthor_values(&self.message), &self.author_email)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -31,13 +31,13 @@ const MENUS: Array[Array] = [
 		&"operation.continue", &"operation.open_resolver", &"operation.abort", &"", &"repo.refresh"]],
 	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"", &"branch.rename", &"branch.set_upstream"]],
 	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_whole_file",
-		&"diff.toggle_minimap", &"",
+		&"diff.toggle_minimap", &"history.toggle_compact", &"",
 		&"app.command_palette", &"view.toggle_git_log"]],
 	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
 ]
 const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves"]
 const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_whole_file",
-	&"diff.toggle_minimap", &"view.toggle_git_log"]
+	&"diff.toggle_minimap", &"history.toggle_compact", &"view.toggle_git_log"]
 const OPERATION_ACTIONS: Array[StringName] = [&"operation.continue", &"operation.open_resolver", &"operation.abort"]
 
 ## Submenu name -> `func() -> Array[Dictionary]` of `{label, run: Callable}`.
