@@ -37,7 +37,8 @@ const SMOKE_PASS_MARKER: &str = "SMOKE PASSED";
 /// Output fragments that fail a smoke run even when Godot exits with 0.
 const SMOKE_FAIL_MARKERS: &[&str] = &["SCRIPT ERROR", "Parse Error", "ERROR:"];
 
-const SMOKE_TIMEOUT: Duration = Duration::from_secs(180);
+/// The whole suite: about 160 s on a Windows CI runner.
+const SMOKE_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
