@@ -1,7 +1,9 @@
 class_name CommitList
 extends VirtualList
-## History rows driven by `RepoSession.graph_rows()`. Only a window around
-## the visible rows is fetched. Rows have two lines (M7.10): the subject, then
+## History rows driven by `RepoSession.graph_rows()` (a subclass can supply
+## other rows of the same shape through `_fetch_rows`, without the graph:
+## Compare's commits, M7.12c). Only a window around the visible rows is
+## fetched. Rows have two lines (M7.10): the subject, then
 ## the author's avatar with the co-authors' after it, "Author +N · 3 h ago"
 ## and the ref chips on the right: the first branch and the first tag, each
 ## with "+N" for the others (`RefChip.summarize`), which emits
@@ -35,6 +37,9 @@ var compact: bool = false:
 ## Draw the commit graph before the text; see `set_show_graph`.
 var show_graph: bool = true:
 	set = set_show_graph
+## The rows are History's graph rows, reloaded when the graph changes (off
+## for a subclass with rows of its own, which also leaves the graph out).
+var follows_graph: bool = true
 
 ## Time spent in the last `_draw()`, for benchmarks.
 var last_draw_usec: int = 0
@@ -199,7 +204,7 @@ func set_session(value: RepoSession) -> void:
 		if session.graph_reset.is_connected(_on_graph_reset):
 			session.graph_reset.disconnect(_on_graph_reset)
 	session = value
-	if session != null:
+	if session != null and follows_graph:
 		session.graph_changed.connect(_on_graph_changed)
 		session.graph_reset.connect(_on_graph_reset)
 	_clear_window()
@@ -215,8 +220,20 @@ func row_data(row: int) -> Dictionary:
 		return _rows[row]
 	if session == null or row < 0:
 		return {}
-	var rows: Array[Dictionary] = session.graph_rows(row, 1)
+	var rows: Array[Dictionary] = _fetch_rows(row, 1)
 	return rows[0] if not rows.is_empty() else {}
+
+
+## Rows `start` to `start + count` (fewer at the end), each with its `row`.
+func _fetch_rows(start: int, count: int) -> Array[Dictionary]:
+	return session.graph_rows(start, count) if session != null else []
+
+
+## Fetches the rows again (their source changed).
+func reload() -> void:
+	_clear_window()
+	refresh()
+	queue_redraw()
 
 
 func _get_tooltip(at_position: Vector2) -> String:
@@ -273,9 +290,9 @@ func hash_at(row: int) -> String:
 	if row < 0 or session == null:
 		return ""
 	if _rows.has(row):
-		return String(_rows[row]["hash"])
-	var rows: Array[Dictionary] = session.graph_rows(row, 1)
-	return String(rows[0]["hash"]) if not rows.is_empty() else ""
+		return String(_rows[row].get("hash", ""))
+	var rows: Array[Dictionary] = _fetch_rows(row, 1)
+	return String(rows[0].get("hash", "")) if not rows.is_empty() else ""
 
 
 ## The ref label drawn at `at` (local coordinates) on `row`: `{name, kind,
@@ -392,11 +409,11 @@ func _prepare_rows(first: int, count: int) -> void:
 	# does not leave a gap everywhere else.
 	_graph_lanes = 1
 	_window_start = maxi(0, first - FETCH_MARGIN)
-	var fetched: Array[Dictionary] = session.graph_rows(_window_start, count + 2 * FETCH_MARGIN)
+	var fetched: Array[Dictionary] = _fetch_rows(_window_start, count + 2 * FETCH_MARGIN)
 	for data: Dictionary in fetched:
 		var row: int = data["row"]
 		_rows[row] = data
-		_graph_lanes = mini(maxi(_graph_lanes, int(data["width"])), _graph.max_lanes)
+		_graph_lanes = mini(maxi(_graph_lanes, int(data.get("width", 1))), _graph.max_lanes)
 	_window_end = _window_start + fetched.size()
 	last_fetch_usec = Time.get_ticks_usec() - started
 
@@ -406,12 +423,12 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	if data.is_empty():
 		return
 	rows_drawn += 1
-	var geometry: GraphView.RowGeometry = _geometry.get(row)
-	if geometry == null:
-		geometry = _graph.build(data, rect.size.y)
-		_geometry[row] = geometry
 	var dimmed: bool = not _query.is_empty() and not bool(data.get("match", false))
 	if show_graph:
+		var geometry: GraphView.RowGeometry = _geometry.get(row)
+		if geometry == null:
+			geometry = _graph.build(data, rect.size.y)
+			_geometry[row] = geometry
 		_graph.draw(self, geometry, rect.position, _dim_node_alpha if dimmed else 1.0)
 	var subject_x: float = rect.position.x + text_left()
 	var icon_size: float = float(get_theme_constant(&"outgoing_icon_size", LIST_THEME_TYPE))

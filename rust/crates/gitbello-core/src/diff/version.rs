@@ -46,9 +46,11 @@ pub enum VersionSource {
 pub fn new_source(target: &DiffTarget) -> Option<VersionSource> {
     let path = slashed(&target.path);
     match target.kind {
-        DiffKind::Unstaged | DiffKind::Untracked | DiffKind::Head | DiffKind::Amend => {
-            Some(VersionSource::Working(target.path.clone()))
-        }
+        DiffKind::Unstaged
+        | DiffKind::Untracked
+        | DiffKind::Head
+        | DiffKind::Amend
+        | DiffKind::Working => Some(VersionSource::Working(target.path.clone())),
         DiffKind::Staged => Some(VersionSource::Blob(format!(":{path}"))),
         DiffKind::Commit | DiffKind::AmendStaged => target
             .commit
@@ -66,7 +68,7 @@ pub fn old_source(target: &DiffTarget) -> Option<VersionSource> {
         DiffKind::Untracked => None,
         DiffKind::Unstaged => Some(VersionSource::Blob(format!(":{path}"))),
         DiffKind::Staged | DiffKind::Head => Some(VersionSource::Blob(format!("HEAD:{path}"))),
-        DiffKind::Commit | DiffKind::Amend | DiffKind::AmendStaged => target
+        DiffKind::Commit | DiffKind::Amend | DiffKind::AmendStaged | DiffKind::Working => target
             .commit
             .as_ref()
             .and_then(|c| c.parent.as_ref())

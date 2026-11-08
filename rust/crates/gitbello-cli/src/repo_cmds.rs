@@ -1,11 +1,12 @@
 //! Repository read commands: status, refs, worktrees, stashes, diff,
-//! op-state, watch and config.
+//! compare, op-state, watch and config.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use gitbello_core::backend::{CliBackend, GitBackend};
+use gitbello_core::compare::{CompareMode, CompareRequest, CompareSide};
 use gitbello_core::config::Config;
 use gitbello_core::diff::{
     display_text, DiffContent, DiffKind, DiffTarget, LineKind, LARGE_DIFF_BYTES,
@@ -303,6 +304,112 @@ pub fn diff(args: &[String]) -> Result<()> {
         diff.line_count(),
         diff.additions,
         diff.deletions,
+        elapsed.as_secs_f64() * 1e3
+    );
+    print_command_log(&backend);
+    Ok(())
+}
+
+/// `compare <root> <left> <right|--working> [--fork|--exact] [--file <path>]`:
+/// the sides, mode, counts and files of a comparison, or one file's diff.
+pub fn compare(args: &[String]) -> Result<()> {
+    let mut positional = Vec::new();
+    let mut mode = None;
+    let mut working = false;
+    let mut file = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--fork" => mode = Some(CompareMode::SinceFork),
+            "--exact" => mode = Some(CompareMode::Exact),
+            "--working" => working = true,
+            "--file" => file = Some(iter.next().context("--file needs a path")?.clone()),
+            other => positional.push(other),
+        }
+    }
+    let (root, left, right) = match (&positional[..], working) {
+        ([root, left], true) => (*root, *left, CompareSide::WorkingCopy),
+        ([root, left, right], false) => (*root, *left, CompareSide::Rev((*right).to_owned())),
+        _ => bail!("compare needs a worktree root, a left side and a right side (or --working)"),
+    };
+    let backend = backend()?;
+    let request = CompareRequest {
+        left: left.to_owned(),
+        right,
+        mode,
+    };
+    let started = std::time::Instant::now();
+    let cmp = backend.compare(Path::new(root), &request, &CancelToken::new())?;
+    let elapsed = started.elapsed();
+    let side = |s: &gitbello_core::compare::ResolvedSide| {
+        let oid = s.oid.as_deref().map_or("unborn", |o| &o[..7.min(o.len())]);
+        let name = if s.name().is_empty() {
+            "working copy".to_owned()
+        } else {
+            s.name()
+        };
+        format!("{name} [{}] {oid}", s.kind.id())
+    };
+    println!("left:  {}", side(&cmp.left));
+    println!("right: {}", side(&cmp.right));
+    println!(
+        "mode:  {} (default {}){}",
+        cmp.mode.id(),
+        cmp.default_mode.id(),
+        if cmp.can_fork() {
+            ""
+        } else {
+            ", no merge base"
+        }
+    );
+    println!(
+        "base:  {}  · only on right {} · only on left {}",
+        &cmp.base[..7.min(cmp.base.len())],
+        cmp.only_right,
+        cmp.only_left
+    );
+    if let Some(path) = file {
+        let found = cmp
+            .file(Path::new(&path))
+            .with_context(|| format!("{path} does not differ"))?;
+        let diff = backend.diff(
+            Path::new(root),
+            &cmp.target(found),
+            None,
+            &CancelToken::new(),
+        )?;
+        for line in diff.lines(0, usize::MAX) {
+            let mark = match line.kind {
+                LineKind::Hunk => "",
+                LineKind::Context => " ",
+                LineKind::Added => "+",
+                LineKind::Removed => "-",
+            };
+            println!("{mark}{}", display_text(line.text));
+        }
+    } else {
+        for f in &cmp.files {
+            let stats = f
+                .stats
+                .map_or_else(|| "binary".to_owned(), |(a, r)| format!("+{a} -{r}"));
+            let from = f
+                .original_path
+                .as_ref()
+                .map(|p| format!("{} -> ", p.display()))
+                .unwrap_or_default();
+            let untracked = if f.untracked { "  (untracked)" } else { "" };
+            println!(
+                "  {:?}  {from}{}  {stats}{untracked}",
+                f.change,
+                f.path.display()
+            );
+        }
+    }
+    eprintln!(
+        "{} file(s), +{} -{}, compared in {:.1} ms",
+        cmp.files.len(),
+        cmp.additions,
+        cmp.deletions,
         elapsed.as_secs_f64() * 1e3
     );
     print_command_log(&backend);

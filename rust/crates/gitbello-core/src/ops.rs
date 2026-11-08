@@ -192,8 +192,10 @@ pub enum RefOp {
         url: String,
     },
     /// Merge commits are picked against their first parent.
+    /// Several commits are applied oldest first, as listed (git's
+    /// sequencer); a merge commit only alone.
     CherryPick {
-        commit: String,
+        commits: Vec<String>,
     },
     /// Aborts the operation in progress.
     Abort(Operation),

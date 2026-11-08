@@ -96,6 +96,7 @@ func _ready() -> void:
 		&"view.changes": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.CHANGES,
 		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
+		&"view.compare": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.COMPARE,
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
 		&"history.toggle_compact": func() -> bool: return Core.history_compact(),
 		&"history.toggle_graph": func() -> bool: return Core.history_graph(),
@@ -555,6 +556,7 @@ func _register_actions() -> void:
 	_register_branch_actions()
 	_register_merge_actions()
 	_register_worktree_actions()
+	_register_compare_actions()
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings, PackedStringArray(["Ctrl+Comma"]))
 	Actions.register(&"diff.cycle_mode", "Next diff mode", "View",
 			func() -> void: _mode_diff_panel().cycle_mode(), PackedStringArray(["Ctrl+Shift+D"]),
@@ -574,7 +576,7 @@ func _register_actions() -> void:
 	Actions.register(&"diff.open_file", "Open", "View",
 			func() -> void:
 				var page: RepoTab = current_page()
-				page.session.open_version("commit" if page.view == WorktreeView.View.HISTORY else "changes", "shown"),
+				page.session.open_version(_diff_slot(page), "shown"),
 			PackedStringArray(), func() -> bool: return _open_panel() != null,
 			_says("Select a file first."))
 	Actions.register(&"diff.copy", "Copy", "Edit",
@@ -600,15 +602,15 @@ func _register_actions() -> void:
 				var page: RepoTab = current_page()
 				if page.view == WorktreeView.View.HISTORY:
 					page.history().details().retry_diff()
+				elif page.view == WorktreeView.View.COMPARE:
+					page.active_view().compare().retry()
 				else:
 					page.changes().retry_diff(),
 			PackedStringArray(), func() -> bool:
 				var page: RepoTab = current_page()
 				if page == null or page.session == null or not page.session.is_ready():
 					return false
-				var panel: DiffPanel = page.history().details().diff_panel() \
-						if page.view == WorktreeView.View.HISTORY else page.changes().diff_panel()
-				return panel.can_retry(), _says("There is no failed diff to retry."))
+				return _view_diff_panel(page).can_retry(), _says("There is no failed diff to retry."))
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
@@ -1246,9 +1248,28 @@ func _open_panel() -> DiffPanel:
 	var page: RepoTab = current_page()
 	if page == null or page.session == null or not page.session.is_ready():
 		return null
-	var panel: DiffPanel = page.history().details().diff_panel() if page.view == WorktreeView.View.HISTORY \
-			else page.changes().diff_panel()
+	var panel: DiffPanel = _view_diff_panel(page)
 	return panel if not panel.shown_path().is_empty() else null
+
+
+## The diff panel of `page`'s current view.
+func _view_diff_panel(page: RepoTab) -> DiffPanel:
+	match page.view:
+		WorktreeView.View.HISTORY:
+			return page.history().details().diff_panel()
+		WorktreeView.View.COMPARE:
+			return page.active_view().compare().diff_panel()
+	return page.changes().diff_panel()
+
+
+## The session's diff slot that `page`'s current view shows.
+static func _diff_slot(page: RepoTab) -> String:
+	match page.view:
+		WorktreeView.View.HISTORY:
+			return "commit"
+		WorktreeView.View.COMPARE:
+			return "compare"
+	return "changes"
 
 
 ## The image viewer on screen that the zoom actions act on, or null.
@@ -1346,3 +1367,107 @@ func _palette_entries() -> Array[Dictionary]:
 		entries.append({"label": tr("Open recent: %s") % String(entry["label"]), "detail": String(entry["tooltip"]),
 			"run": entry["run"]})
 	return entries
+
+
+## Compare (PLAN M7.12): the view, its bar, and the ways in: ref menus,
+## History's commits and Branch → Compare….
+func _register_compare_actions() -> void:
+	var page: Callable = func() -> WorktreeView: return current_view()
+	var is_ready: Callable = func() -> bool:
+		return page.call() != null and page.call().session != null and page.call().session.is_ready()
+	var has_head: Callable = func() -> bool:
+		return is_ready.call() and not String(page.call().session.status().get("oid", "")).is_empty()
+	var comparing: Callable = func() -> bool:
+		return is_ready.call() and page.call().compare().has_comparison()
+	var shown: Callable = func() -> bool:
+		return comparing.call() and page.call().view == WorktreeView.View.COMPARE
+	var no_comparison: Callable = _says("No comparison is open.")
+	var ref: Callable = func() -> Dictionary:
+		var target: Dictionary = page.call().ref_target() if is_ready.call() else {}
+		return target if String(target.get("type", "")) in ["branch", "remote", "tag"] else {}
+	var commit: Callable = func() -> Dictionary:
+		return page.call().commit_target() if is_ready.call() else {}
+	Actions.register(&"view.compare", "Compare", "View",
+			func() -> void: page.call().show_view(WorktreeView.View.COMPARE), PackedStringArray(),
+			comparing, no_comparison)
+	Actions.register(&"compare.close", "Close comparison", "Compare",
+			func() -> void: page.call().close_compare(), PackedStringArray(), comparing, no_comparison)
+	Actions.register(&"compare.recent", "Recent comparisons…", "Compare",
+			func() -> void: page.call().compare().show_recent(), PackedStringArray(), shown, no_comparison)
+	Actions.register(&"compare.swap", "Swap sides", "Compare",
+			func() -> void: page.call().compare().swap(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().compare().can_swap(),
+			_says("The working copy stays on the right."))
+	Actions.register(&"compare.full_difference", "Show full difference / only since the fork", "Compare",
+			func() -> void: page.call().compare().toggle_full_difference(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().compare().can_toggle_full_difference(),
+			_says("The files already show every difference."))
+	Actions.register(&"compare.pick_left", "Change the left side…", "Compare",
+			func() -> void: page.call().compare().pick_side("left"), PackedStringArray(), shown, no_comparison)
+	Actions.register(&"compare.pick_right", "Change the right side…", "Compare",
+			func() -> void: page.call().compare().pick_side("right"), PackedStringArray(), shown, no_comparison)
+	Actions.register(&"compare.all_changes", "All changes", "Compare",
+			func() -> void: page.call().compare().focus_commit(""), PackedStringArray(),
+			func() -> bool: return shown.call() and not page.call().compare().focused_commit().is_empty(),
+			_says("All changes is already selected."))
+	Actions.register(&"compare.restore_left", "Restore file from the left side", "Compare",
+			func() -> void: page.call().compare().restore("left"), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().compare().can_restore("left"),
+			_says("Select a file in the comparison."))
+	Actions.register(&"compare.restore_right", "Restore file from the right side", "Compare",
+			func() -> void: page.call().compare().restore("right"), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().compare().can_restore("right"),
+			func() -> String:
+				return tr("The working copy is already your files.") \
+						if shown.call() and bool(page.call().compare().shown_request().get("working", false)) \
+						else tr("Select a file in the comparison."))
+	Actions.register(&"compare.cherry_pick", "Cherry-pick selected commits…", "Compare",
+			func() -> void: page.call().compare().cherry_pick(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().compare().can_cherry_pick(),
+			func() -> String: return page.call().compare().cherry_pick_reason() if shown.call() else tr("No comparison is open."))
+	Actions.register(&"compare.copy_hash", "Copy commit hash", "Compare",
+			func() -> void:
+				var commits: Array[Dictionary] = page.call().compare().selected_commits()
+				page.call().ops().copy_hash(String(commits[-1]["oid"])),
+			PackedStringArray(),
+			func() -> bool: return shown.call() and not page.call().compare().selected_commits().is_empty(),
+			_says("Select a commit in the comparison."))
+	Actions.register(&"branch.compare", "Compare…", "Branches",
+			func() -> void: page.call().open_compare(page.call().current_side(), "", true, "", "right"),
+			PackedStringArray(["Ctrl+Shift+C"]), has_head, _says("There is no commit to compare yet."))
+	Actions.register(&"compare.with_current", "Compare with current branch", "Compare",
+			func() -> void:
+				page.call().open_compare(page.call().current_side(), String(ref.call()["name"]), false),
+			PackedStringArray(),
+			func() -> bool:
+				return has_head.call() and not ref.call().is_empty() and not bool(ref.call().get("is_head", false)),
+			_says("Pick a branch or tag other than the current one."))
+	Actions.register(&"compare.with", "Compare with…", "Compare",
+			func() -> void:
+				page.call().open_compare(page.call().current_side(), String(ref.call()["name"]), false, "", "left"),
+			PackedStringArray(),
+			func() -> bool: return has_head.call() and not ref.call().is_empty(),
+			_says("Pick a branch or tag first."))
+	Actions.register(&"commit.compare_working", "Compare with working copy", "History",
+			func() -> void: page.call().open_compare(String(commit.call()["hash"]), "", true),
+			PackedStringArray(),
+			func() -> bool:
+				return not commit.call().is_empty() and page.call().history().selected_pair().is_empty(),
+			_says("Select a commit in History."))
+	Actions.register(&"commit.compare_with", "Compare with…", "History",
+			func() -> void:
+				page.call().open_compare(page.call().current_side(), String(commit.call()["hash"]), false, "", "left"),
+			PackedStringArray(),
+			func() -> bool:
+				return has_head.call() and not commit.call().is_empty() \
+						and page.call().history().selected_pair().is_empty(),
+			_says("Select a commit in History."))
+	Actions.register(&"history.compare_selected", "Compare these commits", "History",
+			func() -> void:
+				var pair: PackedStringArray = page.call().history().selected_pair()
+				page.call().open_compare(pair[0], pair[1], false),
+			PackedStringArray(),
+			func() -> bool:
+				return is_ready.call() and page.call().view == WorktreeView.View.HISTORY \
+						and not page.call().history().selected_pair().is_empty(),
+			_says("Ctrl+click a second commit in History to compare two commits."))

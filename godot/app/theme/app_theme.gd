@@ -1255,6 +1255,12 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	# focused. Its own vertical padding sets the bar's height.
 	_variation(theme, &"FilterBar", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"FilterBar", _box(p.background))
+	# Compare's bar of sides: a filter bar with a line under it.
+	_variation(theme, &"CompareBar", &"PanelContainer")
+	var compare_bar: StyleBoxFlat = _box(p.background)
+	compare_bar.border_color = p.border
+	compare_bar.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"CompareBar", compare_bar)
 	var filter: StyleBoxFlat = _box(p.raised, 0, Vector4(8, 6, 4, 6))
 	filter.border_color = p.border
 	filter.border_width_bottom = 1

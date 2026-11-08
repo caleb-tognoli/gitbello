@@ -1252,6 +1252,18 @@ func cherry_pick(oid: String, subject: String) -> void:
 						Callable(), origin))
 
 
+## Several commits at once (Compare's Commits tab), applied in the order
+## given (oldest first); a conflict stops on that commit, and Continue
+## applies the rest.
+func cherry_pick_commits(oids: PackedStringArray) -> void:
+	var onto: String = session.current_branch()
+	var origin: Control = Actions.origin()
+	_ask("Cherry-pick", tr("Apply %d commits on top of %s, oldest first?") % [oids.size(),
+			onto if not onto.is_empty() else "HEAD"], "Cherry-pick", func() -> void:
+				_track(session.cherry_pick_commits(oids), tr("Cherry-picking %d commits") % oids.size(), "",
+						Callable(), origin))
+
+
 func abort_operation() -> void:
 	var doing: String = String(session.badge().get("operation", ""))
 	var what: String = tr(doing) if not doing.is_empty() else tr("the operation in progress")

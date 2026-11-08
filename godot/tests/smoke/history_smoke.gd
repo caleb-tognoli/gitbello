@@ -246,10 +246,10 @@ func _check_parents(page: RepoTab) -> void:
 	expect(Actions.get_action(&"history.go_to_parent").hidden, "the contextual action stays out of the palette")
 	expect(not Actions.is_enabled(&"history.go_to_parent"), "there is no target between activations")
 	expect(details.parent_links().is_empty(), "an ordinary commit shows no parent links")
-	expect(not (details.get_node("%Parents") as Control).visible, "an ordinary commit has no parent row")
+	expect(not details.header().parents_group().visible, "an ordinary commit has no parent row")
 	expect(await _select_ready(history, 2), "the root loads")
 	expect(details.parent_links().is_empty(), "the root shows no parent links")
-	expect(not (details.get_node("%Parents") as Control).visible, "the root has no parent row")
+	expect(not details.header().parents_group().visible, "the root has no parent row")
 
 
 ## Runs after `_check_merge_parents`: row 0 is a merge, the only kind of

@@ -7,6 +7,10 @@ extends Control
 ## Handles scrolling (with middle-click autoscroll, see `AutoScroll`), keyboard
 ## navigation, multi-select (Ctrl/Shift, unless `multi_select` is off) and
 ## context-menu requests.
+##
+## Rows are `row_height()` tall. A subclass with a few rows of other heights
+## overrides `row_top()`, `row_extent()`, `row_at_offset()` and
+## `visible_row_count()` together.
 
 signal selection_changed()
 signal row_activated(row: int)
@@ -86,6 +90,23 @@ func row_height() -> float:
 	return float(maxi(1, get_theme_constant(&"row_height", THEME_TYPE)))
 
 
+## Where `row` starts, from the top of the first row (`row_count()` gives
+## the rows' total height).
+func row_top(row: int) -> float:
+	return row * row_height()
+
+
+## Height of `row`.
+func row_extent(_row: int) -> float:
+	return row_height()
+
+
+## The row at `offset` pixels from the top of the first row (`row_count()`
+## past the last one).
+func row_at_offset(offset: float) -> int:
+	return int(offset / row_height())
+
+
 func scroll_offset() -> float:
 	return _scroll_bar.value
 
@@ -97,7 +118,7 @@ func set_scroll_offset(offset: float) -> void:
 ## Axes the list can scroll now (0 or 1 each); a subclass that scrolls
 ## sideways adds x.
 func scroll_axes() -> Vector2i:
-	return Vector2i(0, 1 if _row_count * row_height() > size.y else 0)
+	return Vector2i(0, 1 if row_top(_row_count) > size.y else 0)
 
 
 ## Scrolls by `delta` pixels; a subclass that scrolls sideways uses x.
@@ -106,7 +127,7 @@ func scroll_by(delta: Vector2) -> void:
 
 
 func first_visible_row() -> int:
-	return int(scroll_offset() / row_height())
+	return row_at_offset(scroll_offset())
 
 
 func visible_row_count() -> int:
@@ -130,16 +151,17 @@ func max_scroll_offset() -> float:
 
 
 func row_at(at_position: Vector2) -> int:
-	var row: int = int((at_position.y + scroll_offset()) / row_height())
+	var row: int = row_at_offset(at_position.y + scroll_offset())
 	return row if at_position.y >= 0.0 and row < _row_count else -1
 
 
 func scroll_to_row(row: int) -> void:
-	var top: float = row * row_height()
+	var top: float = row_top(row)
+	var bottom: float = top + row_extent(row)
 	if top < scroll_offset():
 		set_scroll_offset(top)
-	elif top + row_height() > scroll_offset() + size.y:
-		set_scroll_offset(top + row_height() - size.y)
+	elif bottom > scroll_offset() + size.y:
+		set_scroll_offset(bottom - size.y)
 
 
 func is_selected(row: int) -> bool:
@@ -179,15 +201,15 @@ func clear_selection() -> void:
 func _draw() -> void:
 	if _row_count == 0:
 		return
-	var height: float = row_height()
 	var first: int = first_visible_row()
 	var count: int = mini(visible_row_count(), _row_count - first)
 	_prepare_rows(first, count)
 	var width: float = content_width()
-	var y: float = first * height - scroll_offset()
+	var y: float = row_top(first) - scroll_offset()
 	var selection_color: Color = get_theme_color(&"selection_color", THEME_TYPE)
 	var cursor_color: Color = get_theme_color(&"cursor_color", THEME_TYPE)
 	for row: int in range(first, first + count):
+		var height: float = row_extent(row)
 		var rect: Rect2 = Rect2(0.0, y, width, height)
 		var selected: bool = draws_selection and _selected.has(row)
 		if selected:
@@ -301,7 +323,7 @@ func _toggle(row: int) -> void:
 
 
 func _update_scroll_range() -> void:
-	var content: float = _row_count * row_height()
+	var content: float = row_top(_row_count)
 	_scroll_bar.max_value = content
 	_scroll_bar.page = size.y
 	_scroll_bar.visible = shows_scroll_bar and content > size.y

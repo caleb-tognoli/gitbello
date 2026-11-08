@@ -3,6 +3,9 @@
 use std::path::Path;
 
 use gitbello_core::changes::{change_code, is_conflicted, FilePick};
+use gitbello_core::compare::{
+    CompareCommit, CompareFile, CompareMode, CompareSide, OnlyOn, RecentComparison, ResolvedSide,
+};
 use gitbello_core::diff::eol::{EndingSummary, FinalNewline, Marker};
 use gitbello_core::diff::image::{ImageSides, SideImage};
 use gitbello_core::diff::{
@@ -22,7 +25,7 @@ use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
     RefKind, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
-use gitbello_core::runtime::{ConflictState, DiffState, RepoState};
+use gitbello_core::runtime::{CompareState, ConflictState, DiffState, RepoState};
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
 use godot::prelude::*;
 
@@ -63,6 +66,7 @@ pub fn error_kind_id(kind: GitErrorKind) -> &'static str {
         GitErrorKind::InUse => "in_use",
         GitErrorKind::FolderLeft => "folder_left",
         GitErrorKind::TrackedMatches => "tracked_matches",
+        GitErrorKind::UnknownRevision => "unknown_revision",
         _ => "other",
     }
 }
@@ -413,6 +417,167 @@ pub fn commit_file_row(file: &CommitFile) -> VarDictionary {
     }
 }
 
+/// One side of a comparison: `{spec, name, kind, full_name, oid}` (`name`
+/// empty and `kind` `working` for the working copy, `oid` empty on an unborn
+/// branch).
+pub fn compare_side(side: &ResolvedSide) -> VarDictionary {
+    vdict! {
+        "spec" => &gstr(&side.spec),
+        "name" => &gstr(&side.name()),
+        "kind" => side.kind.id(),
+        "full_name" => &gstr(side.full_name.as_deref().unwrap_or_default()),
+        "oid" => &gstr(side.oid.as_deref().unwrap_or_default()),
+        "subject" => &gstr(side.subject.as_deref().unwrap_or_default()),
+    }
+}
+
+/// The open comparison: `{state, reloading, request, left, right, mode,
+/// default_mode, can_fork, merge_base, base, only_right, only_left,
+/// file_count, shown_count, additions, deletions, filter, error}`. `state`
+/// is `none`, `loading` (nothing loaded yet), `error` or `ready`;
+/// `reloading` says a new read runs behind a shown result. `request` is
+/// `{left, right, working, mode}` as asked (`mode` "" for the default).
+/// The result's fields are left out until one loaded.
+pub fn compare_info(state: Option<&CompareState>) -> VarDictionary {
+    let Some(state) = state else {
+        return vdict! { "state" => "none" };
+    };
+    let request = state.request();
+    let (right, working) = match &request.right {
+        CompareSide::Rev(spec) => (spec.as_str(), false),
+        CompareSide::WorkingCopy => ("", true),
+    };
+    let mut info = vdict! {
+        "request" => &vdict! {
+            "left" => &gstr(&request.left),
+            "right" => &gstr(right),
+            "working" => working,
+            "mode" => request.mode.map_or("", CompareMode::id),
+        },
+        "filter" => &gstr(state.filter()),
+        "shown_count" => to_i64(state.shown_count()),
+        "reloading" => state.is_loading() && state.comparison().is_some(),
+    };
+    match (state.error(), state.comparison()) {
+        (Some(error), _) if !state.is_loading() => {
+            info.set("state", "error");
+            info.set("error", &error_dict(error));
+        }
+        (_, None) => info.set("state", "loading"),
+        (_, Some(_)) => info.set("state", "ready"),
+    }
+    let focus = match (state.focus(), state.focus_error()) {
+        (None, _) => "none",
+        (Some(_), _) if state.focus_loading() => "loading",
+        (Some(_), Some(_)) => "error",
+        (Some(_), None) => "ready",
+    };
+    info.set("focus", &gstr(state.focus().unwrap_or_default()));
+    info.set("focus_state", focus);
+    if let Some(error) = state.focus_error() {
+        info.set("focus_error", &error_dict(error));
+    }
+    if let Some(shown) = state.shown_comparison() {
+        info.set("file_count", to_i64(shown.files.len()));
+        info.set(
+            "additions",
+            i64::try_from(shown.additions).unwrap_or(i64::MAX),
+        );
+        info.set(
+            "deletions",
+            i64::try_from(shown.deletions).unwrap_or(i64::MAX),
+        );
+    }
+    if let Some(cmp) = state.comparison() {
+        info.set("all_file_count", to_i64(cmp.files.len()));
+        info.set("commit_count", to_i64(cmp.commits.len()));
+        info.set("commits_truncated", cmp.commits_truncated);
+        info.set(
+            "listed_right",
+            to_i64(
+                cmp.commits
+                    .iter()
+                    .filter(|c| c.only == OnlyOn::Right)
+                    .count(),
+            ),
+        );
+        info.set("left", &compare_side(&cmp.left));
+        info.set("right", &compare_side(&cmp.right));
+        info.set("mode", cmp.mode.id());
+        info.set("default_mode", cmp.default_mode.id());
+        info.set("can_fork", cmp.can_fork());
+        info.set(
+            "merge_base",
+            &gstr(cmp.merge_base.as_deref().unwrap_or_default()),
+        );
+        info.set("base", &gstr(&cmp.base));
+        info.set("only_right", i64::from(cmp.only_right));
+        info.set("only_left", i64::from(cmp.only_left));
+    }
+    info
+}
+
+/// A commit only on one side, shaped like a History row (`graph_rows`)
+/// without the graph: `{oid, hash, subject, author, email, coauthors, time,
+/// refs, only ("left" or "right"), parents, in_head, outgoing}`.
+pub fn compare_commit_row(commit: &CompareCommit, refs: &[RefLabel]) -> VarDictionary {
+    let coauthors: Vec<(&str, &str)> = commit
+        .coauthors
+        .iter()
+        .map(|(name, email)| (name.as_str(), email.as_str()))
+        .collect();
+    vdict! {
+        "oid" => &gstr(&commit.oid),
+        "hash" => &gstr(&commit.oid),
+        "subject" => &gstr(&commit.subject),
+        "author" => &gstr(&commit.author),
+        "email" => &gstr(&commit.email),
+        "coauthors" => &identities(&coauthors),
+        "refs" => &labels(refs),
+        "outgoing" => false,
+        "time" => commit.time,
+        "only" => match commit.only {
+            OnlyOn::Left => "left",
+            OnlyOn::Right => "right",
+        },
+        "parents" => i64::from(commit.parents),
+        "in_head" => commit.in_head,
+    }
+}
+
+/// A recent comparison: `{left, right, working, mode, left_name,
+/// right_name}` (the names empty unless a side is a commit).
+pub fn recent_comparison(recent: &RecentComparison) -> VarDictionary {
+    let (right, working) = match &recent.right {
+        CompareSide::Rev(spec) => (spec.as_str(), false),
+        CompareSide::WorkingCopy => ("", true),
+    };
+    vdict! {
+        "left" => &gstr(&recent.left),
+        "right" => &gstr(right),
+        "working" => working,
+        "mode" => recent.mode.map_or("", CompareMode::id),
+        "left_name" => &gstr(&recent.left_name),
+        "right_name" => &gstr(&recent.right_name),
+    }
+}
+
+/// A Compare file row: `{path, original_path, code, additions, deletions,
+/// untracked}`; the counts are -1 for a binary file.
+pub fn compare_file_row(file: &CompareFile) -> VarDictionary {
+    let (additions, deletions) = file
+        .stats
+        .map_or((-1, -1), |(a, r)| (i64::from(a), i64::from(r)));
+    vdict! {
+        "path" => &path_str(&file.path),
+        "original_path" => &file.original_path.as_deref().map_or_else(GString::new, path_str),
+        "code" => change_letter(file.change),
+        "additions" => additions,
+        "deletions" => deletions,
+        "untracked" => file.untracked,
+    }
+}
+
 /// A Changes view row: `{path, original_path, code, pick, conflicted,
 /// resolved, as_staged, amending, in_original_commit, locked, endings_only}`.
 /// `resolved` marks a file whose conflicts were resolved during the
@@ -722,6 +887,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
         DiffKind::Amend => "amend",
         DiffKind::AmendStaged => "staged",
         DiffKind::Commit => "commit",
+        DiffKind::Working => "working",
     };
     let mut info = vdict! {
         "path" => &path_str(&target.path),

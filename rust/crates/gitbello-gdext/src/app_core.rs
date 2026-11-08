@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use gitbello_core::changes::split_message;
+use gitbello_core::compare::{push_recent, CompareMode, CompareSide, RecentComparison};
 use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
 use gitbello_core::diff::rename_parts;
 use gitbello_core::diff::version;
@@ -18,6 +19,9 @@ use gitbello_core::ops::{branch_prefix_error, ref_name_error, PullMode};
 use gitbello_core::paths;
 use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent, REPOSITORY_JOB_LABELS};
 use gitbello_core::ui_state::{self, UiState};
+
+/// UI state list of a repository's recent comparisons.
+const RECENT_KEY: &str = "compare_recent";
 use gitbello_core::worktrees::new_worktree_path_error;
 use godot::prelude::*;
 
@@ -205,8 +209,14 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 let signal = match slot {
                     DiffSlot::Changes => "diff_changed",
                     DiffSlot::Commit => "commit_diff_changed",
+                    DiffSlot::Compare => "compare_diff_changed",
                 };
                 session.emit_signal(signal, &[]);
+            }
+        }
+        RuntimeEvent::CompareChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("compare_changed", &[]);
             }
         }
         RuntimeEvent::Missing { repo } => {
@@ -837,6 +847,54 @@ impl AppCore {
     fn set_repo_ui_state(&mut self, repo: GString, name: GString, value: i64) -> GString {
         self.ui_state
             .set(Path::new(&repo.to_string()), &name.to_string(), value)
+            .err()
+            .map_or_else(GString::new, |e| gstr(&e.to_string()))
+    }
+
+    /// The repository's recent comparisons, newest first (PLAN M7.12):
+    /// `convert::recent_comparison` each.
+    #[func]
+    fn compare_recent(&self, repo: GString) -> Array<VarDictionary> {
+        let mut out = Array::new();
+        for line in self.ui_state.list(Path::new(&repo.to_string()), RECENT_KEY) {
+            if let Some(recent) = RecentComparison::decode(&line) {
+                out.push(&convert::recent_comparison(&recent));
+            }
+        }
+        out
+    }
+
+    /// Puts a comparison first among `repo`'s recent ones (`right` is
+    /// ignored when `working`; `mode` "" is the default; the names are what
+    /// to list a commit side as, or ""). Returns an error message, or an
+    /// empty string.
+    #[func]
+    #[allow(clippy::too_many_arguments)]
+    fn add_compare_recent(
+        &mut self,
+        repo: GString,
+        left: GString,
+        right: GString,
+        working: bool,
+        mode: GString,
+        left_name: GString,
+        right_name: GString,
+    ) -> GString {
+        let repo = PathBuf::from(repo.to_string());
+        let entry = RecentComparison {
+            left: left.to_string(),
+            right: if working {
+                CompareSide::WorkingCopy
+            } else {
+                CompareSide::Rev(right.to_string())
+            },
+            mode: CompareMode::parse(&mode.to_string()),
+            left_name: left_name.to_string(),
+            right_name: right_name.to_string(),
+        };
+        let list = push_recent(&self.ui_state.list(&repo, RECENT_KEY), &entry);
+        self.ui_state
+            .set_list(&repo, RECENT_KEY, list)
             .err()
             .map_or_else(GString::new, |e| gstr(&e.to_string()))
     }

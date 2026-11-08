@@ -28,6 +28,9 @@ commands:
   stashes <path>                   stash list
   diff <root> <file> [--staged|--untracked] [--full]
                                    one file's diff (root = worktree root)
+  compare <root> <left> <right|--working> [--fork|--exact] [--file <path>]
+                                   sides, counts and files of a comparison,
+                                   or one file's diff in it
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
@@ -58,6 +61,7 @@ fn main() -> Result<()> {
         Some("worktrees") => repo_cmds::worktrees(rest),
         Some("stashes") => repo_cmds::stashes(rest),
         Some("diff") => repo_cmds::diff(rest),
+        Some("compare") => repo_cmds::compare(rest),
         Some("op-state") => repo_cmds::op_state(rest),
         Some("watch") => repo_cmds::watch(rest),
         Some("config") => repo_cmds::config(rest),

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
+use gitbello_core::compare::{CompareMode, CompareRequest, CompareSide, OnlyOn};
 use gitbello_core::diff::image::{ImageSides, SideImage};
 use gitbello_core::diff::minimap::{
     self, ConflictMinimap, DiffMinimap, MinimapPalette, MinimapSource, MinimapStyle, Rgba, StripMap,
@@ -12,7 +13,7 @@ use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
-use gitbello_core::runtime::{BranchDelete, DiffSlot, RepoState};
+use gitbello_core::runtime::{BranchDelete, DiffSlot, DiffState, RepoState};
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
@@ -106,6 +107,12 @@ impl RepoSession {
     /// The commit file diff loaded or failed (`commit_diff_info`).
     #[signal]
     fn commit_diff_changed();
+    /// The comparison loaded or failed (`compare_info`).
+    #[signal]
+    fn compare_changed();
+    /// The compare file diff loaded or failed (`compare_diff_info`).
+    #[signal]
+    fn compare_diff_changed();
     /// The worktree folder is gone; the session no longer refreshes.
     #[signal]
     fn missing();
@@ -690,7 +697,7 @@ impl RepoSession {
     #[func]
     fn cherry_pick(&self, oid: GString) -> i64 {
         self.ref_op(RefOp::CherryPick {
-            commit: oid.to_string(),
+            commits: vec![oid.to_string()],
         })
     }
 
@@ -1237,14 +1244,14 @@ impl RepoSession {
     fn diff_split_rows(&self, slot: GString, start: i64, count: i64) -> Array<VarDictionary> {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
-        let commit = slot == "commit";
+        let slot = parse_slot(&slot);
         self.read(|s| {
-            if let (false, Some(conflict)) = (commit, s.conflict()) {
+            if let (DiffSlot::Changes, Some(conflict)) = (slot, s.conflict()) {
                 return Some(convert::conflict_rows(conflict, true, start, count));
             }
-            let state = if commit { s.commit_diff() } else { s.diff() }?;
+            let state = slot_diff(s, slot)?;
             let rows = convert::diff_rows(state, true, start, count);
-            if !commit {
+            if slot == DiffSlot::Changes {
                 for row in rows.iter_shared() {
                     for side in ["left", "right"] {
                         if let Some(Ok(mut line)) =
@@ -1368,6 +1375,190 @@ impl RepoSession {
         .flatten()
         .and_then(|row| i64::try_from(row).ok())
         .unwrap_or(-1)
+    }
+
+    // --- Compare (M7.12) ----------------------------------------------------
+
+    /// Opens a comparison of `left` (any revision) with `right` (a revision,
+    /// or the working copy when `working`), replacing any other; `mode` is
+    /// `fork`, `exact` or "" for the default. `compare_changed` follows.
+    #[func]
+    fn open_compare(&self, left: GString, right: GString, working: bool, mode: GString) {
+        let request = CompareRequest {
+            left: left.to_string(),
+            right: if working {
+                CompareSide::WorkingCopy
+            } else {
+                CompareSide::Rev(right.to_string())
+            },
+            mode: CompareMode::parse(&mode.to_string()),
+        };
+        runtime_cell::with(|rt| rt.open_compare(&self.key, request));
+    }
+
+    /// `fork`, `exact` or "" (the default) for the open comparison.
+    #[func]
+    fn set_compare_mode(&self, mode: GString) {
+        let mode = CompareMode::parse(&mode.to_string());
+        runtime_cell::with(|rt| rt.set_compare_mode(&self.key, mode));
+    }
+
+    #[func]
+    fn reload_compare(&self) {
+        runtime_cell::with(|rt| rt.reload_compare(&self.key));
+    }
+
+    #[func]
+    fn close_compare(&self) {
+        runtime_cell::with(|rt| rt.close_compare(&self.key));
+    }
+
+    /// See `convert::compare_info`.
+    #[func]
+    fn compare_info(&self) -> VarDictionary {
+        self.read(|s| convert::compare_info(s.compare()))
+            .unwrap_or_else(|| convert::compare_info(None))
+    }
+
+    /// Shows only the files whose path contains `text` (any case).
+    #[func]
+    fn set_compare_filter(&self, text: GString) {
+        runtime_cell::with(|rt| rt.set_compare_filter(&self.key, &text.to_string()));
+    }
+
+    /// The files the filter shows, rows `start..start + count`
+    /// (`convert::compare_file_row`).
+    #[func]
+    fn compare_files(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let mut rows = Array::new();
+            if let Some(compare) = s.compare() {
+                let end = start.saturating_add(count).min(compare.shown_count());
+                for index in start..end {
+                    if let Some(file) = compare.shown_file(index) {
+                        rows.push(&convert::compare_file_row(file));
+                    }
+                }
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// The row of `path` among the shown files, or -1.
+    #[func]
+    fn compare_file_index(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        self.read(|s| s.compare()?.shown_index(&path))
+            .flatten()
+            .map_or(-1, to_i64)
+    }
+
+    /// Shows the diff of `path` in the comparison; `compare_diff_changed` follows.
+    #[func]
+    fn select_compare_file(&self, path: GString, full: bool) {
+        let path = PathBuf::from(path.to_string());
+        runtime_cell::with(|rt| rt.select_compare_file(&self.key, Some(&path), full));
+    }
+
+    /// Commits only on one side, rows `start..start + count`, the right
+    /// side's first (`convert::compare_commit_row`).
+    #[func]
+    fn compare_commits(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let mut rows = Array::new();
+            if let Some(compare) = s.compare() {
+                let end = start.saturating_add(count).min(compare.commit_count());
+                for index in start..end {
+                    if let Some(commit) = compare.commit(index) {
+                        rows.push(&convert::compare_commit_row(commit, s.labels(&commit.oid)));
+                    }
+                }
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// The details of the commit the comparison is narrowed to, shaped as
+    /// `commit_info` (empty until they load).
+    #[func]
+    fn compare_focus_details(&self) -> VarDictionary {
+        self.read(|s| {
+            let commit = s.compare()?.focus_details()?;
+            let mut info = convert::commit_info(commit);
+            info.set("refs", &convert::labels(s.labels(&commit.oid)));
+            Some(info)
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// The row of commit `oid` among `compare_commits`, or -1.
+    #[func]
+    fn compare_commit_index(&self, oid: GString) -> i64 {
+        let oid = oid.to_string();
+        self.read(|s| s.compare()?.commit_index(&oid))
+            .flatten()
+            .map_or(-1, to_i64)
+    }
+
+    /// Narrows the files to commit `oid`'s own ("" for the whole
+    /// comparison again); `compare_changed` follows.
+    #[func]
+    fn focus_compare_commit(&self, oid: GString) {
+        let oid = oid.to_string();
+        let oid = (!oid.is_empty()).then_some(oid);
+        runtime_cell::with(|rt| rt.focus_compare_commit(&self.key, oid.as_deref()));
+    }
+
+    /// Writes `paths` as the `left` or `right` side has them into the
+    /// working copy, backed up for `undo_discard`. Label `restore from
+    /// revision`; -1 when that side is the working copy.
+    #[func]
+    fn restore_compare_files(&self, paths: PackedStringArray, side: GString) -> i64 {
+        let paths = path_list(&paths);
+        let side = if side == "left" {
+            OnlyOn::Left
+        } else {
+            OnlyOn::Right
+        };
+        job_id(runtime_cell::with(|rt| rt.restore_compare_files(&self.key, &paths, side)).flatten())
+    }
+
+    /// Applies `oids` on top of HEAD in that order (oldest first). Label
+    /// `cherry-pick`.
+    #[func]
+    fn cherry_pick_commits(&self, oids: PackedStringArray) -> i64 {
+        self.ref_op(RefOp::CherryPick {
+            commits: oids.as_slice().iter().map(|o| o.to_string()).collect(),
+        })
+    }
+
+    #[func]
+    fn clear_compare_diff(&self) {
+        runtime_cell::with(|rt| rt.select_compare_file(&self.key, None, false));
+    }
+
+    /// Like `diff_info`, for the compare file diff.
+    #[func]
+    fn compare_diff_info(&self) -> VarDictionary {
+        self.read(|s| convert::diff_info(s.compare_diff()))
+            .unwrap_or_default()
+    }
+
+    /// Like `diff_lines`, for the compare file diff.
+    #[func]
+    fn compare_diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| Some(convert::diff_rows(s.compare_diff()?, false, start, count)))
+            .flatten()
+            .unwrap_or_default()
     }
 
     // --- Commit details -----------------------------------------------------
@@ -2105,11 +2296,23 @@ impl RepoSession {
 }
 
 /// `commit` is the commit file diff; anything else the Changes diff.
+/// `changes`, `commit` or `compare`.
 fn parse_slot(id: &GString) -> DiffSlot {
     if *id == "commit" {
         DiffSlot::Commit
+    } else if *id == "compare" {
+        DiffSlot::Compare
     } else {
         DiffSlot::Changes
+    }
+}
+
+/// The diff shown in `slot`.
+fn slot_diff(s: &RepoState, slot: DiffSlot) -> Option<&DiffState> {
+    match slot {
+        DiffSlot::Changes => s.diff(),
+        DiffSlot::Commit => s.commit_diff(),
+        DiffSlot::Compare => s.compare_diff(),
     }
 }
 
@@ -2157,13 +2360,12 @@ impl RepoSession {
     /// Calls `f` with the minimap rows of `slot`'s diff, or of the
     /// resolver's file in `changes`.
     fn with_images<R>(&self, slot: &GString, f: impl FnOnce(&ImageSides) -> R) -> Option<R> {
-        let commit = *slot == "commit";
+        let slot = parse_slot(slot);
         self.read(|s| {
-            if let (false, Some(conflict)) = (commit, s.conflict()) {
+            if let (DiffSlot::Changes, Some(conflict)) = (slot, s.conflict()) {
                 return conflict.images().map(f);
             }
-            let state = if commit { s.commit_diff() } else { s.diff() }?;
-            state.images().map(f)
+            slot_diff(s, slot)?.images().map(f)
         })
         .flatten()
     }
@@ -2174,9 +2376,9 @@ impl RepoSession {
         split: bool,
         f: impl FnOnce(&dyn MinimapSource) -> R,
     ) -> Option<R> {
-        let commit = *slot == "commit";
+        let slot = parse_slot(slot);
         self.read(|s| {
-            if let (false, Some(conflict)) = (commit, s.conflict()) {
+            if let (DiffSlot::Changes, Some(conflict)) = (slot, s.conflict()) {
                 let file = conflict.file()?;
                 let language = convert::diff_language(conflict.path());
                 return Some(f(&ConflictMinimap::new(
@@ -2187,8 +2389,8 @@ impl RepoSession {
                     language,
                 )));
             }
-            let state = if commit { s.commit_diff() } else { s.diff() }?;
-            let picks = if !commit && s.can_pick_lines() {
+            let state = slot_diff(s, slot)?;
+            let picks = if slot == DiffSlot::Changes && s.can_pick_lines() {
                 s.diff_picks()
             } else {
                 &[]

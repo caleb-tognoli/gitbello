@@ -21,25 +21,30 @@ signal worktree_missing(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
 signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String)
 
-enum View { HISTORY, CHANGES, SHELVES }
+enum View { HISTORY, CHANGES, SHELVES, COMPARE }
 
 ## Context menu entries per ref type; &"" is a separator.
 const REF_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.new", &"tag.new", &"",
-		&"branch.rename", &"branch.set_upstream", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge", &"branch.new", &"tag.new", &"", &"branch.delete_remote"],
-	"tag": [&"commit.checkout", &"branch.merge", &"branch.new", &"", &"tag.push", &"tag.delete"],
+	"branch": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
+		&"branch.new", &"tag.new", &"", &"branch.rename", &"branch.set_upstream", &"branch.delete"],
+	"remote": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
+		&"branch.new", &"tag.new", &"", &"branch.delete_remote"],
+	"tag": [&"commit.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
+		&"branch.new", &"", &"tag.push", &"tag.delete"],
 	"worktree": [&"worktree.open_terminal", &"worktree.show_in_file_manager",
 		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.remove"],
 }
 ## A ref label in the graph offers fewer actions than the branch list.
 const LABEL_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.merge", &"", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge", &"", &"branch.delete_remote"],
-	"tag": [&"branch.merge", &"", &"tag.push", &"tag.delete"],
+	"branch": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
+		&"branch.delete"],
+	"remote": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
+		&"branch.delete_remote"],
+	"tag": [&"branch.merge", &"", &"compare.with_current", &"compare.with", &"", &"tag.push", &"tag.delete"],
 }
-const COMMIT_MENU: Array[StringName] = [&"commit.amend", &"commit.checkout", &"branch.new", &"tag.new", &"",
-	&"commit.cherry_pick", &"commit.merge", &"", &"commit.copy_hash"]
+const COMMIT_MENU: Array[StringName] = [&"history.compare_selected", &"", &"commit.amend", &"commit.checkout",
+	&"branch.new", &"tag.new", &"", &"commit.cherry_pick", &"commit.merge", &"", &"commit.compare_working",
+	&"commit.compare_with", &"", &"commit.copy_hash"]
 const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"", &"sync.pull_merge", &"sync.pull_rebase", &"",
 	&"sync.push", &"sync.force_push"]
 ## Jobs that change the worktree's files: its panes dim while they run.
@@ -92,6 +97,13 @@ var _history_button: Button = Button.new()
 var _changes_button: Button = Button.new()
 var _shelves_button: Button = Button.new()
 var _shelves_badge: CountBadge = CountBadge.new()
+## Shown while a comparison is open (PLAN M7.12).
+var _compare_button: Button = Button.new()
+## The × inside the Compare tab.
+var _compare_close: Button = Button.new()
+var _compare: CompareView = CompareView.new()
+## The view shown before Compare opened (Close returns to it).
+var _before_compare: View = View.HISTORY
 ## The number of changed files on the Changes button.
 var _changes_badge: CountBadge = CountBadge.new()
 ## The blocking job the overlay shows, or -1.
@@ -135,7 +147,8 @@ func _ready() -> void:
 	var group: ButtonGroup = ButtonGroup.new()
 	for entry: Array in [[_changes_button, "Changes", &"FileList", View.CHANGES, &"view.changes"],
 			[_history_button, "History", &"History", View.HISTORY, &"view.history"],
-			[_shelves_button, "Shelves", &"GitShelf", View.SHELVES, &"view.shelves"]]:
+			[_shelves_button, "Shelves", &"GitShelf", View.SHELVES, &"view.shelves"],
+			[_compare_button, "Compare", &"GitCompare", View.COMPARE, &"view.compare"]]:
 		var button: Button = entry[0]
 		button.text = entry[1]
 		button.icon = AppTheme.icon(entry[2])
@@ -150,7 +163,20 @@ func _ready() -> void:
 	_changes_button.add_child(_changes_badge)
 	_shelves_button.add_child(_shelves_badge)
 	_shelves_button.hide()
+	_compare_button.hide()
+	_compare_close.theme_type_variation = &"FilterFieldButton"
+	_compare_close.focus_mode = Control.FOCUS_NONE
+	_compare_close.pressed.connect(func() -> void: Actions.run_action(&"compare.close", _compare_close))
+	_compare_button.add_child(_compare_close)
+	_compare_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_compare_button.resized.connect(_place_compare_close)
+	_compare_close.minimum_size_changed.connect(_place_compare_close)
 	_view_tabs.add_child(_switch)
+	_compare.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_compare.hide()
+	_changes.add_sibling(_compare)
+	_compare.closed.connect(_on_compare_closed)
+	_compare.label_menu_requested.connect(_on_label_menu)
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
@@ -206,7 +232,8 @@ func _ready() -> void:
 		if _overlay_job >= 0:
 			session.cancel_job(_overlay_job))
 	var panes: Array[SplitContainer] = [_history, _changes, _history.details(), _history.details().files_split(),
-			_changes.shelf_files_split()]
+			_changes.shelf_files_split(), _compare.files_split(), _compare.details_split(),
+			_compare.files_diff_split()]
 	for pane: SplitContainer in panes:
 		pane.drag_ended.connect(_on_split_dragged.bind(pane))
 	show_view(View.HISTORY)
@@ -219,6 +246,10 @@ func setup(value: RepoSession) -> void:
 		add_child(session)
 	_history.session = session
 	_changes.session = session
+	_compare.session = session
+	_compare.feedback = feedback
+	_compare.ops = _ops
+	_compare.date_format = _history.commit_list().date_text
 	_changes.feedback = feedback
 	_changes.ops = _ops
 	_ops.session = session
@@ -260,6 +291,61 @@ func worktree_path() -> String:
 
 func history() -> HistoryView:
 	return _history
+
+
+func compare() -> CompareView:
+	return _compare
+
+
+func compare_button() -> Button:
+	return _compare_button
+
+
+## Opens a comparison of `left` with `right` (or the working copy) in the
+## Compare view; `pick` opens that side's picker (`left` or `right`) at once,
+## its choice replacing this comparison.
+func open_compare(left: String, right: String, working: bool, mode: String = "", pick: String = "") -> void:
+	if session == null:
+		return
+	if view != View.COMPARE:
+		_before_compare = view
+	_compare.open(left, right, working, mode)
+	_compare_button.show()
+	show_view(View.COMPARE)
+	if not pick.is_empty():
+		_compare.pick_side.call_deferred(pick)
+
+
+## What the current branch is called as a side: its name, else HEAD.
+func current_side() -> String:
+	var branch: String = session.current_branch() if session != null else ""
+	return branch if not branch.is_empty() else "HEAD"
+
+
+func close_compare() -> void:
+	_compare.close()
+
+
+## Widens the Compare tab by its × and sets the × after the text.
+func _place_compare_close() -> void:
+	_compare_close.icon = AppTheme.icon(&"Close")
+	_compare_close.tooltip_text = Actions.tooltip(&"compare.close")
+	var natural: float = _compare_button.get_minimum_size().x
+	var close: Vector2 = _compare_close.get_combined_minimum_size()
+	var right: float = _compare_button.get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
+	_compare_button.custom_minimum_size.x = natural + close.x - right / 2.0
+	_compare_close.size = close
+	_compare_close.position = Vector2(natural - right, roundf((_compare_button.size.y - close.y) / 2.0))
+
+
+func compare_close_button() -> Button:
+	return _compare_close
+
+
+func _on_compare_closed() -> void:
+	_compare_button.hide()
+	if view == View.COMPARE:
+		show_view(_before_compare)
 
 
 func changes() -> ChangesView:
@@ -621,13 +707,17 @@ func _sync_explanation(id: StringName) -> String:
 func show_view(which: View) -> void:
 	if which == View.SHELVES and (session == null or session.shelves().is_empty()):
 		which = View.CHANGES
+	if which == View.COMPARE and not _compare.has_comparison():
+		which = View.HISTORY
 	view = which
 	_history.visible = which == View.HISTORY
-	_changes.visible = which != View.HISTORY
+	_changes.visible = which == View.CHANGES or which == View.SHELVES
+	_compare.visible = which == View.COMPARE
 	_changes.show_shelves_view(which == View.SHELVES)
 	_history_button.set_pressed_no_signal(which == View.HISTORY)
 	_changes_button.set_pressed_no_signal(which == View.CHANGES)
 	_shelves_button.set_pressed_no_signal(which == View.SHELVES)
+	_compare_button.set_pressed_no_signal(which == View.COMPARE)
 	if _sidebar_width > 0:
 		_set_sidebar_width(_sidebar_width)
 	if session != null:
@@ -638,7 +728,9 @@ func show_view(which: View) -> void:
 func focus_view() -> void:
 	if not is_visible_in_tree():
 		return
-	if view != View.HISTORY:
+	if view == View.COMPARE:
+		_compare.focus_files()
+	elif view != View.HISTORY:
 		_changes.focus_files()
 	else:
 		_history.commit_list().grab_focus()
@@ -647,8 +739,14 @@ func focus_view() -> void:
 ## The shared left-pane width, and the commit details' height and
 ## files width, are saved per repository.
 func _on_split_dragged(pane: SplitContainer) -> void:
-	if pane == _history or pane == _changes:
+	if pane == _history or pane == _changes or pane == _compare.files_split():
 		_set_sidebar_width(pane.split_offset)
+	# Compare's details and files keep History's sizes.
+	for pair: Array in [[_history.details(), _compare.details_split()],
+			[_history.details().files_split(), _compare.files_diff_split()]]:
+		if pane in pair:
+			for other: Variant in pair:
+				(other as SplitContainer).split_offset = pane.split_offset
 	Core.set_repo_ui_state(_repo_key(), _split_key(pane), pane.split_offset)
 
 
@@ -656,14 +754,15 @@ func _set_sidebar_width(width: int) -> void:
 	_sidebar_width = width
 	_history.split_offset = width
 	_changes.split_offset = width
+	_compare.files_split().split_offset = width
 
 
 func _split_key(pane: SplitContainer) -> String:
 	if pane == _changes.shelf_files_split():
 		return "shelves_files_width"
-	if pane == _history or pane == _changes:
+	if pane == _history or pane == _changes or pane == _compare.files_split():
 		return "sidebar_width"
-	if pane == _history.details():
+	if pane == _history.details() or pane == _compare.details_split():
 		return "details_height"
 	return "details_files_width"
 
@@ -682,6 +781,8 @@ func _restore_widths() -> void:
 			details.get_theme_constant(&"details_height", CommitDetails.THEME_TYPE)))
 	details.files_split().split_offset = int(saved.get("details_files_width",
 			details.get_theme_constant(&"files_width", CommitDetails.THEME_TYPE)))
+	_compare.details_split().split_offset = details.split_offset
+	_compare.files_diff_split().split_offset = details.files_split().split_offset
 
 
 ## Per-repository state is saved under the main worktree's path.
@@ -706,7 +807,10 @@ func _on_state() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+		_place_compare_close.call_deferred()
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
+		_place_compare_close.call_deferred()
 		_on_state()
 		if _overlay_job >= 0:
 			_update_overlay()

@@ -371,15 +371,47 @@ impl CliBackend {
         match operation {
             Operation::Rebase { .. } => git().args(["rebase", "--continue"]).run().map(drop),
             Operation::ApplyMailbox => git().args(["am", "--continue"]).run().map(drop),
-            _ => match message.filter(|m| !m.trim().is_empty()) {
-                Some(message) => git()
-                    .args(["commit", "-F", "-"])
-                    .stdin(message.as_bytes().to_vec())
-                    .run()
-                    .map(drop),
-                None => git().args(["commit", "--no-edit"]).run().map(drop),
-            },
+            _ => {
+                match message.filter(|m| !m.trim().is_empty()) {
+                    Some(message) => git()
+                        .args(["commit", "-F", "-"])
+                        .stdin(message.as_bytes().to_vec())
+                        .run()
+                        .map(drop)?,
+                    None => git().args(["commit", "--no-edit"]).run().map(drop)?,
+                }
+                // Several commits picked at once: git's sequencer has the
+                // rest, applied once this one is committed.
+                let command = match operation {
+                    Operation::CherryPick => "cherry-pick",
+                    Operation::Revert => "revert",
+                    _ => return Ok(()),
+                };
+                if self.sequencer_pending(toplevel, cancel)? {
+                    git().args([command, "--continue"]).run().map(drop)?;
+                }
+                Ok(())
+            }
         }
+    }
+
+    /// Whether git's sequencer has picks (or reverts) left to apply.
+    fn sequencer_pending(&self, toplevel: &Path, cancel: &CancelToken) -> Result<bool, GitError> {
+        let out = self.read(
+            toplevel,
+            &["rev-parse", "--git-path", "sequencer/todo"],
+            cancel,
+        )?;
+        let path = PathBuf::from(out.stdout_text().trim());
+        let path = if path.is_absolute() {
+            path
+        } else {
+            toplevel.join(path)
+        };
+        Ok(fs::read_to_string(path).is_ok_and(|todo| {
+            todo.lines()
+                .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+        }))
     }
 
     pub(super) fn skip_operation_impl(

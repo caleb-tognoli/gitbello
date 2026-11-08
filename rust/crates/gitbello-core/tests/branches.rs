@@ -328,19 +328,34 @@ fn cherry_picks_commits_merges_and_aborts_conflicts() {
     let (mut rt, key) = open(&repo);
 
     ok(&mut rt, &key, |rt| {
-        rt.ref_op(&key, RefOp::CherryPick { commit: pick })
+        rt.ref_op(
+            &key,
+            RefOp::CherryPick {
+                commits: vec![pick],
+            },
+        )
     });
     assert!(repo.path().join("p.txt").is_file());
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "to pick");
 
     // A merge commit is picked against its first parent.
     ok(&mut rt, &key, |rt| {
-        rt.ref_op(&key, RefOp::CherryPick { commit: merge })
+        rt.ref_op(
+            &key,
+            RefOp::CherryPick {
+                commits: vec![merge],
+            },
+        )
     });
     assert!(repo.path().join("m.txt").is_file());
 
     let err = outcome(&mut rt, &key, |rt| {
-        rt.ref_op(&key, RefOp::CherryPick { commit: clash })
+        rt.ref_op(
+            &key,
+            RefOp::CherryPick {
+                commits: vec![clash],
+            },
+        )
     })
     .expect("conflict");
     assert_eq!(err.kind, GitErrorKind::Conflict, "{err}");

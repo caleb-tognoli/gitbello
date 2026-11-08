@@ -352,6 +352,19 @@ func selected_commit() -> Dictionary:
 	return {"hash": oid, "subject": String(data.get("subject", "")), "in_head": bool(data.get("in_head", true))}
 
 
+## The two selected commits, older first (Compare's left side), when exactly
+## two rows are selected (Ctrl+click); else empty.
+func selected_pair() -> PackedStringArray:
+	var rows: PackedInt32Array = _commit_list.selected_rows()
+	if rows.size() != 2:
+		return PackedStringArray()
+	var newer: String = _commit_list.hash_at(mini(rows[0], rows[1]))
+	var older: String = _commit_list.hash_at(maxi(rows[0], rows[1]))
+	if newer.is_empty() or older.is_empty():
+		return PackedStringArray()
+	return PackedStringArray([older, newer])
+
+
 func can_go_to_parent() -> bool:
 	return session != null and session == _parent_action_session and is_visible_in_tree() \
 			and not _parent_action_oid.is_empty() and _parent_source_valid(_parent_action_source, _parent_action_oid)
@@ -428,6 +441,7 @@ func _on_commit_selected() -> void:
 		_head_pending = false
 		_follow_head = session != null and _selected_oid == String(session.status().get("oid", ""))
 	_details.show_commit(_selected_oid)
+	_details.show_pair_action(selected_pair().size() == 2)
 	_update_header()
 
 

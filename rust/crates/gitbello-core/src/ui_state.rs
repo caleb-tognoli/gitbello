@@ -19,33 +19,73 @@ pub struct UiState {
     /// `None` keeps the state in memory only.
     path: Option<PathBuf>,
     repos: BTreeMap<String, BTreeMap<String, i64>>,
+    /// Lists of strings per repository (Compare's recent comparisons).
+    lists: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
 impl UiState {
     /// Loads `path`; a missing or unreadable file gives an empty state (it is
     /// only a convenience, so a broken file is replaced on the next save).
     pub fn load(path: Option<PathBuf>) -> Self {
-        let repos = path
+        let table = path
             .as_deref()
             .and_then(|p| fs::read_to_string(p).ok())
             .and_then(|text| text.parse::<Table>().ok())
-            .map(|table| {
-                table
-                    .into_iter()
-                    .filter_map(|(repo, values)| {
-                        let Value::Table(values) = values else {
-                            return None;
-                        };
-                        let values = values
-                            .into_iter()
-                            .filter_map(|(k, v)| v.as_integer().map(|n| (k, n)))
-                            .collect();
-                        Some((repo, values))
-                    })
-                    .collect()
-            })
             .unwrap_or_default();
-        Self { path, repos }
+        let mut repos = BTreeMap::new();
+        let mut lists = BTreeMap::new();
+        for (repo, values) in table {
+            let Value::Table(values) = values else {
+                continue;
+            };
+            let mut numbers = BTreeMap::new();
+            let mut strings = BTreeMap::new();
+            for (name, value) in values {
+                match value {
+                    Value::Integer(n) => {
+                        numbers.insert(name, n);
+                    }
+                    Value::Array(items) => {
+                        let items: Vec<String> = items
+                            .into_iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect();
+                        strings.insert(name, items);
+                    }
+                    _ => {}
+                }
+            }
+            if !numbers.is_empty() {
+                repos.insert(repo.clone(), numbers);
+            }
+            if !strings.is_empty() {
+                lists.insert(repo, strings);
+            }
+        }
+        Self { path, repos, lists }
+    }
+
+    /// The list `name` saved for `repo` (empty when none).
+    pub fn list(&self, repo: &Path, name: &str) -> Vec<String> {
+        self.lists
+            .get(&key(repo))
+            .and_then(|lists| lists.get(name))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Sets the list `name` for `repo` and saves the file.
+    pub fn set_list(
+        &mut self,
+        repo: &Path,
+        name: &str,
+        items: Vec<String>,
+    ) -> Result<(), ConfigError> {
+        self.lists
+            .entry(key(repo))
+            .or_default()
+            .insert(name.to_owned(), items);
+        self.save()
     }
 
     /// The values saved for `repo` (empty when none).
@@ -66,12 +106,18 @@ impl UiState {
     /// Moves the values of `old` to `new` (a repository moved on disk) and
     /// saves; values already saved for `new` win.
     pub fn rename(&mut self, old: &Path, new: &Path) -> Result<(), ConfigError> {
-        let Some(values) = self.repos.remove(&key(old)) else {
+        let values = self.repos.remove(&key(old));
+        let lists = self.lists.remove(&key(old));
+        if values.is_none() && lists.is_none() {
             return Ok(());
-        };
+        }
         let target = self.repos.entry(key(new)).or_default();
-        for (name, value) in values {
+        for (name, value) in values.unwrap_or_default() {
             target.entry(name).or_insert(value);
+        }
+        let target = self.lists.entry(key(new)).or_default();
+        for (name, items) in lists.unwrap_or_default() {
+            target.entry(name).or_insert(items);
         }
         self.save()
     }
@@ -87,17 +133,25 @@ impl UiState {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(write_err)?;
         }
-        let table: Table = self
-            .repos
-            .iter()
-            .map(|(repo, values)| {
-                let values: Table = values
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Value::Integer(*v)))
-                    .collect();
-                (repo.clone(), Value::Table(values))
-            })
-            .collect();
+        let mut table = Table::new();
+        for (repo, values) in &self.repos {
+            let values: Table = values
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::Integer(*v)))
+                .collect();
+            table.insert(repo.clone(), Value::Table(values));
+        }
+        for (repo, lists) in &self.lists {
+            let entry = table
+                .entry(repo.clone())
+                .or_insert_with(|| Value::Table(Table::new()));
+            if let Value::Table(values) = entry {
+                for (name, items) in lists {
+                    let items = items.iter().cloned().map(Value::String).collect();
+                    values.insert(name.clone(), Value::Array(items));
+                }
+            }
+        }
         let tmp = path.with_extension("toml.tmp");
         fs::write(&tmp, table.to_string()).map_err(write_err)?;
         fs::rename(&tmp, path).map_err(write_err)
@@ -161,6 +215,31 @@ mod tests {
         assert!(state.get(Path::new("/old/repo")).is_empty());
         let moved = state.get(Path::new("/new/repo"));
         assert_eq!((moved.get("w"), moved.get("h")), (Some(&1), Some(&3)));
+    }
+
+    #[test]
+    fn saves_lists_beside_values() {
+        let dir = std::env::temp_dir().join(format!("gitbello ui lists {}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let file = dir.join(FILE_NAME);
+        let repo = Path::new("/some/repö");
+        let mut state = UiState::load(Some(file.clone()));
+        state.set(repo, "w", 3).unwrap();
+        let items = vec![
+            "main\u{1f}feature x\u{1f}".to_owned(),
+            "a\u{1f}\u{1f}exact".to_owned(),
+        ];
+        state
+            .set_list(repo, "compare_recent", items.clone())
+            .unwrap();
+        let loaded = UiState::load(Some(file));
+        assert_eq!(loaded.list(repo, "compare_recent"), items);
+        assert_eq!(loaded.get(repo).get("w"), Some(&3));
+        assert!(loaded.list(repo, "other").is_empty());
+        let mut moved = loaded;
+        moved.rename(repo, Path::new("/new/place")).unwrap();
+        assert_eq!(moved.list(Path::new("/new/place"), "compare_recent"), items);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

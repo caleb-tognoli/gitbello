@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::changes::IndexEntry;
+use crate::compare::{CompareRequest, Comparison};
 use crate::diff::{
     parse_diff, untracked_diff, DiffContent, DiffKind, DiffTarget, FileDiff, PatchMode,
 };
@@ -34,6 +35,7 @@ use crate::repo::{
 use crate::worktrees::new_worktree_path_error;
 
 mod amend;
+mod compare;
 mod ignore;
 mod merge;
 mod shelf_files;
@@ -522,6 +524,42 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<Option<PathBuf>, GitError> {
         Err(unsupported("ignore rules"))
     }
+
+    /// Compare (PLAN M7.12): resolves both sides of `request` in the
+    /// worktree `toplevel`, their merge base and commit counts, and the
+    /// files that differ (with line counts). An unknown revision fails with
+    /// [`GitErrorKind::NotFound`].
+    fn compare(
+        &self,
+        _toplevel: &Path,
+        _request: &CompareRequest,
+        _cancel: &CancelToken,
+    ) -> Result<Comparison, GitError> {
+        Err(unsupported("compare"))
+    }
+    /// The files commit `oid` changed against its first parent (the empty
+    /// tree for a root commit), as an exact comparison of the two.
+    fn compare_commit(
+        &self,
+        _toplevel: &Path,
+        _oid: &str,
+        _cancel: &CancelToken,
+    ) -> Result<Comparison, GitError> {
+        Err(unsupported("compare commit"))
+    }
+    /// Writes `paths` as commit `oid` has them into the working tree (not
+    /// the index); a path `oid` lacks is deleted. Returns the backup: the
+    /// bytes of each path that existed, and an empty id for each that did
+    /// not (undo deletes it, see [`GitBackend::restore_backup`]).
+    fn restore_from(
+        &self,
+        _toplevel: &Path,
+        _oid: &str,
+        _paths: &[PathBuf],
+        _cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        Err(unsupported("restore from a revision"))
+    }
 }
 
 /// Receives `--progress` updates of a running fetch, pull or push.
@@ -933,6 +971,20 @@ impl GitBackend for CliBackend {
                 cmd = cmd.arg(&side.oid);
             }
         }
+        if target.kind == DiffKind::Working {
+            let base = target
+                .commit
+                .as_ref()
+                .and_then(|s| s.parent.as_deref())
+                .ok_or_else(|| {
+                    GitError::new(
+                        "diff",
+                        GitErrorKind::UnexpectedOutput,
+                        "missing compare base",
+                    )
+                })?;
+            cmd = cmd.args(["-M", base]);
+        }
         if target.kind == DiffKind::Head {
             let base = match self.resolve(toplevel, "HEAD", cancel)? {
                 Some(head) => head,
@@ -1249,13 +1301,26 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
         for (path, oid) in files {
+            let target = toplevel.join(path);
+            if oid.is_empty() {
+                // The file did not exist before: undo removes it.
+                match fs::remove_file(&target) {
+                    Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(GitError::new(
+                            format!("delete {}", target.display()),
+                            GitErrorKind::Io,
+                            err.to_string(),
+                        ));
+                    }
+                    _ => continue,
+                }
+            }
             let out = self
                 .runner
                 .read(toplevel)
                 .args(["cat-file", "blob", oid])
                 .cancel_token(cancel)
                 .run()?;
-            let target = toplevel.join(path);
             let io = |err: std::io::Error| {
                 GitError::new(
                     format!("write {}", target.display()),
@@ -1487,16 +1552,24 @@ impl GitBackend for CliBackend {
             RefOp::RenameRemote { old, new } => git(&["remote", "rename", "--", old, new]),
             RefOp::RemoveRemote { name } => git(&["remote", "remove", "--", name]),
             RefOp::SetRemoteUrl { name, url } => git(&["remote", "set-url", "--", name, url]),
-            RefOp::CherryPick { commit } => {
-                let parents = ["rev-list", "--parents", "-n", "1", commit, "--"];
-                let out = self.read(toplevel, &parents, cancel)?;
-                // The commit itself plus more than one parent: a merge.
-                if out.stdout_text().split_whitespace().count() > 2 {
-                    git(&["cherry-pick", "--mainline", "1", commit])
-                } else {
-                    git(&["cherry-pick", commit])
+            RefOp::CherryPick { commits } => match commits.as_slice() {
+                [] => Ok(()),
+                [commit] => {
+                    let parents = ["rev-list", "--parents", "-n", "1", commit, "--"];
+                    let out = self.read(toplevel, &parents, cancel)?;
+                    // The commit itself plus more than one parent: a merge.
+                    if out.stdout_text().split_whitespace().count() > 2 {
+                        git(&["cherry-pick", "--mainline", "1", commit])
+                    } else {
+                        git(&["cherry-pick", commit])
+                    }
                 }
-            }
+                many => {
+                    let mut args = vec!["cherry-pick"];
+                    args.extend(many.iter().map(String::as_str));
+                    git(&args)
+                }
+            },
             RefOp::Abort(operation) => git(abort_args(*operation)),
         }
     }
@@ -1954,6 +2027,34 @@ impl GitBackend for CliBackend {
         self.skip_operation_impl(toplevel, operation, cancel)
     }
 
+    fn compare(
+        &self,
+        toplevel: &Path,
+        request: &CompareRequest,
+        cancel: &CancelToken,
+    ) -> Result<Comparison, GitError> {
+        self.compare_sides(toplevel, request, cancel)
+    }
+
+    fn compare_commit(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<Comparison, GitError> {
+        self.compare_one_commit(toplevel, oid, cancel)
+    }
+
+    fn restore_from(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        self.restore_paths_from(toplevel, oid, paths, cancel)
+    }
+
     fn head_info(&self, repo: &Path, cancel: &CancelToken) -> Result<HeadInfo, GitError> {
         self.head_info_impl(repo, cancel)
     }
@@ -2295,9 +2396,21 @@ impl CliBackend {
             }
             DiffKind::Unstaged | DiffKind::Untracked => (format!(":{path}"), None),
             DiffKind::Commit => {
-                let oid = target.commit.as_ref().map_or("HEAD", |c| c.oid.as_str());
+                let side = target.commit.as_ref();
+                let oid = side.map_or("HEAD", |c| c.oid.as_str());
                 // `<oid>^` is missing for a root commit, which reads as "no old side".
-                (format!("{oid}^:{old_path}"), Some(format!("{oid}:{path}")))
+                let old = side
+                    .and_then(|c| c.parent.clone())
+                    .unwrap_or_else(|| format!("{oid}^"));
+                (format!("{old}:{old_path}"), Some(format!("{oid}:{path}")))
+            }
+            DiffKind::Working => {
+                let base = target
+                    .commit
+                    .as_ref()
+                    .and_then(|c| c.parent.as_deref())
+                    .unwrap_or("HEAD");
+                (format!("{base}:{old_path}"), None)
             }
         };
         let mut input = format!("{old_spec}\n");

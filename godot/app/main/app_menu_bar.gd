@@ -29,13 +29,14 @@ const MENUS: Array[Array] = [
 		["Remotes and tags", [&"repo.remotes", &"repo.tags"]], &"repo.ignore_rules",
 		["Shelves", [&"changes.shelve", &"shelf.restore_left"]], &"",
 		&"operation.continue", &"operation.open_resolver", &"operation.abort", &"", &"repo.refresh"]],
-	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"", &"branch.rename", &"branch.set_upstream"]],
-	["View", [&"view.changes", &"view.history", &"view.shelves", &"", &"diff.toggle_whole_file",
+	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"branch.compare", &"", &"branch.rename",
+		&"branch.set_upstream"]],
+	["View", [&"view.changes", &"view.history", &"view.shelves", &"view.compare", &"", &"diff.toggle_whole_file",
 		&"diff.toggle_minimap", &"history.toggle_compact", &"history.toggle_graph", &"",
 		&"app.command_palette", &"view.toggle_git_log"]],
 	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
 ]
-const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves"]
+const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves", &"view.compare"]
 const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_whole_file",
 	&"diff.toggle_minimap", &"history.toggle_compact", &"history.toggle_graph", &"view.toggle_git_log"]
 const OPERATION_ACTIONS: Array[StringName] = [&"operation.continue", &"operation.open_resolver", &"operation.abort"]

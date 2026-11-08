@@ -1,9 +1,13 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://app/history/commit_details.gd" id="1_details"]
+
 [ext_resource type="Script" path="res://app/history/commit_file_list.gd" id="2_files"]
+
 [ext_resource type="PackedScene" path="res://ui/diff_view/diff_panel.tscn" id="3_panel"]
+
 [ext_resource type="PackedScene" path="res://ui/list_header/list_header.tscn" id="4_header"]
+[ext_resource type="PackedScene" path="res://app/history/commit_header.tscn" id="5_info"]
 
 [node name="CommitDetails" type="VSplitContainer"]
 anchors_preset = 15
@@ -13,99 +17,9 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_details")
 
-[node name="InfoPanel" type="PanelContainer" parent="."]
-layout_mode = 2
-theme_type_variation = &"DetailsHeader"
-
-[node name="Info" type="VBoxContainer" parent="InfoPanel"]
+[node name="Header" parent="." instance=ExtResource("5_info")]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"DetailsInfo"
-
-[node name="Summary" type="RichTextLabel" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 1
-mouse_default_cursor_shape = 1
-theme_type_variation = &"CommitSummary"
-fit_content = true
-scroll_active = false
-autowrap_mode = 3
-context_menu_enabled = true
-selection_enabled = true
-
-[node name="Who" type="HFlowContainer" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsPeople"
-
-[node name="Ids" type="HFlowContainer" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsRow"
-
-[node name="Date" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
-layout_mode = 2
-theme_type_variation = &"DetailsGroup"
-
-[node name="DateIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Date"]
-unique_name_in_owner = true
-layout_mode = 2
-stretch_mode = 5
-
-[node name="DateLabel" type="Label" parent="InfoPanel/Info/Ids/Date"]
-unique_name_in_owner = true
-layout_mode = 2
-mouse_filter = 1
-theme_type_variation = &"DetailsMeta"
-
-[node name="Hash" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
-layout_mode = 2
-theme_type_variation = &"DetailsGroup"
-
-[node name="HashIcon" type="TextureRect" parent="InfoPanel/Info/Ids/Hash"]
-unique_name_in_owner = true
-layout_mode = 2
-stretch_mode = 5
-
-[node name="HashLabel" type="Label" parent="InfoPanel/Info/Ids/Hash"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsHash"
-
-[node name="CopyHash" type="Button" parent="InfoPanel/Info/Ids/Hash"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 4
-focus_mode = 0
-theme_type_variation = &"DetailsIconButton"
-
-[node name="Parents" type="HBoxContainer" parent="InfoPanel/Info/Ids"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"DetailsGroup"
-
-[node name="Refs" type="HFlowContainer" parent="InfoPanel/Info/Ids"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-size_flags_horizontal = 3
-theme_type_variation = &"DetailsRefs"
-
-[node name="BodySeparator" type="HSeparator" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="Body" type="RichTextLabel" parent="InfoPanel/Info"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-focus_mode = 1
-mouse_default_cursor_shape = 1
-theme_type_variation = &"CommitBody"
-autowrap_mode = 3
-context_menu_enabled = true
-selection_enabled = true
 
 [node name="Split" type="HSplitContainer" parent="."]
 unique_name_in_owner = true

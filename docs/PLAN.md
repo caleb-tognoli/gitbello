@@ -963,9 +963,95 @@ Scope settled in the Q&A of 2026-11-07. The shortcuts dialog (a flat list with C
 - [x] `shortcuts_page_smoke.gd` (no default clashes, recording, Escape, conflict Cancel/Reassign, shared and nested contexts, clear/revert, filters, sections, Settings search, Reset all)
 - [ ] Shots in both themes (`tests/visual/shortcuts_screenshots.tscn`); review stop
 
+### M7.12 — Compare (≈2.5 weeks)
+
+Scope settled in the Q&A of 2026-11-08. Compare two states of a repository: branches, remote branches, tags, commits or the working copy. File history and blame stay in M8 and reuse Compare's pieces (picking two versions in a file's history opens Compare filtered to that file). Approved interface change: new gdext calls for comparisons (core range model, file list slices, compare diff targets).
+
+**Sides.** Left is the base, right is what is compared; the diff reads left → right. Either side is any revision git resolves (branch, remote branch, tag, hash, `HEAD~3`); the right side can also be **Working copy** (tracked changes and untracked files, as in Changes). ⇄ swaps them.
+
+**Mode.** `[Since fork | Exact]`. *Since fork* diffs `merge-base(left, right)` against the right side (what the right side added since it split off, like a pull request); *Exact* diffs the two trees. The default is Since fork when both sides are branches (or a branch and the working copy), Exact otherwise. No merge base (unrelated histories) forces Exact, the toggle disabled with the reason in its tooltip. When one side is an ancestor of the other both modes give the same result and the toggle stays as chosen.
+
+**View.** A *Compare* view joins Changes | History | Shelves only while a comparison is open, with a close ×. One comparison per worktree: opening another replaces it, and Back (Alt+←, the header's back button) returns to the previous one. Not restored on restart.
+
+```
+( Changes 3 | History | Compare × )
+[ ⎇ main v ] ⇄ [ ⎇ feature/login v ]  [Since fork | Exact]
++-----------------------------+----------------------------+
+| [Files 12] [Commits ↑5 ↓2]  | src/auth.rs   +40 −12      |
+|  M src/auth.rs     +40 −12  |  @@ -10,6 +10,9 @@         |
+|  A src/token.rs    +88      |  ...diff...                |
+|  D old/login.rs    −63      |                            |
++-----------------------------+----------------------------+
+```
+
+**Picker.** Each side is a chip button with the ref's icon that opens a filterable popup: Working copy (right side only), local branches, remote branches, tags, recent commits, and "Enter any revision…" (Enter resolves it; an invalid one shows inline under the field). The popup also lists the repository's last 5 comparisons for a one-click reopen (kept per repository in its UI state).
+
+**Files tab.** Like Changes: list/tree toggle, status letters, renames as old → new, a `+N −M` column and the filter field. The diff is read-only (no line picks) and keeps diff modes, the minimap and the image viewer as in History. Large ranges stay in Rust: the list is fetched in slices.
+
+**Commits tab.** Two sections, "Only on <right> (N)" and "Only on <left> (N)", as history rows with their lane colours (counts also in the tab label as ↑N ↓M). An **All changes** row at the top shows the aggregate; clicking a commit narrows the right pane to that commit's files and diff (as in History) until All changes is chosen again. With Exact on two commits on one line, only one section has rows.
+
+**Refresh.** A working-copy side refreshes with the file watcher like Changes; ref sides refresh when refs move (commit, fetch, checkout). The selected file and tab are kept when they still exist. The working-copy diff becomes editable once M8's editable diff lands.
+
+**Entry points** (all actions, so also in the palette):
+- Ref menus (branch picker, ref chips, the "+N" popover): **Compare with current branch** and **Compare with…** (the ref on the right, the other side's picker open).
+- History: Ctrl+click a second commit selects two rows (the older one becomes the left side) → **Compare these commits** in the context menu and the details pane. A single commit's menu: **Compare with working copy** and **Compare with…**.
+- **Branch → Compare…** (`Ctrl+Shift+C`; `Ctrl+Shift+D` is the diff mode cycle): the current branch on the left, the right picker open.
+
+**Actions.**
+- File menu: **Restore from <left>** / **Restore from <right>** writes that side's version into the working copy (a file missing on that side is deleted). Backed up first; the toast offers Undo, as for discard. Disabled for a side that is the working copy.
+- Commits: select commits not reachable from HEAD → **Cherry-pick onto <current branch>**, oldest first, through the existing cherry-pick flow and its conflict banner.
+- Deferred: opening a file at a revision in the external editor; copy/save as patch; the merge dialog's "Open in Compare".
+
+**Core.** `git merge-base`, `rev-list --left-right --count`, a left-right log for the two commit sections, `diff -z -M --raw --numstat <base> <right>` for the files (against the working copy: `diff <base>` plus untracked files from status), and file diffs between any two sides as new `DiffTarget` kinds (tree vs tree, working copy vs a commit). All reads, run as jobs.
+
+#### a — Range and files (≈1.5 weeks)
+- [x] Core: compare model (sides, resolve, merge base, mode defaults, counts), file list with stats and renames, file diff between any two sides (tests on fixture repos: branches, tags, unrelated histories, renames, working copy with untracked files, paths with spaces and non-ASCII)
+- [x] `gitbello-cli compare <repo> <left> <right|--working> [--fork|--exact] [--file <path>]` for headless checks
+- [x] Compare view in the switch, picker popup, mode toggle, swap, Back, Files tab with the read-only diff
+- [x] Entry points: ref menus, Branch → Compare…, History's two-commit selection
+- [x] Smoke test (open, swap, mode, filter, close); review stop
+
+As built in a: the view's bar holds Back, the two side chips with ⇄ between them, the ↑/↓ commit counts, the mode switch and Close (the switch's Compare tab has no × of its own). The Files tab is a flat list (the tree toggle comes with the Commits tab in b). "Compare these commits" is in the commit menu and the palette, not yet in the details pane. A comparison opened only to pick its other side (Branch → Compare…, Compare with…) is replaced by the pick, not kept for Back. Compare keeps its own diff slot, so the History and Changes selections are untouched.
+
+#### b — Commits, live sides, actions (≈1 week)
+- [x] Commits tab with both sections, All changes and narrowing
+- [x] Working-copy side live with the watcher; ref sides refresh on ref changes, keeping the selection
+- [x] Restore from a side with backup and Undo; cherry-pick of selected commits
+- [x] Recent comparisons in the picker
+- [x] Smoke test; shots in both themes (`tests/visual/compare_screenshots.tscn`); review stop
+
+As built in b: the Commits tab shows the commit list above the file list (2:3, draggable) rather than replacing it, so a narrowed commit's files stay in view; the rows are plain (subject, short hash, author, date) without lane colours, and the list stops at 2000 commits with a "More commits are not listed" row. The Files tab stays flat: Changes has no tree view to share. Narrowing to a commit compares it with its first parent (a root commit with the empty tree); a strip above the files names it and its × returns to All changes. Restore takes the left side's own revision (not the merge base) and, while narrowed, the commit's parent or the commit. A multi-commit cherry-pick refuses merge commits (one merge alone keeps the mainline-1 flow), and finishing a conflicted step through gitbello's commit continues the rest of the sequence. The Compare tab has its own × and the details pane shows "Compare these commits" while two commits are selected. Recent comparisons skip the one already open.
+
+#### c — Layout pass (≈1 week)
+From Caleb's review of b (2026-11-08). It replaces the Files/Commits tabs, the mode switch and Back described above.
+
+```
+[ ⎇ main v ] ⇄ [ ⎇ feature v ]                                    (🕘)
++------------------------+------------------------------------------+
+| All changes            | selected commit's details (as History)   |
+| Only on feature (5)    +--------------+---------------------------+
+|  Improve login         | files        | diff                      |
+|  Add token refresh     |              |                           |
+| Only on main (2)       |              |                           |
+|  Bump deps             |              |                           |
++------------------------+--------------+---------------------------+
+```
+
+- [x] Layout like History: the commit list on the left (All changes, then "Only on <right> (N)" and "Only on <left> (N)"); on the right the selected commit's details over its files beside the diff. All changes shows every file of the comparison, without a details block. No tabs, no strip naming the commit.
+- [x] Commit rows are History's two-line rows (subject; avatars, author · date; ref chips), without the graph: `CommitList` takes its rows from a source, and Compare's rows carry email, co-authors and refs. The details block is History's, split out of `CommitDetails` as its own component.
+- [x] No hashes shown: a side that is a plain commit shows its subject (the hash in the tooltip); Restore names the sides.
+- [x] Mode switch dropped: always since the fork. When the left side has commits of its own, a dim line "<left> has N newer commits not included · Show full difference" switches to the full difference (and back); unrelated histories always show it.
+- [x] Bar: Back and the bar's × go (the tab has its ×); a Recent button at the far right opens a popover of the repository's recent comparisons, which leave the side pickers.
+- [x] File rows without `+N −M` (the list header keeps the totals), as in Changes.
+- [x] Smoke test; shots in both themes; review stop
+
+As built in c: `CommitHeader` (summary, people, date, hash, refs, message) is split out of `CommitDetails` and shared; in Compare it copies through `compare.copy_hash` and leaves out a merge's parent links (they navigate History). `CommitList` takes its rows from `_fetch_rows` and can leave the graph out; `CompareCommitList` extends it, drawing All changes ("N changed files") and the section names in rows of the same height, and the cursor skips the section names. The details' height and the files' width follow History's (saved under the same keys). The details block keeps History's hash and copy button; lists, chips, menus and toasts name commits by subject. Recent comparisons left the side pickers for a popover at the bar's right; `compare.toggle_mode` became `compare.full_difference`, and `compare.back` (Alt+Left) became `compare.recent`.
+
+After review: the bar has a line under it and a divider before Recent, which follows the sides. The section headers are one-line rows (`VirtualList` gained `row_top`, `row_extent` and `row_at_offset` for lists with rows of other heights) with a fold arrow; a click folds the section, moving the cursor to All changes when its commit is folded away. Recent comparisons save the subjects of commit sides to list them by name, and the side picker lists commits by subject.
+
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit
-- [ ] File history (`git log --follow`) with per-commit diffs
+- [ ] File history (`git log --follow`) with per-commit diffs; two picked versions open Compare (M7.12) filtered to the file, and Compare's file menu gets "History of this file"
 - [ ] Editable working copy in `DiffView` with live re-diff, save, and dirty protection (§3.10)
 - [ ] Graph filter: "Show only matches", search by path and in full messages (find and highlight by subject, author and hash moved to M6.5 P5)
 

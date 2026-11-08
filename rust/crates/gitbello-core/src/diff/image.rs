@@ -217,7 +217,11 @@ pub fn image_format(diff: &FileDiff, path: &Path) -> Option<ImageFormat> {
 fn new_side_on_disk(kind: DiffKind) -> bool {
     matches!(
         kind,
-        DiffKind::Unstaged | DiffKind::Untracked | DiffKind::Head | DiffKind::Amend
+        DiffKind::Unstaged
+            | DiffKind::Untracked
+            | DiffKind::Head
+            | DiffKind::Amend
+            | DiffKind::Working
     )
 }
 

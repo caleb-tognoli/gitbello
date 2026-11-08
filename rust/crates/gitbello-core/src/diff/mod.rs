@@ -49,8 +49,11 @@ pub enum DiffKind {
     Amend,
     /// The amend selection snapshot (`commit.oid`) against `commit.parent`.
     AmendStaged,
-    /// A file in a commit, against the commit's first parent.
+    /// A file in a commit, against the commit's first parent (or, in
+    /// Compare, against any base commit in `commit.parent`).
     Commit,
+    /// Compare: the working tree against the commit in `commit.parent`.
+    Working,
 }
 
 /// The commit or amend selection snapshot a diff reads.
@@ -69,7 +72,8 @@ pub struct DiffTarget {
     pub path: PathBuf,
     /// Source of a staged rename or copy.
     pub original_path: Option<PathBuf>,
-    /// Set for [`DiffKind::Commit`], [`DiffKind::Amend`] and [`DiffKind::AmendStaged`].
+    /// Set for [`DiffKind::Commit`], [`DiffKind::Working`], [`DiffKind::Amend`]
+    /// and [`DiffKind::AmendStaged`].
     pub commit: Option<CommitSide>,
 }
 

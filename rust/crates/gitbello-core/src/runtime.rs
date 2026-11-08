@@ -54,6 +54,7 @@ use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 mod amend;
 mod branch_delete;
+mod compare;
 mod ignore;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
 use branch_delete::BranchDeleteState;
@@ -61,6 +62,11 @@ pub use branch_delete::{
     BranchDelete, BranchDeleteInfo, DeletedBranch, RemoteBranch, BRANCH_DELETE_INFO_JOB_LABEL,
     DELETE_BRANCH_JOB_LABEL, DELETE_REMOTE_BRANCH_JOB_LABEL, MAX_BRANCH_UNDO,
     UNDO_BRANCH_DELETE_JOB_LABEL,
+};
+use compare::{apply_compare, compare_after_refs, compare_after_status};
+pub use compare::{
+    CompareState, COMPARE_COMMIT_JOB_LABEL, COMPARE_DIFF_JOB_LABEL, COMPARE_JOB_LABEL,
+    RESTORE_FROM_JOB_LABEL,
 };
 use ignore::{apply_ignore_picks, reload_ignore_rules, IgnoreState};
 pub use ignore::{
@@ -163,6 +169,7 @@ const AUTO_FETCH_FIRST_DELAY: Duration = Duration::from_secs(5);
 /// conflicted pull, a checkout whose stashed changes did not re-apply).
 const REFRESH_ON_FAILURE: &[&str] = &[
     CHECKOUT_JOB_LABEL,
+    RESTORE_FROM_JOB_LABEL,
     DELETE_BRANCH_JOB_LABEL,
     DELETE_REMOTE_BRANCH_JOB_LABEL,
     UNDO_BRANCH_DELETE_JOB_LABEL,
@@ -196,6 +203,9 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
     let policy = match label {
         DIFF_JOB_LABEL
         | COMMIT_DIFF_JOB_LABEL
+        | COMPARE_JOB_LABEL
+        | COMPARE_COMMIT_JOB_LABEL
+        | COMPARE_DIFF_JOB_LABEL
         | COMMIT_DETAILS_JOB_LABEL
         | MERGE_PREVIEW_JOB_LABEL
         | IGNORE_PREVIEW_JOB_LABEL => (Interactive, true),
@@ -283,6 +293,10 @@ pub enum RuntimeEvent {
     },
     /// The commit requested with [`Runtime::load_commit`] loaded.
     CommitLoaded {
+        repo: PathBuf,
+    },
+    /// The comparison opened with [`Runtime::open_compare`] loaded or failed.
+    CompareChanged {
         repo: PathBuf,
     },
     /// The worktree folder of this repository is gone; refreshes stop.
@@ -538,6 +552,8 @@ pub struct RepoState {
     commit: Option<CommitDetails>,
     commit_requested: Option<String>,
     commit_diff: Option<DiffState>,
+    compare: Option<CompareState>,
+    compare_diff: Option<DiffState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
     /// Modified files whose only unstaged changes are line endings or the
@@ -617,6 +633,8 @@ impl RepoState {
             commit: None,
             commit_requested: None,
             commit_diff: None,
+            compare: None,
+            compare_diff: None,
             discards: Vec::new(),
             endings_only: HashSet::new(),
             endings_inputs: None,
@@ -1158,6 +1176,7 @@ impl RepoState {
         match slot {
             DiffSlot::Changes => &mut self.diff,
             DiffSlot::Commit => &mut self.commit_diff,
+            DiffSlot::Compare => &mut self.compare_diff,
         }
     }
 
@@ -1325,12 +1344,13 @@ impl RepoState {
     }
 }
 
-/// Which of a repository's two diffs: the changes panel's or the commit
-/// details panel's.
+/// Which of a repository's diffs: the changes panel's, the commit details
+/// panel's or Compare's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiffSlot {
     Changes,
     Commit,
+    Compare,
 }
 
 impl DiffSlot {
@@ -1338,6 +1358,7 @@ impl DiffSlot {
         match self {
             Self::Changes => DIFF_JOB_LABEL,
             Self::Commit => COMMIT_DIFF_JOB_LABEL,
+            Self::Compare => COMPARE_DIFF_JOB_LABEL,
         }
     }
 }
@@ -1584,6 +1605,7 @@ impl Runtime {
             },
             (DiffSlot::Changes, None) => state.diff()?.target().clone(),
             (DiffSlot::Commit, _) => state.commit_diff()?.target().clone(),
+            (DiffSlot::Compare, _) => state.compare_diff()?.target().clone(),
         };
         let dir = self.versions_dir.clone()?;
         Some(
@@ -3434,6 +3456,15 @@ impl Runtime {
             submit_old_file(&self.scheduler, state, DiffSlot::Commit);
             return;
         }
+        if label == COMPARE_DIFF_JOB_LABEL {
+            apply_diff(state, DiffSlot::Compare, kind, &repo, out);
+            submit_old_file(&self.scheduler, state, DiffSlot::Compare);
+            return;
+        }
+        if label == COMPARE_JOB_LABEL || label == COMPARE_COMMIT_JOB_LABEL {
+            apply_compare(state, &label, kind, &repo, out);
+            return;
+        }
         if label == OLD_FILE_JOB_LABEL {
             if let EventKind::Finished(result) = kind {
                 apply_old_file(state, result.ok(), &repo, out);
@@ -3602,6 +3633,7 @@ impl Runtime {
                         if state.diff.is_some() {
                             reload_changes_diff(&self.scheduler, state, &mut self.diff_generation);
                         }
+                        compare_after_status(&self.scheduler, state, &mut self.diff_generation);
                         // Conflict markers live in the files, not the status.
                         if state.conflict.is_some() || state.operation.is_some() {
                             self.diff_generation += 1;
@@ -3621,6 +3653,12 @@ impl Runtime {
                     // Staging, edits and commits all show up as a status change.
                     if refresh == RefreshKind::Status && state.diff.is_some() {
                         reload_changes_diff(&self.scheduler, state, &mut self.diff_generation);
+                    }
+                    if refresh == RefreshKind::Status {
+                        compare_after_status(&self.scheduler, state, &mut self.diff_generation);
+                    }
+                    if refresh == RefreshKind::Refs {
+                        compare_after_refs(&self.scheduler, state, &mut self.diff_generation);
                     }
                     if refresh == RefreshKind::Status {
                         self.diff_generation += 1;
@@ -4090,6 +4128,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Amend(_)
         | JobOutput::AmendChanges { .. }
         | JobOutput::Commit(_)
+        | JobOutput::Compare { .. }
         | JobOutput::Discarded(_)
         | JobOutput::EndingsOnly(_)
         | JobOutput::ShelfFiles(..)
@@ -4781,11 +4820,22 @@ fn diff_inputs(state: &RepoState, target: &DiffTarget) -> Option<DiffInputs> {
 /// is running is followed by another, so a file that keeps changing still
 /// shows each load as it lands rather than restarting forever.
 fn reload_changes_diff(scheduler: &JobScheduler, state: &mut RepoState, generation: &mut u64) {
-    let Some(target) = state.diff.as_ref().map(|d| d.target.clone()) else {
+    reload_slot_diff(scheduler, state, DiffSlot::Changes, generation);
+}
+
+/// [`reload_changes_diff`] for the diff in `slot` (Compare's working-copy
+/// side too).
+fn reload_slot_diff(
+    scheduler: &JobScheduler,
+    state: &mut RepoState,
+    slot: DiffSlot,
+    generation: &mut u64,
+) {
+    let Some(target) = state.slot_mut(slot).as_ref().map(|d| d.target.clone()) else {
         return;
     };
     let inputs = diff_inputs(state, &target);
-    let Some(diff) = state.diff.as_mut() else {
+    let Some(diff) = state.slot_mut(slot).as_mut() else {
         return;
     };
     let failed = diff.error.is_some() && !diff.loading;
@@ -4801,7 +4851,7 @@ fn reload_changes_diff(scheduler: &JobScheduler, state: &mut RepoState, generati
         return;
     }
     *generation += 1;
-    submit_diff(scheduler, state, DiffSlot::Changes, *generation);
+    submit_diff(scheduler, state, slot, *generation);
 }
 
 /// Reads the old side of the diff in `slot` when its open gaps need it.
@@ -4841,7 +4891,7 @@ fn apply_old_file(
         Some(JobOutput::OldFile { oid, text: None }) => (None, Some(oid)),
         _ => (None, None),
     };
-    for slot in [DiffSlot::Changes, DiffSlot::Commit] {
+    for slot in [DiffSlot::Changes, DiffSlot::Commit, DiffSlot::Compare] {
         let Some(diff) = state.slot_mut(slot).as_mut().filter(|d| d.old_loading) else {
             continue;
         };

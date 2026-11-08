@@ -191,6 +191,14 @@ pub enum JobOutput {
     },
     /// One commit's details.
     Commit(Box<CommitDetails>),
+    /// A comparison (`Runtime::open_compare`); `generation` as for diffs.
+    Compare {
+        generation: u64,
+        comparison: Box<crate::compare::Comparison>,
+        /// The commit's details when one commit is compared with its parent
+        /// (the comparison narrowed to it).
+        details: Option<Box<crate::repo::CommitDetails>>,
+    },
     /// Worktrees the cleanup flow can offer.
     Cleanup(Vec<CleanupCandidate>),
     /// A discard finished; these `(path, blob id)` backups can undo it.

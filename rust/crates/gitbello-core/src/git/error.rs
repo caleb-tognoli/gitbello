@@ -65,6 +65,9 @@ pub enum GitErrorKind {
     /// about them first; nothing was written.
     #[error("the rule matches tracked files")]
     TrackedMatches,
+    /// A revision that does not name a commit (Compare's sides).
+    #[error("unknown revision")]
+    UnknownRevision,
     #[error("git failed")]
     Other,
 }

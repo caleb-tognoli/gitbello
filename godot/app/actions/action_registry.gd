@@ -72,6 +72,21 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"changes.shelve_checked": &"GitShelf",
 	&"changes.discard_checked": &"Remove",
 	&"view.shelves": &"GitShelf",
+	&"view.compare": &"GitCompare",
+	&"branch.compare": &"GitCompare",
+	&"compare.with_current": &"GitCompare",
+	&"compare.with": &"GitCompare",
+	&"commit.compare_working": &"GitCompare",
+	&"commit.compare_with": &"GitCompare",
+	&"history.compare_selected": &"GitCompare",
+	&"compare.close": &"Close",
+	&"compare.swap": &"Swap",
+	&"compare.recent": &"History",
+	&"compare.restore_left": &"Undo",
+	&"compare.restore_right": &"Undo",
+	&"compare.cherry_pick": &"GitCommit",
+	&"compare.copy_hash": &"ActionCopy",
+	&"compare.all_changes": &"FileList",
 	&"shelf.restore": &"Undo",
 	&"shelf.restore_file": &"Undo",
 	&"shelf.discard_file": &"Remove",
@@ -137,15 +152,19 @@ const CONTEXT_PREFIXES: Dictionary[String, StringName] = {
 	"commit.": &"History",
 	"shelf.": &"Shelves",
 	"conflict.": &"Resolver",
+	"compare.": &"Compare",
 }
 ## Ids whose context differs from their prefix's.
 const CONTEXT_IDS: Dictionary[StringName, StringName] = {
 	&"commit.undo": &"Changes",
+	&"compare.with_current": GLOBAL,
+	&"compare.with": GLOBAL,
+	&"compare.close": GLOBAL,
 }
 ## Contexts shown inside others: the diff sits in Changes, History and
 ## Shelves. The resolver replaces the diff, so it overlaps only `GLOBAL`.
 const CONTEXTS_INSIDE: Dictionary[StringName, Array] = {
-	&"Diff": [&"Changes", &"History", &"Shelves"],
+	&"Diff": [&"Changes", &"History", &"Shelves", &"Compare"],
 }
 
 

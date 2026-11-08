@@ -417,7 +417,7 @@ fn commits_a_cherry_pick_with_its_author() {
         rt.ref_op(
             &key,
             RefOp::CherryPick {
-                commit: picked.clone(),
+                commits: vec![picked.clone()],
             },
         )
     });
