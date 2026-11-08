@@ -442,19 +442,24 @@ fn a_deleted_worktree_folder_is_reported_once() {
 
     // On Windows a refresh running in the folder (started by the deletion
     // itself) briefly blocks removing it, as it would for Explorer: retry.
+    // A failed attempt may already have removed `.git`, so the events
+    // polled meanwhile can hold the one Missing: keep them.
+    let mut events = Vec::new();
     for attempt in 0.. {
         match fs::remove_dir_all(&linked) {
             Ok(()) => break,
             Err(err) if attempt < 100 => {
                 let _ = err;
-                rt.poll();
+                events.extend(rt.poll());
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Err(err) => panic!("cannot delete the worktree folder: {err}"),
         }
     }
     rt.on_focus(&key);
-    let mut events = poll_until(&mut rt, |rt, _| rt.repo(&key).unwrap().is_missing());
+    events.extend(poll_until(&mut rt, |rt, _| {
+        rt.repo(&key).unwrap().is_missing()
+    }));
     // Later refreshes are not tried; the ones already queued fail quietly.
     rt.on_focus(&key);
     events.extend(poll_until(&mut rt, |rt, _| rt.pending_jobs() == 0));
