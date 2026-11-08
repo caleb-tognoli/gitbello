@@ -73,6 +73,10 @@ const SYNC_ICONS: Dictionary[String, StringName] = {
 	"publish": &"GitPush", "push": &"GitPush", "pull": &"GitPull", "sync": &"Reload", "fetch": &"GitFetch",
 }
 
+## The view last chosen in the shown worktree: every worktree and tab shows it
+## when it is selected.
+static var shared_view: View = View.HISTORY
+
 var session: RepoSession = null
 var view: View = View.HISTORY
 ## Shows job progress and results; set before `setup`.
@@ -104,6 +108,10 @@ var _compare_close: Button = Button.new()
 var _compare: CompareView = CompareView.new()
 ## The view shown before Compare opened (Close returns to it).
 var _before_compare: View = View.HISTORY
+## The shared view this worktree could not show yet (Shelves before its
+## shelves are read), shown once it can.
+var _wanted: View = View.HISTORY
+var _has_wanted: bool = false
 ## The number of changed files on the Changes button.
 var _changes_badge: CountBadge = CountBadge.new()
 ## The blocking job the overlay shows, or -1.
@@ -236,7 +244,7 @@ func _ready() -> void:
 			_compare.files_diff_split()]
 	for pane: SplitContainer in panes:
 		pane.drag_ended.connect(_on_split_dragged.bind(pane))
-	show_view(View.HISTORY)
+	_apply_view(View.HISTORY)
 
 
 ## Takes ownership of `value` (adds it as a child) and shows its worktree.
@@ -704,11 +712,48 @@ func _sync_explanation(id: StringName) -> String:
 # --- Views ----------------------------------------------------------------------
 
 ## Switches the panes and focuses them (the changes view focuses its files).
+## In the shown worktree it also becomes the shared view.
 func show_view(which: View) -> void:
-	if which == View.SHELVES and (session == null or session.shelves().is_empty()):
-		which = View.CHANGES
-	if which == View.COMPARE and not _compare.has_comparison():
-		which = View.HISTORY
+	_has_wanted = false
+	_apply_view(which)
+	if is_visible_in_tree():
+		shared_view = view
+	focus_view()
+
+
+## Shows the next (`step` 1) or previous (-1) view in the switch's order,
+## skipping the views whose buttons are hidden.
+func cycle_view(step: int) -> void:
+	var order: Array[View] = [View.CHANGES, View.HISTORY, View.SHELVES, View.COMPARE]
+	var at: int = order.find(view)
+	for i: int in range(1, order.size()):
+		var next: View = order[posmod(at + step * i, order.size())]
+		if _can_show(next):
+			show_view(next)
+			return
+
+
+func _can_show(which: View) -> bool:
+	match which:
+		View.SHELVES:
+			return session != null and not session.shelves().is_empty()
+		View.COMPARE:
+			return _compare.has_comparison()
+	return true
+
+
+## Shows the shared view (the worktree or tab was just selected), or, until
+## this worktree can show it, its fallback.
+func show_shared_view() -> void:
+	_apply_view(shared_view)
+	_wanted = shared_view
+	_has_wanted = view != shared_view
+	focus_view()
+
+
+func _apply_view(which: View) -> void:
+	if not _can_show(which):
+		which = View.CHANGES if which == View.SHELVES else View.HISTORY
 	view = which
 	_history.visible = which == View.HISTORY
 	_changes.visible = which == View.CHANGES or which == View.SHELVES
@@ -722,7 +767,6 @@ func show_view(which: View) -> void:
 		_set_sidebar_width(_sidebar_width)
 	if session != null:
 		_update_banner()
-	focus_view()
 
 
 func focus_view() -> void:
@@ -803,6 +847,9 @@ func _on_state() -> void:
 	_shelves_button.visible = _shelves_badge.count > 0
 	if view == View.SHELVES and _shelves_badge.count == 0:
 		show_view(View.CHANGES)
+	elif _has_wanted and is_visible_in_tree():
+		_apply_view(_wanted)
+		_has_wanted = view != _wanted
 	state_changed.emit()
 
 

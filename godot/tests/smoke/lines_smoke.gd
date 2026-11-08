@@ -23,7 +23,7 @@ func run() -> void:
 	var session: RepoSession = page.session
 	expect(await wait_until(func() -> bool: return session.change_count() == 3),
 			"README.md and app.txt are modified, notes.txt is untracked")
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 	var view: ChangesView = page.changes()
 	var list: ChangeList = view.list()
 	expect_eq(list.path_at(list.cursor), "README.md", "README.md is first")

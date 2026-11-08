@@ -27,8 +27,8 @@ func run() -> void:
 
 	var view: ChangesView = page.changes()
 	var list: ChangeList = view.list()
-	press("Ctrl+Shift+G")
-	expect_eq(page.view, WorktreeView.View.CHANGES, "Ctrl+Shift+G shows the changes view")
+	press("Alt+1")
+	expect_eq(page.view, WorktreeView.View.CHANGES, "Alt+1 shows the changes view")
 	expect(list.has_focus(), "the list has focus")
 	expect_eq(list.cursor, 0, "cursor on the first file")
 	expect_eq(session.picked_count(), 2, "nothing staged: every file is included")
@@ -404,8 +404,8 @@ func run() -> void:
 		return false)
 	expect(badged, "linked worktree has a badge: %s" % [session.worktrees()])
 
-	press("Ctrl+Shift+H")
-	expect_eq(page.view, WorktreeView.View.HISTORY, "Ctrl+Shift+H shows history")
+	press("Alt+2")
+	expect_eq(page.view, WorktreeView.View.HISTORY, "Alt+2 shows history")
 	while _main.tab_count() > 0:
 		_main.close_tab(0)
 	_main.queue_free()

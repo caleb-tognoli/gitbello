@@ -437,7 +437,8 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+Tab / Ctrl+Shift+Tab | next / previous repo tab |
 | Ctrl+1 … Ctrl+9 | select worktree chip 1–9 |
 | Ctrl+B | branch popover (was the sidebar toggle) |
-| Ctrl+Shift+G / Ctrl+Shift+H | Changes / History (were Ctrl+2 and Ctrl+1, which move to the chips) |
+| Alt+1 … Alt+4 | Changes / History / Shelves / Compare (were Ctrl+Shift+G and Ctrl+Shift+H) |
+| Ctrl+PageDown / Ctrl+PageUp | next / previous view, round the switch's shown buttons |
 | Ctrl+T | new worktree |
 | Ctrl+N | Home tab (M7.5) |
 | Ctrl+O | Add existing folder (M7.5; was Open repository) |

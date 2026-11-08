@@ -26,7 +26,7 @@ func run() -> void:
 			operation_errors.append("%s: %s" % [label, error]))
 	expect(await wait_until(func() -> bool: return session.change_count() == 2 and session.shelves().size() == 1),
 			"repo-11 has two changes and one stash")
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 	var view: ChangesView = page.changes()
 	var shelves: ShelfList = view.shelf_list()
 	expect(not shelves.visible, "Changes does not contain the shelf browser")
@@ -36,7 +36,7 @@ func run() -> void:
 	expect("work in progress" in " ".join(shelves.row_texts()), "the stash is named in the browser")
 	expect(not view.commit_box().is_visible_in_tree(), "Shelves has no commit form")
 	expect(not Actions.is_enabled(&"changes.commit"), "commit is disabled in Shelves")
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 
 	# Shelve app.txt (highlighted first) under a name.
 	var list: ChangeList = view.list()
@@ -92,7 +92,7 @@ func run() -> void:
 	press("Ctrl+F")
 	expect(shelves.filter_field().text_box().has_focus(), "Ctrl+F focuses the shelf-name filter")
 	press("Escape")
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 
 	# Switch with notes.txt still changed: leave it on main.
 	var created: bool = await _job_ok(session, session.create_branch("topic", "HEAD", false))
@@ -149,7 +149,7 @@ func run() -> void:
 	expect(shelves.all_branches(), "all includes branches added later")
 	shelves.branch_picker().hide()
 	expect(await _job_ok(session, session.discard_shelf(String(_shelf(session, "topic work")["oid"]))), "remove the temporary topic shelf")
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 
 	# Back on main: the changes left there are offered back.
 	ops.checkout_branch("main")

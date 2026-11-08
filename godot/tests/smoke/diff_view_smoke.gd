@@ -33,7 +33,7 @@ func run() -> void:
 	write_file(long_file, _lines([10, 60]))
 	expect(await wait_until(func() -> bool: return session.change_count() == 3), "long.txt changed")
 
-	press("Ctrl+Shift+G")
+	press("Alt+1")
 	var view: ChangesView = page.changes()
 	var list: ChangeList = view.list()
 	var row: int = -1

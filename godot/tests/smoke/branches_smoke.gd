@@ -180,7 +180,7 @@ func run() -> void:
 	# within the same second onto the same parent, git would produce the
 	# very same commit and `renamed` would count as merged.
 	expect(await _commit(session, "notes.txt", "Add notes"), "committed notes.txt on main")
-	press("Ctrl+Shift+H")
+	press("Alt+2")
 	var history: HistoryView = page.history()
 	var list: CommitList = history.commit_list()
 	expect(Actions.run_action(&"history.all_branches"), "all branches exposes the commit on renamed")

@@ -243,6 +243,12 @@ func focus_view() -> void:
 		_active.focus_view()
 
 
+## Shows the view last chosen in any worktree (the tab was just selected).
+func show_shared_view() -> void:
+	if _active != null:
+		_active.show_shared_view()
+
+
 func ref_target() -> Dictionary:
 	return _active.ref_target() if _active != null else {}
 
@@ -316,7 +322,7 @@ func _activate(v: WorktreeView) -> void:
 	for other: WorktreeView in _views:
 		other.visible = other == v
 	_refresh_strip()
-	v.focus_view()
+	v.show_shared_view()
 	state_changed.emit()
 
 

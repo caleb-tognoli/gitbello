@@ -6,6 +6,12 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 
 ## Unreleased
 
+### Views
+- The Changes, History, Shelves or Compare view you pick stays when you switch worktree
+  or repository tab.
+- Alt+1 to Alt+4 show Changes, History, Shelves and Compare (Ctrl+Shift+G and
+  Ctrl+Shift+H are gone); Ctrl+PageDown and Ctrl+PageUp go to the next and previous view.
+
 ### Deleting branches
 - Deleting a branch says what it would lose (commits not in the main branch, commits not
   pushed, its worktree) and deletes it in one step, merged or not.

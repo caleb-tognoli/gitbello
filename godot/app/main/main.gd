@@ -396,7 +396,7 @@ func _on_tab_changed(index: int) -> void:
 	_save_tabs()
 	var active: RepoTab = current_page()
 	if active != null:
-		active.focus_view()
+		active.show_shared_view()
 
 
 ## TabBar reordered its tabs; rebuild the page list from the tab metadata.
@@ -536,12 +536,17 @@ func _register_actions() -> void:
 			PackedStringArray(["Ctrl+Shift+L"]))
 	Actions.register(&"view.history", "History", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.HISTORY),
-			PackedStringArray(["Ctrl+Shift+H"]), has_repo, no_repo)
+			PackedStringArray(["Alt+2"]), has_repo, no_repo)
 	Actions.register(&"view.changes", "Changes", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.CHANGES),
-			PackedStringArray(["Ctrl+Shift+G"]), has_repo, no_repo)
+			PackedStringArray(["Alt+1"]), has_repo, no_repo)
+	# Next and previous go round the switch's shown buttons.
+	Actions.register(&"view.next", "Next view", "View",
+			func() -> void: current_view().cycle_view(1), PackedStringArray(["Ctrl+PageDown"]), has_repo, no_repo)
+	Actions.register(&"view.previous", "Previous view", "View",
+			func() -> void: current_view().cycle_view(-1), PackedStringArray(["Ctrl+PageUp"]), has_repo, no_repo)
 	Actions.register(&"view.shelves", "Shelves", "View",
-			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(),
+			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(["Alt+3"]),
 			func() -> bool: return current_page() != null and not current_page().session.shelves().is_empty(),
 			_says("This repository has no shelves."))
 	for i: int in CHIP_SHORTCUTS:
@@ -1388,7 +1393,7 @@ func _register_compare_actions() -> void:
 	var commit: Callable = func() -> Dictionary:
 		return page.call().commit_target() if is_ready.call() else {}
 	Actions.register(&"view.compare", "Compare", "View",
-			func() -> void: page.call().show_view(WorktreeView.View.COMPARE), PackedStringArray(),
+			func() -> void: page.call().show_view(WorktreeView.View.COMPARE), PackedStringArray(["Alt+4"]),
 			comparing, no_comparison)
 	Actions.register(&"compare.close", "Close comparison", "Compare",
 			func() -> void: page.call().close_compare(), PackedStringArray(), comparing, no_comparison)

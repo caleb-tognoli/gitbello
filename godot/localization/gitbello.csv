@@ -28,6 +28,8 @@ keys,en,it
 "Close tab","Close tab","Chiudi scheda"
 "Next tab","Next tab","Scheda successiva"
 "Previous tab","Previous tab","Scheda precedente"
+"Next view","Next view","Vista successiva"
+"Previous view","Previous view","Vista precedente"
 "Git command log","Git command log","Registro dei comandi Git"
 "Settings…","Settings…","Impostazioni…"
 "Settings","Settings","Impostazioni"

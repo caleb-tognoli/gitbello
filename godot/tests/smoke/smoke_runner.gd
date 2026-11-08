@@ -32,6 +32,8 @@ func _ready() -> void:
 			continue
 		add_child(test)
 		ran += 1
+		# Every test starts like a fresh launch.
+		WorktreeView.shared_view = WorktreeView.View.HISTORY
 		await test.run()
 		for failure: String in test.failures:
 			failures.append("%s: %s" % [path.get_file(), failure])
