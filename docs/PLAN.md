@@ -150,7 +150,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - **`GraphView`:** draws lanes and nodes for visible rows from the lane data supplied by core. It is combined with the commit list inside one scroll container.
   - **`DiffView`:** unified and side-by-side views with hunk and line selection gutters, intra-line highlights, and an editable working-copy side (§3.10). It wraps `CodeEdit` where possible. A minimap rendered by core replaces its scroll bar (M7.6).
   - **`AutoScroll`:** browser-style middle-click autoscroll for every `VirtualList` and `ScrollContainer` (M7.6).
-- **`ActionRegistry`** (autoload). Every action is `{ id, label, category, shortcut, enabled: Callable, run: Callable }`. The command palette fuzzy-searches it, the menu bar, big buttons, menus and context menus are built from it, and shortcuts are rebindable. From M6.5 an action can also give the reason it is disabled (shown in tooltips), and a run carries its origin control so the job's progress shows there (§4 Feedback).
+- **`ActionRegistry`** (autoload). Every action is `{ id, label, category, shortcut, enabled: Callable, run: Callable }`. The command palette fuzzy-searches it, the menu bar, big buttons, menus and context menus are built from it, and shortcuts are rebindable (in Settings → Keyboard from M7.11, where each action also has a context: where its shortcut works). From M6.5 an action can also give the reason it is disabled (shown in tooltips), and a run carries its origin control so the job's progress shows there (§4 Feedback).
 - **Theming** (M6.5 P1): `AppTheme` (GDScript, modelled on spritesheetbelli's) builds the `Theme` at startup from one palette per theme and the accent colour from Settings, and rebuilds it when the OS theme, the theme override or the accent changes. The app follows `DisplayServer.is_dark_mode()` and reacts to changes (use the system theme change callback if the pinned Godot version provides it; otherwise re-check on focus-in).
   - **Tokens:** background, surface, raised, hover, border, text, muted text, accent, error, plus the git colours (graph lanes, ref labels, added/removed/modified/renamed, diff backgrounds and highlights, syntax).
   - **Type variations** for the big header buttons, worktree chips, segmented toggles, section headers, toasts and the blocking overlay. Text on selected rows is checked for WCAG AA contrast against the accent.
@@ -441,6 +441,7 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+Shift+B | Merge a branch into the current one (M7) |
 | Alt+O / Alt+T / Alt+B | Resolver: use ours / theirs / both for the conflict at the cursor (M7) |
 | F8 / Shift+F8 | Resolver: next / previous conflict (M7) |
+| Ctrl+/ | Settings → Keyboard (M7.11) |
 
 The other existing shortcuts stay.
 
@@ -941,6 +942,21 @@ Scope settled in the Q&A of 2026-11-07 (mockups: rows A/B/C, refs R1/R2/R3; chos
 - [x] Ref chips: local/remote merge, one branch and one tag plus "+N", popover with the ref menu (core tests, smoke test, shots in both themes)
 - [x] Commit details: author cards and ref chips (smoke test, shots in both themes)
 - [ ] Avatar lookup, cache and setting; initials fallback (core tests with a local HTTP stub; no network in tests)
+
+### M7.11 — Keyboard shortcuts in Settings (≈1 week)
+
+Scope settled in the Q&A of 2026-11-07. The shortcuts dialog (a flat list with Change, Reset and Remove under it) is replaced by a **Keyboard** category in Settings, opened by Help → Keyboard shortcuts…, the palette and `Ctrl+/`.
+
+**Page.** A toolbar with a filter (label, category, context, shortcut text), a keyboard button in the field to search by pressing a shortcut, a **Changed** toggle with the count, and **Reset All…** (confirmed). Below it one folding section per category with its count; each row has the action's icon, its label, a context tag (none for global actions), an accent dot when changed and the shortcuts as key caps in chips. Hidden actions with a default key (Ctrl+1 … Ctrl+9, `F`) are listed so they can be rebound; actions without a shortcut show an "Add shortcut" chip on hover. Hovering a row shows its clear (×) and revert buttons. Settings' own search adds "Matching shortcuts: N", which opens the page with the search carried over.
+
+**Recording.** A click on a chip, or Enter on it, records: the chip pulses "Press keys…", modifiers alone wait for the key, Escape cancels (the window does not close on Escape meanwhile). A key that another action uses in an overlapping context opens a strip under the row ("Ctrl+K is already used by App → Command palette") with **Reassign** (focused; takes the key from the other action, which keeps any other shortcut) and **Cancel**.
+
+**Contexts.** `Action.context` comes from the id prefix (`ActionRegistry.CONTEXT_PREFIXES`): Global, Changes, History, Shelves, Diff and Resolver. Two contexts overlap when they are the same, one is Global, or the diff sits inside the other (Changes, History, Shelves); the resolver replaces the diff, so Ctrl+Z stays shared by Undo last discard and Undo last conflict choice. Overrides stay one shortcut per action (multiple bindings, chords and import/export are out of scope).
+
+- [x] Registry: contexts, `conflicts`, `release_shortcut`, `reset_all_shortcuts`, `with_shortcuts`; choosing the defaults clears the override; Meta must match (not on macOS)
+- [x] Keyboard page (`ShortcutsPage`, `ShortcutChip`, `ShortcutsPage`/`KeyCap` theme types) in Settings; old dialog removed; `Ctrl+/`
+- [x] `shortcuts_page_smoke.gd` (no default clashes, recording, Escape, conflict Cancel/Reassign, shared and nested contexts, clear/revert, filters, sections, Settings search, Reset all)
+- [ ] Shots in both themes (`tests/visual/shortcuts_screenshots.tscn`); review stop
 
 ### M8 — History tools and editing (≈2 weeks)
 - [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit

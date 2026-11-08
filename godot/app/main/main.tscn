@@ -1,11 +1,10 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://app/main/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://app/home/home.tscn" id="2_home"]
 [ext_resource type="Script" path="res://app/log_panel/log_panel.gd" id="3_log"]
 [ext_resource type="Script" path="res://app/toasts/toasts.gd" id="4_toasts"]
 [ext_resource type="PackedScene" path="res://app/palette/command_palette.tscn" id="5_palette"]
-[ext_resource type="Script" path="res://app/shortcuts_dialog/shortcuts_dialog.gd" id="6_shortcuts"]
 [ext_resource type="Script" path="res://app/main/app_menu_bar.gd" id="7_menu"]
 
 [node name="Main" type="PanelContainer"]
@@ -98,6 +97,3 @@ script = ExtResource("4_toasts")
 unique_name_in_owner = true
 layout_mode = 1
 
-[node name="ShortcutsDialog" type="AcceptDialog" parent="."]
-unique_name_in_owner = true
-script = ExtResource("6_shortcuts")

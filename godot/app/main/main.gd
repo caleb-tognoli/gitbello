@@ -41,7 +41,6 @@ var _fit_queued: bool = false
 @onready var _git_log: GitLogPanel = %GitLog
 @onready var _toasts: Toasts = %Toasts
 @onready var _palette: CommandPalette = %Palette
-@onready var _shortcuts_dialog: ShortcutsDialog = %ShortcutsDialog
 
 
 func _ready() -> void:
@@ -507,7 +506,8 @@ func _register_actions() -> void:
 	var no_repo: Callable = func() -> String: return "Open a repository first."
 	Actions.register(&"app.command_palette", "Command palette", "App",
 			_palette.open, PackedStringArray(["Ctrl+Shift+P", "Ctrl+K"]))
-	Actions.register(&"app.keyboard_shortcuts", "Keyboard shortcuts…", "App", _shortcuts_dialog.open)
+	Actions.register(&"app.keyboard_shortcuts", "Keyboard shortcuts…", "App",
+			_settings_window.open_shortcuts, PackedStringArray(["Ctrl+Slash"]))
 	Actions.register(&"app.quit", "Quit", "App",
 			func() -> void: get_tree().quit(), PackedStringArray(["Ctrl+Q"]))
 	Actions.register(&"app.about", "About gitbello", "App", _show_about)

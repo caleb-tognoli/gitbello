@@ -124,6 +124,30 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"worktree.lock": &"Lock",
 }
 
+## Where an action's shortcut works: `GLOBAL` anywhere, the others in one part
+## of the window. Two actions may share a key when their contexts never show
+## at once (Ctrl+Z undoes a discard in Changes and a choice in the resolver).
+const GLOBAL: StringName = &"Global"
+## Contexts by id prefix; ids not listed are `GLOBAL`.
+const CONTEXT_PREFIXES: Dictionary[String, StringName] = {
+	"diff.": &"Diff",
+	"image.": &"Diff",
+	"changes.": &"Changes",
+	"history.": &"History",
+	"commit.": &"History",
+	"shelf.": &"Shelves",
+	"conflict.": &"Resolver",
+}
+## Ids whose context differs from their prefix's.
+const CONTEXT_IDS: Dictionary[StringName, StringName] = {
+	&"commit.undo": &"Changes",
+}
+## Contexts shown inside others: the diff sits in Changes, History and
+## Shelves. The resolver replaces the diff, so it overlaps only `GLOBAL`.
+const CONTEXTS_INSIDE: Dictionary[StringName, Array] = {
+	&"Diff": [&"Changes", &"History", &"Shelves"],
+}
+
 
 class Action:
 	extends RefCounted
@@ -137,6 +161,8 @@ class Action:
 		get: return tr(_category)
 		set(value): _category = value
 	var run: Callable
+	## Where its shortcut works (`ActionRegistry.GLOBAL` or a context name).
+	var context: StringName = &"Global"
 	## Returns bool; an invalid Callable means always enabled.
 	var enabled: Callable
 	var default_shortcuts: PackedStringArray
@@ -182,6 +208,7 @@ func register(id: StringName, label: String, category: String, run: Callable,
 	action.id = id
 	action.label = label
 	action.category = category
+	action.context = context_for(id)
 	action.run = run
 	action.enabled = enabled
 	action.default_shortcuts = default_shortcuts
@@ -216,6 +243,34 @@ func listed() -> Array[Action]:
 	out.sort_custom(func(a: Action, b: Action) -> bool:
 		return [a.category, a.label] < [b.category, b.label])
 	return out
+
+
+## What the shortcut editor lists: the visible actions plus hidden ones that
+## have a default shortcut (Ctrl+1 … Ctrl+9), sorted like `listed()`.
+func with_shortcuts() -> Array[Action]:
+	var out: Array[Action] = []
+	for action: Action in _actions.values():
+		if not action.hidden or not action.default_shortcuts.is_empty():
+			out.append(action)
+	out.sort_custom(func(a: Action, b: Action) -> bool:
+		return [a.category, a.label] < [b.category, b.label])
+	return out
+
+
+## The context of action `id` (see `CONTEXT_PREFIXES`).
+static func context_for(id: StringName) -> StringName:
+	if CONTEXT_IDS.has(id):
+		return CONTEXT_IDS[id]
+	for prefix: String in CONTEXT_PREFIXES:
+		if String(id).begins_with(prefix):
+			return CONTEXT_PREFIXES[prefix]
+	return GLOBAL
+
+
+## Whether shortcuts in contexts `a` and `b` can be pressed at the same time.
+static func contexts_overlap(a: StringName, b: StringName) -> bool:
+	return a == b or a == GLOBAL or b == GLOBAL \
+			or b in CONTEXTS_INSIDE.get(a, []) or a in CONTEXTS_INSIDE.get(b, [])
 
 
 func is_enabled(id: StringName) -> bool:
@@ -277,6 +332,11 @@ func shortcut_label(id: StringName) -> String:
 ## Sets the user's shortcut for `id` and saves it. "" restores the default;
 ## "none" removes every shortcut.
 func set_shortcut(id: StringName, text: String) -> void:
+	# Choosing what the defaults already are is no override.
+	var action: Action = _actions.get(id)
+	if action != null and (action.default_shortcuts == PackedStringArray([text])
+			or (text == "none" and action.default_shortcuts.is_empty())):
+		text = ""
 	if text.is_empty():
 		_overrides.erase(id)
 	else:
@@ -284,6 +344,62 @@ func set_shortcut(id: StringName, text: String) -> void:
 	_parsed.erase(id)
 	Core.set_keybinding(String(id), text)
 	actions_changed.emit()
+
+
+## Whether the user changed the shortcuts of `id`.
+func is_modified(id: StringName) -> bool:
+	return _overrides.has(id)
+
+
+## How many actions have a user shortcut.
+func modified_count() -> int:
+	var count: int = 0
+	for id: StringName in _overrides:
+		if _actions.has(id):
+			count += 1
+	return count
+
+
+## Restores every action's default shortcuts.
+func reset_all_shortcuts() -> void:
+	for id: StringName in _overrides.keys():
+		Core.set_keybinding(String(id), "")
+	_overrides.clear()
+	_parsed.clear()
+	actions_changed.emit()
+
+
+## The other actions that `text` would clash with if `id` used it: those
+## with the same key in a context that can show at the same time.
+func conflicts(id: StringName, text: String) -> Array[StringName]:
+	var out: Array[StringName] = []
+	var event: InputEventKey = Shortcuts.parse(text)
+	var action: Action = _actions.get(id)
+	if event == null or action == null:
+		return out
+	for other: StringName in _actions:
+		if other == id or not contexts_overlap(action.context, _actions[other].context):
+			continue
+		for shortcut: InputEventKey in _shortcut_events(other):
+			if Shortcuts.matches(event, shortcut):
+				out.append(other)
+				break
+	return out
+
+
+## Takes `text` away from `id`, keeping its other shortcuts.
+func release_shortcut(id: StringName, text: String) -> void:
+	var event: InputEventKey = Shortcuts.parse(text)
+	var kept: PackedStringArray = PackedStringArray()
+	for shortcut: String in shortcuts(id):
+		if event == null or not Shortcuts.matches(event, Shortcuts.parse(shortcut)):
+			kept.append(shortcut)
+	var action: Action = _actions.get(id)
+	if action != null and kept == action.default_shortcuts:
+		set_shortcut(id, "")
+	else:
+		# An override holds one shortcut: the first one left stays.
+		set_shortcut(id, kept[0] if not kept.is_empty() else "none")
 
 
 ## The action whose shortcut `event` presses, or &"".

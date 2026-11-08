@@ -259,6 +259,7 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT,
 	_add_shell_p2(theme, p)
 	_add_changes_p3(theme, p)
 	_add_home(theme, p)
+	_add_shortcuts(theme, p)
 	return theme
 
 
@@ -1382,6 +1383,82 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 
 ## Home (PLAN §4 Home, M7.5): the filter and Add on top, the Recent cards,
 ## and the repository rows, flat until hovered.
+## The Keyboard page of Settings: rows of actions with their shortcuts as key
+## caps, in chips that record a new shortcut when clicked.
+static func _add_shortcuts(theme: Theme, p: Palette) -> void:
+	theme.set_constant(&"row_height", &"ShortcutsPage", 30)
+	theme.set_constant(&"icon_size", &"ShortcutsPage", 16)
+	theme.set_constant(&"slot_width", &"ShortcutsPage", 26)
+	theme.set_constant(&"dot_size", &"ShortcutsPage", 6)
+	theme.set_constant(&"chip_width", &"ShortcutsPage", 132)
+	for entry: Array in [[&"ShortcutRow", Color.TRANSPARENT], [&"ShortcutRowHover", Color(p.hover, 0.55)]]:
+		_variation(theme, entry[0], &"PanelContainer")
+		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 4, Vector4(6, 1, 4, 1)))
+	_variation(theme, &"ShortcutRowLines", &"VBoxContainer")
+	theme.set_constant(&"separation", &"ShortcutRowLines", 4)
+	# Section headers fold their rows
+	_variation(theme, &"ShortcutSection", &"Button")
+	var section: Vector4 = Vector4(2, 10, 2, 4)
+	for state: StringName in [&"normal", &"hover", &"pressed", &"hover_pressed", &"focus"]:
+		var box: StyleBoxFlat = _box(Color.TRANSPARENT, 0, section)
+		if state == &"focus":
+			box.border_color = p.accent
+			box.border_width_bottom = 1
+		theme.set_stylebox(state, &"ShortcutSection", box)
+	theme.set_color(&"font_color", &"ShortcutSection", p.text_muted)
+	theme.set_color(&"font_focus_color", &"ShortcutSection", p.text_muted)
+	theme.set_color(&"font_hover_color", &"ShortcutSection", p.text)
+	theme.set_color(&"font_pressed_color", &"ShortcutSection", p.text_muted)
+	theme.set_color(&"font_hover_pressed_color", &"ShortcutSection", p.text)
+	theme.set_font(&"font", &"ShortcutSection", bold_font())
+	theme.set_font_size(&"font_size", &"ShortcutSection", 13)
+	theme.set_constant(&"h_separation", &"ShortcutSection", 6)
+	_variation(theme, &"ShortcutSectionCount", &"Label")
+	theme.set_color(&"font_color", &"ShortcutSectionCount", Color(p.text_muted, 0.75))
+	theme.set_font_size(&"font_size", &"ShortcutSectionCount", 12)
+	# Where the shortcut works, as a small tag
+	_variation(theme, &"ShortcutContext", &"Label")
+	theme.set_color(&"font_color", &"ShortcutContext", p.text_muted)
+	theme.set_font_size(&"font_size", &"ShortcutContext", 11)
+	theme.set_stylebox(&"normal", &"ShortcutContext", _box(Color(p.text_muted, 0.13), 3, Vector4(6, 0, 6, 1)))
+	_variation(theme, &"ShortcutModified", &"Panel")
+	theme.set_stylebox(&"panel", &"ShortcutModified", _box(p.accent, 3))
+	# The chip around a shortcut's key caps
+	var chip: Vector4 = Vector4(4, 3, 4, 3)
+	for entry: Array in [[&"ShortcutChip", Color.TRANSPARENT, Color.TRANSPARENT],
+			[&"ShortcutChipHover", p.hover, p.border],
+			[&"ShortcutChipFocus", Color.TRANSPARENT, p.accent],
+			[&"ShortcutChipRecording", Color(p.accent, 0.16), p.accent],
+			[&"ShortcutChipConflict", Color(p.modified, 0.14), p.modified]]:
+		_variation(theme, entry[0], &"PanelContainer")
+		theme.set_stylebox(&"panel", entry[0], _box(entry[1], 5, chip, entry[2], 1))
+	_variation(theme, &"ShortcutChipKeys", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ShortcutChipKeys", 3)
+	_variation(theme, &"ShortcutChipText", &"Label")
+	theme.set_color(&"font_color", &"ShortcutChipText", p.text_muted)
+	theme.set_font_size(&"font_size", &"ShortcutChipText", 12)
+	_variation(theme, &"ShortcutChipPrompt", &"Label")
+	theme.set_color(&"font_color", &"ShortcutChipPrompt", p.accent_text)
+	theme.set_font_size(&"font_size", &"ShortcutChipPrompt", 12)
+	# One key cap: raised, with a deeper bottom edge
+	_variation(theme, &"KeyCap", &"PanelContainer")
+	var cap: StyleBoxFlat = _box(p.raised, 4, Vector4(6, 1, 6, 2), p.border, 1)
+	cap.border_width_bottom = 2
+	theme.set_stylebox(&"panel", &"KeyCap", cap)
+	_variation(theme, &"KeyCapLabel", &"Label")
+	theme.set_color(&"font_color", &"KeyCapLabel", p.text)
+	theme.set_font_size(&"font_size", &"KeyCapLabel", 12)
+	_variation(theme, &"KeyCapSeparator", &"Label")
+	theme.set_color(&"font_color", &"KeyCapSeparator", p.text_muted)
+	theme.set_font_size(&"font_size", &"KeyCapSeparator", 11)
+	# A clash with another action, under the row
+	_variation(theme, &"ShortcutConflict", &"PanelContainer")
+	theme.set_stylebox(&"panel", &"ShortcutConflict", _box(p.background.blend(Color(p.modified, 0.12)), 4,
+			Vector4(8, 4, 4, 4), Color(p.modified, 0.5), 1))
+	_variation(theme, &"ShortcutsToolbar", &"HBoxContainer")
+	theme.set_constant(&"separation", &"ShortcutsToolbar", 6)
+
+
 static func _add_home(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"HomePage", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"HomePage", _box(p.background))

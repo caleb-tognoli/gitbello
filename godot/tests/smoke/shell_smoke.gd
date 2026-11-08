@@ -466,7 +466,9 @@ func _check_menus(main: Main) -> void:
 	expect("Command palette" in view_labels, "Command palette moved to View")
 	expect_eq(Actions.shortcuts(&"app.command_palette")[0], "Ctrl+Shift+P", "the primary palette shortcut is displayed")
 	expect_eq(Actions.shortcuts(&"app.settings"), PackedStringArray(["Ctrl+Comma"]), "Settings has the conventional shortcut")
-	expect(Actions.shortcuts(&"app.keyboard_shortcuts").is_empty(), "Keyboard shortcuts has no conflicting default")
+	expect_eq(Actions.shortcuts(&"app.keyboard_shortcuts"), PackedStringArray(["Ctrl+Slash"]),
+			"Keyboard shortcuts opens with Ctrl+/")
+	expect(Actions.conflicts(&"app.keyboard_shortcuts", "Ctrl+Slash").is_empty(), "Ctrl+/ is free")
 
 	expect(bar.press("View", "Changes"), "a menu entry runs its action")
 	expect_eq(main.current_page().view, WorktreeView.View.CHANGES, "View → Changes shows the changes")

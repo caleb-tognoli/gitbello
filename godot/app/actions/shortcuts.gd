@@ -51,18 +51,27 @@ static func from_event(event: InputEventKey) -> String:
 
 ## Key names shown as their symbols.
 const SYMBOLS: Dictionary[String, String] = {"Equal": "=", "Minus": "-", "Plus": "+",
-		"Kp Add": "Num +", "Kp Subtract": "Num -", "Kp 0": "Num 0"}
+		"Kp Add": "Num +", "Kp Subtract": "Num -", "Kp 0": "Num 0", "Slash": "/", "Comma": ",",
+		"Period": ".", "Backslash": "\\", "Semicolon": ";", "Apostrophe": "'", "Quoteleft": "`",
+		"Bracketleft": "[", "Bracketright": "]"}
 
 
 ## Text to show users (`Cmd` instead of `Ctrl` on macOS, `=` for `Equal`).
 static func display(text: String) -> String:
-	var parts: PackedStringArray = text.split("+")
-	if not parts.is_empty() and SYMBOLS.has(parts[parts.size() - 1]):
-		parts[parts.size() - 1] = SYMBOLS[parts[parts.size() - 1]]
-		text = "+".join(parts)
-	if OS.has_feature("macos"):
-		return text.replace("Ctrl+", "Cmd+")
-	return text
+	return "+".join(display_keys(text))
+
+
+## Each key of `text` as shown to users, modifiers first: one key cap each.
+static func display_keys(text: String) -> PackedStringArray:
+	var keys: PackedStringArray = text.split("+", false)
+	for i: int in keys.size():
+		var key: String = keys[i].strip_edges()
+		if i == keys.size() - 1:
+			key = SYMBOLS.get(key, key)
+		elif key == "Ctrl" and OS.has_feature("macos"):
+			key = "Cmd"
+		keys[i] = key
+	return keys
 
 
 ## Whether `event` presses exactly `shortcut` (modifiers included).
@@ -73,4 +82,5 @@ static func matches(event: InputEventKey, shortcut: InputEventKey) -> bool:
 	return keycode == shortcut.keycode \
 			and event.is_command_or_control_pressed() == shortcut.is_command_or_control_pressed() \
 			and event.shift_pressed == shortcut.shift_pressed \
-			and event.alt_pressed == shortcut.alt_pressed
+			and event.alt_pressed == shortcut.alt_pressed \
+			and (OS.has_feature("macos") or event.meta_pressed == shortcut.meta_pressed)

@@ -3,9 +3,12 @@ extends AcceptDialog
 ## Edits the app settings like Godot's Editor Settings: categories on the left,
 ## their settings on the right, and a search over all of them. Changes apply
 ## immediately; a setting that differs from its default has a button to revert it.
+## The Keyboard category holds the shortcut editor (`ShortcutsPage`); the
+## search also counts the shortcuts it matches, with a button to show them.
 
 const THEME_TYPE: StringName = &"SettingsDialog"
 const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.tscn")
+const KEYBOARD: String = "Keyboard"
 const CATEGORIES: Array = [
 	[
 		"General",
@@ -71,6 +74,7 @@ const DEFAULTS: Dictionary = {
 
 var categories: ItemList = ItemList.new()
 var search: FilterField = FILTER_FIELD.instantiate() as FilterField
+var shortcuts: ShortcutsPage = ShortcutsPage.new()
 
 var _list: VBoxContainer = VBoxContainer.new()
 var _error: Label = Label.new()
@@ -81,6 +85,9 @@ var _category: String = "General"
 var _refreshing: bool = false
 var _reset: ConfirmationDialog = ConfirmationDialog.new()
 var _reset_all: Button
+var _scroll: ScrollContainer = ScrollContainer.new()
+var _shortcut_header: Label = Label.new()
+var _shortcut_hits: Button = Button.new()
 
 
 func _init() -> void:
@@ -108,14 +115,17 @@ func _init() -> void:
 	categories.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(categories)
 
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	AutoScroll.enable(scroll)
-	layout.add_child(scroll)
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	AutoScroll.enable(_scroll)
+	layout.add_child(_scroll)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override(&"separation", 4)
-	scroll.add_child(_list)
+	_scroll.add_child(_list)
+	shortcuts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shortcuts.hide()
+	shortcuts.capturing_changed.connect(func(on: bool) -> void: dialog_close_on_escape = not on)
+	layout.add_child(shortcuts)
 	_error.theme_type_variation = &"ErrorLabel"
 	_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_error.hide()
@@ -160,7 +170,16 @@ func open() -> void:
 func show_category(category: String) -> void:
 	_category = category
 	search.set_text("")
+	if category == KEYBOARD:
+		shortcuts.reset_view()
 	_filter()
+
+
+## Opens Settings on the Keyboard page with its filter focused.
+func open_shortcuts() -> void:
+	open()
+	show_category(KEYBOARD)
+	shortcuts.focus_search()
 
 
 func get_control(key: StringName) -> Control:
@@ -205,6 +224,21 @@ func _build() -> void:
 		_headers.append(header)
 		for row: Array in category[1]:
 			_add_row(category_name, row)
+	categories.add_item(KEYBOARD)
+	categories.set_item_metadata(categories.item_count - 1, KEYBOARD)
+	# While searching: how many shortcuts match, opening them on Keyboard.
+	_shortcut_header.theme_type_variation = &"HeaderSmall"
+	_list.add_child(_shortcut_header)
+	_shortcut_hits.theme_type_variation = &"ToolbarButton"
+	_shortcut_hits.icon = AppTheme.icon(&"Keyboard")
+	_shortcut_hits.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_shortcut_hits.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_shortcut_hits.pressed.connect(func() -> void:
+		var query: String = search.text()
+		show_category(KEYBOARD)
+		shortcuts.search.set_text(query)
+		shortcuts.focus_search())
+	_list.add_child(_shortcut_hits)
 
 
 func _add_row(category: String, definition: Array) -> void:
@@ -416,6 +450,14 @@ func _filter() -> void:
 			shown_categories[row.category] = true
 	for header: Label in _headers:
 		header.visible = not query.is_empty() and shown_categories.has(String(header.get_meta(&"category")))
+	var keyboard: bool = query.is_empty() and _category == KEYBOARD
+	_scroll.visible = not keyboard
+	shortcuts.visible = keyboard
+	_reset_all.visible = not keyboard
+	var hits: int = shortcuts.count_matches(query) if not query.is_empty() else 0
+	_shortcut_header.visible = hits > 0
+	_shortcut_hits.visible = hits > 0
+	_shortcut_hits.text = tr("Matching shortcuts: %d") % hits
 
 
 func _show_error(key: StringName, text: String) -> void:
@@ -434,9 +476,7 @@ func _stored_accent(color: Color) -> String:
 
 
 func _on_category_selected(index: int) -> void:
-	_category = String(categories.get_item_metadata(index))
-	search.set_text("")
-	_filter()
+	show_category(String(categories.get_item_metadata(index)))
 
 
 func _translate() -> void:
@@ -452,6 +492,7 @@ func _translate() -> void:
 		categories.set_item_text(i, tr(String(categories.get_item_metadata(i))))
 	for header: Label in _headers:
 		header.text = tr(String(header.get_meta(&"category")))
+	_shortcut_header.text = tr(KEYBOARD)
 	for row: Dictionary in _rows:
 		var label: Label = row.label
 		label.text = tr(row.text)
