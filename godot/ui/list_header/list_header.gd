@@ -107,13 +107,18 @@ func counts_text() -> String:
 ## `count` and `noun`, plural (`plural`, or `noun` + "s") unless one, with
 ## thousands separators: "1,204 commits".
 static func count_text(count: int, noun: String, plural: String = "") -> String:
+	var word: String = noun if count == 1 else (plural if not plural.is_empty() else noun + "s")
+	return "%s %s" % [number_text(count), TranslationServer.translate(word)]
+
+
+## `count` with thousands separators: "1,204".
+static func number_text(count: int) -> String:
 	var digits: String = str(count)
 	var out: String = ""
 	while digits.length() > 3:
 		out = "," + digits.right(3) + out
 		digits = digits.left(digits.length() - 3)
-	var word: String = noun if count == 1 else (plural if not plural.is_empty() else noun + "s")
-	return "%s%s %s" % [digits, out, TranslationServer.translate(word)]
+	return digits + out
 
 
 func _on_label_input(event: InputEvent) -> void:

@@ -6,15 +6,20 @@ extends HSplitContainer
 ## HEAD is selected initially; reloads follow it or preserve a historical selection.
 ## Above the list, a search finds commits by subject, author or hash
 ## (`RepoSession.search_commits`) and highlights them in place: the graph
-## stays whole, other rows are dimmed. When a search finishes, the first
-## match from the selected commit down is selected; Enter and Shift+Enter
-## (or F3, Shift+F3 and the field's arrows, shown while searching) step
-## through the matches.
+## stays whole, other rows are dimmed. The field counts the matches
+## ("3/41"). When a search finishes, the first match from the selected
+## commit down is selected; Enter and Shift+Enter (or F3, Shift+F3 and the
+## field's arrows, shown while searching) step through the matches. The
+## field's options menu picks the scope, compact rows and the graph; there is no row
+## between the field and the list.
 
 signal repo_loaded(row_count: int, error: String)
 
 ## Every History view, for `set_compact` across tabs.
 const GROUP: StringName = &"history_views"
+## The options menu's Compact rows and Show graph items.
+const COMPACT_ID: int = 2
+const GRAPH_ID: int = 3
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
 signal commit_menu_requested(at_position: Vector2)
 ## Right-click on a ref label: `{name, short, kind, is_head}`, screen position.
@@ -33,8 +38,8 @@ var _pending_parent_session: RepoSession = null
 var session: RepoSession = null:
 	set = set_session
 
-## What the header says without a search: the commit count, progress or an error.
-var _commits_text: String = ""
+## The error of the last load, shown over an empty list.
+var _load_error: String = ""
 ## A new query's first match is still to be selected.
 var _jump_pending: bool = false
 ## The field's previous and next match buttons.
@@ -46,15 +51,13 @@ var _follow_head: bool = false
 
 var _scope_menu: PopupMenu = null
 var _scope_button: Button = null
-## The header's row switch: two-line and compact rows.
-var _rows_switch: HBoxContainer = null
-var _two_line_button: Button = null
-var _compact_button: Button = null
 var _refs_popover: RefsPopover = null
 ## Over the commit list while the history loads or reloads.
 var _loading: LoadingIndicator = LoadingIndicator.new()
+## Over an empty list when the load failed: its error (the details say
+## "No commits yet." for an empty repository).
+var _empty_label: Label = null
 @onready var _commit_list: CommitList = %CommitList
-@onready var _list_header: ListHeader = %ListHeader
 @onready var _search: FilterField = %SearchField
 @onready var _details: CommitDetails = %Details
 @onready var _left: VBoxContainer = %Left
@@ -64,6 +67,15 @@ func _ready() -> void:
 	_details.date_format = _commit_list.date_text
 	_loading.area = "history"
 	_commit_list.add_child(_loading)
+	_empty_label = Label.new()
+	_empty_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_empty_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_empty_label.theme_type_variation = &"ErrorLabel"
+	_empty_label.hide()
+	_commit_list.add_child(_empty_label)
 	_commit_list.selection_changed.connect(_on_commit_selected)
 	_commit_list.gui_input.connect(_on_list_key)
 	_commit_list.context_menu_requested.connect(func(row: int, at: Vector2) -> void:
@@ -98,60 +110,53 @@ func _ready() -> void:
 	_scope_menu = PopupMenu.new()
 	_scope_menu.add_radio_check_item(tr("Current branch"), 0)
 	_scope_menu.add_radio_check_item(tr("All branches"), 1)
+	_scope_menu.add_separator()
+	_scope_menu.add_check_item(tr("Compact rows"), COMPACT_ID)
+	_scope_menu.add_check_item(tr("Show graph"), GRAPH_ID)
 	_scope_menu.id_pressed.connect(func(id: int) -> void:
+		if id == COMPACT_ID or id == GRAPH_ID:
+			Actions.run_action(&"history.toggle_compact" if id == COMPACT_ID else &"history.toggle_graph", _scope_button)
+			return
 		Actions.run_action(&"history.all_branches" if id == 1 else &"history.current_branch", _scope_button))
 	_scope_menu.about_to_popup.connect(_update_scope)
 	add_child(_scope_menu)
 	add_to_group(GROUP)
-	_add_rows_switch()
 	set_compact(Core.history_compact())
+	set_show_graph(Core.history_graph())
 	_apply_theme()
-
-
-## The switch at the right of the commit count: two-line rows or compact
-## ones (`history.toggle_compact`, saved for every tab).
-func _add_rows_switch() -> void:
-	_rows_switch = HBoxContainer.new()
-	_rows_switch.theme_type_variation = &"IconSwitch"
-	var group: ButtonGroup = ButtonGroup.new()
-	for entry: Array in [[&"IconSegmentFirst", false], [&"IconSegmentLast", true]]:
-		var button: Button = Button.new()
-		button.theme_type_variation = entry[0]
-		button.toggle_mode = true
-		button.button_group = group
-		button.focus_mode = Control.FOCUS_NONE
-		var compact: bool = entry[1]
-		button.pressed.connect(func() -> void:
-			if _commit_list.compact != compact:
-				Actions.run_action(&"history.toggle_compact", button))
-		_rows_switch.add_child(button)
-		if compact:
-			_compact_button = button
-		else:
-			_two_line_button = button
-	_list_header.add_tool(_rows_switch)
-	_update_rows_switch()
 
 
 ## Two-line rows (with the author line) or compact one-line rows.
 func set_compact(value: bool) -> void:
 	_commit_list.compact = value
-	_update_rows_switch()
+	_update_compact_item()
 
 
-func rows_switch() -> HBoxContainer:
-	return _rows_switch
+## Draws the commit graph beside the rows or leaves it out.
+func set_show_graph(value: bool) -> void:
+	_commit_list.show_graph = value
+	_update_compact_item()
 
 
-func _update_rows_switch() -> void:
-	if _two_line_button == null:
+## Checks Compact rows and Show graph in the options menu and shows their
+## shortcuts.
+func _update_compact_item() -> void:
+	if _scope_menu == null:
 		return
-	_two_line_button.set_pressed_no_signal(not _commit_list.compact)
-	_compact_button.set_pressed_no_signal(_commit_list.compact)
-	_two_line_button.icon = AppTheme.icon(&"RowsTwoLine")
-	_compact_button.icon = AppTheme.icon(&"RowsOneLine")
-	_two_line_button.tooltip_text = tr("Rows with authors")
-	_compact_button.tooltip_text = tr("Compact rows")
+	for entry: Array in [[COMPACT_ID, "Compact rows", &"history.toggle_compact", _commit_list.compact],
+			[GRAPH_ID, "Show graph", &"history.toggle_graph", _commit_list.show_graph]]:
+		var index: int = _scope_menu.get_item_index(entry[0])
+		_scope_menu.set_item_text(index, tr(String(entry[1])))
+		_scope_menu.set_item_checked(index, bool(entry[3]))
+		var shortcuts: PackedStringArray = Actions.shortcuts(entry[2])
+		var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
+		var shortcut: Shortcut = null
+		if event != null:
+			shortcut = Shortcut.new()
+			shortcut.events = [event]
+		_scope_menu.set_item_shortcut(index, shortcut)
+		# Shown only: the registry handles the keys.
+		_scope_menu.set_item_shortcut_disabled(index, true)
 
 
 func _notification(what: int) -> void:
@@ -169,7 +174,7 @@ func _notification(what: int) -> void:
 			session.set_history_visible(is_visible_in_tree())
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		_update_header()
-		_update_rows_switch()
+		_update_empty()
 		for i: int in _match_buttons.size():
 			_match_buttons[i].tooltip_text = tr("Previous match (Shift+Enter)") if i == 0 else tr("Next match (Enter)")
 
@@ -210,7 +215,7 @@ func set_session(value: RepoSession) -> void:
 			session.search_commits(_search.text())
 	_commit_list.session = session
 	_details.session = session
-	_commits_text = "Loading…" if session != null else ""
+	_load_error = ""
 	_update_header()
 	_update_loading()
 
@@ -275,26 +280,7 @@ func _update_scope() -> void:
 	_scope_button.set_pressed_no_signal(all)
 	_scope_button.disabled = session == null or not session.is_ready()
 	_scope_button.tooltip_text = (tr("All branches") if all else current) + "\n" + tr("Filter options")
-	_list_header.hide_status()
-	_list_header.tooltip_text = ""
-	if head.is_empty():
-		_list_header.tooltip_text = tr("No commits yet") if session != null and session.is_ready() else tr("Loading…")
-	elif branch.is_empty():
-		_list_header.tooltip_text = tr("Detached HEAD · no upstream comparison")
-	elif not bool(info.get("ready", false)):
-		_list_header.tooltip_text = tr("Checking upstream…")
-	else:
-		var gone: bool = bool(info.get("gone", false))
-		var upstream: String = String(info.get("upstream", "")).trim_prefix("refs/remotes/").trim_prefix("refs/heads/")
-		var unpublished: bool = gone or upstream.is_empty()
-		if unpublished:
-			_list_header.tooltip_text = tr("Upstream gone") if gone else tr("No upstream · Publish branch")
-		if int(info.get("outgoing", 0)) > 0:
-			_list_header.show_status(AppTheme.icon(&"GitPush"), tr("%d outgoing") % int(info["outgoing"]),
-					get_theme_color(&"outgoing_color", CommitList.LIST_THEME_TYPE),
-					(tr("Commits on the current branch that are not on any remote. Based on local refs; fetch to refresh.")
-					if unpublished else
-					tr("Commits on the current branch that are not in %s. Based on local refs; fetch to refresh.") % upstream))
+	_update_compact_item()
 
 
 ## The popover of a row's refs (its "+N" chip).
@@ -315,10 +301,15 @@ func details() -> CommitDetails:
 	return _details
 
 
-## The line above the list: the commit count, progress or an error, or
-## the search's matches.
+## What the search field counts: "Searching…", "3/41", "41" (no match
+## selected), "No matches", or "" without a search.
 func status_text() -> String:
-	return _list_header.text()
+	return _search.count_text()
+
+
+## The load's error shown over the empty list, or "".
+func empty_text() -> String:
+	return _empty_label.text if _empty_label != null and _empty_label.visible else ""
 
 
 func search_field() -> FilterField:
@@ -349,10 +340,6 @@ func step_match(forward: bool) -> void:
 	var row: int = session.next_match(cursor, forward) if cursor >= 0 or not forward else _first_match_from(0)
 	if row >= 0:
 		_select(row)
-
-
-func list_header() -> ListHeader:
-	return _list_header
 
 
 ## The commit under the cursor: `{hash, subject, in_head}`, or empty.
@@ -477,24 +464,34 @@ func _on_search_changed() -> void:
 	_update_header()
 
 
-## The commit count, or while searching "Searching… 12 matches", "3 of 41
-## matches" (the selected commit is the third) or "No matches".
+## The search field's count: "Searching…" until the search finishes, then
+## "3/41" (the selected commit is the third match), "41" when the selection
+## is not a match, or "No matches"; nothing without a search.
 func _update_header() -> void:
 	_update_scope()
 	var info: Dictionary = session.search_info() if session != null else {}
 	if info.is_empty():
-		_list_header.set_text(tr(_commits_text))
+		_search.set_count("")
 		return
 	var matches: int = int(info["matches"])
-	var text: String = ListHeader.count_text(matches, "match", "matches")
 	var index: int = session.search_match_index(_commit_list.cursor)
 	if not bool(info["done"]):
-		text = tr("Searching… %s") % text
+		_search.set_count(tr("Searching…"))
 	elif matches == 0:
-		text = tr("No matches")
+		_search.set_count(tr("No matches"), true)
 	elif index >= 0:
-		text = tr("%d of %s") % [index + 1, text]
-	_list_header.set_text(tr(_commits_text) if info.is_empty() else text)
+		_search.set_count("%d/%s" % [index + 1, ListHeader.number_text(matches)])
+	else:
+		_search.set_count(ListHeader.number_text(matches))
+
+
+## The load's error over the empty list, once it has failed.
+func _update_empty() -> void:
+	if _empty_label == null:
+		return
+	_empty_label.visible = session != null and not _graph_loading and session.graph_row_count() == 0 \
+			and not _load_error.is_empty()
+	_empty_label.text = tr(_load_error)
 
 
 func _on_list_key(event: InputEvent) -> void:
@@ -521,11 +518,9 @@ func _on_files_key(event: InputEvent) -> void:
 func _apply_theme() -> void:
 	_left.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
 	_update_scope()
-	_update_rows_switch()
 
 
 func _on_graph_changed(_start: int, _count: int) -> void:
-	_commits_text = tr("Loading… %s") % ListHeader.count_text(session.graph_row_count(), "commit")
 	_update_header()
 	_update_loading()
 	_select_newest_if_none()
@@ -538,14 +533,13 @@ func _on_graph_reset() -> void:
 	_restore_oid = _selected_oid if not _head_pending else ""
 	_graph_loading = true
 	_commit_list.select_only(-1)
-	_commits_text = tr("Reloading…")
 	_update_header()
 	_update_loading()
 
 
 func _on_graph_loaded(row_count: int, error: String) -> void:
 	_graph_loading = false
-	_commits_text = tr(error) if not error.is_empty() else ListHeader.count_text(row_count, "commit")
+	_load_error = error
 	_update_header()
 	_update_loading()
 	_select_newest_if_none()
@@ -560,6 +554,7 @@ func _on_graph_loaded(row_count: int, error: String) -> void:
 func _update_loading() -> void:
 	if session == null:
 		_loading.hide_loading()
+		_update_empty()
 		return
 	var rows: int = session.graph_row_count()
 	if _graph_loading and rows == 0:
@@ -568,6 +563,7 @@ func _update_loading() -> void:
 		_loading.show_loading(false, tr("Updating…"))
 	else:
 		_loading.hide_loading()
+	_update_empty()
 
 
 ## The commit list's loading indicator (smoke tests and screenshots).

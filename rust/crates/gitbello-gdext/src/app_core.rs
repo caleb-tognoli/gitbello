@@ -918,6 +918,22 @@ impl AppCore {
         .unwrap_or(false)
     }
 
+    /// Whether History draws the commit graph beside its rows (saved in the
+    /// config).
+    #[func]
+    fn history_graph(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().history_graph).unwrap_or(true)
+    }
+
+    #[func]
+    fn set_history_graph(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().history_graph = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
     /// `ff-only`, `merge` or `rebase`: what a plain pull does.
     #[func]
     fn pull_mode(&self) -> GString {

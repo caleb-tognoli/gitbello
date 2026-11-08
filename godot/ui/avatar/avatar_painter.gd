@@ -57,13 +57,14 @@ static func draw(canvas: CanvasItem, control: Control, center: Vector2, diameter
 		ring_width: float = 1.5, alpha: float = 1.0) -> void:
 	var radius: float = diameter * 0.5
 	if ring.a > 0.0:
-		canvas.draw_circle(center, radius + ring_width, ring)
+		canvas.draw_circle(center, radius + ring_width, ring, true, -1.0, true)
 	var colors: PackedColorArray = colors_for(control, name, email)
 	var fill: Color = colors[0]
 	var ink: Color = colors[1]
 	fill.a *= alpha
 	ink.a *= alpha
-	canvas.draw_circle(center, radius, fill)
+	# Antialiased: a plain filled circle has stair-stepped edges at avatar sizes.
+	canvas.draw_circle(center, radius, fill, true, -1.0, true)
 	var text: String = initials(name, email)
 	var size: int = maxi(6, int(round(diameter * (0.42 if text.length() > 1 else 0.5))))
 	var extent: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)

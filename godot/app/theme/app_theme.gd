@@ -131,8 +131,8 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT,
 		p.error = Color("c43d2b")
 		p.incoming = Color(0.6, 0.38, 0.0)
 		p.shade = 0.6
-		p.selected = p.background.blend(Color(accent, 0.3))
-		p.selected_focus = p.background.blend(Color(accent, 0.45))
+		p.selected = p.background.blend(Color(accent, 0.15))
+		p.selected_focus = p.background.blend(Color(accent, 0.22))
 		p.head = Color(0.1, 0.5, 0.22)
 		p.lanes = [
 			Color(0.13, 0.42, 0.85), Color(0.12, 0.6, 0.25), Color(0.88, 0.45, 0.05),
@@ -165,8 +165,8 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT,
 		p.error = Color(1.0, 0.55, 0.45)
 		p.incoming = Color(0.98, 0.74, 0.35)
 		p.shade = 1.0
-		p.selected = p.background.blend(Color(accent, 0.4))
-		p.selected_focus = p.background.blend(Color(accent, 0.6))
+		p.selected = p.background.blend(Color(accent, 0.18))
+		p.selected_focus = p.background.blend(Color(accent, 0.26))
 		p.head = Color(0.45, 0.8, 0.55)
 		p.lanes = [
 			Color(0.3, 0.6, 1.0), Color(0.36, 0.8, 0.45), Color(1.0, 0.62, 0.25),
@@ -1273,6 +1273,12 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	var flat_text: StyleBoxFlat = _box(Color.TRANSPARENT, 0, Vector4(4, 5, 4, 5))
 	for state: StringName in [&"normal", &"focus", &"read_only"]:
 		theme.set_stylebox(state, &"FilterFieldText", flat_text)
+	# The search's match count after the text ("3/41"), muted; "No matches" in red.
+	_variation(theme, &"FilterFieldCount", &"Label")
+	theme.set_color(&"font_color", &"FilterFieldCount", p.text_muted)
+	theme.set_font_size(&"font_size", &"FilterFieldCount", 12)
+	_variation(theme, &"FilterFieldCountError", &"FilterFieldCount")
+	theme.set_color(&"font_color", &"FilterFieldCountError", p.error)
 	_variation(theme, &"FilterFieldDivider", &"VSeparator")
 	theme.set_constant(&"separation", &"FilterFieldDivider", 5)
 	var divider: StyleBoxLine = StyleBoxLine.new()

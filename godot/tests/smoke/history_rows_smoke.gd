@@ -2,7 +2,7 @@ extends SmokeTest
 ## M7.10: two-line history rows. Initials and their colours, the relative
 ## dates, the author line with co-authors, the ref chips (one branch and one
 ## tag plus "+N", the merged remote branch, the popover of all refs and its
-## menus), the details' people cards and ref chips, and the compact switch (saved in the scratch config, applied to
+## menus), the details' people cards and ref chips, and Compact rows in the options menu (saved in the scratch config, applied to
 ## every History view). Read-only on the
 ## fixture `repo-5`; skipped without `--fixtures`.
 
@@ -49,15 +49,30 @@ func run() -> void:
 	await _check_chips(list, history, page)
 	await _check_details(list, history, page)
 
-	# The switch beside the commit count, and the View menu action.
-	var switch: HBoxContainer = history.rows_switch()
-	expect(switch != null and switch.get_child_count() == 2, "the header has the rows switch")
-	var two_line: Button = switch.get_child(0) as Button
-	var one_line: Button = switch.get_child(1) as Button
-	expect(two_line.button_pressed and not one_line.button_pressed, "the switch shows two-line rows")
-	one_line.pressed.emit()
-	expect(list.compact and Core.history_compact(), "the compact segment switches and saves")
-	expect(one_line.button_pressed and not two_line.button_pressed, "the switch follows")
+	# Compact rows in the search field's options menu, and the View menu action.
+	var menu: PopupMenu = history.scope_menu()
+	var compact_index: int = menu.get_item_index(HistoryView.COMPACT_ID)
+	expect(compact_index >= 0 and menu.is_item_checkable(compact_index), "the options menu has Compact rows")
+	expect(not menu.is_item_checked(compact_index), "it is off for two-line rows")
+	history.scope_button().pressed.emit()
+	menu.id_pressed.emit(HistoryView.COMPACT_ID)
+	menu.hide()
+	expect(list.compact and Core.history_compact(), "Compact rows switches and saves")
+	expect(menu.is_item_checked(compact_index), "the item follows")
+	expect(not history.scope_button().button_pressed, "compact rows do not light the filter button")
+	# Show graph, next to it: off moves the text to the left edge, saved.
+	var graph_index: int = menu.get_item_index(HistoryView.GRAPH_ID)
+	expect(graph_index >= 0 and menu.is_item_checked(graph_index), "Show graph is on by default")
+	var with_graph: float = list.text_left()
+	history.scope_button().pressed.emit()
+	menu.id_pressed.emit(HistoryView.GRAPH_ID)
+	menu.hide()
+	expect(not list.show_graph and not Core.history_graph(), "Show graph off hides the graph and saves")
+	expect(not menu.is_item_checked(graph_index), "the item follows")
+	expect(list.text_left() < with_graph, "the text starts further left (%s < %s)" % [list.text_left(), with_graph])
+	Actions.run_action(&"history.toggle_graph")
+	expect(list.show_graph and Core.history_graph(), "the action brings the graph back")
+	expect(menu.is_item_checked(graph_index), "and the item follows")
 	expect(list.row_height() < tall, "compact rows are shorter")
 	# Compact rows: the ref icons and the author's avatar on the right.
 	await get_tree().process_frame

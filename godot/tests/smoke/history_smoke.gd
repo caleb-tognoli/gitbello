@@ -29,11 +29,12 @@ func run() -> void:
 	list.grab_focus()
 	var diff: DiffView = details.diff_panel().view()
 	expect(await wait_until(_diff_has.bind(diff, "v2")), "first file's diff is shown")
-	expect_eq(history.status_text(), "3 commits", "the status line has no load time")
+	expect_eq(history.status_text(), "", "the search field counts nothing without a search")
+	expect(history.find_child("ListHeader", true, false) == null, "there is no header row above the list")
+	expect_eq(history.empty_text(), "", "a loaded history has no empty text")
 	expect_eq(details.files_header().text(), "1 changed file", "the files header counts the files")
 	expect_eq(ListHeader.count_text(12345, "commit"), "12,345 commits", "counts have thousands separators")
-	expect_eq(details.files_header().size.y, history.list_header().size.y,
-			"the files header is as tall as the commits header")
+	expect_eq(ListHeader.number_text(1234567), "1,234,567", "numbers have thousands separators")
 	var first_code: String = String(details.file_list().row(0).get("code", ""))
 	expect(not first_code.is_empty(), "the first file has a status code")
 	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")
@@ -170,7 +171,7 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	expect(field.text_box().has_focus(), "Ctrl+F in History focuses the search")
 	type_text("app")
 	await get_tree().process_frame  # LineEdit reports text changes deferred
-	expect(await wait_until(func() -> bool: return history.status_text() == "2 of 2 matches"),
+	expect(await wait_until(func() -> bool: return history.status_text() == "2/2"),
 			"the selected commit is the second match: %s" % history.status_text())
 	expect(history.match_buttons().all(func(b: Button) -> bool: return b.visible), "the match buttons show while searching")
 	var strip: MarkStrip = list.match_strip()
@@ -185,7 +186,7 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	expect(strip.current >= 0.0, "the selected match is marked stronger")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "Enter wraps to the first match")
-	expect_eq(history.status_text(), "1 of 2 matches", "the header follows")
+	expect_eq(history.status_text(), "1/2", "the count follows")
 	expect(await wait_until(func() -> bool: return details.summary_text() == "Improve app"),
 			"the details show the match: %s" % details.summary_text())
 	press("Shift+Enter")
@@ -195,7 +196,7 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	field.set_text("initial")
 	expect(await wait_until(func() -> bool: return list.cursor == 2),
 			"the first match from the selected commit down is selected: %d" % list.cursor)
-	expect(await wait_until(func() -> bool: return history.status_text() == "1 of 1 match"),
+	expect(await wait_until(func() -> bool: return history.status_text() == "1/1"),
 			"one match: %s" % history.status_text())
 	expect(not bool(list.row_data(0).get("match", true)), "the other rows are not matches")
 	expect(bool(list.row_data(2).get("match", false)), "the matching row is flagged")
@@ -203,13 +204,14 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 	field.set_text("zzz-none")
 	expect(await wait_until(func() -> bool: return history.status_text() == "No matches"),
 			"no matches: %s" % history.status_text())
+	expect_eq(field.get_node("%Count").theme_type_variation, &"FilterFieldCountError", "no matches is shown as an error")
 	expect(not list.match_strip().visible, "no strip without matches")
 	field.focus_text()
 	press("Escape")
 	expect_eq(field.text(), "", "Escape clears the search")
 	expect(history.match_buttons().all(func(b: Button) -> bool: return not b.visible), "and they hide again")
-	expect(await wait_until(func() -> bool: return history.status_text() == "3 commits"),
-			"the header counts commits again: %s" % history.status_text())
+	expect(await wait_until(func() -> bool: return history.status_text().is_empty()),
+			"the count hides with the search: %s" % history.status_text())
 	expect_eq(list.search_query(), "", "nothing is dimmed")
 	press("Escape")
 	expect(list.has_focus(), "a second Escape goes back to the list")

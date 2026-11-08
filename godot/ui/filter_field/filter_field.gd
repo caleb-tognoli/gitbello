@@ -3,7 +3,8 @@ extends PanelContainer
 ## A filter or search box, the same everywhere: one field with a search
 ## icon, the text and its clear button, then any buttons added with
 ## `add_button` after a divider (shown while any of them is) (an options menu from `set_options`, or
-## steps through matches). The whole field is outlined in the accent colour
+## steps through matches). A muted count (`set_count`, "3/41") can sit
+## between the text and the divider. The whole field is outlined in the accent colour
 ## while the text has focus; the options button looks pressed while any
 ## option is on. Enter and Shift+Enter submit, Down leaves the field, Escape
 ## clears the text (then leaves). Styles are the `FilterField*` theme types.
@@ -31,6 +32,7 @@ var _menu: PopupMenu = PopupMenu.new()
 
 @onready var _search_icon: TextureRect = %SearchIcon
 @onready var _text: LineEdit = %Text
+@onready var _count: Label = %Count
 @onready var _divider: Control = %Divider
 @onready var _buttons: HBoxContainer = %Buttons
 
@@ -85,6 +87,19 @@ func focus_text() -> void:
 
 func text_box() -> LineEdit:
 	return _text
+
+
+## Shows `value` after the text ("3/41", "No matches"), in the error colour
+## when `error`; "" hides it.
+func set_count(value: String, error: bool = false) -> void:
+	_count.text = value
+	_count.theme_type_variation = &"FilterFieldCountError" if error else &"FilterFieldCount"
+	_count.visible = not value.is_empty()
+
+
+## What the count says, or "".
+func count_text() -> String:
+	return _count.text if _count.visible else ""
 
 
 ## Adds a flat icon button after the divider; returns it to connect.

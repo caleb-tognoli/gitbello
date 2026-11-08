@@ -7,7 +7,8 @@ extends VirtualList
 ## with "+N" for the others (`RefChip.summarize`), which emits
 ## `refs_requested`. `compact` keeps one line: the graph, the subject, and
 ## on the right an icon-only chip per kind of ref (`RefChip.shape_icons`)
-## and the author's avatar.
+## and the author's avatar. `show_graph` off leaves the graph out: the
+## text starts at the left edge.
 ## While a search is on
 ## (`set_search`), rows it does not match are dimmed (subject and graph dot)
 ## and the query is highlighted in the subjects of the rows it matches,
@@ -31,6 +32,9 @@ var session: RepoSession = null:
 ## One-line rows (no author line); see `set_compact`.
 var compact: bool = false:
 	set = set_compact
+## Draw the commit graph before the text; see `set_show_graph`.
+var show_graph: bool = true:
+	set = set_show_graph
 
 ## Time spent in the last `_draw()`, for benchmarks.
 var last_draw_usec: int = 0
@@ -173,6 +177,19 @@ func set_compact(value: bool) -> void:
 	if anchor >= 0:
 		set_scroll_offset(anchor * row_height() - size.y * 0.5 + row_height() * 0.5)
 	queue_redraw()
+
+
+## Draws the graph or leaves it out (the text moves to the left edge).
+func set_show_graph(value: bool) -> void:
+	if show_graph == value:
+		return
+	show_graph = value
+	queue_redraw()
+
+
+## Where the rows' text starts: after the graph, or at the left edge.
+func text_left() -> float:
+	return (_graph.width_for(_graph_lanes) if show_graph else 0.0) + _padding
 
 
 func set_session(value: RepoSession) -> void:
@@ -394,9 +411,9 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 		geometry = _graph.build(data, rect.size.y)
 		_geometry[row] = geometry
 	var dimmed: bool = not _query.is_empty() and not bool(data.get("match", false))
-	_graph.draw(self, geometry, rect.position, _dim_node_alpha if dimmed else 1.0)
-
-	var subject_x: float = rect.position.x + _graph.width_for(_graph_lanes) + _padding
+	if show_graph:
+		_graph.draw(self, geometry, rect.position, _dim_node_alpha if dimmed else 1.0)
+	var subject_x: float = rect.position.x + text_left()
 	var icon_size: float = float(get_theme_constant(&"outgoing_icon_size", LIST_THEME_TYPE))
 	# Two-line rows keep a column for the push icon; compact ones put it
 	# before the subject, only on the commits to push.

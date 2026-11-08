@@ -17,6 +17,15 @@ func run() -> void:
 				_expect_readable(accented.selected_text, background,
 						"%s, accent %s: selected-row text" % [theme_name, accent.to_html(false)])
 		var p: AppTheme.Palette = AppTheme.palette(light)
+		# Selected rows stay faint enough that muted text and accent icons
+		# (History's outgoing arrow) still show on them. The light theme's
+		# accent is pale on any background, so it is held to its plain contrast.
+		for background: Color in [p.selected, p.selected_focus]:
+			expect(AppTheme.contrast_ratio(p.text_muted, background) >= 3.0,
+					"%s: muted text shows on selected rows" % theme_name)
+			var accent_min: float = 0.75 * AppTheme.contrast_ratio(p.accent, p.background) if light else 3.0
+			expect(AppTheme.contrast_ratio(p.accent, background) >= accent_min,
+					"%s: accent icons show on selected rows" % theme_name)
 		for background: Color in [p.background, p.surface, p.raised, p.hover]:
 			_expect_readable(p.text, background, "%s: text" % theme_name)
 		for background: Color in [p.background, p.surface, p.raised]:

@@ -176,7 +176,7 @@ func _ready() -> void:
 	search.focus_text()
 	search.set_text("app")
 	deadline = Time.get_ticks_msec() + WAIT_MS
-	while Time.get_ticks_msec() < deadline and not page.history().status_text().contains(" of "):
+	while Time.get_ticks_msec() < deadline and not page.history().status_text().contains("/"):
 		await get_tree().process_frame
 	await _shot(out, "history_search")
 	Actions.run_action(&"view.theme_light")

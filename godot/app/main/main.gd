@@ -98,6 +98,7 @@ func _ready() -> void:
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
 		&"history.toggle_compact": func() -> bool: return Core.history_compact(),
+		&"history.toggle_graph": func() -> bool: return Core.history_graph(),
 		&"diff.toggle_whole_file": func() -> bool:
 			var panel: DiffPanel = _shown_diff_panel()
 			return panel != null and panel.whole_file_button().button_pressed,
@@ -587,6 +588,7 @@ func _register_actions() -> void:
 			func() -> bool: return _shown_diff_panel() != null)
 	Actions.register(&"diff.toggle_minimap", "Diff minimap", "View", _toggle_minimap)
 	Actions.register(&"history.toggle_compact", "Compact history rows", "View", _toggle_history_compact)
+	Actions.register(&"history.toggle_graph", "Show history graph", "View", _toggle_history_graph)
 	Actions.register(&"diff.next_change", "Next change", "View",
 			func() -> void: _navigable_diff().jump_to_change(true), PackedStringArray(["F7"]),
 			func() -> bool: return _navigable_diff() != null)
@@ -1269,6 +1271,12 @@ func _toggle_history_compact() -> void:
 	var value: bool = not Core.history_compact()
 	Core.set_history_compact(value)
 	get_tree().call_group(HistoryView.GROUP, &"set_compact", value)
+
+
+func _toggle_history_graph() -> void:
+	var value: bool = not Core.history_graph()
+	Core.set_history_graph(value)
+	get_tree().call_group(HistoryView.GROUP, &"set_show_graph", value)
 
 
 func _set_theme(choice: String) -> void:
