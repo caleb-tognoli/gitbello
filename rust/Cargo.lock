@@ -37,7 +37,7 @@ checksum = "3489a9e7463353467db3cfe3eb12de31c9b6200e4f928bde4959bf5db5b31d2f"
 
 [[package]]
 name = "gitbello-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "gitbello-core",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "gitbello-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "notify",
  "thiserror",
@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "gitbello-gdext"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "gitbello-core",
  "godot",
@@ -605,7 +605,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
 ]

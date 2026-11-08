@@ -4,13 +4,42 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 (`workspace.package.version`), `godot/project.godot` (`application/config/version`) and
 `godot/export_presets.cfg`, and shown in Help > About.
 
-## Unreleased
+## 1.1.0
+
+### Compare
+- Compare any two branches, remote branches, tags or commits, or one of them with the
+  working copy, Since fork (like a pull request) or Exact. Files and Commits tabs, with
+  the commits only on each side and an All changes row.
+- Open it from Branch > Compare… (Ctrl+Shift+C), a ref's menu (Compare with current
+  branch, Compare with…), or two commits Ctrl+clicked in History; recent comparisons are
+  kept.
+- Restore a file from either side (with Undo) and cherry-pick commits onto the current
+  branch.
 
 ### Views
 - The Changes, History, Shelves or Compare view you pick stays when you switch worktree
   or repository tab.
 - Alt+1 to Alt+4 show Changes, History, Shelves and Compare (Ctrl+Shift+G and
   Ctrl+Shift+H are gone); Ctrl+PageDown and Ctrl+PageUp go to the next and previous view.
+
+### History
+- Two-line rows with the author's avatar, relative dates and ref chips: one branch (a
+  local branch and its remote branch merged) and one tag, with "+N" for the rest.
+  Compact rows and the graph can be turned off from the search field's menu.
+- Co-authors from `Co-authored-by:` trailers show in the rows and the details, and the
+  search finds them.
+- The header row is gone: the search field counts matches ("3/41").
+- Commits on a branch that isn't published yet count as outgoing (Sync's Publish count,
+  chips and Home).
+
+### Ignore rules
+- Ignore changed files from the Changes list's menu: the file, its name, its extension or
+  a folder, with a preview of what the rule hides, in the repository's `.gitignore`,
+  `info/exclude` or your global excludes file. A tracked file can stop being tracked.
+- Repository > Ignore rules… lists every rule file, what each line hides, unused rules
+  and tracked files that match, and adds rules from templates.
+- "Show ignored files" in Changes, with the rule behind each file and Stop ignoring.
+- A folder that fills Changes (build output) offers to be ignored.
 
 ### Deleting branches
 - Deleting a branch says what it would lose (commits not in the main branch, commits not
@@ -24,6 +53,39 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 - Undo on the toast brings the branch back, and pushes its remote branch back.
 - Remote branches can be deleted from their menu, Delete deletes the selected branch in
   the branch list, and deleting a tag can delete it on the remote too.
+
+### Diffs
+- An image viewer for PNG, JPG, WebP, BMP, TGA and SVG: split, onion skin, swipe and
+  difference, with zoom and pan. Image conflicts preview both sides.
+- The diff header picks the mode (unified or side by side, or the image modes);
+  Ctrl+Shift+D cycles them. The mode is saved per viewer.
+- Line endings: a row says when a file's endings changed and when it has no final
+  newline; a file that changed only its endings shows a card instead. Restore line
+  endings puts them back (with Undo), and Changes marks these files `EOL` and can show
+  only them.
+- Open opens a file, or the version a diff shows, in its default app. It replaces Open
+  in editor and the editor setting.
+
+### Worktrees
+- The worktree icon's list has a filter, the chip's menu on right-click and a footer
+  with New worktree…, From branch…, Clean up and Prune.
+- A worktree deleted outside gitbello closes quietly.
+
+### Changes
+- The checkboxes are the only multi-file selection: clicking a row shows its diff.
+
+### Keyboard
+- Shortcuts live in Settings > Keyboard (Ctrl+/): filter by name or by pressing keys,
+  see what you changed, reassign on a conflict and reset all.
+
+### Speed
+- Clicks and selections run before background refreshes, stale jobs are dropped,
+  unchanged refreshes are skipped and History loads only new commits. Lists, diffs and
+  commit details show when they are loading.
+
+### Fixes and polish
+- A new logo, restyled filter fields, a scrolling commit list in the merge dialog.
+- The Windows process shows as just "gitbello" in Task Manager.
 
 ## 1.0.0
 
