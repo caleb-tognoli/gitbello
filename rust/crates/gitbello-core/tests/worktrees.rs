@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use gitbello_core::config::{Config, DEFAULT_WORKTREE_TEMPLATE};
 use gitbello_core::git::GitErrorKind;
 use gitbello_core::ops::{NewTask, WorktreeOp};
-use gitbello_core::runtime::{normalize, Runtime, RuntimeEvent};
+use gitbello_core::runtime::{normalize, JobState, Runtime, RuntimeEvent};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use support::rt::{ok, open, outcome, poll_until, settle};
 use support::TestRepo;
@@ -467,6 +467,43 @@ fn a_deleted_worktree_folder_is_reported_once() {
         .iter()
         .any(|e| matches!(e, RuntimeEvent::RefreshFailed { .. }));
     assert!(missing == 1 && !failed, "{events:#?}");
+}
+
+#[test]
+fn a_worktree_folder_left_by_a_deletion_is_missing() {
+    // Windows keeps a folder another program has open until it lets go:
+    // its files are gone (`.git` among them) but the folder is still there.
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let linked = repo.add_worktree("linked", "left");
+    let mut config = Config::default();
+    config.auto_fetch_minutes = 0;
+    let mut rt = Runtime::with_runner(config, None, repo.app_runner());
+    let key = rt.open(&linked);
+    poll_until(&mut rt, |rt, _| {
+        rt.repo(&key).and_then(|s| s.status()).is_some()
+    });
+    fs::remove_file(linked.join(".git")).unwrap();
+    fs::remove_file(linked.join("a.txt")).unwrap();
+    rt.on_focus(&key);
+    let mut events = poll_until(&mut rt, |rt, _| rt.repo(&key).unwrap().is_missing());
+    events.extend(poll_until(&mut rt, |rt, _| rt.pending_jobs() == 0));
+    events.extend(rt.poll());
+    let missing = events
+        .iter()
+        .filter(|e| matches!(e, RuntimeEvent::Missing { .. }))
+        .count();
+    let reported = events.iter().any(|e| {
+        matches!(
+            e,
+            RuntimeEvent::RefreshFailed { .. }
+                | RuntimeEvent::Job {
+                    state: JobState::Finished(Some(_)),
+                    ..
+                }
+        )
+    });
+    assert!(missing == 1 && !reported, "{events:#?}");
 }
 
 #[test]

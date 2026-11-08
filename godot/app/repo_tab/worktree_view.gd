@@ -15,6 +15,9 @@ signal notice(title: String, message: String)
 signal worktree_open_requested(path: String)
 ## A worktree is about to be removed: its view should close.
 signal worktree_close_requested(path: String)
+## The worktree's folder was deleted outside gitbello: the tab closes the
+## view, or calls `show_missing`.
+signal worktree_missing(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
 signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String)
 
@@ -849,6 +852,11 @@ func _on_job_ended(job: int) -> void:
 # --- Errors ---------------------------------------------------------------------
 
 func _on_missing() -> void:
+	worktree_missing.emit(worktree_path())
+
+
+## Says the worktree's folder no longer exists (see `worktree_missing`).
+func show_missing() -> void:
 	_layout.hide()
 	_error_panel.show()
 	_error_label.text = tr("%s\n\nThis worktree's folder no longer exists.") % worktree_path()

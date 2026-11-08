@@ -3242,6 +3242,29 @@ impl Runtime {
         let Some(state) = self.repos.get_mut(&repo) else {
             return; // closed meanwhile
         };
+        // The worktree folder was deleted (a task cleaning up after itself):
+        // say so once, and end the jobs that fail meanwhile quietly instead
+        // of reporting each one.
+        let failed =
+            matches!(&kind, EventKind::Finished(Err(e)) if e.kind != GitErrorKind::Cancelled);
+        if failed && (state.missing || state.toplevel.as_deref().is_some_and(worktree_gone)) {
+            if !state.missing {
+                state.missing = true;
+                if let Some(watcher) = &self.watcher {
+                    watcher.unwatch(&repo);
+                }
+                out.push(RuntimeEvent::Missing { repo: repo.clone() });
+            }
+            if RefreshKind::from_label(&label).is_none() {
+                out.push(RuntimeEvent::Job {
+                    repo,
+                    job,
+                    label,
+                    state: JobState::Cancelled,
+                });
+            }
+            return;
+        }
         // Searches report through `SearchChanged`, not as jobs.
         if label == SEARCH_JOB_LABEL {
             return;
@@ -3492,17 +3515,6 @@ impl Runtime {
                     });
                 }
                 EventKind::Finished(Err(error)) if error.kind != GitErrorKind::Cancelled => {
-                    // The worktree folder was deleted: say so once and stop.
-                    if state.toplevel.as_ref().is_some_and(|t| !t.is_dir()) {
-                        if !state.missing {
-                            state.missing = true;
-                            if let Some(watcher) = &self.watcher {
-                                watcher.unwatch(&repo);
-                            }
-                            out.push(RuntimeEvent::Missing { repo });
-                        }
-                        return;
-                    }
                     out.push(RuntimeEvent::RefreshFailed {
                         repo,
                         kind: refresh,
@@ -3823,6 +3835,12 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::BranchRestored(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
+}
+
+/// Whether the worktree at `toplevel` was deleted: its `.git` is gone. The
+/// folder itself may linger while another program holds it open (Windows).
+fn worktree_gone(toplevel: &Path) -> bool {
+    !toplevel.join(".git").exists()
 }
 
 /// What worktree jobs refresh: the list, its badges, and refs (branches

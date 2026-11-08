@@ -289,11 +289,12 @@ func _connect(v: WorktreeView) -> void:
 	v.worktree_open_requested.connect(_on_open_requested)
 	v.worktree_close_requested.connect(close_worktree)
 	v.worktree_delete_requested.connect(_delete_worktree)
+	v.worktree_missing.connect(_on_worktree_missing.bind(v))
 
 
 func _disconnect(v: WorktreeView) -> void:
 	for sig: Signal in [v.state_changed, v.notice, v.worktree_open_requested, v.worktree_close_requested,
-			v.worktree_delete_requested]:
+			v.worktree_delete_requested, v.worktree_missing]:
 		for connection: Dictionary in sig.get_connections():
 			var callable: Callable = connection["callable"]
 			if callable.get_object() == self:
@@ -315,6 +316,18 @@ func _activate(v: WorktreeView) -> void:
 	_refresh_strip()
 	v.focus_view()
 	state_changed.emit()
+
+
+## A linked worktree deleted outside gitbello (a task cleaning up after
+## itself) closes without a word, showing the main worktree if it was shown;
+## only a missing main worktree says so. Deferred: the session closes once
+## the core has delivered its events.
+func _on_worktree_missing(path: String, v: WorktreeView) -> void:
+	var main: String = main_worktree()
+	if main.is_empty() or Paths.same(main, path):
+		v.show_missing()
+		return
+	close_worktree.call_deferred(path)
 
 
 func _on_view_state(v: WorktreeView) -> void:

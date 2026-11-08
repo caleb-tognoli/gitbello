@@ -181,6 +181,7 @@ func run() -> void:
 	expect(not DirAccess.dir_exists_absolute(spare), "its folder is gone")
 	expect(Paths.same(page.active_view().worktree_path(), repo), "the main worktree shows")
 	expect(await wait_until(func() -> bool: return not _has_branch(session, "spare")), "its branch was deleted")
+	await _deleted_outside(main, page, session, repo, fixtures.path_join("repo-10-gone"))
 	if OS.get_name() == "Windows":
 		await _delete_while_in_use(main, page, session, repo, fixtures.path_join("repo-10-busy"))
 
@@ -208,6 +209,40 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## The shown worktree's folder deleted outside gitbello: its view closes
+## and the main worktree shows, with no error panel or toast.
+func _deleted_outside(main: Main, page: RepoTab, session: RepoSession, repo: String, gone: String) -> void:
+	var count: int = session.worktrees().size()
+	session.add_worktree(gone, "gone", "main")
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == count + 1), "a worktree to delete was added")
+	expect(page.show_worktree(gone), "it shows")
+	expect(await wait_until(func() -> bool: return page.session.is_ready()), "and loads")
+	var views: int = page.views().size()
+	var toasts: int = main.toasts().toast_count()
+	_remove_tree(gone)
+	expect(not FileAccess.file_exists(gone.path_join(".git")), "its files were deleted outside gitbello")
+	Core.focus_in(page.session)
+	expect(await wait_until(func() -> bool: return Paths.same(page.active_view().worktree_path(), repo)),
+			"the main worktree shows")
+	expect_eq(page.views().size(), views - 1, "the deleted worktree's view closed")
+	expect(not page.has_error(), "no error panel")
+	expect(main.toasts().toast_count() <= toasts, "no toast")
+	session.prune_worktrees()
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == count), "pruned")
+
+
+static func _remove_tree(path: String) -> void:
+	var dir: DirAccess = DirAccess.open(path)
+	if dir == null:
+		return
+	dir.include_hidden = true
+	for sub: String in dir.get_directories():
+		_remove_tree(path.path_join(sub))
+	for file: String in dir.get_files():
+		DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)
 
 
 ## Windows: deleting a worktree a program runs from (a copy of `findstr`
