@@ -328,3 +328,154 @@ fn reads_co_authors_from_trailers_in_the_graph_and_the_details() {
         ]
     );
 }
+
+/// Loads `repo` as the app does (all branches) on `scheduler`, reusing
+/// `previous` when given, and waits for it.
+fn reload(
+    scheduler: &gitbello_core::jobs::JobScheduler,
+    repo: &TestRepo,
+    previous: Option<&GraphLoader>,
+) -> GraphLoader {
+    let (loader, _) = GraphLoader::submit_reload(
+        scheduler,
+        repo.runner().clone(),
+        repo.path().to_path_buf(),
+        gitbello_core::graph::HistoryScope::AllBranches,
+        previous.map(GraphLoader::reader),
+    );
+    wait_done(loader)
+}
+
+fn hashes(loader: &GraphLoader) -> Vec<String> {
+    let index = loader.index();
+    (0..index.row_count())
+        .map(|row| index.commit(row).expect("row in range").hash_hex())
+        .collect()
+}
+
+fn graph_text(loader: &GraphLoader) -> String {
+    let index = loader.index();
+    let mut out = String::new();
+    for (row, layout) in index.layouts(0, index.row_count()).iter().enumerate() {
+        let commit = index.commit(row).expect("row in range");
+        let _ = writeln!(
+            out,
+            "{} {} {:?} {:?}",
+            commit.subject, layout.column, commit.parent_rows, layout.segments
+        );
+    }
+    out
+}
+
+fn scheduler_for(repo: &TestRepo) -> gitbello_core::jobs::JobScheduler {
+    use gitbello_core::backend::CliBackend;
+    use std::sync::Arc;
+    gitbello_core::jobs::JobScheduler::new(Arc::new(CliBackend::new(repo.runner().clone())), 2).0
+}
+
+#[test]
+fn a_reload_with_nothing_new_keeps_the_previous_load() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "f.txt", "1
+", "one",
+    );
+    let scheduler = scheduler_for(&repo);
+    let first = reload(&scheduler, &repo, None);
+    assert!(!first.is_unchanged());
+    // Moving HEAD between existing branches changes no tip.
+    repo.branch("side");
+    let first = reload(&scheduler, &repo, Some(&first));
+    let again = reload(&scheduler, &repo, Some(&first));
+    assert!(again.is_unchanged());
+    assert_eq!(
+        again.index().row_count(),
+        0,
+        "an unchanged reload reads no rows"
+    );
+}
+
+#[test]
+fn a_reload_after_new_commits_reads_only_them_and_matches_a_full_load() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "f.txt", "1
+", "one",
+    );
+    repo.commit(
+        "f.txt", "2
+", "two",
+    );
+    repo.branch("side");
+    repo.checkout("side");
+    repo.commit(
+        "s.txt",
+        "s
+",
+        "side work",
+    );
+    repo.checkout("main");
+    let scheduler = scheduler_for(&repo);
+    let first = reload(&scheduler, &repo, None);
+    assert_eq!(first.index().row_count(), 3);
+
+    repo.commit(
+        "f.txt", "3
+", "three",
+    );
+    repo.merge("side", "merge side");
+    let next = reload(&scheduler, &repo, Some(&first));
+    assert!(next.is_incremental());
+    assert!(!next.is_unchanged());
+    let full = reload(&scheduler, &repo, None);
+    assert!(!full.is_incremental());
+    // The same commits as a full load, children above parents, the new
+    // ones on top. (The order may differ from git's: the full load keeps
+    // `side work` next to the merge, the reload keeps it where it was.)
+    let mut a = hashes(&next);
+    let mut b = hashes(&full);
+    assert_eq!(a.len(), 5);
+    assert_eq!(a[0], repo.head());
+    {
+        let index = next.index();
+        for row in 0..index.row_count() {
+            let commit = index.commit(row).unwrap();
+            assert!(
+                commit.parent_rows.iter().all(|&p| p > row),
+                "row {row}: {commit:?}"
+            );
+        }
+        assert_eq!(index.commit(1).unwrap().subject, "three");
+        assert_eq!(index.commit(2).unwrap().subject, "side work");
+    }
+    assert!(graph_text(&next).starts_with("merge side 0 [1, 2]"));
+    a.sort();
+    b.sort();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_reload_after_rewritten_history_loads_in_full() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "f.txt", "1
+", "one",
+    );
+    repo.commit(
+        "f.txt", "2
+", "two",
+    );
+    let scheduler = scheduler_for(&repo);
+    let first = reload(&scheduler, &repo, None);
+    repo.git(&["reset", "-q", "--hard", "HEAD~1"]);
+    repo.commit(
+        "f.txt",
+        "2b
+",
+        "two again",
+    );
+    let next = reload(&scheduler, &repo, Some(&first));
+    assert!(!next.is_incremental() && !next.is_unchanged());
+    assert_eq!(next.index().row_count(), 2, "the dropped commit is gone");
+    assert_eq!(hashes(&next)[0], repo.head());
+}

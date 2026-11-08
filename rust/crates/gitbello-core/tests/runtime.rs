@@ -166,6 +166,19 @@ fn focus_refresh_picks_up_changes_and_close_forgets_the_repo() {
     repo.commit("a.txt", "a\n", "first");
     let mut rt = runtime();
     let key = open_ready(&mut rt, repo.path());
+    // A focus refresh runs; with nothing changed it lands without an event.
+    rt.on_focus(&key);
+    poll_until(&mut rt, |_, ev| {
+        ev.iter()
+            .any(|e| matches!(e, RuntimeEvent::Refreshing { repo } if *repo == key))
+    });
+    poll_until(&mut rt, |rt, _| {
+        rt.repo(&key).is_some_and(|s| s.refreshing().is_empty())
+    });
+    repo.write(
+        "a.txt", "changed
+",
+    );
     rt.on_focus(&key);
     let events = poll_until(&mut rt, |_, ev| updated(ev, &key, RefreshKind::Status));
     assert!(updated(&events, &key, RefreshKind::Status));

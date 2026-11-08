@@ -1,5 +1,6 @@
 //! Dev-only headless harness for `gitbello-core`.
 
+mod busy_bench;
 mod eol_fixture;
 mod fixture;
 mod image_fixture;
@@ -34,6 +35,9 @@ commands:
                                    create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
+  busy-bench <source> --work <empty dir> [--worktrees N] [--rounds N]
+                                   time changes, diffs and history while files
+                                   keep changing (clones <source> into <work>)
   in-use <dir>                     programs running files from a folder
                                    (Windows; what blocks deleting it)
 
@@ -59,6 +63,7 @@ fn main() -> Result<()> {
         Some("config") => repo_cmds::config(rest),
         Some("fixture") => fixture::run(rest),
         Some("home-bench") => repo_cmds::home_bench(rest),
+        Some("busy-bench") => busy_bench::run(rest),
         Some("in-use") => in_use(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
@@ -221,6 +226,14 @@ fn graph_bench(args: &[String]) -> Result<()> {
         .map(|c| c.hash_hex())
         .unwrap_or_default();
     let max_chunk = max_chunk_us(&index, "fix");
+    let started = Instant::now();
+    let mut copy = GraphIndex::new();
+    copy.extend_from(&index)?;
+    println!(
+        "reload copy     {:.1} ms (an incremental reload re-adds the old rows)",
+        started.elapsed().as_secs_f64() * 1e3
+    );
+    drop(copy);
     drop(index);
     for query in ["fix", "Junio", "zzzqqqxx", &hash[..hash.len().min(8)]] {
         let (matches, took) = time_search(&loader, query);

@@ -208,8 +208,11 @@ func run() -> void:
 	var committed: bool = await wait_until(func() -> bool:
 		return not box.is_busy() and box.summary().is_empty() and session.change_count() == 0)
 	expect(committed, "Ctrl+Enter commits and clears the message (output: %s)" % box.output_text())
+	# A hidden history waits to reload until it is shown.
+	page.show_view(WorktreeView.View.HISTORY)
 	expect(await wait_until(func() -> bool: return _head_subject(session) == "Add notes"), "graph shows the new commit")
 	var commits: int = session.graph_row_count()
+	page.show_view(WorktreeView.View.CHANGES)
 
 	# Nothing left: suggested actions replace the diff.
 	var empty: EmptyState = view.empty_state()
@@ -274,6 +277,7 @@ func run() -> void:
 	expect(not Actions.is_enabled(&"changes.cancel_amend"), "Cancel is unavailable during submission")
 	committed = await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend())
 	expect(committed, "message-only amend finished (output: %s)" % box.output_text())
+	page.show_view(WorktreeView.View.HISTORY)
 	expect(await wait_until(func() -> bool: return _head_subject(session) == "Add notes (amended)"),
 			"graph shows the amended commit: %s" % _head_subject(session))
 	expect_eq(session.graph_row_count(), commits, "amending does not add a commit")

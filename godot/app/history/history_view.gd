@@ -51,6 +51,8 @@ var _rows_switch: HBoxContainer = null
 var _two_line_button: Button = null
 var _compact_button: Button = null
 var _refs_popover: RefsPopover = null
+## Over the commit list while the history loads or reloads.
+var _loading: LoadingIndicator = LoadingIndicator.new()
 @onready var _commit_list: CommitList = %CommitList
 @onready var _list_header: ListHeader = %ListHeader
 @onready var _search: FilterField = %SearchField
@@ -60,6 +62,8 @@ var _refs_popover: RefsPopover = null
 
 func _ready() -> void:
 	_details.date_format = _commit_list.date_text
+	_loading.area = "history"
+	_commit_list.add_child(_loading)
 	_commit_list.selection_changed.connect(_on_commit_selected)
 	_commit_list.gui_input.connect(_on_list_key)
 	_commit_list.context_menu_requested.connect(func(row: int, at: Vector2) -> void:
@@ -151,12 +155,18 @@ func _update_rows_switch() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
+		_loading.free()  # Never added: freed without ever being ready.
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
-	elif what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
-		_cancel_parent_navigation()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED:
+		if not is_visible_in_tree():
+			_cancel_parent_navigation()
+		# A hidden history does not reload; shown again, it catches up.
+		if session != null:
+			session.set_history_visible(is_visible_in_tree())
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		_update_header()
 		_update_rows_switch()
@@ -174,6 +184,8 @@ func set_session(value: RepoSession) -> void:
 	_head_pending = false
 	_follow_head = false
 	if session != null:
+		session.set_history_visible(false)
+		session.graph_reloading_changed.disconnect(_update_loading)
 		session.graph_changed.disconnect(_on_graph_changed)
 		session.graph_loaded.disconnect(_on_graph_loaded)
 		session.graph_reset.disconnect(_on_graph_reset)
@@ -183,6 +195,8 @@ func set_session(value: RepoSession) -> void:
 		session.refs_changed.disconnect(_on_history_state)
 	session = value
 	if session != null:
+		session.set_history_visible(is_visible_in_tree())
+		session.graph_reloading_changed.connect(_update_loading)
 		session.graph_changed.connect(_on_graph_changed)
 		session.graph_loaded.connect(_on_graph_loaded)
 		session.graph_reset.connect(_on_graph_reset)
@@ -198,6 +212,7 @@ func set_session(value: RepoSession) -> void:
 	_details.session = session
 	_commits_text = "Loading…" if session != null else ""
 	_update_header()
+	_update_loading()
 
 
 func set_all_branches(all: bool) -> void:
@@ -512,6 +527,7 @@ func _apply_theme() -> void:
 func _on_graph_changed(_start: int, _count: int) -> void:
 	_commits_text = tr("Loading… %s") % ListHeader.count_text(session.graph_row_count(), "commit")
 	_update_header()
+	_update_loading()
 	_select_newest_if_none()
 	_try_parent_navigation()
 
@@ -524,17 +540,39 @@ func _on_graph_reset() -> void:
 	_commit_list.select_only(-1)
 	_commits_text = tr("Reloading…")
 	_update_header()
+	_update_loading()
 
 
 func _on_graph_loaded(row_count: int, error: String) -> void:
 	_graph_loading = false
 	_commits_text = tr(error) if not error.is_empty() else ListHeader.count_text(row_count, "commit")
 	_update_header()
+	_update_loading()
 	_select_newest_if_none()
 	if row_count == 0:
 		_details.show_placeholder(tr("No commits yet.") if error.is_empty() else "")
 	_try_parent_navigation()
 	repo_loaded.emit(row_count, error)
+
+
+## The list's loading indicator: blocking until the first rows arrive, over
+## the rows while more stream in or a reload runs behind them.
+func _update_loading() -> void:
+	if session == null:
+		_loading.hide_loading()
+		return
+	var rows: int = session.graph_row_count()
+	if _graph_loading and rows == 0:
+		_loading.show_loading(true, tr("Loading history…"))
+	elif _graph_loading or session.graph_reloading():
+		_loading.show_loading(false, tr("Updating…"))
+	else:
+		_loading.hide_loading()
+
+
+## The commit list's loading indicator (smoke tests and screenshots).
+func loading_indicator() -> LoadingIndicator:
+	return _loading
 
 
 func _select_newest_if_none() -> void:

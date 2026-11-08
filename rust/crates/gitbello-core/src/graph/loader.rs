@@ -2,10 +2,17 @@
 //!
 //! Readers (the UI) take short read locks to query slices while loading goes
 //! on. M2 moves this onto the job scheduler; the API stays the same.
+//!
+//! A load first lists the tips it shows (`rev-list --no-walk`). A reload
+//! given the previous finished load ([`GraphLoader::submit_reload`]) does
+//! less when it can: nothing when the tips are the same, and when no commit
+//! was dropped (only added), `git log` of the new commits alone, placed above
+//! the previous rows (a valid topological order: no older commit has a newer
+//! one as parent). Rewritten or deleted history loads in full.
 
 use std::io::Read;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -65,6 +72,13 @@ struct Shared {
     cancel: CancelToken,
     status: Mutex<Status>,
     started: Instant,
+    scope: HistoryScope,
+    /// The commits the load starts from, sorted (set once listed).
+    tips: Mutex<Vec<String>>,
+    /// A reload found the same tips as the previous load: nothing to show.
+    unchanged: AtomicBool,
+    /// A reload loaded only the new commits.
+    incremental: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -112,7 +126,20 @@ impl GraphLoader {
         repo: PathBuf,
         scope: HistoryScope,
     ) -> (Self, JobId) {
-        let (loader, task) = Self::unstarted(scope);
+        Self::submit_reload(scheduler, runner, repo, scope, None)
+    }
+
+    /// Loads again, reusing `previous` (a finished load of the same scope)
+    /// where it can; see the module docs and [`GraphLoader::is_unchanged`].
+    pub fn submit_reload(
+        scheduler: &JobScheduler,
+        runner: GitRunner,
+        repo: PathBuf,
+        scope: HistoryScope,
+        previous: Option<GraphReader>,
+    ) -> (Self, JobId) {
+        let (loader, mut task) = Self::unstarted(scope);
+        task.previous = previous.filter(|p| p.shared.scope == scope && p.is_done());
         let spec = JobSpec::read(repo.clone(), GRAPH_JOB_LABEL, move |_| {
             match task.run(&runner, repo) {
                 LoadState::Done | LoadState::Loading => Ok(JobOutput::Done),
@@ -125,7 +152,8 @@ impl GraphLoader {
                 )),
             }
         })
-        .with_cancel(loader.shared.cancel.clone());
+        .with_cancel(loader.shared.cancel.clone())
+        .with_priority(crate::jobs::JobPriority::Background);
         let id = scheduler.submit(spec);
         (loader, id)
     }
@@ -142,10 +170,15 @@ impl GraphLoader {
                 total: None,
             }),
             started: Instant::now(),
+            scope,
+            tips: Mutex::new(Vec::new()),
+            unchanged: AtomicBool::new(false),
+            incremental: AtomicBool::new(false),
         });
         let task = GraphLoadTask {
             shared: Arc::clone(&shared),
             scope,
+            previous: None,
         };
         (
             Self {
@@ -196,6 +229,20 @@ impl GraphLoader {
         self.shared.cancel.cancel();
     }
 
+    pub fn scope(&self) -> HistoryScope {
+        self.shared.scope
+    }
+
+    /// A finished reload found nothing new: keep showing the previous load.
+    pub fn is_unchanged(&self) -> bool {
+        self.shared.unchanged.load(Ordering::Acquire)
+    }
+
+    /// A finished reload read only the commits added since the previous load.
+    pub fn is_incremental(&self) -> bool {
+        self.shared.incremental.load(Ordering::Acquire)
+    }
+
     /// A handle on the index for other threads (searches). It does not keep
     /// the load alive: dropping the loader still cancels it.
     pub fn reader(&self) -> GraphReader {
@@ -241,6 +288,24 @@ impl GraphReader {
             != LoadState::Loading
     }
 
+    /// Whether loading finished without error or cancel.
+    pub fn is_done(&self) -> bool {
+        self.shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .state
+            == LoadState::Done
+    }
+
+    fn tips(&self) -> Vec<String> {
+        self.shared
+            .tips
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Read access to the index. Keep the guard short-lived: loading waits on it.
     pub fn index(&self) -> RwLockReadGuard<'_, GraphIndex> {
         self.shared
@@ -254,11 +319,13 @@ impl GraphReader {
 struct GraphLoadTask {
     shared: Arc<Shared>,
     scope: super::HistoryScope,
+    previous: Option<GraphReader>,
 }
 
 impl GraphLoadTask {
     fn run(self, runner: &GitRunner, repo: PathBuf) -> LoadState {
-        let state = match load(runner, repo, &self.shared, self.scope) {
+        let result = load(runner, repo, &self.shared, self.scope, self.previous);
+        let state = match result {
             Ok(true) => LoadState::Done,
             Ok(false) => LoadState::Cancelled,
             Err(err) => LoadState::Failed(err),
@@ -289,25 +356,141 @@ fn load(
     repo: PathBuf,
     shared: &Shared,
     scope: super::HistoryScope,
+    previous: Option<GraphReader>,
 ) -> Result<bool, GraphLoadError> {
-    let mut args = LOG_ARGS.to_vec();
-    let head;
-    if scope == super::HistoryScope::CurrentBranch {
-        match runner
-            .read(&repo)
-            .args(["rev-parse", "--verify", "--quiet", "HEAD"])
-            .cancel_token(&shared.cancel)
-            .run()
-        {
-            Ok(output) => head = output.stdout_text().trim().to_owned(),
-            Err(error) if error.exit_code == Some(1) => return Ok(true),
-            Err(error) => return Err(error.into()),
-        }
-        args.retain(|arg| *arg != "--all");
-        args.push(&head);
+    let tips = list_tips(runner, &repo, shared, scope)?;
+    *shared.tips.lock().unwrap_or_else(PoisonError::into_inner) = tips.clone();
+    if tips.is_empty() {
+        return Ok(true);
     }
-    args.push("--");
-    let mut stream = runner.read(&repo).args(args).stream()?;
+    if let Some(previous) = previous {
+        let old = previous.tips();
+        if old == tips {
+            shared.unchanged.store(true, Ordering::Release);
+            return Ok(true);
+        }
+        if !old.is_empty() && !drops_commits(runner, &repo, shared, &old, &tips)? {
+            let mut input = String::new();
+            for tip in &tips {
+                input.push_str(tip);
+                input.push('\n');
+            }
+            for tip in &old {
+                input.push('^');
+                input.push_str(tip);
+                input.push('\n');
+            }
+            // Fill a separate index: nobody reads this one until it is done.
+            if !stream_log(runner, &repo, shared, input, false)? {
+                return Ok(false);
+            }
+            let mut index = shared.index.write().unwrap_or_else(PoisonError::into_inner);
+            index.extend_from(&previous.index())?;
+            index.shrink_to_fit();
+            let rows = index.row_count();
+            drop(index);
+            shared.incremental.store(true, Ordering::Release);
+            publish_rows(shared, rows);
+            return Ok(true);
+        }
+    }
+    let mut input = tips.join("\n");
+    input.push('\n');
+    if !stream_log(runner, &repo, shared, input, true)? {
+        return Ok(false);
+    }
+    let mut index = shared.index.write().unwrap_or_else(PoisonError::into_inner);
+    index.shrink_to_fit();
+    Ok(true)
+}
+
+/// The commits the history starts from, sorted: HEAD, or every ref (but the
+/// stash) and HEAD as `log --all` takes them.
+fn list_tips(
+    runner: &GitRunner,
+    repo: &Path,
+    shared: &Shared,
+    scope: super::HistoryScope,
+) -> Result<Vec<String>, GraphLoadError> {
+    let args: &[&str] = match scope {
+        super::HistoryScope::CurrentBranch => {
+            &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]
+        }
+        super::HistoryScope::AllBranches => &[
+            "rev-list",
+            "--no-walk=unsorted",
+            "--exclude=refs/stash",
+            "--all",
+        ],
+    };
+    let output = match runner
+        .read(repo)
+        .args(args)
+        .cancel_token(&shared.cancel)
+        .run()
+    {
+        Ok(output) => output,
+        // No HEAD yet (an unborn branch): nothing to show.
+        Err(error) if error.exit_code == Some(1) => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut tips: Vec<String> = output
+        .stdout_text()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    tips.sort();
+    tips.dedup();
+    Ok(tips)
+}
+
+/// Whether some commit reachable from `old` is not reachable from `new`
+/// (history was rewritten or a branch with its own commits deleted).
+fn drops_commits(
+    runner: &GitRunner,
+    repo: &Path,
+    shared: &Shared,
+    old: &[String],
+    new: &[String],
+) -> Result<bool, GraphLoadError> {
+    let mut input = String::new();
+    for tip in old {
+        input.push_str(tip);
+        input.push('\n');
+    }
+    for tip in new {
+        input.push('^');
+        input.push_str(tip);
+        input.push('\n');
+    }
+    let output = runner
+        .read(repo)
+        .args(["rev-list", "--count", "--stdin"])
+        .stdin(input)
+        .cancel_token(&shared.cancel)
+        .run()?;
+    Ok(output.stdout_text().trim() != "0")
+}
+
+/// Streams `git log` of the revisions in `input` into the index. `publish`
+/// shows rows as they arrive (a first load); otherwise they appear when the
+/// caller publishes them. Returns `Ok(false)` when cancelled.
+fn stream_log(
+    runner: &GitRunner,
+    repo: &Path,
+    shared: &Shared,
+    input: String,
+    publish: bool,
+) -> Result<bool, GraphLoadError> {
+    let mut args: Vec<&str> = LOG_ARGS
+        .iter()
+        .copied()
+        .filter(|arg| *arg != "--all" && *arg != "--exclude=refs/stash")
+        .collect();
+    args.extend(["--stdin", "--"]);
+    let mut stream = runner.read(repo).args(args).stdin(input).stream()?;
     let mut splitter = RecordSplitter::new();
     let mut buf = vec![0u8; READ_CHUNK];
     loop {
@@ -336,15 +519,18 @@ fn load(
             stream.kill();
             return Err(err.into());
         }
-        publish_rows(shared, rows);
+        if publish {
+            publish_rows(shared, rows);
+        }
     }
     let mut index = shared.index.write().unwrap_or_else(PoisonError::into_inner);
     splitter.finish(|record| index.push(&LogRecord::parse(record)?))?;
-    index.shrink_to_fit();
     let rows = index.row_count();
     drop(index);
     stream.finish()?;
-    publish_rows(shared, rows);
+    if publish {
+        publish_rows(shared, rows);
+    }
     Ok(true)
 }
 

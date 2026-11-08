@@ -11,7 +11,7 @@ use gitbello_core::backend::{GitBackend, PatchGuard, ProgressSink, ShelfChange};
 use gitbello_core::diff::{DiffTarget, FileDiff, PatchMode};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
-    Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
+    Event, EventKind, JobId, JobOutput, JobPriority, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
 use gitbello_core::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
@@ -747,4 +747,139 @@ fn dropping_the_scheduler_cancels_running_jobs_and_joins() {
     drop(scheduler);
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(observed.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn the_most_urgent_queued_job_starts_first() {
+    let (scheduler, events, _) = scheduler(1);
+    let timeline = Timeline::default();
+    // Holds the only worker while the others queue up.
+    let first = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "first",
+        timed("first", &timeline, 120),
+    ));
+    sleep(Duration::from_millis(30));
+    let background = scheduler.submit(
+        JobSpec::read("/repo/a", "background", timed("background", &timeline, 1))
+            .with_priority(JobPriority::Background),
+    );
+    let normal = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "normal",
+        timed("normal", &timeline, 1),
+    ));
+    let urgent = scheduler.submit(
+        JobSpec::read("/repo/a", "urgent", timed("urgent", &timeline, 1))
+            .with_priority(JobPriority::Interactive),
+    );
+    wait_final(&events, &[first, background, normal, urgent]);
+    let start = |name| span(&timeline, name).0;
+    assert!(
+        start("urgent") < start("normal"),
+        "urgent waited for normal"
+    );
+    assert!(
+        start("normal") < start("background"),
+        "normal waited for background"
+    );
+}
+
+#[test]
+fn background_jobs_leave_a_worker_free() {
+    let (scheduler, events, _) = scheduler(2);
+    let timeline = Timeline::default();
+    let slow: Vec<JobId> = ["b1", "b2"]
+        .iter()
+        .map(|n| {
+            scheduler.submit(
+                JobSpec::read("/repo/a", *n, timed(n, &timeline, 200))
+                    .with_priority(JobPriority::Background),
+            )
+        })
+        .collect();
+    sleep(Duration::from_millis(30));
+    let diff = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "diff",
+        timed("diff", &timeline, 1),
+    ));
+    let mut ids = slow.clone();
+    ids.push(diff);
+    wait_final(&events, &ids);
+    let first_background_end = span(&timeline, "b1").1.min(span(&timeline, "b2").1);
+    assert!(
+        span(&timeline, "diff").0 < first_background_end,
+        "background jobs took every worker"
+    );
+    // ... and they still ran one after the other on the remaining worker.
+    let (b1, b2) = (span(&timeline, "b1"), span(&timeline, "b2"));
+    assert!(
+        b2.0 >= b1.1 || b1.0 >= b2.1,
+        "both background jobs ran at once"
+    );
+}
+
+#[test]
+fn a_superseding_job_cancels_queued_and_running_jobs_with_its_label() {
+    let (scheduler, events, _) = scheduler(1);
+    let started = Arc::new(AtomicUsize::new(0));
+    let running = {
+        let started = Arc::clone(&started);
+        scheduler.submit(JobSpec::read("/repo/a", "load diff", move |ctx| {
+            started.fetch_add(1, Ordering::SeqCst);
+            while !ctx.is_cancelled() {
+                sleep(Duration::from_millis(5));
+            }
+            Err(GitError::new("diff", GitErrorKind::Cancelled, ""))
+        }))
+    };
+    while started.load(Ordering::SeqCst) == 0 {
+        sleep(Duration::from_millis(5));
+    }
+    let queued = scheduler.submit(JobSpec::read("/repo/a", "load diff", |_| {
+        Ok(JobOutput::Done)
+    }));
+    let other = scheduler.submit(JobSpec::read("/repo/b", "load diff", |_| {
+        Ok(JobOutput::Done)
+    }));
+    let newest = scheduler
+        .submit(JobSpec::read("/repo/a", "load diff", |_| Ok(JobOutput::Done)).superseding());
+    let seen = wait_final(&events, &[running, queued, other, newest]);
+    let last = |id: JobId| {
+        seen.iter()
+            .rev()
+            .find(|e| e.job == id)
+            .map(|e| e.kind.clone())
+            .unwrap()
+    };
+    assert_eq!(last(running), EventKind::Cancelled);
+    assert_eq!(last(queued), EventKind::Cancelled);
+    assert_eq!(last(other), EventKind::Finished(Ok(JobOutput::Done)));
+    assert_eq!(last(newest), EventKind::Finished(Ok(JobOutput::Done)));
+}
+
+#[test]
+fn a_policy_sets_the_priority_of_reads_by_label() {
+    let (scheduler, events, _) = scheduler(1);
+    scheduler.set_policy(|label| (label == "urgent").then_some((JobPriority::Interactive, false)));
+    let timeline = Timeline::default();
+    let first = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "first",
+        timed("first", &timeline, 120),
+    ));
+    sleep(Duration::from_millis(30));
+    let normal = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "normal",
+        timed("normal", &timeline, 1),
+    ));
+    let urgent = scheduler.submit(JobSpec::read(
+        "/repo/a",
+        "urgent",
+        timed("urgent", &timeline, 1),
+    ));
+    wait_final(&events, &[first, normal, urgent]);
+    assert!(span(&timeline, "urgent").0 < span(&timeline, "normal").0);
 }

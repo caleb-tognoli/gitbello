@@ -1507,6 +1507,23 @@ static func _add_home(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"icon_size", &"Home", 16)
 	theme.set_constant(&"clone_text_width", &"Home", 220)
 	theme.set_constant(&"width", &"ScanDialog", 760)
+	_add_loading(theme, p)
+
+
+## `LoadingIndicator`: captions, the spinner, the sliding bar and the corner
+## pill over content that is loading again.
+static func _add_loading(theme: Theme, p: Palette) -> void:
+	const T: StringName = &"LoadingIndicator"
+	theme.set_color(&"caption_color", T, p.text_muted)
+	theme.set_color(&"backdrop", T, p.background)
+	theme.set_color(&"bar_color", T, p.accent)
+	theme.set_color(&"bar_track", T, Color(p.accent, 0.15))
+	theme.set_stylebox(&"pill", T, _box(p.surface, 10, Vector4.ZERO, p.border, 1))
+	theme.set_constant(&"bar_height", T, 3)
+	theme.set_constant(&"spinner_size", T, 24)
+	theme.set_constant(&"gap", T, 10)
+	theme.set_constant(&"pill_padding", T, 8)
+	theme.set_constant(&"pill_margin", T, 6)
 
 ## Frame `frame` of the busy spinner, in the icon grey of the light or dark
 ## theme.

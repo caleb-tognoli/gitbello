@@ -119,6 +119,8 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 - Jobs report `Started`, `Progress`, `Finished(Result)` and `Cancelled` through one `Event` channel per `AppCore`.
 - After any write, the scheduler automatically queues a targeted refresh. For example, a commit refreshes status, refs and the graph head; staging refreshes only status and the affected diff.
 - **Coalescing:** duplicate pending refreshes of the same kind collapse into one.
+- **Priorities (busy machines):** reads are Interactive (the shown diff, a commit's details, previews), Normal or Background (graph loads, summaries, searches, auto-fetch, badges); a worker takes the highest-priority job first, and background jobs never take the last free worker. Superseding labels (the diff, commit details, previews, HEAD info) cancel the same repo's older queued or running job. The table is `runtime::job_policy`.
+- **Quiet refreshes:** a refresh whose result equals the current state sends no event. The shown diff reloads only when its inputs changed (HEAD, the file's status, the file's size and mtime); a load already running is not cancelled, it runs once more when it ends. The endings scan skips when the modified files' stats are unchanged.
 
 ### 3.5 Godot boundary
 
@@ -149,6 +151,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
   - **`VirtualList`:** draws only visible rows with `_draw()`, handles selection, keyboard navigation, multi-select and context menus. It is the base for the commit list, file lists and the blame gutter.
   - **`GraphView`:** draws lanes and nodes for visible rows from the lane data supplied by core. It is combined with the commit list inside one scroll container.
   - **`DiffView`:** unified and side-by-side views with hunk and line selection gutters, intra-line highlights, and an editable working-copy side (§3.10). It wraps `CodeEdit` where possible. A minimap rendered by core replaces its scroll bar (M7.6).
+  - **`LoadingIndicator`:** a click-through overlay for one area (`changes`, `diff`, `history`, `details`), blocking while nothing can be shown and an overlay while shown content reloads. It appears after 0.2 s and counts the seconds after 2 s. The style is fixed per area: a sliding bar for the Changes list and History, a spinner for diffs, the caption only for a commit's files.
   - **`AutoScroll`:** browser-style middle-click autoscroll for every `VirtualList` and `ScrollContainer` (M7.6).
 - **`ActionRegistry`** (autoload). Every action is `{ id, label, category, shortcut, enabled: Callable, run: Callable }`. The command palette fuzzy-searches it, the menu bar, big buttons, menus and context menus are built from it, and shortcuts are rebindable (in Settings → Keyboard from M7.11, where each action also has a context: where its shortcut works). From M6.5 an action can also give the reason it is disabled (shown in tooltips), and a run carries its origin control so the job's progress shows there (§4 Feedback).
 - **Theming** (M6.5 P1): `AppTheme` (GDScript, modelled on spritesheetbelli's) builds the `Theme` at startup from one palette per theme and the accent colour from Settings, and rebuilds it when the OS theme, the theme override or the accent changes. The app follows `DisplayServer.is_dark_mode()` and reacts to changes (use the system theme change callback if the pinned Godot version provides it; otherwise re-check on focus-in).
@@ -180,6 +183,7 @@ Models (`RepoStatus`, `FileChange`, `Ref`, `Worktree`, `Commit`, `Hunk`, `StashE
 - Stream `git log` in topological order, parsing commits as they arrive. Build a compact `GraphIndex` with commit table, parent indices and ref decorations.
 - **Lane assignment** happens incrementally in core: a standard "active lanes" algorithm that assigns each commit a column and emits edge segments per row. Godot receives per-row `{column, color_idx, segments[]}`.
 - **Memory target:** under 150 bytes per commit in the index, excluding strings. Interned author names and subjects are stored in an arena.
+- **Reloads:** when HEAD or the refs move, the graph reloads after a short delay, only while the History view is shown (a hidden one is marked stale and catches up when shown; HEAD info for the undo strip still reloads). The reload lists the tips first: unchanged tips load nothing, new commits on top of the old tips are streamed alone and the old index is copied under them (`GraphIndex::extend_from`), anything else (a rewrite, dropped commits) loads in full. The old rows stay shown until the reload is done (`graph_reloading_changed`), then swap in one reset.
 - **Performance targets** (M1 acceptance): about 80k commits (the `git/git` repo) fully indexed in under 2 s on a modern machine. The first screen appears within 300 ms (stream the first page). Scrolling holds 60 fps with no dropped frames. Idle CPU stays near 0%.
 
 ### 3.10 Diff, staging and editing

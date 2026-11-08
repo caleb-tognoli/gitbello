@@ -171,7 +171,71 @@ impl GraphIndex {
             self.check_hash_len(&parent)?;
             parent_oids.push(parent);
         }
+        self.push_parts(
+            oid,
+            &parent_oids,
+            (&record.author_name, &record.author_email),
+            record.author_time,
+            &record.subject,
+            &record.coauthor_identities(),
+        );
+        Ok(())
+    }
 
+    /// Appends every row of `other` after the rows here, in its order: an
+    /// index of newer commits followed by an older load (none of whose
+    /// commits can have a newer commit as parent).
+    pub fn extend_from(&mut self, other: &GraphIndex) -> Result<(), LogParseError> {
+        let unresolved: HashMap<NodeId, Oid> = other
+            .pending
+            .iter()
+            .map(|(oid, node)| (*node, *oid))
+            .collect();
+        let oid_of = |bytes: &[u8]| {
+            let mut oid = Oid {
+                len: bytes.len() as u8,
+                bytes: [0u8; 32],
+            };
+            oid.bytes[..bytes.len()].copy_from_slice(bytes);
+            oid
+        };
+        let mut parents = Vec::with_capacity(2);
+        for row in 0..other.row_count() {
+            let oid = oid_of(other.hash(row));
+            self.check_hash_len(&oid)?;
+            parents.clear();
+            for &node in other.parent_nodes(row) {
+                match other.node_row[node as usize] {
+                    NO_ROW => parents.extend(unresolved.get(&node).copied()),
+                    r => parents.push(oid_of(other.hash(r as usize))),
+                }
+            }
+            let coauthors: Vec<(&str, &str)> = other
+                .coauthor_ids(row)
+                .iter()
+                .map(|&id| other.identities.get(id))
+                .collect();
+            self.push_parts(
+                oid,
+                &parents,
+                other.identities.get(other.author[row]),
+                other.author_time[row],
+                other.subject(row),
+                &coauthors,
+            );
+        }
+        Ok(())
+    }
+
+    fn push_parts(
+        &mut self,
+        oid: Oid,
+        parent_oids: &[Oid],
+        (author_name, author_email): (&str, &str),
+        author_time: i64,
+        subject: &str,
+        coauthors: &[(&str, &str)],
+    ) {
         let row = self.row_node.len();
         if row.is_multiple_of(CHECKPOINT_INTERVAL) {
             self.checkpoints.push(self.lanes.clone());
@@ -183,7 +247,7 @@ impl GraphIndex {
         };
         self.node_row[node as usize] = u32::try_from(row).unwrap_or(NO_ROW);
         let first_parent = self.parents.len();
-        for parent in &parent_oids {
+        for parent in parent_oids {
             let id = match self.pending.get(parent) {
                 Some(&id) => id,
                 None => {
@@ -198,16 +262,13 @@ impl GraphIndex {
         self.hashes.extend_from_slice(oid.as_bytes());
         self.row_node.push(node);
         self.parent_start.push(offset(self.parents.len()));
-        self.author.push(
-            self.identities
-                .intern(&record.author_name, &record.author_email),
-        );
-        self.author_time.push(record.author_time);
-        self.subjects.push_str(&record.subject);
+        self.author
+            .push(self.identities.intern(author_name, author_email));
+        self.author_time.push(author_time);
+        self.subjects.push_str(subject);
         self.subject_start.push(offset(self.subjects.len()));
-        let coauthors = record.coauthor_identities();
         if !coauthors.is_empty() {
-            for (name, email) in coauthors {
+            for &(name, email) in coauthors {
                 let id = self.identities.intern(name, email);
                 self.coauthor_ids.push(id);
             }
@@ -217,7 +278,6 @@ impl GraphIndex {
 
         self.lanes.step(node, &self.parents[first_parent..], None);
         self.max_width = self.max_width.max(self.lanes.width());
-        Ok(())
     }
 
     pub fn commit(&self, row: usize) -> Option<CommitRow<'_>> {

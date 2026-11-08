@@ -344,7 +344,10 @@ func _queue_delayed(history: HistoryView, target: String) -> void:
 func _check_pending_parents(page: RepoTab) -> void:
 	var scene: PackedScene = load("res://app/history/history_view.tscn") as PackedScene
 	var history: HistoryView = scene.instantiate() as HistoryView
+	# The new script builds its own indicator: free the first one.
+	var orphan: LoadingIndicator = history.loading_indicator()
 	history.set_script(DelayedHistory)
+	orphan.free()
 	add_child(history)
 	history.session = page.session
 	expect(await _select_ready(history, 0), "the delayed view loads real merge metadata")

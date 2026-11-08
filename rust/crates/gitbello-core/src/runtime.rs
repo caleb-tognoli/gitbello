@@ -25,10 +25,10 @@ use crate::diff::{
 use crate::git::{
     CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
 };
-use crate::graph::{CommitSearch, GraphLoader, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL};
+use crate::graph::{CommitSearch, GraphLoader, LoadState, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL};
 use crate::in_use::{processes_using, ProcessUse};
 use crate::jobs::{
-    Event, EventKind, JobId, JobOutput, JobScheduler, JobSpec, RefreshKind, RefreshSet,
+    Event, EventKind, JobId, JobOutput, JobPriority, JobScheduler, JobSpec, RefreshKind, RefreshSet,
 };
 use crate::library::{
     check_location, library_root, path_key, read_summary, LocationCheck, RepoLibrary, RepoSummary,
@@ -188,12 +188,43 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     STOP_IGNORING_JOB_LABEL,
 ];
 
+/// How reads are scheduled (see [`JobScheduler::set_policy`]): what the
+/// user is looking at or waiting for first, then refreshes, then work nobody
+/// waits on. Superseding reads replace an older read of the same kind.
+fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
+    use JobPriority::{Background, Interactive, Normal};
+    let policy = match label {
+        DIFF_JOB_LABEL
+        | COMMIT_DIFF_JOB_LABEL
+        | COMMIT_DETAILS_JOB_LABEL
+        | MERGE_PREVIEW_JOB_LABEL
+        | IGNORE_PREVIEW_JOB_LABEL => (Interactive, true),
+        OPEN_JOB_LABEL
+        | OLD_FILE_JOB_LABEL
+        | CONFLICT_JOB_LABEL
+        | VERSION_JOB_LABEL
+        | HEAD_MESSAGE_JOB_LABEL
+        | SHELF_FILES_JOB_LABEL
+        | LOCATION_JOB_LABEL
+        | CLEANUP_SCAN_JOB_LABEL
+        | FETCH_JOB_LABEL
+        | BRANCH_DELETE_INFO_JOB_LABEL => (Interactive, false),
+        HEAD_INFO_JOB_LABEL | CONFLICT_SCAN_JOB_LABEL => (Normal, true),
+        ENDINGS_SCAN_JOB_LABEL => (Background, true),
+        SUMMARY_JOB_LABEL | AUTO_FETCH_JOB_LABEL | SEARCH_JOB_LABEL | GRAPH_JOB_LABEL => {
+            (Background, false)
+        }
+        _ => return None,
+    };
+    Some(policy)
+}
+
 /// A graph reload waits this long after the last ref or HEAD change, so a
 /// commit (which changes both) reloads once.
 const GRAPH_RELOAD_DELAY: Duration = Duration::from_millis(150);
 
-/// While a status or refs refresh is still on its way, the reload waits for it
-/// (under load it can land well after the other), but never longer than this.
+/// While a refs refresh is still on its way, the reload waits for it
+/// (under load it can land well after the status), but never longer than this.
 const GRAPH_RELOAD_MAX_HOLD: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,6 +256,15 @@ pub enum RuntimeEvent {
     },
     /// A new graph load replaced the previous one (refs or HEAD moved).
     GraphReset {
+        repo: PathBuf,
+    },
+    /// A reload behind the shown graph started or ended without replacing it
+    /// (see [`RepoState::graph_reloading`]).
+    GraphReloading {
+        repo: PathBuf,
+    },
+    /// The refreshes queued or running changed (see [`RepoState::refreshing`]).
+    Refreshing {
         repo: PathBuf,
     },
     /// The history search found more matches, progressed, finished, or
@@ -503,9 +543,25 @@ pub struct RepoState {
     /// Modified files whose only unstaged changes are line endings or the
     /// final newline (the line-endings scan after each status).
     endings_only: HashSet<PathBuf>,
+    /// What the last line-endings scan read (see [`endings_inputs`]).
+    endings_inputs: Option<u64>,
     history_scope: crate::graph::HistoryScope,
     graph: Option<GraphLoader>,
+    /// A reload running while `graph` stays shown; it replaces `graph` once
+    /// done (unless it found nothing new).
+    next_graph: Option<GraphLoader>,
+    /// Whether the History view shows this repository. Reloads of a hidden
+    /// history wait until it is shown.
+    history_visible: bool,
+    /// Refreshes queued or running, as last reported.
+    refreshing: RefreshSet,
+    /// Refresh kinds that have landed at least once.
+    loaded: RefreshSet,
     graph_dirty_since: Option<Instant>,
+    /// HEAD or the refs moved since `head_info` was read. It reloads with
+    /// the same delay as the graph, even while the history is hidden (the
+    /// undo strip and amend use it).
+    head_info_stale: bool,
     /// The history search's query ("" for none) and its search of `graph`.
     search_query: String,
     search: Option<CommitSearch>,
@@ -563,9 +619,15 @@ impl RepoState {
             commit_diff: None,
             discards: Vec::new(),
             endings_only: HashSet::new(),
+            endings_inputs: None,
             history_scope: crate::graph::HistoryScope::default(),
             graph: None,
+            next_graph: None,
+            history_visible: true,
+            refreshing: RefreshSet::EMPTY,
+            loaded: RefreshSet::EMPTY,
             graph_dirty_since: None,
+            head_info_stale: false,
             search_query: String::new(),
             search: None,
             search_reported: (0, false),
@@ -871,6 +933,23 @@ impl RepoState {
 
     pub fn graph(&self) -> Option<&GraphLoader> {
         self.graph.as_ref()
+    }
+
+    /// The refreshes queued or running (see [`RuntimeEvent::Refreshing`]).
+    pub fn refreshing(&self) -> RefreshSet {
+        self.refreshing
+    }
+
+    /// Whether the history is loading again behind the rows shown (or waits
+    /// to, until it is shown).
+    pub fn graph_reloading(&self) -> bool {
+        self.next_graph.is_some()
+    }
+
+    /// Whether the history shown is older than the repository (it reloads
+    /// once shown or once the pending reload lands).
+    pub fn graph_stale(&self) -> bool {
+        self.next_graph.is_some() || self.graph_dirty_since.is_some()
     }
 
     /// The history search of the current graph, if there is a query.
@@ -1271,6 +1350,13 @@ pub struct DiffState {
     full: bool,
     generation: u64,
     loading: bool,
+    /// The load job, while queued or running.
+    job: Option<JobId>,
+    /// What the running load reads changed: load again once it lands.
+    rerun: bool,
+    /// What the last load read (see [`diff_inputs`]); a status refresh that
+    /// finds the same skips the reload.
+    inputs: Option<DiffInputs>,
     diff: Option<FileDiff>,
     error: Option<GitError>,
     /// Which gaps between hunks the user opened.
@@ -1294,6 +1380,9 @@ impl DiffState {
             full,
             generation: 0,
             loading: false,
+            job: None,
+            rerun: false,
+            inputs: None,
             diff: None,
             error: None,
             expansion: Expansion::default(),
@@ -1437,6 +1526,7 @@ impl Runtime {
         let backend = Arc::new(CliBackend::new(runner.clone()));
         let (scheduler, events) =
             JobScheduler::new(backend.clone(), JobScheduler::default_workers());
+        scheduler.set_policy(job_policy);
         let scheduler = Arc::new(scheduler);
         let weak: Weak<JobScheduler> = Arc::downgrade(&scheduler);
         let (watcher, watch_error) =
@@ -3169,6 +3259,8 @@ impl Runtime {
             self.apply(event, &mut out);
         }
         self.reload_dirty_graphs(&held, &mut out);
+        self.swap_reloaded_graphs(&mut out);
+        self.report_refreshing(&mut out);
         self.advance_searches(&mut out);
         self.run_auto_fetch();
         let latest = self.runner.log().latest_seq();
@@ -3286,16 +3378,21 @@ impl Runtime {
                     state.paths = Some(paths);
                     self.scheduler.request_refresh(&repo, RefreshSet::all());
                     submit_head_info(&self.scheduler, &repo);
-                    state.graph = Some(
-                        GraphLoader::submit_scoped(
-                            &self.scheduler,
-                            self.runner.clone(),
-                            repo.clone(),
-                            state.history_scope,
-                        )
-                        .0,
-                    );
-                    state.restart_search();
+                    if state.history_visible {
+                        state.graph = Some(
+                            GraphLoader::submit_scoped(
+                                &self.scheduler,
+                                self.runner.clone(),
+                                repo.clone(),
+                                state.history_scope,
+                            )
+                            .0,
+                        );
+                        state.restart_search();
+                    } else {
+                        // Loaded once the History view shows it.
+                        state.graph_dirty_since = Some(Instant::now() - GRAPH_RELOAD_DELAY);
+                    }
                     out.push(RuntimeEvent::Opened { repo });
                 }
                 EventKind::Finished(Err(error)) => {
@@ -3311,9 +3408,25 @@ impl Runtime {
             return;
         }
         if label == DIFF_JOB_LABEL {
+            let landed = matches!(kind, EventKind::Finished(_) | EventKind::Cancelled);
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
             refresh_diff_picks(state);
             submit_old_file(&self.scheduler, state, DiffSlot::Changes);
+            if landed {
+                let rerun = state.diff.as_mut().is_some_and(|d| {
+                    let pending = d.job.is_some_and(|j| self.scheduler.is_pending(j));
+                    !pending && std::mem::take(&mut d.rerun)
+                });
+                if rerun {
+                    self.diff_generation += 1;
+                    submit_diff(
+                        &self.scheduler,
+                        state,
+                        DiffSlot::Changes,
+                        self.diff_generation,
+                    );
+                }
+            }
             return;
         }
         if label == COMMIT_DIFF_JOB_LABEL {
@@ -3474,7 +3587,30 @@ impl Runtime {
         }
         if let Some(refresh) = RefreshKind::from_label(&label) {
             match kind {
+                // Nothing changed: no event, so the UI does no work. A file
+                // can still change without its status changing.
+                EventKind::Finished(Ok(output))
+                    if state.loaded.contains(refresh) && refresh_unchanged(state, &output) =>
+                {
+                    if refresh == RefreshKind::Status {
+                        submit_endings_scan(&self.scheduler, state);
+                        // These read more than the status shows (ignored
+                        // files, the amend's files); they run only while
+                        // the rules viewer or an amend is open.
+                        refresh_amend(&self.scheduler, state);
+                        reload_ignore_rules(&self.scheduler, state);
+                        if state.diff.is_some() {
+                            reload_changes_diff(&self.scheduler, state, &mut self.diff_generation);
+                        }
+                        // Conflict markers live in the files, not the status.
+                        if state.conflict.is_some() || state.operation.is_some() {
+                            self.diff_generation += 1;
+                            after_status_conflicts(&self.scheduler, state, self.diff_generation);
+                        }
+                    }
+                }
                 EventKind::Finished(Ok(output)) => {
+                    state.loaded = state.loaded.with(refresh);
                     apply_refresh(state, output);
                     if refresh == RefreshKind::Status {
                         submit_endings_scan(&self.scheduler, state);
@@ -3484,28 +3620,48 @@ impl Runtime {
                     }
                     // Staging, edits and commits all show up as a status change.
                     if refresh == RefreshKind::Status && state.diff.is_some() {
-                        self.diff_generation += 1;
-                        submit_diff(
-                            &self.scheduler,
-                            state,
-                            DiffSlot::Changes,
-                            self.diff_generation,
-                        );
+                        reload_changes_diff(&self.scheduler, state, &mut self.diff_generation);
                     }
                     if refresh == RefreshKind::Status {
                         self.diff_generation += 1;
                         after_status_conflicts(&self.scheduler, state, self.diff_generation);
                     }
                     let common = state.paths.as_ref().map(|p| p.common_dir.clone());
-                    // Other open worktrees of this repository show this one's badge.
+                    let toplevel = state.toplevel.clone();
+                    let badge = state.status.as_ref().map(|s| Badge::new(Some(s), None));
+                    // Other open worktrees of this repository show this one's
+                    // badge: set it from this status rather than reading the
+                    // status of every worktree again.
                     if refresh == RefreshKind::Status {
-                        for (key, other) in &self.repos {
+                        for (key, other) in self.repos.iter_mut() {
                             let sibling = *key != repo
                                 && other.paths.as_ref().map(|p| &p.common_dir) == common.as_ref()
                                 && other.worktrees.as_ref().is_some_and(|w| w.len() > 1);
-                            if sibling {
-                                let badges = RefreshSet::EMPTY.with(RefreshKind::WorktreeBadges);
-                                self.scheduler.request_refresh(key, badges);
+                            if !sibling {
+                                continue;
+                            }
+                            let entry = toplevel.as_deref().and_then(|top| {
+                                let top = normalize(top);
+                                other
+                                    .worktree_badges
+                                    .iter_mut()
+                                    .find(|(path, _)| normalize(path) == top)
+                            });
+                            match (entry, &badge) {
+                                (Some((_, old)), Some(badge)) => {
+                                    if old != badge {
+                                        *old = badge.clone();
+                                        out.push(RuntimeEvent::Updated {
+                                            repo: key.clone(),
+                                            kind: RefreshKind::WorktreeBadges,
+                                        });
+                                    }
+                                }
+                                _ => {
+                                    let badges =
+                                        RefreshSet::EMPTY.with(RefreshKind::WorktreeBadges);
+                                    self.scheduler.request_refresh(key, badges);
+                                }
                             }
                         }
                     }
@@ -3701,15 +3857,17 @@ impl Runtime {
         }
     }
 
-    /// Repositories with a dirty graph whose status or refs refresh has not
-    /// reported yet.
+    /// Repositories with a dirty graph whose refs refresh has not reported
+    /// yet. (A status refresh does not hold a reload: the load reads the
+    /// refs itself, and while files keep changing one is nearly always on
+    /// its way.)
     fn graphs_awaiting_refresh(&self) -> HashSet<PathBuf> {
         self.repos
             .values()
             .filter(|state| state.graph_dirty_since.is_some())
             .filter(|state| {
                 let pending = self.scheduler.pending_refreshes(&state.key);
-                pending.contains(RefreshKind::Status) || pending.contains(RefreshKind::Refs)
+                pending.contains(RefreshKind::Refs)
             })
             .map(|state| state.key.clone())
             .collect()
@@ -3722,11 +3880,44 @@ impl Runtime {
                 waited >= GRAPH_RELOAD_DELAY
                     && (waited >= GRAPH_RELOAD_MAX_HOLD || !held.contains(&state.key))
             });
-            if !due {
+            // A hidden history stays dirty until it is shown. A reload that
+            // is running finishes first (cancelling it for a newer one would
+            // never finish while refs keep moving); then this one runs, and
+            // usually finds nothing new.
+            if due && state.head_info_stale && state.is_ready() {
+                state.head_info_stale = false;
+                submit_head_info(&self.scheduler, &state.key);
+            }
+            if !due || !state.history_visible || !state.is_ready() || state.next_graph.is_some() {
                 continue;
             }
             state.graph_dirty_since = None;
-            // Dropping the old loader cancels it if it is still running.
+            let previous = state
+                .graph
+                .as_ref()
+                .filter(|g| {
+                    g.scope() == state.history_scope && g.progress().state == LoadState::Done
+                })
+                .map(GraphLoader::reader);
+            if previous.is_some() {
+                // The rows shown stay until the reload is done.
+                state.next_graph = Some(
+                    GraphLoader::submit_reload(
+                        &self.scheduler,
+                        self.runner.clone(),
+                        state.key.clone(),
+                        state.history_scope,
+                        previous,
+                    )
+                    .0,
+                );
+                out.push(RuntimeEvent::GraphReloading {
+                    repo: state.key.clone(),
+                });
+                continue;
+            }
+            // Nothing complete to keep showing: start over in the open.
+            state.next_graph = None;
             state.graph = Some(
                 GraphLoader::submit_scoped(
                     &self.scheduler,
@@ -3737,16 +3928,96 @@ impl Runtime {
                 .0,
             );
             state.restart_search();
-            submit_head_info(&self.scheduler, &state.key);
             out.push(RuntimeEvent::GraphReset {
                 repo: state.key.clone(),
             });
         }
     }
 
+    /// Reports repositories whose pending refreshes changed, so the UI can
+    /// show that what it shows is being read again.
+    fn report_refreshing(&mut self, out: &mut Vec<RuntimeEvent>) {
+        let pending = self.scheduler.pending_refresh_map();
+        for state in self.repos.values_mut() {
+            let now = pending.get(&state.key).copied().unwrap_or_default();
+            if now != state.refreshing {
+                state.refreshing = now;
+                out.push(RuntimeEvent::Refreshing {
+                    repo: state.key.clone(),
+                });
+            }
+        }
+    }
+
+    /// Puts finished reloads in place of the graphs they reloaded.
+    fn swap_reloaded_graphs(&mut self, out: &mut Vec<RuntimeEvent>) {
+        for state in self.repos.values_mut() {
+            let Some(next) = &state.next_graph else {
+                continue;
+            };
+            let progress = next.progress();
+            if !progress.is_finished() {
+                continue;
+            }
+            let Some(next) = state.next_graph.take() else {
+                continue;
+            };
+            let replaced = match progress.state {
+                LoadState::Done if next.is_unchanged() => false,
+                LoadState::Done | LoadState::Failed(_) => {
+                    state.graph = Some(next);
+                    state.restart_search();
+                    true
+                }
+                LoadState::Cancelled | LoadState::Loading => false,
+            };
+            if replaced {
+                out.push(RuntimeEvent::GraphReset {
+                    repo: state.key.clone(),
+                });
+            } else {
+                out.push(RuntimeEvent::GraphReloading {
+                    repo: state.key.clone(),
+                });
+            }
+        }
+    }
+
+    /// Tells whether the History view shows `key`. A hidden history does not
+    /// reload; it catches up (usually by loading just the new commits) when
+    /// shown again.
+    pub fn set_history_visible(&mut self, key: &Path, visible: bool) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        state.history_visible = visible;
+    }
+
     /// The backend, for one-off reads outside the job system (CLI, tests).
     pub fn backend(&self) -> &dyn GitBackend {
         self.backend.as_ref()
+    }
+}
+
+/// Whether a refresh read what the state already has.
+fn refresh_unchanged(state: &RepoState, output: &JobOutput) -> bool {
+    match output {
+        JobOutput::Status(status) => state.status.as_ref() == Some(status),
+        JobOutput::Refs(refs, remotes) => {
+            state.refs.as_ref() == Some(refs) && state.remote_list.as_ref() == Some(remotes)
+        }
+        JobOutput::Worktrees(worktrees) => state.worktrees.as_ref() == Some(worktrees),
+        JobOutput::Operation(details) => {
+            state.operation.is_some() == details.is_some() && state.operation_details == *details
+        }
+        JobOutput::Stashes(stashes) => state.stashes.as_ref() == Some(stashes),
+        JobOutput::WorktreeBadges(badges) => {
+            badges.len() == state.worktree_badges.len()
+                && badges
+                    .iter()
+                    .all(|(path, badge)| state.worktree_badges.get(path) == Some(badge))
+        }
+        _ => false,
     }
 }
 
@@ -3759,6 +4030,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
                 .is_some_and(|old| old.oid != status.oid || old.head != status.head);
             if moved {
                 state.graph_dirty_since = Some(Instant::now());
+                state.head_info_stale = true;
             }
             if moved {
                 state.end_amend();
@@ -3776,6 +4048,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         JobOutput::Refs(refs, remotes) => {
             if state.refs.as_ref().is_some_and(|old| *old != refs) {
                 state.graph_dirty_since = Some(Instant::now());
+                state.head_info_stale = true;
             }
             state.labels = labels_by_commit(&refs);
             state.refs = Some(refs);
@@ -4268,6 +4541,27 @@ fn unstaged_target(path: &Path) -> DiffTarget {
 /// After a status refresh: finds the modified files whose only unstaged
 /// changes are line endings or the final newline. Such a file adds as many
 /// lines as it removes, so `--numstat` picks the files whose diffs are read.
+/// Files the line-endings scan stats to tell whether it must run again.
+const ENDINGS_STAT_MAX_FILES: usize = 400;
+
+/// A hash of what the line-endings scan reads: the modified files with their
+/// size and modification time (the first [`ENDINGS_STAT_MAX_FILES`]).
+fn endings_inputs(toplevel: &Path, modified: &HashSet<PathBuf>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut paths: Vec<&PathBuf> = modified.iter().collect();
+    paths.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    paths.len().hash(&mut hasher);
+    for path in paths.into_iter().take(ENDINGS_STAT_MAX_FILES) {
+        path.hash(&mut hasher);
+        if let Ok(meta) = fs::metadata(toplevel.join(path)) {
+            meta.len().hash(&mut hasher);
+            meta.modified().ok().hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
 fn submit_endings_scan(scheduler: &JobScheduler, state: &mut RepoState) {
     let modified: HashSet<PathBuf> = state
         .status
@@ -4281,6 +4575,7 @@ fn submit_endings_scan(scheduler: &JobScheduler, state: &mut RepoState) {
         })
         .unwrap_or_default();
     if modified.is_empty() {
+        state.endings_inputs = None;
         if !state.endings_only.is_empty() {
             state.endings_only.clear();
             state.rebuild_changes();
@@ -4290,6 +4585,11 @@ fn submit_endings_scan(scheduler: &JobScheduler, state: &mut RepoState) {
     let (Some(toplevel), key) = (state.toplevel.clone(), state.key.clone()) else {
         return;
     };
+    let inputs = endings_inputs(&toplevel, &modified);
+    if state.endings_inputs == Some(inputs) {
+        return;
+    }
+    state.endings_inputs = Some(inputs);
     scheduler.submit(JobSpec::read(&key, ENDINGS_SCAN_JOB_LABEL, move |ctx| {
         let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
         let candidates: Vec<PathBuf> = backend
@@ -4392,38 +4692,116 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
     let key = state.key.clone();
     let toplevel = state.toplevel.clone();
     let as_staged = slot == DiffSlot::Changes && state.diff_as_staged();
+    let shown = state.slot_mut(slot).as_ref().map(|d| d.target.clone());
+    let inputs = match (slot, shown) {
+        (DiffSlot::Changes, Some(target)) => diff_inputs(state, &target),
+        _ => None,
+    };
     let (Some(diff), Some(toplevel)) = (state.slot_mut(slot).as_mut(), toplevel) else {
         return;
     };
     diff.generation = generation;
     diff.loading = true;
+    diff.rerun = false;
+    diff.inputs = inputs;
     let target = diff.target.clone();
     let limit = (!diff.full).then_some(LARGE_DIFF_BYTES);
     let image_limit = (!diff.full).then_some(MAX_IMAGE_BYTES);
-    scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
-        let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
-        let diff = backend.diff(&toplevel, &target, limit, cancel)?;
-        let images = image::read_sides(backend, &toplevel, &target, &diff, image_limit, cancel)?;
-        let staged = if as_staged {
-            let staged = DiffTarget {
-                kind: if target.kind == DiffKind::Amend {
-                    DiffKind::AmendStaged
-                } else {
-                    DiffKind::Staged
-                },
-                ..target.clone()
+    let job = &mut diff.job;
+    *job = Some(
+        scheduler.submit(JobSpec::read(&key, slot.label(), move |ctx| {
+            let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+            let diff = backend.diff(&toplevel, &target, limit, cancel)?;
+            let images =
+                image::read_sides(backend, &toplevel, &target, &diff, image_limit, cancel)?;
+            let staged = if as_staged {
+                let staged = DiffTarget {
+                    kind: if target.kind == DiffKind::Amend {
+                        DiffKind::AmendStaged
+                    } else {
+                        DiffKind::Staged
+                    },
+                    ..target.clone()
+                };
+                Some(Box::new(backend.diff(&toplevel, &staged, limit, cancel)?))
+            } else {
+                None
             };
-            Some(Box::new(backend.diff(&toplevel, &staged, limit, cancel)?))
-        } else {
-            None
-        };
-        Ok(JobOutput::Diff {
-            generation,
-            diff: Box::new(diff),
-            staged,
-            images: images.map(Box::new),
+            Ok(JobOutput::Diff {
+                generation,
+                diff: Box::new(diff),
+                staged,
+                images: images.map(Box::new),
+            })
+        })),
+    );
+}
+
+/// What a Changes diff reads, cheap to compare: HEAD, the file's status entry
+/// (with its index blob) and the size and modification time of the files.
+/// `None` for diffs that read more than that (amend).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiffInputs {
+    head: Option<String>,
+    change: Option<FileChange>,
+    files: Vec<Option<(u64, Option<std::time::SystemTime>)>>,
+}
+
+fn diff_inputs(state: &RepoState, target: &DiffTarget) -> Option<DiffInputs> {
+    if matches!(
+        target.kind,
+        DiffKind::Amend | DiffKind::AmendStaged | DiffKind::Commit
+    ) {
+        return None;
+    }
+    let status = state.status.as_ref()?;
+    let toplevel = state.toplevel.as_ref()?;
+    let change = status
+        .changes
+        .iter()
+        .find(|c| c.path == target.path)
+        .cloned();
+    let files = std::iter::once(&target.path)
+        .chain(target.original_path.as_ref())
+        .map(|path| {
+            fs::metadata(toplevel.join(path))
+                .ok()
+                .map(|m| (m.len(), m.modified().ok()))
         })
-    }));
+        .collect();
+    Some(DiffInputs {
+        head: status.oid.clone(),
+        change,
+        files,
+    })
+}
+
+/// After a status refresh: loads the Changes diff again when what it reads
+/// changed. A load that is still queued reads the new state anyway; one that
+/// is running is followed by another, so a file that keeps changing still
+/// shows each load as it lands rather than restarting forever.
+fn reload_changes_diff(scheduler: &JobScheduler, state: &mut RepoState, generation: &mut u64) {
+    let Some(target) = state.diff.as_ref().map(|d| d.target.clone()) else {
+        return;
+    };
+    let inputs = diff_inputs(state, &target);
+    let Some(diff) = state.diff.as_mut() else {
+        return;
+    };
+    let failed = diff.error.is_some() && !diff.loading;
+    if !failed && inputs.is_some() && diff.inputs == inputs {
+        return;
+    }
+    if let Some(job) = diff.job.filter(|&j| scheduler.is_pending(j)) {
+        if scheduler.is_queued(job) {
+            diff.inputs = inputs;
+        } else {
+            diff.rerun = true;
+        }
+        return;
+    }
+    *generation += 1;
+    submit_diff(scheduler, state, DiffSlot::Changes, *generation);
 }
 
 /// Reads the old side of the diff in `slot` when its open gaps need it.

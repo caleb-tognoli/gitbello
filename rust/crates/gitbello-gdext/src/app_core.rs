@@ -185,6 +185,16 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                 session.bind_mut().reset_graph();
             }
         }
+        RuntimeEvent::GraphReloading { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("graph_reloading_changed", &[]);
+            }
+        }
+        RuntimeEvent::Refreshing { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("refreshing_changed", &[]);
+            }
+        }
         RuntimeEvent::SelectionChanged { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("selection_changed", &[]);

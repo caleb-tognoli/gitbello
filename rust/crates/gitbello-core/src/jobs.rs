@@ -10,6 +10,12 @@
 //!   as fetch, which run as reads so they never hold up commits).
 //! - Refresh requests coalesce: a refresh that is already queued (not yet
 //!   started) for the same repository and kind is reused.
+//! - Jobs have a [`JobPriority`]: the most urgent runnable job starts first
+//!   (in submission order within a priority), and background jobs never take
+//!   the last free worker, so a slow history load cannot hold up a diff or a
+//!   status refresh on a busy machine.
+//! - A superseding job replaces the queued and running jobs of the same
+//!   repository and label (a newer diff, scan or preview makes them moot).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -33,6 +39,10 @@ use crate::sidebar::Badge;
 use crate::worktrees::CleanupCandidate;
 
 pub type JobId = u64;
+
+/// The priority and superseding of read jobs by label, for reads that do not
+/// set them (see [`JobScheduler::set_policy`]).
+pub type JobPolicy = fn(&str) -> Option<(JobPriority, bool)>;
 
 /// What a refresh job reads. Combine with [`RefreshSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,6 +83,16 @@ impl RefreshKind {
             Self::Operation => "refresh operation",
             Self::Stashes => "refresh stashes",
             Self::WorktreeBadges => "refresh worktree badges",
+        }
+    }
+
+    /// Status is what the user waits for after an edit; badges of other
+    /// worktrees can wait.
+    pub fn priority(self) -> JobPriority {
+        match self {
+            Self::Status => JobPriority::Interactive,
+            Self::Refs | Self::Worktrees | Self::Operation | Self::Stashes => JobPriority::Normal,
+            Self::WorktreeBadges => JobPriority::Background,
         }
     }
 }
@@ -257,6 +277,19 @@ pub struct Event {
     pub kind: EventKind,
 }
 
+/// How urgently a job should start. The scheduler starts the most urgent
+/// runnable job first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum JobPriority {
+    /// Work nobody waits on: history loads, searches, badges, scans,
+    /// auto-fetch. Never takes the last free worker.
+    Background,
+    #[default]
+    Normal,
+    /// What the user just asked for or is looking at: diffs, writes, status.
+    Interactive,
+}
+
 /// Whether a job only reads or also changes the repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobAccess {
@@ -323,6 +356,9 @@ pub struct JobSpec {
     /// Use an existing token (for handles that cancel on their own, like the
     /// graph loader); a new one is made otherwise.
     pub cancel: Option<CancelToken>,
+    pub priority: JobPriority,
+    /// Cancel the queued and running jobs of the same repository and label.
+    pub supersede: bool,
     pub run: JobFn,
 }
 
@@ -338,6 +374,8 @@ impl JobSpec {
             label: label.into(),
             refresh_after: RefreshSet::EMPTY,
             cancel: None,
+            priority: JobPriority::Normal,
+            supersede: false,
             run: Box::new(run),
         }
     }
@@ -351,8 +389,21 @@ impl JobSpec {
         Self {
             access: JobAccess::Write,
             refresh_after,
+            // Someone pressed a button and waits for it.
+            priority: JobPriority::Interactive,
             ..Self::read(repo, label, run)
         }
+    }
+
+    pub fn with_priority(mut self, priority: JobPriority) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Replaces the queued and running jobs with this repository and label.
+    pub fn superseding(mut self) -> Self {
+        self.supersede = true;
+        self
     }
 
     pub fn with_cancel(mut self, token: CancelToken) -> Self {
@@ -377,12 +428,15 @@ struct Queued {
 
 struct Running {
     repo: PathBuf,
+    label: String,
     cancel: CancelToken,
     refresh: Option<RefreshKind>,
+    priority: JobPriority,
 }
 
 #[derive(Default)]
 struct State {
+    policy: Option<JobPolicy>,
     next_id: JobId,
     queue: VecDeque<Queued>,
     running: HashMap<JobId, Running>,
@@ -392,6 +446,7 @@ struct State {
 
 struct Inner {
     backend: Arc<dyn GitBackend>,
+    workers: usize,
     state: Mutex<State>,
     wake: Condvar,
     events: Sender<Event>,
@@ -440,7 +495,39 @@ impl Inner {
                 }
             }
         });
+        let spec = spec.with_priority(kind.priority());
         Self::enqueue(state, spec, Some(kind))
+    }
+
+    /// Takes the queued jobs `spec` supersedes out of the queue (to report
+    /// cancelled) and cancels the running ones.
+    fn supersede(state: &mut State, spec: &JobSpec) -> Vec<Queued> {
+        if !spec.supersede {
+            return Vec::new();
+        }
+        let same = |repo: &Path, label: &str| repo == spec.repo && label == spec.label;
+        for running in state.running.values() {
+            if same(&running.repo, &running.label) {
+                running.cancel.cancel();
+            }
+        }
+        let (gone, kept): (VecDeque<Queued>, VecDeque<Queued>) = std::mem::take(&mut state.queue)
+            .into_iter()
+            .partition(|q| same(&q.spec.repo, &q.spec.label));
+        state.queue = kept;
+        gone.into_iter().collect()
+    }
+
+    fn report_cancelled(&self, jobs: Vec<Queued>) {
+        for job in jobs {
+            job.cancel.cancel();
+            self.send(
+                job.id,
+                &job.spec.repo,
+                &job.spec.label,
+                EventKind::Cancelled,
+            );
+        }
     }
 
     fn enqueue(state: &mut State, spec: JobSpec, refresh: Option<RefreshKind>) -> JobId {
@@ -476,21 +563,35 @@ fn worktree_badges(
     Ok(badges)
 }
 
-/// Index of the first job allowed to start now.
-fn next_runnable(state: &State) -> Option<usize> {
+/// Index of the job to start now: the most urgent one allowed to start, the
+/// earliest queued among equals. Background jobs leave one worker free for
+/// everything else.
+fn next_runnable(state: &State, workers: usize) -> Option<usize> {
+    let background_running = state
+        .running
+        .values()
+        .filter(|r| r.priority == JobPriority::Background)
+        .count();
+    let background_ok = workers < 2 || background_running + 1 < workers;
     // Repositories with a write queued ahead of the current position.
     let mut write_ahead: HashSet<&Path> = HashSet::new();
+    let mut best: Option<(usize, JobPriority)> = None;
     for (i, job) in state.queue.iter().enumerate() {
         let repo = job.spec.repo.as_path();
         let free = !state.writing.contains(repo) && !write_ahead.contains(repo);
-        if free {
-            return Some(i);
+        let priority = job.spec.priority;
+        let allowed = priority != JobPriority::Background || background_ok;
+        if free && allowed && best.is_none_or(|(_, p)| priority > p) {
+            best = Some((i, priority));
+            if priority == JobPriority::Interactive {
+                break;
+            }
         }
         if job.spec.access == JobAccess::Write {
             write_ahead.insert(repo);
         }
     }
-    None
+    best.map(|(i, _)| i)
 }
 
 /// Runs jobs on a fixed pool of worker threads. Dropping it cancels running
@@ -504,13 +605,15 @@ impl JobScheduler {
     /// Starts `workers` threads (at least one). Events arrive on the receiver.
     pub fn new(backend: Arc<dyn GitBackend>, workers: usize) -> (Self, Receiver<Event>) {
         let (events, receiver) = mpsc::channel();
+        let workers = workers.max(1);
         let inner = Arc::new(Inner {
             backend,
+            workers,
             state: Mutex::new(State::default()),
             wake: Condvar::new(),
             events,
         });
-        let workers = (0..workers.max(1))
+        let workers = (0..workers)
             .filter_map(|n| {
                 let inner = Arc::clone(&inner);
                 thread::Builder::new()
@@ -522,17 +625,45 @@ impl JobScheduler {
         (Self { inner, workers }, receiver)
     }
 
-    /// A pool sized for git work: up to 4 threads.
+    /// A pool sized for git work: 3 or 4 threads. Workers mostly wait on git,
+    /// so even a two-core machine gets three (one stays free for urgent work
+    /// while background jobs run).
     pub fn default_workers() -> usize {
-        thread::available_parallelism().map_or(2, |n| n.get().min(4))
+        thread::available_parallelism().map_or(3, |n| n.get().clamp(3, 4))
     }
 
-    pub fn submit(&self, spec: JobSpec) -> JobId {
+    /// Sets how reads that leave priority and superseding at their defaults
+    /// are scheduled, by label.
+    pub fn set_policy(&self, policy: JobPolicy) {
+        self.inner.lock().policy = Some(policy);
+    }
+
+    pub fn submit(&self, mut spec: JobSpec) -> JobId {
         let mut state = self.inner.lock();
+        let defaults = spec.priority == JobPriority::Normal && !spec.supersede;
+        if let (JobAccess::Read, true, Some(policy)) = (spec.access, defaults, state.policy) {
+            if let Some((priority, supersede)) = policy(&spec.label) {
+                spec.priority = priority;
+                spec.supersede = supersede;
+            }
+        }
+        let gone = Inner::supersede(&mut state, &spec);
         let id = Inner::enqueue(&mut state, spec, None);
         drop(state);
+        self.inner.report_cancelled(gone);
         self.inner.wake.notify_all();
         id
+    }
+
+    /// Whether job `id` is queued or running.
+    pub fn is_pending(&self, id: JobId) -> bool {
+        let state = self.inner.lock();
+        state.running.contains_key(&id) || state.queue.iter().any(|q| q.id == id)
+    }
+
+    /// Whether job `id` is queued and has not started.
+    pub fn is_queued(&self, id: JobId) -> bool {
+        self.inner.lock().queue.iter().any(|q| q.id == id)
     }
 
     /// Queues refreshes of `kinds` for `repo`, reusing identical queued ones.
@@ -625,6 +756,21 @@ impl JobScheduler {
     }
 
     /// Jobs queued or running, for tests and diagnostics.
+    /// The refreshes queued or running, by repository (one lock for all).
+    pub fn pending_refresh_map(&self) -> HashMap<PathBuf, RefreshSet> {
+        let state = self.inner.lock();
+        let mut map: HashMap<PathBuf, RefreshSet> = HashMap::new();
+        let queued = state.queue.iter().map(|q| (&q.spec.repo, q.refresh));
+        let running = state.running.values().map(|r| (&r.repo, r.refresh));
+        for (repo, refresh) in queued.chain(running) {
+            if let Some(kind) = refresh {
+                let set = map.entry(repo.clone()).or_default();
+                *set = set.with(kind);
+            }
+        }
+        map
+    }
+
     pub fn pending(&self) -> usize {
         let state = self.inner.lock();
         state.queue.len() + state.running.len()
@@ -658,13 +804,16 @@ fn worker(inner: &Inner) {
                 if state.shutdown {
                     return;
                 }
-                if let Some(job) = next_runnable(&state).and_then(|i| state.queue.remove(i)) {
+                let next = next_runnable(&state, inner.workers);
+                if let Some(job) = next.and_then(|i| state.queue.remove(i)) {
                     state.running.insert(
                         job.id,
                         Running {
                             repo: job.spec.repo.clone(),
+                            label: job.spec.label.clone(),
                             cancel: job.cancel.clone(),
                             refresh: job.refresh,
+                            priority: job.spec.priority,
                         },
                     );
                     if job.spec.access == JobAccess::Write {

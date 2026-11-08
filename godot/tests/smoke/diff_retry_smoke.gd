@@ -108,7 +108,7 @@ func _exercise(page: RepoTab, config_path: String, config: String, mode: String)
 		await _shot(mode + "_error_" + theme)
 	expect(Actions.run_action(&"diff.retry"), mode + ": Retry runs through the registry")
 	expect_eq(String(info.call().get("state", "")), "loading", mode + ": retry starts synchronously")
-	expect_eq(panel.message_text(), "Loading…", mode + ": retry shows loading immediately")
+	expect(panel.loading_indicator().is_blocking(), mode + ": retry shows loading immediately")
 	expect(not Actions.run_action(&"diff.retry"), mode + ": a second retry cannot run while loading")
 	expect(await wait_until(func() -> bool: return String(info.call().get("state", "")) == "error"),
 			mode + ": repeated failure can be retried again")

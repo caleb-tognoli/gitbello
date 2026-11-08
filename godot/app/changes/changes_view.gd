@@ -89,6 +89,9 @@ const CONFLICT_WAIT_MSEC: int = 5000
 @onready var _list_header: ListHeader = %ListHeader
 @onready var _no_match: Control = %NoMatch
 @onready var _list: ChangeList = %List
+## Over the list while the status is read: blocking until the first one
+## arrives, over the files while a refresh runs.
+var _loading: LoadingIndicator = LoadingIndicator.new()
 @onready var _commit_box: CommitBox = %CommitBox
 @onready var _diff_panel: DiffPanel = %DiffPanel
 @onready var _diff_view: DiffView = _diff_panel.view()
@@ -112,6 +115,8 @@ const CONFLICT_WAIT_MSEC: int = 5000
 
 
 func _ready() -> void:
+	_loading.area = "changes"
+	_list.add_child(_loading)
 	_list.pick_toggled.connect(func(paths: PackedStringArray, include: bool) -> void:
 		session.pick_files(paths, include))
 	_list.current_changed.connect(_on_current_changed)
@@ -204,6 +209,7 @@ func _ready() -> void:
 
 func set_session(value: RepoSession) -> void:
 	if session != null:
+		session.refreshing_changed.disconnect(_update_loading)
 		session.status_changed.disconnect(reload)
 		session.operation_changed.disconnect(_on_operation_changed)
 		session.diff_changed.disconnect(_on_diff_changed)
@@ -216,6 +222,7 @@ func set_session(value: RepoSession) -> void:
 		session.ignore_rules_ready.disconnect(_on_ignore_rules_ready)
 	session = value
 	if session != null:
+		session.refreshing_changed.connect(_update_loading)
 		session.status_changed.connect(reload)
 		session.operation_changed.connect(_on_operation_changed)
 		session.diff_changed.connect(_on_diff_changed)
@@ -294,6 +301,8 @@ func shelf_files_split() -> HSplitContainer:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
+		_loading.free()  # Never added: freed without ever being ready.
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -349,6 +358,7 @@ func show_shelves_view(enabled: bool) -> void:
 	_update_header()
 	_update_offer()
 	_update_empty()
+	_update_loading()
 	_clear_diff()
 	if enabled:
 		_shelf_oid = ""
@@ -605,8 +615,27 @@ func reload() -> void:
 		_clear_diff()
 	if _want_conflict_until > 0:
 		_show_wanted_conflict()
+	_update_loading()
 	# The branch may have changed, and with it the shelves that are its own.
 	reload_shelves()
+
+
+## The list's loading indicator, from whether a status is known and whether
+## one is being read.
+func _update_loading() -> void:
+	if session == null or _shelves_mode:
+		_loading.hide_loading()
+	elif not session.has_status():
+		_loading.show_loading(true, tr("Reading changes…"))
+	elif session.status_refreshing():
+		_loading.show_loading(false, tr("Updating…"))
+	else:
+		_loading.hide_loading()
+
+
+## The list's loading indicator (smoke tests and screenshots).
+func loading_indicator() -> LoadingIndicator:
+	return _loading
 
 
 ## Focuses the list (cursor on its first row if none), the filter when it
@@ -945,7 +974,8 @@ func _update_empty() -> void:
 		_shelf_files_split.visible = has_shelf
 		_diff_panel.visible = has_shelf
 		return
-	var empty: bool = session != null and session.is_ready() and session.change_count() == 0
+	# Until the first status arrives nothing is known: the list shows loading.
+	var empty: bool = session != null and session.has_status() and session.change_count() == 0
 	_empty.visible = empty
 	_diff_panel.visible = not empty
 	_shelf_files_split.visible = not empty

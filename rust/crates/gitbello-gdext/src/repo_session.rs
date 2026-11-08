@@ -75,6 +75,12 @@ impl RepoSession {
     /// Graph loading ended; `error` is empty on success.
     #[signal]
     fn graph_loaded(row_count: i64, error: GString);
+    /// A reload behind the shown rows started or ended (`graph_reloading`).
+    #[signal]
+    fn graph_reloading_changed();
+    /// Refreshes started or ended (`status_refreshing`).
+    #[signal]
+    fn refreshing_changed();
     /// A job other than a refresh or diff load started (fetch, push, ...).
     #[signal]
     fn job_started(job: i64, label: GString);
@@ -1836,6 +1842,37 @@ impl RepoSession {
     #[func]
     fn load_head_message(&self) -> i64 {
         job_id(runtime_cell::with(|rt| rt.load_head_message(&self.key)).flatten())
+    }
+
+    /// Whether a status has been read (the first one can take a while).
+    #[func]
+    fn has_status(&self) -> bool {
+        self.read(|state| state.status().is_some()).unwrap_or(false)
+    }
+
+    /// Whether the status is being read again (after a file change, a job or
+    /// focus): what Changes shows may be about to change.
+    #[func]
+    fn status_refreshing(&self) -> bool {
+        self.read(|state| {
+            state
+                .refreshing()
+                .contains(gitbello_core::jobs::RefreshKind::Status)
+        })
+        .unwrap_or(false)
+    }
+
+    /// Whether the history is loading again behind the rows shown.
+    #[func]
+    fn graph_reloading(&self) -> bool {
+        self.read(|state| state.graph_reloading()).unwrap_or(false)
+    }
+
+    /// Whether the History view shows this session: a hidden history does not
+    /// reload until it is shown again.
+    #[func]
+    fn set_history_visible(&self, visible: bool) {
+        runtime_cell::with(|rt| rt.set_history_visible(&self.key, visible));
     }
 
     #[func]

@@ -70,6 +70,9 @@ signal open_side_requested(side: String)
 @onready var _layout_gap: Control = %LayoutGap
 @onready var _view: DiffView = %DiffView
 @onready var _message: Control = %DiffMessage
+## Over the diff while it loads: blocking for a new file, over the old lines
+## while the shown one loads again.
+var _loading: LoadingIndicator = LoadingIndicator.new()
 @onready var _message_label: Label = %DiffMessageLabel
 @onready var _load_anyway: Button = %LoadAnywayButton
 @onready var _retry: Button = %RetryButton
@@ -137,6 +140,8 @@ static var _eol_full: Dictionary[String, bool] = {}
 
 func _ready() -> void:
 	add_to_group(GROUP)
+	_loading.area = "diff"
+	_message.get_parent().add_child(_loading)
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
 	_retry.pressed.connect(func() -> void: Actions.run_action(&"diff.retry", _retry))
 	_update_layout_tooltips()
@@ -304,6 +309,8 @@ func conflict_bar_text() -> String:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
+		_loading.free()  # Never added: freed without ever being ready.
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -525,6 +532,7 @@ func clear(placeholder: String = "") -> void:
 	_show_conflict_bar(0, PackedStringArray())
 	_set_offered("none", PackedStringArray())
 	_hide_images()
+	_loading.hide_loading()
 	show_message(tr(_placeholder))
 
 
@@ -558,9 +566,13 @@ func show_info(info: Dictionary) -> void:
 			if key != _shown:
 				_view.show_lines(0, 0, false)
 				_hide_images()
-				show_message(tr("Loading…"))
+				_message.hide()
+				_loading.show_loading(true, tr("Loading diff…"))
+			else:
+				_loading.show_loading(false, tr("Updating…"))
 			return
 		"error":
+			_loading.hide_loading()
 			var error: Dictionary = info.get("error", {})
 			_view.show_lines(0, 0, false)
 			_hide_images()
@@ -570,6 +582,7 @@ func show_info(info: Dictionary) -> void:
 			_set_offered("none", PackedStringArray())
 			_shown = ""
 			return
+	_loading.hide_loading()
 	var keep: bool = key == _shown
 	_shown = key
 	var whole: bool = bool(info.get("whole", false))
@@ -1039,6 +1052,11 @@ func show_message(text: String, offer_full: bool = false) -> void:
 	_card_icon.hide()
 	_card_table.hide()
 	_message.show()
+
+
+## The diff's loading indicator (smoke tests and screenshots).
+func loading_indicator() -> LoadingIndicator:
+	return _loading
 
 
 func message_text() -> String:

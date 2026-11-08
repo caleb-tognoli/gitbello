@@ -49,9 +49,13 @@ var _requested_oid: String = ""
 @onready var _files_header: ListHeader = %FilesHeader
 @onready var _files: CommitFileList = %Files
 @onready var _diff_panel: DiffPanel = %CommitDiffPanel
+## Over the file list while the selected commit loads.
+var _loading: LoadingIndicator = LoadingIndicator.new()
 
 
 func _ready() -> void:
+	_loading.area = "details"
+	_files.add_child(_loading)
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(&"commit.copy_hash", _copy_hash))
 	_copy_hash.tooltip_text = tr("Copy the full hash")
 	dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
@@ -119,6 +123,8 @@ func _baseline_lift(control: Control) -> float:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
+		_loading.free()  # Never added: freed without ever being ready.
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -185,11 +191,18 @@ func show_commit(oid: String) -> void:
 	session.load_commit(oid)
 	if String(session.commit_info().get("oid", "")) == oid:
 		_on_commit_loaded()
+	elif _shown_oid != oid:
+		# The files of the previous commit would mislead: show the load.
+		_files.show_files(0)
+		_files_header.set_text("")
+		_files_header.show_counts(0, 0)
+		_loading.show_loading(true, tr("Loading commit…"))
 
 
 ## Shows `text` instead of a commit (while the history loads, or when it
 ## has none).
 func show_placeholder(text: String = "") -> void:
+	_loading.hide_loading()
 	_requested_oid = ""
 	_shown_oid = ""
 	_clear_parents()
@@ -203,6 +216,11 @@ func show_placeholder(text: String = "") -> void:
 	_diff_panel.clear("Select a file to see its changes.")
 
 
+## The file list's loading indicator (smoke tests and screenshots).
+func loading_indicator() -> LoadingIndicator:
+	return _loading
+
+
 ## Focuses the file list (cursor on the first file).
 func focus_files() -> void:
 	_files.grab_focus()
@@ -214,6 +232,7 @@ func _on_commit_loaded() -> void:
 	var info: Dictionary = session.commit_info()
 	if info.is_empty() or _requested_oid.is_empty() or not String(info["oid"]).begins_with(_requested_oid):
 		return
+	_loading.hide_loading()
 	_summary.text = String(info["summary"])
 	_show_people(info)
 	_date.text = date_format.call(int(info["time"])) if date_format.is_valid() else str(info["time"])

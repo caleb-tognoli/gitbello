@@ -80,7 +80,10 @@ func run() -> void:
 	press("Ctrl+Enter")
 	expect(await wait_until(func() -> bool: return not box.is_busy() and box.summary().is_empty()),
 			"Ctrl+Enter committed (output: %s)" % box.output_text())
+	# A hidden history waits to reload until it is shown.
+	page.show_view(WorktreeView.View.HISTORY)
 	expect(await wait_until(func() -> bool: return _head_subject(session) == "Add line a"), "graph shows the commit")
+	page.show_view(WorktreeView.View.CHANGES)
 	expect_eq(read_file(readme), "# repo 7\nline a\nline b\n", "the working copy keeps line b")
 	expect(await wait_until(func() -> bool: return session.change_count() == 3), "the rest is still a change")
 	list.grab_focus()
