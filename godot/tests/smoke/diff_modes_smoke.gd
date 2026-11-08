@@ -39,7 +39,7 @@ func run() -> void:
 	expect(panel.mode() == "split" and panel.view().side_by_side, "it opens in the saved mode")
 	expect(panel.mode_button("split").button_pressed and not panel.mode_button("unified").button_pressed,
 			"the saved mode's button is chosen")
-	expect(panel.mode_button("split").tooltip_text.contains("Ctrl+Shift+D"), "the tooltip names the cycle shortcut")
+	expect(panel.mode_button("split").tooltip_text.contains(Shortcuts.display("Ctrl+Shift+D")), "the tooltip names the cycle shortcut")
 	expect(Actions.is_enabled(&"diff.cycle_mode"), "the cycle action is enabled")
 
 	# New and deleted files offer unified only: no picker, no saving.
@@ -95,7 +95,7 @@ func run() -> void:
 	var menu_labels: PackedStringArray = main.menu_bar().labels("View")
 	expect(not menu_labels.has("Side-by-side diff") and not menu_labels.has("Next diff mode"),
 			"the View menu has no mode entry: %s" % [menu_labels])
-	expect_eq(Actions.shortcut_label(&"diff.cycle_mode"), "Ctrl+Shift+D", "the cycle action keeps Ctrl+Shift+D")
+	expect_eq(Actions.shortcut_label(&"diff.cycle_mode"), Shortcuts.display("Ctrl+Shift+D"), "the cycle action keeps Ctrl+Shift+D")
 	expect(Actions.get_action(&"diff.toggle_side_by_side") == null, "the old toggle is gone")
 
 	Core.set_diff_mode("text", "unified")

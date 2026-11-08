@@ -120,7 +120,7 @@ func run() -> void:
 	await get_tree().process_frame
 	expect(page.is_row_shown(&"branch.switch"), "pressing Ctrl+B finds Switch branch")
 	expect(not page.is_row_shown(&"sync.fetch"), "and only what uses it")
-	expect_eq(page.search.text(), "Ctrl+B", "the field shows the keys")
+	expect_eq(page.search.text(), Shortcuts.display("Ctrl+B"), "the field shows the keys")
 	press("Escape", settings)
 	expect(not page.key_search.button_pressed, "Escape leaves key search")
 	expect(page.is_row_shown(&"sync.fetch"), "and every row shows again")

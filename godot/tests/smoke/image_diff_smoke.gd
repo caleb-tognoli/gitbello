@@ -163,7 +163,7 @@ func _zooming(images: ImageDiffView) -> void:
 	expect(is_equal_approx(images.scale_shown(), 2.0), "Zoom in goes to the next whole level")
 	press("Ctrl+Minus")
 	expect(is_equal_approx(images.scale_shown(), 1.0), "Ctrl+- zooms out a level")
-	expect_eq(Actions.shortcut_label(&"image.zoom_in"), "Ctrl+=", "zoom in shows as Ctrl+=")
+	expect_eq(Actions.shortcut_label(&"image.zoom_in"), Shortcuts.display("Ctrl+Equal"), "zoom in shows as Ctrl+=")
 
 	# The wheel zooms by whole levels at the cursor.
 	var centre: Vector2 = images.side_rect(ImageDiffView.NEW).get_center()
