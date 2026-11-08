@@ -58,7 +58,7 @@ func run() -> void:
 		chip_tooltip.free()
 		expect(chips[0].selected and not chips[1].selected, "the opened worktree's chip is selected")
 
-	# + follows the last tab, and New worktree the last chip.
+	# + follows the last tab.
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var tabs: TabBar = main.tab_bar()
@@ -68,9 +68,6 @@ func run() -> void:
 	expect(absf(add.global_position.x - tabs_end) < 16.0,
 			"+ sits right after the last tab: %s vs %s" % [add.global_position.x, tabs_end])
 	if chips.size() == 2:
-		var chips_end: float = chips[1].get_global_rect().end.x
-		var new_x: float = strip.new_task_button().global_position.x
-		expect(absf(new_x - chips_end) < 16.0, "New worktree sits right after the last chip: %s vs %s" % [new_x, chips_end])
 		# A real right-click on a chip opens its menu.
 		var click: InputEventMouseButton = InputEventMouseButton.new()
 		click.button_index = MOUSE_BUTTON_RIGHT

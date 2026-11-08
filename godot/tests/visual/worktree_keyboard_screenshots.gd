@@ -36,11 +36,8 @@ func _ready() -> void:
 		await _shot(out, mode + "_selected_chip_focus")
 		_focus(page.strip().chips()[1])
 		await _shot(out, mode + "_other_chip_focus")
-		_focus(page.strip().new_task_button())
-		await _shot(out, mode + "_new_button_focus")
-		var more: Button = page.strip().new_task_button().get_parent().get_child(1) as Button
-		_focus(more)
-		await _shot(out, mode + "_more_button_focus")
+		_focus(page.strip().list_button())
+		await _shot(out, mode + "_list_button_focus")
 	var worktrees: Array[Dictionary] = []
 	var template: Dictionary = page.strip().chips()[0].worktree.duplicate()
 	for i: int in 14:
@@ -56,7 +53,7 @@ func _ready() -> void:
 		await _shot(out, mode + "_overflow_unfocused")
 		_focus(page.strip().chips()[13])
 		await _shot(out, mode + "_overflow_last_chip_focus")
-		var all: Button = page.strip().get_child(0).get_child(1) as Button
+		var all: Button = page.strip().list_button()
 		_focus(all)
 		await _shot(out, mode + "_overflow_button_focus")
 	main.close_tab(0)

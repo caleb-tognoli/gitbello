@@ -58,26 +58,17 @@ func run() -> void:
 	expect(second.selected, "Ctrl+2 still selects the second worktree")
 	press("Ctrl+1")
 	expect(first.selected, "Ctrl+1 still selects the first worktree")
-	second.grab_focus()
-	press("Tab")
-	expect(strip.new_task_button().has_focus(), "Tab skips the hidden overflow button and reaches New worktree")
+	# The worktree actions are in the list's footer.
+	strip.list_button().grab_focus()
 	press("Enter")
-	expect(await wait_until(func() -> bool: return page.ops().form().visible), "keyboard New worktree opens its form")
+	var all_list: WorktreeListPopover = strip.all_list()
+	await get_tree().process_frame
+	expect(all_list.visible and all_list.filter_field().text_box().has_focus(),
+			"Enter on the worktree icon opens the list with the filter focused")
+	all_list.footer_button(&"task.new").pressed.emit()
+	expect(await wait_until(func() -> bool: return page.ops().form().visible), "the list's New worktree opens its form")
+	expect(not all_list.visible, "and closes the list")
 	page.ops().form().hide()
-	strip.new_task_button().grab_focus()
-	press("Tab")
-	var more: Button = get_viewport().gui_get_focus_owner() as Button
-	expect(more != null and more.tooltip_text == "More worktree actions", "Tab reaches More worktree actions")
-	press("Space")
-	var task_menu: PopupMenu = null
-	for child: Node in strip.get_children():
-		if child is PopupMenu and (child as PopupMenu).visible:
-			task_menu = child as PopupMenu
-	expect(task_menu != null, "Space opens More worktree actions")
-	if task_menu != null:
-		await _popup_key("Escape", task_menu)
-		expect(not task_menu.visible, "Escape closes More worktree actions")
-		expect(more.has_focus(), "Escape restores the menu button's focus")
 	await _overflow(strip)
 	main.close_tab(0)
 	main.queue_free()
@@ -117,9 +108,16 @@ func _overflow(source: WorktreeStrip) -> void:
 	await get_tree().process_frame
 	expect(list.visible and list.rows().size() == 14, "Enter opens all worktrees")
 	if list.visible:
-		expect_eq(list.focused_index(), 0, "the shown worktree's row has the focus")
+		expect(list.filter_field().text_box().has_focus(), "the filter has the focus")
+		expect_eq(list.target_index(), 0, "Enter in the filter would choose the shown worktree")
+		await _popup_key("Down", list)
+		expect_eq(list.focused_index(), 0, "Down moves to the shown worktree's row")
 		await _popup_key("Down", list)
 		expect_eq(list.focused_index(), 1, "Down moves to the next worktree")
+		await _popup_key("Up", list)
+		await _popup_key("Up", list)
+		expect(list.filter_field().text_box().has_focus(), "Up on the first row goes back to the filter")
+		await _popup_key("Down", list)
 		await _popup_key("Escape", list)
 		expect(not list.visible, "Escape closes the worktree list")
 		expect(all.has_focus(), "Escape returns focus to the worktree icon")
@@ -127,10 +125,11 @@ func _overflow(source: WorktreeStrip) -> void:
 		strip.worktree_chosen.connect(func(path: String) -> void: chosen.append(path))
 		press("Enter")
 		await get_tree().process_frame
-		await _popup_key("Down", list)
-		var target: String = String(worktrees[list.focused_index()]["path"]) if list.focused_index() >= 0 else ""
+		list.set_filter("ree-07")
+		expect_eq(list.rows().size(), 1, "the filter keeps the matching worktree")
+		expect_eq(list.target_index(), 0, "and Enter would choose it")
 		await _popup_key("Enter", list)
-		expect_eq(chosen, [target] as Array[String], "arrows and Enter choose the highlighted worktree")
+		expect_eq(chosen, [String(worktrees[7]["path"])] as Array[String], "Enter in the filter chooses the match")
 	strip.chips()[13].grab_focus()
 	var focused_path: String = strip.chips()[13].path()
 	worktrees[13]["name"] = "aaa-reordered"

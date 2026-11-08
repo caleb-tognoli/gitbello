@@ -81,6 +81,9 @@ var _menu_actions: Array[StringName] = []
 var _menu_ref: Dictionary = {}
 var _menu_commit: Dictionary = {}
 var _menu_active: bool = false
+## The popup list the context menu shows over, which closes when an entry
+## runs (see `show_ref_menu_over`), or null.
+var _menu_host: Window = null
 var _sync_menu: PopupMenu = PopupMenu.new()
 var _sync_ids: Array[StringName] = []
 var _popover: BranchPopover = BranchPopover.new()
@@ -157,8 +160,10 @@ func _ready() -> void:
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
 	_menu.popup_hide.connect(func() -> void:
-		if _menu.get_parent() == _popover:
-			_menu.reparent(self))
+		if _menu.get_parent() != self:
+			_menu.reparent(self)
+		# After the entry's `id_pressed`, which closes the host.
+		(func() -> void: _menu_host = null).call_deferred())
 	add_child(_sync_menu)
 	_sync_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_sync_ids[id], _sync_button))
 	add_child(_popover)
@@ -423,6 +428,14 @@ func show_ref_menu(ref: Dictionary, at_position: Vector2, menus: Dictionary = RE
 	show_menu(menus.get(String(ref["type"]), []), at_position)
 
 
+## Shows `ref`'s menu over `host`, a popup list (such as the worktree list)
+## that closes when one of its entries runs.
+func show_ref_menu_over(host: Window, ref: Dictionary, at_position: Vector2) -> void:
+	_menu.reparent(host)
+	_menu_host = host
+	show_ref_menu.call_deferred(ref, at_position)
+
+
 ## Shows a context menu of the enabled actions among `ids` at a screen position.
 func show_menu(ids: Array, at_position: Vector2) -> void:
 	_menu.clear()
@@ -439,6 +452,10 @@ func show_menu(ids: Array, at_position: Vector2) -> void:
 	while _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
 		_menu.remove_item(_menu.item_count - 1)
 	if _menu_actions.is_empty():
+		# Nothing to show over a popup list after all.
+		_menu_host = null
+		if _menu.get_parent() != self:
+			_menu.reparent(self)
 		return
 	_menu.position = Vector2i(at_position)
 	_menu.reset_size()
@@ -473,6 +490,10 @@ func press_menu(label: String) -> bool:
 
 
 func _on_menu_id(id: int) -> void:
+	var host: Window = _menu_host
+	_menu_host = null
+	if is_instance_valid(host) and host.visible:
+		host.hide()
 	_menu_active = true
 	Actions.run_action(_menu_actions[id])
 	_menu_active = false

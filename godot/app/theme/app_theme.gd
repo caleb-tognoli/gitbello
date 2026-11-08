@@ -492,11 +492,22 @@ static func _add_menus(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"pressed", &"WorktreeListRow", _box(Color(p.accent, 0.15), 4, list_row))
 	theme.set_stylebox(&"hover_pressed", &"WorktreeListRow", _box(Color(p.accent, 0.3), 4, list_row))
 	theme.set_stylebox(&"focus", &"WorktreeListRow", _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1))
+	# The first match of the worktree list's filter, which Enter chooses
+	_variation(theme, &"WorktreeListRowTarget", &"WorktreeListRow")
+	theme.set_stylebox(&"normal", &"WorktreeListRowTarget", _box(Color(p.accent, 0.3), 4, list_row))
 	_variation(theme, &"WorktreeListChanges", &"Label")
 	theme.set_color(&"font_color", &"WorktreeListChanges", p.modified)
 	theme.set_font_size(&"font_size", &"WorktreeListChanges", 12)
+	# The worktree list's filter, rows, line and footer of actions
+	_variation(theme, &"WorktreeListBox", &"VBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeListBox", 4)
+	_variation(theme, &"WorktreeListFooter", &"HBoxContainer")
+	theme.set_constant(&"separation", &"WorktreeListFooter", 2)
 	theme.set_color(&"icon_color", &"WorktreeList", Color(1, 1, 1, 0.6))
-	theme.set_constant(&"max_height", &"WorktreeList", 420)
+	theme.set_color(&"warning_color", &"WorktreeList", p.modified)
+	theme.set_constant(&"width", &"WorktreeList", 380)
+	theme.set_constant(&"max_height", &"WorktreeList", 400)
+	theme.set_constant(&"empty_height", &"WorktreeList", 48)
 	theme.set_constant(&"branch_width", &"WorktreeList", 240)
 
 
@@ -1066,29 +1077,6 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	chip_line.grow_begin = -5.0
 	chip_line.grow_end = -5.0
 	theme.set_stylebox(&"separator", &"ChipSeparator", chip_line)
-	# New worktree │ ▾ after the chips: borderless like the chips, each half
-	# with its own hover background, joined on the inner side
-	_variation(theme, &"ChipSplit", &"HBoxContainer")
-	theme.set_constant(&"separation", &"ChipSplit", 1)
-	for entry: Array in [[&"ChipAction", Vector4(8, 4, 6, 4), 1],
-			[&"ChipActionMenu", Vector4(SPLIT_ARROW_PADDING, 4, SPLIT_ARROW_PADDING, 4), 2]]:
-		_variation(theme, entry[0], &"Button")
-		for state: Array in [[&"normal", Color.TRANSPARENT], [&"hover", p.hover],
-				[&"pressed", Color(p.accent, 0.25)], [&"hover_pressed", Color(p.accent, 0.35)],
-				[&"disabled", Color.TRANSPARENT]]:
-			var box: StyleBoxFlat = _box(state[1], 6, entry[1])
-			if entry[2] == 1:
-				box.corner_radius_top_right = 0
-				box.corner_radius_bottom_right = 0
-			else:
-				box.corner_radius_top_left = 0
-				box.corner_radius_bottom_left = 0
-			theme.set_stylebox(state[0], entry[0], box)
-		theme.set_stylebox(&"focus", entry[0], _box(Color.TRANSPARENT, 6, Vector4.ZERO, p.accent, 2))
-		theme.set_color(&"font_color", entry[0], p.text_muted)
-		theme.set_color(&"icon_normal_color", entry[0], Color(1, 1, 1, 0.7))
-		theme.set_color(&"icon_hover_color", entry[0], Color.WHITE)
-		theme.set_constant(&"h_separation", entry[0], 4)
 	# Branch and Sync: big raised buttons with room for a ▾ part
 	_variation(theme, &"HeaderRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"HeaderRow", 8)

@@ -38,6 +38,8 @@ var _pending_delete: Dictionary = {}
 func _ready() -> void:
 	_strip.worktree_chosen.connect(func(path: String) -> void: show_worktree(path))
 	_strip.worktree_menu_requested.connect(_on_chip_menu)
+	_strip.list_menu_requested.connect(func(wt: Dictionary, at: Vector2) -> void:
+		_on_chip_menu(wt, at, _strip.all_list()))
 	_strip.worktree_reveal_requested.connect(func(wt: Dictionary) -> void:
 		if _active != null and not bool(wt["prunable"]):
 			_active.ops().show_in_file_manager(String(wt["path"])))
@@ -368,10 +370,12 @@ func _refresh_strip() -> void:
 	_strip.show_worktrees(list, _active.worktree_path())
 
 
-func _on_chip_menu(wt: Dictionary, at_position: Vector2) -> void:
+## A worktree's menu at a screen position, over `host` when it comes from a
+## popup list.
+func _on_chip_menu(wt: Dictionary, at_position: Vector2, host: Window = null) -> void:
 	if _active == null:
 		return
-	_active.show_ref_menu({
+	var ref: Dictionary = {
 		"type": "worktree",
 		"name": "worktree:" + String(wt["path"]),
 		"short": String(wt["name"]),
@@ -385,4 +389,8 @@ func _on_chip_menu(wt: Dictionary, at_position: Vector2) -> void:
 		"detached": bool(wt["detached"]),
 		"changed": maxi(0, int(wt["changed"])),
 		"upstream": "",
-	}, at_position)
+	}
+	if host != null:
+		_active.show_ref_menu_over(host, ref, at_position)
+	else:
+		_active.show_ref_menu(ref, at_position)

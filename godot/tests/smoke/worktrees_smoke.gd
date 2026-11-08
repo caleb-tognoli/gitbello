@@ -34,6 +34,21 @@ func run() -> void:
 	strip.list_button().pressed.emit()
 	var all_list: WorktreeListPopover = strip.all_list()
 	expect_eq(all_list.rows().size(), 2, "the list has both real worktrees")
+	expect(not all_list.footer_button(&"worktree.prune").visible, "Prune shows only while a folder is missing")
+	var cleanup: Button = all_list.footer_button(&"worktree.cleanup")
+	expect(cleanup.visible and not cleanup.disabled and cleanup.text.is_empty(), "Clean up is an icon in the footer")
+	expect_eq(all_list.footer_button(&"task.new").text, "New worktree…", "the footer's New worktree is labelled")
+	var right_click: InputEventMouseButton = InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	(all_list._rows.get_child(1) as Button).gui_input.emit(right_click)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	expect("Delete…" in page.menu_labels() and page.context_menu().get_parent() == all_list,
+			"right-click on a row opens its worktree's menu over the list: %s" % [page.menu_labels()])
+	page.close_menu()
+	await get_tree().process_frame
+	expect(page.context_menu().get_parent() != all_list and all_list.visible, "the menu goes back once it closes")
 	all_list.choose(1)
 	expect(await wait_until(func() -> bool: return page.active_view().worktree_path().ends_with("repo-10-feature")),
 			"overflow selection opens the linked fixture worktree")
@@ -314,7 +329,8 @@ func _overflow_selection() -> void:
 	strip.show_worktrees(rows, first)
 	await _settle_strip()
 	expect(_chip_in_view(strip, first), "selecting the first chip scrolls back")
-	strip.list_button().pressed.emit()
+	# Filled, not opened: the actions its footer reads left with the test's Main.
+	strip.all_list().fill(rows, first)
 	strip.all_list().choose(5)
 	await _settle_strip()
 	expect(_chip_in_view(strip, last), "the all-worktrees choice reveals its chip")
@@ -405,6 +421,17 @@ func _overflow_presentation() -> void:
 		expect(String(listed[3]["tooltip"]).contains("1 commit ahead") and String(listed[3]["tooltip"]).contains("2 commits behind"), "sync detail")
 		expect(String(listed[5]["tooltip"]).contains("The folder is missing."), "missing explained")
 		expect(listed[5]["changes"] == "" and not String(listed[5]["tooltip"]).contains("No local changes"), "unknown is not shown as clean")
+		expect_eq(list.target_index(), 3, "with no filter, Enter would choose the shown worktree")
+		list.set_filter("DIRT")
+		expect_eq(list.rows().size(), 1, "the filter matches folder names, ignoring case")
+		expect_eq(list.target_index(), 0, "Enter would choose the first match")
+		list.set_filter("abcdef")
+		expect(list.rows().size() == 1 and list.rows()[0]["name"] == "detached", "the filter matches what the branch column says")
+		list.set_filter("no such worktree")
+		expect(list.rows().is_empty() and list.target_index() == -1, "nothing matches")
+		expect_eq(list.empty_text(), "No matching worktrees", "and the list says so")
+		list.set_filter("")
+		expect_eq(list.rows().size(), 6, "clearing the filter shows every worktree")
 	list.hide()
 	dirty["changed"] = 4
 	strip.show_worktrees(rows, "/fixture/main")
@@ -453,7 +480,7 @@ func _test_worktree_list() -> void:
 				"the shown worktree's row is marked, with the commits to pull and its lock")
 	var picked: Array[String] = []
 	list.chosen.connect(func(path: String) -> void: picked.append(path))
-	(list.find_children("*", "Button", true, false)[0] as Button).pressed.emit()
+	list.choose(0)
 	expect_eq(picked, ["C:/test/repo"] as Array[String], "a row emits its worktree's path")
 	list.queue_free()
 

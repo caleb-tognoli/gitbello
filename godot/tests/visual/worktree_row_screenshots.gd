@@ -1,7 +1,9 @@
 extends Node
 ## Saves numbered screenshots of the worktree strip for visual review (not
 ## part of the smoke run): the strip in both themes, hovered chips with their
-## tooltip cards, the hovered New worktree button and the worktree list.
+## tooltip cards, the hovered worktree icon and the worktree list: open,
+## filtered, matching nothing, a hovered footer action and in the light theme
+## (Prune shows in its footer when one of the worktrees' folders is missing).
 ## Usage: godot --path godot res://tests/visual/worktree_row_screenshots.tscn --
 ##        --repo=<worktree of a throwaway repo with several worktrees> --out=<dir>
 ## Run with GITBELLO_CONFIG pointing at a scratch config file. Read-only.
@@ -46,27 +48,50 @@ func _ready() -> void:
 			await _hover(chip)
 			await _shot(out, "%02d-hover-%s" % [step, String(chip.texts()["name"]).left(20)])
 			step += 1
-	await _hover(strip.new_task_button())
-	await _shot(out, "%02d-hover-new-worktree" % step)
+	await _hover(strip.list_button())
+	await _shot(out, "%02d-hover-worktree-icon" % step)
 	step += 1
 	_move_mouse(Vector2(640, 600))
-	strip.list_button().pressed.emit()
-	# Embedded here, so place the list under the icon in viewport coordinates.
-	var under: Rect2 = strip.list_button().get_global_rect()
-	for child: Node in strip.get_children():
-		if child is PopupMenu and (child as PopupMenu).visible:
-			(child as PopupMenu).position = Vector2i(under.position + Vector2(0.0, under.size.y))
+	var list: WorktreeListPopover = strip.all_list()
+	_open_list(strip)
 	await _shot(out, "%02d-worktree-list" % step)
 	step += 1
-	for child: Node in strip.get_children():
-		if child is PopupMenu:
-			(child as PopupMenu).hide()
+	# Part of the last branch's name (folder names share the repository's).
+	var query: String = String(list.rows()[list.rows().size() - 1]["branch"]).get_file().left(4)
+	list.set_filter(query)
+	await _shot(out, "%02d-worktree-list-filtered-%s" % [step, query])
+	step += 1
+	list.set_filter("no such worktree")
+	await _shot(out, "%02d-worktree-list-no-match" % step)
+	step += 1
+	list.set_filter("")
+	await _settle()
+	# The list is an embedded window: its controls are placed in its own viewport.
+	_move_mouse(Vector2(list.position) + list.footer_button(&"worktree.cleanup").get_global_rect().get_center())
+	var until: int = Time.get_ticks_msec() + 1500
+	while Time.get_ticks_msec() < until:
+		await get_tree().process_frame
+	await _shot(out, "%02d-worktree-list-hover-cleanup" % step)
+	step += 1
+	list.hide()
 	Actions.run_action(&"view.theme_light")
 	await _shot(out, "%02d-strip-light" % step)
+	step += 1
+	_open_list(strip)
+	await _shot(out, "%02d-worktree-list-light" % step)
+	list.hide()
 	Actions.run_action(&"view.theme_dark")
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	get_tree().quit(0)
+
+
+## Opens the worktree list under the icon (embedded here, so in viewport
+## coordinates).
+func _open_list(strip: WorktreeStrip) -> void:
+	strip.list_button().pressed.emit()
+	var under: Rect2 = strip.list_button().get_global_rect()
+	strip.all_list().position = Vector2i(under.position + Vector2(0.0, under.size.y))
 
 
 func _hover(control: Control) -> void:
