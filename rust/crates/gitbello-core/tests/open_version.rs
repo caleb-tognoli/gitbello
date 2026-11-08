@@ -159,9 +159,15 @@ fn the_runtime_opens_the_shown_diff_and_reports_where() {
         .open_version(&key, DiffSlot::Changes, VersionSide::Shown)
         .is_some());
     let events = poll_until(&mut rt, |_, ev| ready(ev).is_some());
+    // The runtime reports the root git resolved, which can spell the temp
+    // dir differently (macOS /private/var, Windows 8.3 short names).
     assert_eq!(
-        ready(&events).unwrap().expect("the working copy"),
-        repo.path().join("dir/ä b.txt")
+        ready(&events)
+            .unwrap()
+            .expect("the working copy")
+            .canonicalize()
+            .unwrap(),
+        repo.path().join("dir/ä b.txt").canonicalize().unwrap()
     );
     fs::remove_dir_all(&dir).unwrap();
 }
