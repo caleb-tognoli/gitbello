@@ -1,4 +1,4 @@
-//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol]`: builds throwaway repositories for
+//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol] [--history]`: builds throwaway repositories for
 //! the Godot smoke tests (GDScript never runs git itself).
 //!
 //! Each `repo-<n>` has: two commits on `main`, a `feature/login` branch, a
@@ -7,7 +7,7 @@
 //! remote also has a commit (`remote.txt`) that `repo-<n>` has not fetched,
 //! so a fetch leaves `main` one ahead and one behind. `--images` adds the
 //! image repositories of `image_fixture`, `--eol` the line-endings one of
-//! `eol_fixture`.
+//! `eol_fixture`, `--history` the file-history one of `history_fixture`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut repos = 1usize;
     let mut images = false;
     let mut eol = false;
+    let mut history = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -32,6 +33,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             "--images" => images = true,
             "--eol" => eol = true,
+            "--history" => history = true,
             other if dir.is_none() => dir = Some(PathBuf::from(other)),
             other => bail!("unexpected argument `{other}`"),
         }
@@ -67,6 +69,16 @@ pub fn run(args: &[String]) -> Result<()> {
         };
         crate::eol_fixture::build(&git, &dir).context("building the line-endings repository")?;
         println!("{}", dir.join("eol").display());
+    }
+    if history {
+        let git = Git {
+            runner: &runner,
+            global_config: &global_config,
+            clock: std::cell::Cell::new(1_700_000_000),
+        };
+        crate::history_fixture::build(&git, &dir)
+            .context("building the file-history repository")?;
+        println!("{}", dir.join("history").display());
     }
     Ok(())
 }

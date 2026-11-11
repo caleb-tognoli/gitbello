@@ -87,6 +87,17 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"compare.cherry_pick": &"GitCommit",
 	&"compare.copy_hash": &"ActionCopy",
 	&"compare.all_changes": &"FileList",
+	&"view.file_history": &"FileHistory",
+	&"file_history.open": &"FileHistory",
+	&"file_history.close": &"Close",
+	&"file_history.compare_versions": &"GitCompare",
+	&"file_history.restore": &"Undo",
+	&"file_history.open_version": &"ExternalLink",
+	&"file_history.show_in_history": &"History",
+	&"file_history.copy_hash": &"ActionCopy",
+	&"file_history.blame": &"User",
+	&"blame.before": &"History",
+	&"blame.show_changes": &"FileHistory",
 	&"shelf.restore": &"Undo",
 	&"shelf.restore_file": &"Undo",
 	&"shelf.discard_file": &"Remove",
@@ -153,6 +164,8 @@ const CONTEXT_PREFIXES: Dictionary[String, StringName] = {
 	"shelf.": &"Shelves",
 	"conflict.": &"Resolver",
 	"compare.": &"Compare",
+	"file_history.": &"File history",
+	"blame.": &"File history",
 }
 ## Ids whose context differs from their prefix's.
 const CONTEXT_IDS: Dictionary[StringName, StringName] = {
@@ -160,11 +173,14 @@ const CONTEXT_IDS: Dictionary[StringName, StringName] = {
 	&"compare.with_current": GLOBAL,
 	&"compare.with": GLOBAL,
 	&"compare.close": GLOBAL,
+	&"file_history.open": GLOBAL,
+	&"file_history.close": GLOBAL,
+	&"file_history.blame": GLOBAL,
 }
 ## Contexts shown inside others: the diff sits in Changes, History and
 ## Shelves. The resolver replaces the diff, so it overlaps only `GLOBAL`.
 const CONTEXTS_INSIDE: Dictionary[StringName, Array] = {
-	&"Diff": [&"Changes", &"History", &"Shelves", &"Compare"],
+	&"Diff": [&"Changes", &"History", &"Shelves", &"Compare", &"File history"],
 }
 
 
@@ -192,6 +208,11 @@ class Action:
 	var in_text_fields: bool = false
 	## Returns why the action is disabled (shown in tooltips), or "".
 	var reason: Callable = Callable()
+	## Returns the id of the action whose shortcut also runs this one right
+	## now (&"" for none): menus and tooltips show that shortcut while this
+	## action has none of its own. Alt+3 shows the third view of the switch,
+	## whichever it is.
+	var shortcut_from: Callable = Callable()
 
 	func is_enabled() -> bool:
 		return not enabled.is_valid() or bool(enabled.call())
@@ -342,9 +363,20 @@ func shortcuts(id: StringName) -> PackedStringArray:
 	return action.default_shortcuts if action != null else PackedStringArray()
 
 
-## First effective shortcut for display, or "".
-func shortcut_label(id: StringName) -> String:
+## The shortcuts that run `id` right now, for display: its own or, without
+## any, those of the action it borrows them from (`Action.shortcut_from`).
+func shown_shortcuts(id: StringName) -> PackedStringArray:
 	var list: PackedStringArray = shortcuts(id)
+	var action: Action = _actions.get(id)
+	if not list.is_empty() or action == null or not action.shortcut_from.is_valid():
+		return list
+	var from: StringName = action.shortcut_from.call()
+	return shortcuts(from) if from != &"" else list
+
+
+## First shortcut that runs `id` for display, or "".
+func shortcut_label(id: StringName) -> String:
+	var list: PackedStringArray = shown_shortcuts(id)
 	return Shortcuts.display(list[0]) if not list.is_empty() else ""
 
 

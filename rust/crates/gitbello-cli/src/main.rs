@@ -3,6 +3,7 @@
 mod busy_bench;
 mod eol_fixture;
 mod fixture;
+mod history_fixture;
 mod image_fixture;
 mod repo_cmds;
 
@@ -31,10 +32,16 @@ commands:
   compare <root> <left> <right|--working> [--fork|--exact] [--file <path>]
                                    sides, counts and files of a comparison,
                                    or one file's diff in it
+  file-history <root> <file> [--from <rev>] [--rows a..b] [--time]
+                                   the commits that changed a file, under
+                                   every name it had (default rows 0..50)
+  blame <root> <file> [--rev <rev>] [-w] [-M] [--lines a..b] [--time]
+                                   who last changed each line (the working
+                                   copy without --rev; default lines 0..50)
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
-  fixture <dir> [--repos N] [--images] [--eol]
+  fixture <dir> [--repos N] [--images] [--eol] [--history]
                                    create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
@@ -62,6 +69,8 @@ fn main() -> Result<()> {
         Some("stashes") => repo_cmds::stashes(rest),
         Some("diff") => repo_cmds::diff(rest),
         Some("compare") => repo_cmds::compare(rest),
+        Some("file-history") => repo_cmds::file_history(rest),
+        Some("blame") => repo_cmds::blame(rest),
         Some("op-state") => repo_cmds::op_state(rest),
         Some("watch") => repo_cmds::watch(rest),
         Some("config") => repo_cmds::config(rest),

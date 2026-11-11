@@ -24,11 +24,11 @@ const LIST_HEADER: PackedScene = preload("res://ui/list_header/list_header.tscn"
 const DIFF_PANEL: PackedScene = preload("res://ui/diff_view/diff_panel.tscn")
 const COMMIT_HEADER: PackedScene = preload("res://app/history/commit_header.tscn")
 ## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file", &"",
-	&"diff.toggle_minimap"]
+const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file",
+	&"file_history.open", &"", &"diff.toggle_minimap"]
 ## The file list's context menu.
 const FILE_MENU_ACTIONS: Array[StringName] = [&"compare.restore_left", &"compare.restore_right", &"",
-	&"diff.open_file"]
+	&"diff.open_file", &"file_history.open"]
 ## The commit list's context menu.
 const COMMIT_MENU_ACTIONS: Array[StringName] = [&"compare.cherry_pick", &"", &"compare.copy_hash"]
 ## Icons of the sides, by `compare_info` side kind.
@@ -281,8 +281,8 @@ func set_session(value: RepoSession) -> void:
 
 ## Opens a comparison of `left` with `right` (or the working copy when
 ## `working`); `mode` is `fork`, `exact` or "" for the default (since the
-## fork).
-func open(left: String, right: String, working: bool, mode: String = "") -> void:
+## fork); `filter` starts the file filter with a path.
+func open(left: String, right: String, working: bool, mode: String = "", filter: String = "") -> void:
 	if session == null:
 		return
 	var request: Dictionary = {"left": left, "right": "" if working else right, "working": working, "mode": mode}
@@ -297,6 +297,8 @@ func open(left: String, right: String, working: bool, mode: String = "") -> void
 	_details_header.hide()
 	_diff_panel.clear("Select a file to see its changes.")
 	session.open_compare(left, right, working, mode)
+	if not filter.is_empty():
+		_filter.set_text(filter)
 	_on_compare_changed()
 
 
@@ -688,6 +690,18 @@ func _on_commit_context(row: int, at_position: Vector2) -> void:
 ## The file under the cursor in the list, or "".
 func current_file() -> String:
 	return _files.path_at(_files.cursor)
+
+
+## Where the current file's history is read from: `{start, start_name}`,
+## the commit the files are narrowed to, else the right side ("" for the
+## working copy: HEAD).
+func file_history_start() -> Dictionary:
+	if not focused_commit().is_empty():
+		return {"start": focused_commit(), "start_name": _details_header.summary_text()}
+	if bool(_request.get("working", false)):
+		return {"start": "", "start_name": ""}
+	var side: Dictionary = _info.get("right", {})
+	return {"start": String(side.get("oid", _request.get("right", ""))), "start_name": _side_name("right")}
 
 
 ## Whether the current file can be restored from `which` side (`left` or

@@ -542,3 +542,148 @@ pub fn home_bench(args: &[String]) -> Result<()> {
     );
     Ok(())
 }
+
+/// `file-history <root> <file> [--from <rev>] [--rows a..b] [--time]`: the
+/// commits that changed a file under every name it had, newest first, and
+/// with `--time` how long the list took.
+pub fn file_history(args: &[String]) -> Result<()> {
+    use gitbello_core::file_history::{FileHistoryLoader, HistoryLoad};
+    use gitbello_core::repo::Change;
+
+    let mut positional = Vec::new();
+    let mut from = "HEAD".to_owned();
+    let mut rows = 0..50;
+    let mut time = false;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--from" => from = iter.next().context("--from needs a revision")?.clone(),
+            "--rows" => {
+                let spec = iter.next().context("--rows needs a range like 0..50")?;
+                rows = crate::parse_range(spec)?;
+            }
+            "--time" => time = true,
+            other => positional.push(other),
+        }
+    }
+    let [root, file] = positional[..] else {
+        bail!("file-history needs a worktree root and a file (relative to it)");
+    };
+    let backend = backend()?;
+    let loader = FileHistoryLoader::load(&backend, Path::new(root), &from, Path::new(file));
+    let progress = loader.progress();
+    match progress.state {
+        HistoryLoad::Done => {}
+        HistoryLoad::Failed(err) => return Err(err).context("file history failed"),
+        HistoryLoad::Loading | HistoryLoad::Cancelled => bail!("the load did not finish"),
+    }
+    let slashed = |path: &Path| path.to_string_lossy().replace('\\', "/");
+    for version in loader.rows().iter().skip(rows.start).take(rows.len()) {
+        let letter = match version.change {
+            Change::Added => "A",
+            Change::Deleted => "D",
+            Change::Renamed => "R",
+            Change::Copied => "C",
+            Change::TypeChanged => "T",
+            Change::Modified | Change::Unmodified => "M",
+        };
+        let stats = match version.stats {
+            Some((added, removed)) => format!("+{added} -{removed}"),
+            None => "binary".to_owned(),
+        };
+        let name = match &version.original_path {
+            Some(old) => format!("{} <- {}", slashed(&version.path), slashed(old)),
+            None => slashed(&version.path),
+        };
+        println!(
+            "{} {letter} {stats:>10}  {}  [{name}]",
+            &version.oid[..7.min(version.oid.len())],
+            version.subject
+        );
+    }
+    let names: Vec<String> = loader.names().iter().map(|p| slashed(p)).collect();
+    eprintln!("{} commits · names: {}", progress.rows, names.join(", "));
+    if time {
+        let ms = |d: Option<std::time::Duration>| d.map_or(0.0, |d| d.as_secs_f64() * 1e3);
+        eprintln!(
+            "first row {:.0} ms · full list {:.0} ms · {} passes",
+            ms(progress.first_row),
+            ms(progress.total),
+            progress.passes
+        );
+    }
+    Ok(())
+}
+
+/// `blame <root> <file> [--rev <rev>] [-w] [-M] [--lines a..b] [--time]`:
+/// the commit each line was last changed by, and with `--time` how long
+/// the text, the first block and the whole blame took.
+pub fn blame(args: &[String]) -> Result<()> {
+    use gitbello_core::blame::{BlameLoad, BlameLoader, BlameOptions, BlameRequest};
+    use gitbello_core::diff::display_text;
+
+    let mut positional = Vec::new();
+    let mut rev = None;
+    let mut options = BlameOptions::default();
+    let mut lines = 0..50;
+    let mut time = false;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--rev" => rev = Some(iter.next().context("--rev needs a revision")?.clone()),
+            "-w" => options.ignore_whitespace = true,
+            "-M" => options.detect_moves = true,
+            "--lines" => {
+                let spec = iter.next().context("--lines needs a range like 0..50")?;
+                lines = crate::parse_range(spec)?;
+            }
+            "--time" => time = true,
+            other => positional.push(other),
+        }
+    }
+    let [root, file] = positional[..] else {
+        bail!("blame needs a worktree root and a file (relative to it)");
+    };
+    let backend = backend()?;
+    let request = BlameRequest {
+        rev,
+        path: PathBuf::from(file),
+        options,
+    };
+    let loader = BlameLoader::load(&backend, Path::new(root), &request);
+    let progress = loader.progress();
+    match progress.state.clone() {
+        BlameLoad::Done => {}
+        BlameLoad::Failed(err) => return Err(err).context("blame failed"),
+        BlameLoad::Binary => bail!("a binary file has no lines to blame"),
+        BlameLoad::TooLarge(bytes) => bail!("the file is too large to blame ({bytes} bytes)"),
+        BlameLoad::Missing => bail!("the working copy has no such file"),
+        BlameLoad::Loading | BlameLoad::Cancelled => bail!("the blame did not finish"),
+    }
+    let table = loader.table();
+    for line in lines.start..lines.end.min(table.line_count()) {
+        let who = match table.commit_of(line) {
+            Some(commit) if commit.is_working() => format!("{:7} {:<16.16}", "", "(uncommitted)"),
+            Some(commit) => format!("{:.7} {:<16.16}", commit.oid, commit.author),
+            None => format!("{:7} {:<16}", "", ""),
+        };
+        let mark = if table.starts_run(line) { "+" } else { " " };
+        println!(
+            "{who} {mark}{:>5}  {}",
+            line + 1,
+            display_text(table.line_text(line))
+        );
+    }
+    drop(table);
+    eprintln!("{} lines · {} commits", progress.lines, progress.commits);
+    if time {
+        let ms = |d: Option<std::time::Duration>| d.map_or(0.0, |d| d.as_secs_f64() * 1e3);
+        eprintln!(
+            "text {:.0} ms · first block {:.0} ms · blame {:.0} ms",
+            ms(progress.text),
+            ms(progress.first_block),
+            ms(progress.total)
+        );
+    }
+    Ok(())
+}

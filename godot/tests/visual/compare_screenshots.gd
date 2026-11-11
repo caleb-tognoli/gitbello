@@ -77,7 +77,7 @@ func _ready() -> void:
 		commits.toggle_section("left")
 		await _shot("folded-" + mode, null)
 		commits.toggle_section("left")
-		# History: two commits selected offer Compare these commits.
+		# History: two commits selected offer Compare commits.
 		Actions.run_action(&"compare.close")
 		worktree.show_view(WorktreeView.View.HISTORY)
 		var list: CommitList = page.history().commit_list()

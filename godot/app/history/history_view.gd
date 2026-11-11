@@ -17,6 +17,9 @@ signal repo_loaded(row_count: int, error: String)
 
 ## Every History view, for `set_compact` across tabs.
 const GROUP: StringName = &"history_views"
+## How long a commit to reveal may take to show up in a list that is not
+## loading before the newest commit is selected instead.
+const REVEAL_WAIT: float = 1.0
 ## The options menu's Compact rows and Show graph items.
 const COMPACT_ID: int = 2
 const GRAPH_ID: int = 3
@@ -143,20 +146,25 @@ func set_show_graph(value: bool) -> void:
 func _update_compact_item() -> void:
 	if _scope_menu == null:
 		return
-	for entry: Array in [[COMPACT_ID, "Compact rows", &"history.toggle_compact", _commit_list.compact],
-			[GRAPH_ID, "Show graph", &"history.toggle_graph", _commit_list.show_graph]]:
-		var index: int = _scope_menu.get_item_index(entry[0])
-		_scope_menu.set_item_text(index, tr(String(entry[1])))
-		_scope_menu.set_item_checked(index, bool(entry[3]))
-		var shortcuts: PackedStringArray = Actions.shortcuts(entry[2])
-		var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
-		var shortcut: Shortcut = null
-		if event != null:
-			shortcut = Shortcut.new()
-			shortcut.events = [event]
-		_scope_menu.set_item_shortcut(index, shortcut)
-		# Shown only: the registry handles the keys.
-		_scope_menu.set_item_shortcut_disabled(index, true)
+	show_check_action(_scope_menu, COMPACT_ID, "Compact rows", &"history.toggle_compact", _commit_list.compact)
+	show_check_action(_scope_menu, GRAPH_ID, "Show graph", &"history.toggle_graph", _commit_list.show_graph)
+
+
+## Sets check item `id` of `menu` to `label` (translated here), `checked`,
+## with `action`'s shortcut shown beside it.
+static func show_check_action(menu: PopupMenu, id: int, label: String, action: StringName, checked: bool) -> void:
+	var index: int = menu.get_item_index(id)
+	menu.set_item_text(index, TranslationServer.translate(label))
+	menu.set_item_checked(index, checked)
+	var shortcuts: PackedStringArray = Actions.shortcuts(action)
+	var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
+	var shortcut: Shortcut = null
+	if event != null:
+		shortcut = Shortcut.new()
+		shortcut.events = [event]
+	menu.set_item_shortcut(index, shortcut)
+	# Shown only: the registry handles the keys.
+	menu.set_item_shortcut_disabled(index, true)
 
 
 func _notification(what: int) -> void:
@@ -241,6 +249,35 @@ func go_to_current_commit() -> void:
 	_jump_pending = false
 	_select_newest_if_none()
 	_commit_list.grab_focus()
+
+
+## Selects and reveals commit `oid`. A commit the list does not have yet is
+## selected once it arrives (a reload behind the rows, a load still running);
+## unless the current branch has it (`in_head`), a history of the current
+## branch then lists all branches, where the commit may be.
+func reveal_commit(oid: String, in_head: bool) -> void:
+	if session == null or oid.is_empty():
+		return
+	_cancel_parent_navigation()
+	_commit_list.grab_focus()
+	var row: int = session.graph_find_commit(oid)
+	if row >= 0:
+		_select(row)
+		return
+	_commit_list.select_only(-1)
+	# What a reset keeps selected, and what is selected once it is listed.
+	_selected_oid = oid
+	_restore_oid = oid
+	_head_pending = false
+	_follow_head = false
+	if not in_head and not bool(session.history_info().get("all_branches", false)):
+		set_all_branches(true)
+		return
+	# Nothing may be on its way: fall back to the newest commit then.
+	get_tree().create_timer(REVEAL_WAIT).timeout.connect(func() -> void:
+		if _restore_oid == oid and _commit_list.cursor < 0 and not _graph_loading \
+				and session != null and not session.graph_reloading():
+			_select_newest_if_none())
 
 
 func scope_menu() -> PopupMenu:

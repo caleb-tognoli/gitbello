@@ -21,7 +21,7 @@ signal worktree_missing(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
 signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String)
 
-enum View { HISTORY, CHANGES, SHELVES, COMPARE }
+enum View { HISTORY, CHANGES, SHELVES, COMPARE, FILE }
 
 ## Context menu entries per ref type; &"" is a separator.
 const REF_MENUS: Dictionary[String, Array] = {
@@ -97,17 +97,20 @@ var _sync_menu: PopupMenu = PopupMenu.new()
 var _sync_ids: Array[StringName] = []
 var _popover: BranchPopover = BranchPopover.new()
 var _switch: HBoxContainer = HBoxContainer.new()
+## The switch's buttons, in order, with the view action each runs.
+var _switch_actions: Dictionary[Button, StringName] = {}
 var _history_button: Button = Button.new()
 var _changes_button: Button = Button.new()
 var _shelves_button: Button = Button.new()
 var _shelves_badge: CountBadge = CountBadge.new()
-## Shown while a comparison is open (PLAN M7.12).
+## Shown while a comparison is open (PLAN M7.12), with a × inside it.
 var _compare_button: Button = Button.new()
-## The × inside the Compare tab.
-var _compare_close: Button = Button.new()
+var _compare_tab: ClosableViewTab = null
 var _compare: CompareView = CompareView.new()
-## The view shown before Compare opened (Close returns to it).
-var _before_compare: View = View.HISTORY
+## Shown while a file's history is open (PLAN M8a), with a × inside it.
+var _file_button: Button = Button.new()
+var _file_tab: ClosableViewTab = null
+var _file_view: FileView = FileView.new()
 ## The shared view this worktree could not show yet (Shelves before its
 ## shelves are read), shown once it can.
 var _wanted: View = View.HISTORY
@@ -156,7 +159,8 @@ func _ready() -> void:
 	for entry: Array in [[_changes_button, "Changes", &"FileList", View.CHANGES, &"view.changes"],
 			[_history_button, "History", &"History", View.HISTORY, &"view.history"],
 			[_shelves_button, "Shelves", &"GitShelf", View.SHELVES, &"view.shelves"],
-			[_compare_button, "Compare", &"GitCompare", View.COMPARE, &"view.compare"]]:
+			[_compare_button, "Compare", &"GitCompare", View.COMPARE, &"view.compare"],
+			[_file_button, "File history", &"FileHistory", View.FILE, &"view.file_history"]]:
 		var button: Button = entry[0]
 		button.text = entry[1]
 		button.icon = AppTheme.icon(entry[2])
@@ -166,25 +170,30 @@ func _ready() -> void:
 		button.theme_type_variation = &"ViewTab"
 		var action_id: StringName = entry[4]
 		button.pressed.connect(func() -> void: Actions.run_action(action_id, button))
-		button.tooltip_text = Actions.tooltip(entry[4])
+		_switch_actions[button] = action_id
+		# The shortcut in the tooltip is the button's place among the shown ones.
+		button.visibility_changed.connect(_update_switch_tooltips)
 		_switch.add_child(button)
+	Actions.actions_changed.connect(_update_switch_tooltips)
+	_update_switch_tooltips()
 	_changes_button.add_child(_changes_badge)
 	_shelves_button.add_child(_shelves_badge)
 	_shelves_button.hide()
-	_compare_button.hide()
-	_compare_close.theme_type_variation = &"FilterFieldButton"
-	_compare_close.focus_mode = Control.FOCUS_NONE
-	_compare_close.pressed.connect(func() -> void: Actions.run_action(&"compare.close", _compare_close))
-	_compare_button.add_child(_compare_close)
-	_compare_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_compare_button.resized.connect(_place_compare_close)
-	_compare_close.minimum_size_changed.connect(_place_compare_close)
+	_compare_tab = ClosableViewTab.new(_compare_button, &"compare.close")
+	_file_tab = ClosableViewTab.new(_file_button, &"file_history.close")
 	_view_tabs.add_child(_switch)
-	_compare.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_compare.hide()
-	_changes.add_sibling(_compare)
-	_compare.closed.connect(_on_compare_closed)
+	for pane: Control in [_file_view, _compare]:
+		pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pane.hide()
+		_changes.add_sibling(pane)
+	_compare.closed.connect(_on_closable_closed.bind(_compare_tab, View.COMPARE))
 	_compare.label_menu_requested.connect(_on_label_menu)
+	_file_view.closed.connect(_on_closable_closed.bind(_file_tab, View.FILE))
+	_file_view.label_menu_requested.connect(_on_label_menu)
+	_file_view.compare_requested.connect(func(left: String, right: String, path: String) -> void:
+		# In quotes, the filter shows that file alone (`set_compare_filter`).
+		open_compare(left, right, false, "exact", "", "\"%s\"" % path))
+	_file_view.history_requested.connect(show_in_history)
 	add_child(_ops)
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
@@ -241,7 +250,7 @@ func _ready() -> void:
 			session.cancel_job(_overlay_job))
 	var panes: Array[SplitContainer] = [_history, _changes, _history.details(), _history.details().files_split(),
 			_changes.shelf_files_split(), _compare.files_split(), _compare.details_split(),
-			_compare.files_diff_split()]
+			_compare.files_diff_split(), _file_view.files_split(), _file_view.details_split()]
 	for pane: SplitContainer in panes:
 		pane.drag_ended.connect(_on_split_dragged.bind(pane))
 	_apply_view(View.HISTORY)
@@ -258,6 +267,10 @@ func setup(value: RepoSession) -> void:
 	_compare.feedback = feedback
 	_compare.ops = _ops
 	_compare.date_format = _history.commit_list().date_text
+	_file_view.session = session
+	_file_view.feedback = feedback
+	_file_view.ops = _ops
+	_file_view.date_format = _history.commit_list().date_text
 	_changes.feedback = feedback
 	_changes.ops = _ops
 	_ops.session = session
@@ -311,13 +324,15 @@ func compare_button() -> Button:
 
 ## Opens a comparison of `left` with `right` (or the working copy) in the
 ## Compare view; `pick` opens that side's picker (`left` or `right`) at once,
-## its choice replacing this comparison.
-func open_compare(left: String, right: String, working: bool, mode: String = "", pick: String = "") -> void:
+## its choice replacing this comparison; `filter` shows only the files whose
+## path contains it.
+func open_compare(left: String, right: String, working: bool, mode: String = "", pick: String = "",
+		filter: String = "") -> void:
 	if session == null:
 		return
 	if view != View.COMPARE:
-		_before_compare = view
-	_compare.open(left, right, working, mode)
+		_compare_tab.opened_from = view
+	_compare.open(left, right, working, mode, filter)
 	_compare_button.show()
 	show_view(View.COMPARE)
 	if not pick.is_empty():
@@ -334,26 +349,107 @@ func close_compare() -> void:
 	_compare.close()
 
 
-## Widens the Compare tab by its × and sets the × after the text.
-func _place_compare_close() -> void:
-	_compare_close.icon = AppTheme.icon(&"Close")
-	_compare_close.tooltip_text = Actions.tooltip(&"compare.close")
-	var natural: float = _compare_button.get_minimum_size().x
-	var close: Vector2 = _compare_close.get_combined_minimum_size()
-	var right: float = _compare_button.get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
-	_compare_button.custom_minimum_size.x = natural + close.x - right / 2.0
-	_compare_close.size = close
-	_compare_close.position = Vector2(natural - right, roundf((_compare_button.size.y - close.y) / 2.0))
-
-
 func compare_close_button() -> Button:
-	return _compare_close
+	return _compare_tab.close
 
 
-func _on_compare_closed() -> void:
-	_compare_button.hide()
-	if view == View.COMPARE:
-		show_view(_before_compare)
+## A view with a × closed: its button goes and the view it was opened from
+## shows again.
+func _on_closable_closed(tab: ClosableViewTab, which: View) -> void:
+	tab.button.hide()
+	if view == which:
+		show_view(tab.opened_from as View)
+
+
+# --- File history (PLAN M8a) ---------------------------------------------------
+
+func file_view() -> FileView:
+	return _file_view
+
+
+func file_history_button() -> Button:
+	return _file_button
+
+
+func file_history_close_button() -> Button:
+	return _file_tab.close
+
+
+## Opens the history of `path` (repository-relative) in the File history
+## view, read from `start` (a revision; "" for HEAD); `start_name` is what
+## the view calls a fixed start. `blame` turns Blame on there (the blame
+## starts on line `line`, 0-based; -1 for the top).
+func open_file_history(path: String, start: String = "", start_name: String = "", blame: bool = false,
+		line: int = -1) -> void:
+	if session == null or path.is_empty():
+		return
+	if view != View.FILE:
+		_file_tab.opened_from = view
+	_file_view.open(path, start, start_name, blame, line)
+	_file_button.show()
+	show_view(View.FILE)
+
+
+func close_file_history() -> void:
+	_file_view.close()
+
+
+## The file the current view has in focus and where its history would be
+## read from: `{path, start, start_name, line}` (`start` "" for HEAD), or
+## empty without one. Changes and Shelves read from HEAD, History from the
+## commit shown (HEAD when it is the current one), Compare from the commit
+## it is narrowed to or its right side, the File history view from where its
+## history is. `line` is the file's line the diff's caret is on (0-based),
+## where a blame starts; -1 without one.
+func file_history_target() -> Dictionary:
+	if session == null or not session.is_ready():
+		return {}
+	var path: String = ""
+	var start: String = ""
+	var start_name: String = ""
+	var diff: DiffView = null
+	match view:
+		View.CHANGES:
+			path = _changes.current_path()
+			diff = _changes.diff_panel().view()
+		View.SHELVES:
+			path = _changes.selected_shelf_file()
+		View.FILE:
+			var request: Dictionary = _file_view.shown_request()
+			path = String(request.get("path", ""))
+			start = String(request.get("start", ""))
+			start_name = String(request.get("start_name", ""))
+			diff = _file_view.blame_view() if _file_view.is_blame() else _file_view.diff_panel().view()
+		View.HISTORY:
+			var details: CommitDetails = _history.details()
+			diff = details.diff_panel().view()
+			path = details.file_list().path_at(details.file_list().cursor)
+			if details.commit_oid() != String(session.status().get("oid", "")):
+				start = details.commit_oid()
+				start_name = details.summary_text()
+		View.COMPARE:
+			path = _compare.current_file()
+			diff = _compare.diff_panel().view()
+			var from: Dictionary = _compare.file_history_start()
+			start = String(from["start"])
+			start_name = String(from["start_name"])
+	if path.is_empty():
+		return {}
+	var line: int = -1
+	if diff != null and diff.is_visible_in_tree() and diff.cursor >= 0:
+		var shown: Dictionary = diff.line(diff.cursor)
+		line = maxi(int(shown.get("new", 0)), int(shown.get("old", 0))) - 1
+	return {"path": path, "start": start, "start_name": start_name, "line": line}
+
+
+## Shows commit `oid` in History, selected and revealed. `in_head`: the
+## current branch has it; otherwise History lists all branches when its
+## scope does not have the commit.
+func show_in_history(oid: String, in_head: bool) -> void:
+	if session == null or oid.is_empty():
+		return
+	show_view(View.HISTORY)
+	_history.reveal_commit(oid, in_head)
 
 
 func changes() -> ChangesView:
@@ -721,10 +817,39 @@ func show_view(which: View) -> void:
 	focus_view()
 
 
+## The action of the switch's button at `position` among the shown ones
+## (0 first), or &"": what Alt+1 … Alt+5 run.
+func view_action_at(position: int) -> StringName:
+	var shown: int = 0
+	for button: Button in _switch_actions:
+		if button.visible:
+			if shown == position:
+				return _switch_actions[button]
+			shown += 1
+	return &""
+
+
+## Where the button of view action `action` is among the shown ones (0
+## first), or -1 while it is hidden.
+func view_position(action: StringName) -> int:
+	var shown: int = 0
+	for button: Button in _switch_actions:
+		if button.visible:
+			if _switch_actions[button] == action:
+				return shown
+			shown += 1
+	return -1
+
+
+func _update_switch_tooltips() -> void:
+	for button: Button in _switch_actions:
+		button.tooltip_text = Actions.tooltip(_switch_actions[button])
+
+
 ## Shows the next (`step` 1) or previous (-1) view in the switch's order,
 ## skipping the views whose buttons are hidden.
 func cycle_view(step: int) -> void:
-	var order: Array[View] = [View.CHANGES, View.HISTORY, View.SHELVES, View.COMPARE]
+	var order: Array[View] = [View.CHANGES, View.HISTORY, View.SHELVES, View.COMPARE, View.FILE]
 	var at: int = order.find(view)
 	for i: int in range(1, order.size()):
 		var next: View = order[posmod(at + step * i, order.size())]
@@ -739,6 +864,8 @@ func _can_show(which: View) -> bool:
 			return session != null and not session.shelves().is_empty()
 		View.COMPARE:
 			return _compare.has_comparison()
+		View.FILE:
+			return _file_view.has_history()
 	return true
 
 
@@ -758,11 +885,13 @@ func _apply_view(which: View) -> void:
 	_history.visible = which == View.HISTORY
 	_changes.visible = which == View.CHANGES or which == View.SHELVES
 	_compare.visible = which == View.COMPARE
+	_file_view.visible = which == View.FILE
 	_changes.show_shelves_view(which == View.SHELVES)
 	_history_button.set_pressed_no_signal(which == View.HISTORY)
 	_changes_button.set_pressed_no_signal(which == View.CHANGES)
 	_shelves_button.set_pressed_no_signal(which == View.SHELVES)
 	_compare_button.set_pressed_no_signal(which == View.COMPARE)
+	_file_button.set_pressed_no_signal(which == View.FILE)
 	if _sidebar_width > 0:
 		_set_sidebar_width(_sidebar_width)
 	if session != null:
@@ -774,6 +903,8 @@ func focus_view() -> void:
 		return
 	if view == View.COMPARE:
 		_compare.focus_files()
+	elif view == View.FILE:
+		_file_view.focus_files()
 	elif view != View.HISTORY:
 		_changes.focus_files()
 	else:
@@ -783,10 +914,10 @@ func focus_view() -> void:
 ## The shared left-pane width, and the commit details' height and
 ## files width, are saved per repository.
 func _on_split_dragged(pane: SplitContainer) -> void:
-	if pane == _history or pane == _changes or pane == _compare.files_split():
+	if pane in _sidebar_panes():
 		_set_sidebar_width(pane.split_offset)
-	# Compare's details and files keep History's sizes.
-	for pair: Array in [[_history.details(), _compare.details_split()],
+	# Compare's and File history's details and files keep History's sizes.
+	for pair: Array in [[_history.details(), _compare.details_split(), _file_view.details_split()],
 			[_history.details().files_split(), _compare.files_diff_split()]]:
 		if pane in pair:
 			for other: Variant in pair:
@@ -796,17 +927,21 @@ func _on_split_dragged(pane: SplitContainer) -> void:
 
 func _set_sidebar_width(width: int) -> void:
 	_sidebar_width = width
-	_history.split_offset = width
-	_changes.split_offset = width
-	_compare.files_split().split_offset = width
+	for pane: SplitContainer in _sidebar_panes():
+		pane.split_offset = width
+
+
+## The splits whose first part is the shared left pane.
+func _sidebar_panes() -> Array[SplitContainer]:
+	return [_history, _changes, _compare.files_split(), _file_view.files_split()]
 
 
 func _split_key(pane: SplitContainer) -> String:
 	if pane == _changes.shelf_files_split():
 		return "shelves_files_width"
-	if pane == _history or pane == _changes or pane == _compare.files_split():
+	if pane in _sidebar_panes():
 		return "sidebar_width"
-	if pane == _history.details() or pane == _compare.details_split():
+	if pane in [_history.details(), _compare.details_split(), _file_view.details_split()]:
 		return "details_height"
 	return "details_files_width"
 
@@ -826,6 +961,7 @@ func _restore_widths() -> void:
 	details.files_split().split_offset = int(saved.get("details_files_width",
 			details.get_theme_constant(&"files_width", CommitDetails.THEME_TYPE)))
 	_compare.details_split().split_offset = details.split_offset
+	_file_view.details_split().split_offset = details.split_offset
 	_compare.files_diff_split().split_offset = details.files_split().split_offset
 
 
@@ -853,11 +989,17 @@ func _on_state() -> void:
 	state_changed.emit()
 
 
+func _place_closable_tabs() -> void:
+	for tab: ClosableViewTab in [_compare_tab, _file_tab]:
+		tab.place()
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
-		_place_compare_close.call_deferred()
+		_place_closable_tabs.call_deferred()
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
-		_place_compare_close.call_deferred()
+		_place_closable_tabs.call_deferred()
+		_update_switch_tooltips()
 		_on_state()
 		if _overlay_job >= 0:
 			_update_overlay()

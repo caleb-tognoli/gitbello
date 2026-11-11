@@ -7,10 +7,10 @@ extends VSplitContainer
 
 const THEME_TYPE: StringName = &"CommitDetails"
 ## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file", &"",
-	&"diff.toggle_minimap"]
+const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file",
+	&"file_history.open", &"", &"diff.toggle_minimap"]
 ## The file list's context menu: its actions, by item id.
-const FILE_MENU_ACTIONS: Array[StringName] = [&"diff.open_file"]
+const FILE_MENU_ACTIONS: Array[StringName] = [&"diff.open_file", &"file_history.open"]
 
 var session: RepoSession = null:
 	set = set_session
@@ -188,7 +188,7 @@ func show_placeholder(text: String = "") -> void:
 	_diff_panel.clear("Select a file to see its changes.")
 
 
-## Shows "Compare these commits" while two commits are selected.
+## Shows "Compare commits" while two commits are selected.
 func show_pair_action(shown: bool) -> void:
 	_header.show_pair_action(shown)
 

@@ -1261,6 +1261,58 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	compare_bar.border_color = p.border
 	compare_bar.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"CompareBar", compare_bar)
+	# File history (M8a): a row says what its commit did to the file, as a
+	# chip in the change's colour and the lines added and removed; the bar's
+	# "as of …" names a start other than the current branch.
+	for entry: Array in [[&"added", p.added], [&"renamed", p.renamed], [&"deleted", p.removed]]:
+		theme.set_color(StringName("%s_color" % entry[0]), &"FileHistory", entry[1])
+	theme.set_color(&"stat_added_color", &"FileHistory", p.added)
+	theme.set_color(&"stat_removed_color", &"FileHistory", p.removed)
+	theme.set_font_size(&"chip_font_size", &"FileHistory", 10)
+	theme.set_font_size(&"stat_font_size", &"FileHistory", 12)
+	theme.set_constant(&"chip_radius", &"FileHistory", 3)
+	theme.set_constant(&"chip_padding", &"FileHistory", 4)
+	theme.set_constant(&"mark_gap", &"FileHistory", 6)
+	# Blame (M8b): the gutter before the file's lines names each run's
+	# commit; a bar in the commit's age, from faint (the file's oldest) to
+	# the accent (its newest); the focused commit's lines tinted.
+	theme.set_font_size(&"meta_font_size", &"BlameView", 12)
+	theme.set_constant(&"gap", &"BlameView", 8)
+	theme.set_constant(&"age_bar_width", &"BlameView", 3)
+	theme.set_constant(&"avatar_size", &"BlameView", 16)
+	theme.set_constant(&"author_width", &"BlameView", 116)
+	theme.set_constant(&"date_width", &"BlameView", 78)
+	theme.set_color(&"author_color", &"BlameView", p.text)
+	theme.set_color(&"meta_color", &"BlameView", p.text_muted)
+	theme.set_color(&"separator_color", &"BlameView", p.border)
+	theme.set_color(&"focus_bg", &"BlameView", Color(p.accent, 0.28))
+	theme.set_color(&"focus_line_bg", &"BlameView", Color(p.accent, 0.12))
+	theme.set_color(&"minimap_focus_bg", &"BlameView", Color(p.accent, 0.4))
+	theme.set_color(&"minimap_focus_mark", &"BlameView", p.accent)
+	theme.set_color(&"hover_bg", &"BlameView", p.hover)
+	theme.set_color(&"age_old_color", &"BlameView", Color(p.accent, 0.12))
+	theme.set_color(&"age_new_color", &"BlameView", p.accent)
+	theme.set_color(&"working_color", &"BlameView", p.modified)
+	theme.set_color(&"working_text_color", &"BlameView", p.text_muted)
+	# The row of the commit a blamed line was clicked on, in the versions
+	theme.set_color(&"marked_color", &"FileHistory", p.accent)
+	theme.set_constant(&"marked_width", &"FileHistory", 3)
+	# The strip over the blame: which version it reads, how far it is
+	_variation(theme, &"BlameBar", &"PanelContainer")
+	var blame_bar: StyleBoxFlat = _box(p.surface, 0, Vector4(10, 4, 6, 4))
+	blame_bar.border_color = p.border
+	blame_bar.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"BlameBar", blame_bar)
+	# Its bar names the file: a line of text, padded like a list header.
+	_variation(theme, &"FileBar", &"PanelContainer")
+	var file_bar: StyleBoxFlat = _box(p.background, 0, Vector4(10, 8, 10, 8))
+	file_bar.border_color = p.border
+	file_bar.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"FileBar", file_bar)
+	_variation(theme, &"FileHistoryStart", &"Label")
+	theme.set_color(&"font_color", &"FileHistoryStart", p.text_muted)
+	theme.set_font_size(&"font_size", &"FileHistoryStart", 12)
+	theme.set_stylebox(&"normal", &"FileHistoryStart", _box(Color(p.text_muted, 0.16), 3, Vector4(6, 1, 6, 1)))
 	var filter: StyleBoxFlat = _box(p.raised, 0, Vector4(8, 6, 4, 6))
 	filter.border_color = p.border
 	filter.border_width_bottom = 1

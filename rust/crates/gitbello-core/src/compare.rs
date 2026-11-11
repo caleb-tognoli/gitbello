@@ -386,20 +386,35 @@ pub fn push_recent(list: &[String], entry: &RecentComparison) -> Vec<String> {
 }
 
 /// Indices of the files whose path (or original path) contains `query`, in
-/// any case; all of them for an empty query.
+/// any case; all of them for an empty query. A query in double quotes
+/// (`"src/auth.rs"`) names one path: only the file at exactly that path, or
+/// renamed from it, matches (File history's Compare versions).
 pub fn filter_files(files: &[CompareFile], query: &str) -> Vec<usize> {
-    let query = query.trim().to_lowercase();
+    let query = query.trim();
+    let exact = exact_path(query);
+    // An opening quote alone is a path still being typed.
+    let needle = query.trim_start_matches('"').to_lowercase();
     files
         .iter()
         .enumerate()
         .filter(|(_, file)| {
-            query.is_empty()
-                || std::iter::once(&file.path)
-                    .chain(file.original_path.as_ref())
-                    .any(|p| p.to_string_lossy().to_lowercase().contains(&query))
+            let mut paths = std::iter::once(&file.path)
+                .chain(file.original_path.as_ref())
+                .map(|p| p.to_string_lossy().replace('\\', "/"));
+            match &exact {
+                Some(path) => paths.any(|p| p == *path),
+                None => needle.is_empty() || paths.any(|p| p.to_lowercase().contains(&needle)),
+            }
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+/// The path a quoted filter names (`"a/b.rs"` -> `a/b.rs`), `/`-separated;
+/// `None` for any other query.
+fn exact_path(query: &str) -> Option<String> {
+    let inner = query.strip_prefix('"')?.strip_suffix('"')?;
+    (!inner.is_empty()).then(|| inner.replace('\\', "/"))
 }
 
 /// `(path, added, removed)` from `git diff --numstat -z -M` output, `None`
@@ -596,5 +611,33 @@ mod tests {
         assert_eq!(filter_files(&files, "auth"), vec![0]);
         assert_eq!(filter_files(&files, "OLD"), vec![1]);
         assert_eq!(filter_files(&files, ".md"), vec![1, 2]);
+    }
+
+    #[test]
+    fn quoted_filter_matches_one_path() {
+        let file = |path: &str, original: Option<&str>| CompareFile {
+            change: Change::Modified,
+            path: PathBuf::from(path),
+            original_path: original.map(PathBuf::from),
+            stats: None,
+            untracked: false,
+        };
+        let files = vec![
+            file("src/auth.rs", None),
+            file("src/auth.rs.bak", None),
+            file("lib/src/auth.rs", None),
+            file("src/login/auth.rs", Some("src/old auth \u{e8}.rs")),
+        ];
+        assert_eq!(filter_files(&files, "src/auth.rs"), vec![0, 1, 2]);
+        assert_eq!(filter_files(&files, "\"src/auth.rs\""), vec![0]);
+        assert_eq!(filter_files(&files, " \"src/auth.rs\" "), vec![0]);
+        // The path is exact: its case too.
+        assert_eq!(filter_files(&files, "\"SRC/auth.rs\""), Vec::<usize>::new());
+        // A rename matches under either name.
+        assert_eq!(filter_files(&files, "\"src/old auth \u{e8}.rs\""), vec![3]);
+        assert_eq!(filter_files(&files, "\"src/login/auth.rs\""), vec![3]);
+        // An opening quote alone is a path being typed; `""` filters nothing.
+        assert_eq!(filter_files(&files, "\"src/auth.rs"), vec![0, 1, 2]);
+        assert_eq!(filter_files(&files, "\"\""), vec![0, 1, 2, 3]);
     }
 }

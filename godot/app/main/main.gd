@@ -10,6 +10,8 @@ const REPO_ARG: String = "--repo="
 const REPO_TAB: PackedScene = preload("res://app/repo_tab/repo_tab.tscn")
 ## Worktree chips Ctrl+1 … Ctrl+9 select.
 const CHIP_SHORTCUTS: int = 9
+## Alt+1 … Alt+5 show the switch's first … fifth view.
+const VIEW_SHORTCUTS: int = 5
 ## Repositories File → Open recent lists.
 const RECENT_MENU: int = 12
 
@@ -97,6 +99,7 @@ func _ready() -> void:
 		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
 		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
 		&"view.compare": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.COMPARE,
+		&"view.file_history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.FILE,
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
 		&"history.toggle_compact": func() -> bool: return Core.history_compact(),
 		&"history.toggle_graph": func() -> bool: return Core.history_graph(),
@@ -536,19 +539,30 @@ func _register_actions() -> void:
 			PackedStringArray(["Ctrl+Shift+L"]))
 	Actions.register(&"view.history", "History", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.HISTORY),
-			PackedStringArray(["Alt+2"]), has_repo, no_repo)
+			PackedStringArray(), has_repo, no_repo)
 	Actions.register(&"view.changes", "Changes", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.CHANGES),
-			PackedStringArray(["Alt+1"]), has_repo, no_repo)
+			PackedStringArray(), has_repo, no_repo)
 	# Next and previous go round the switch's shown buttons.
 	Actions.register(&"view.next", "Next view", "View",
-			func() -> void: current_view().cycle_view(1), PackedStringArray(["Ctrl+PageDown"]), has_repo, no_repo)
+			func() -> void: current_view().cycle_view(1), PackedStringArray(["Alt+PageDown"]), has_repo, no_repo)
 	Actions.register(&"view.previous", "Previous view", "View",
-			func() -> void: current_view().cycle_view(-1), PackedStringArray(["Ctrl+PageUp"]), has_repo, no_repo)
+			func() -> void: current_view().cycle_view(-1), PackedStringArray(["Alt+PageUp"]), has_repo, no_repo)
 	Actions.register(&"view.shelves", "Shelves", "View",
-			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(["Alt+3"]),
+			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(),
 			func() -> bool: return current_page() != null and not current_page().session.shelves().is_empty(),
 			_says("This repository has no shelves."))
+	# Alt+number follows the switch as it shows: Shelves, Compare and File
+	# history come and go, so the third button is not always the same view.
+	for i: int in VIEW_SHORTCUTS:
+		var position: int = i
+		var numbered: ActionRegistry.Action = Actions.register(StringName("view.select_%d" % (i + 1)),
+				"Show view %d" % (i + 1), "View",
+				func() -> void: Actions.run_action(current_view().view_action_at(position)),
+				PackedStringArray(["Alt+%d" % (i + 1)]),
+				func() -> bool:
+					return current_view() != null and Actions.is_enabled(current_view().view_action_at(position)))
+		numbered.hidden = true
 	for i: int in CHIP_SHORTCUTS:
 		var index: int = i
 		var action: ActionRegistry.Action = Actions.register(StringName("worktree.select_%d" % (i + 1)),
@@ -562,6 +576,13 @@ func _register_actions() -> void:
 	_register_merge_actions()
 	_register_worktree_actions()
 	_register_compare_actions()
+	_register_file_history_actions()
+	# The views' own actions show the number of their place in the switch.
+	for id: StringName in [&"view.changes", &"view.history", &"view.shelves", &"view.compare", &"view.file_history"]:
+		var view_id: StringName = id
+		Actions.get_action(id).shortcut_from = func() -> StringName:
+			var place: int = current_view().view_position(view_id) if current_view() != null else -1
+			return StringName("view.select_%d" % (place + 1)) if place >= 0 and place < VIEW_SHORTCUTS else &""
 	Actions.register(&"app.settings", "Settings…", "App", _open_settings, PackedStringArray(["Ctrl+Comma"]))
 	Actions.register(&"diff.cycle_mode", "Next diff mode", "View",
 			func() -> void: _mode_diff_panel().cycle_mode(), PackedStringArray(["Ctrl+Shift+D"]),
@@ -671,6 +692,10 @@ func _register_change_actions() -> void:
 				var page: RepoTab = current_page()
 				if page.view == WorktreeView.View.HISTORY:
 					page.history().focus_search()
+				elif page.view == WorktreeView.View.FILE:
+					current_view().file_view().focus_filter()
+				elif page.view == WorktreeView.View.COMPARE:
+					current_view().compare().filter_field().focus_text()
 				else:
 					changes.call().focus_filter(),
 			PackedStringArray(["Ctrl+F"]), repo_ready)
@@ -1138,6 +1163,8 @@ func _register_worktree_actions() -> void:
 func _update_localized_actions() -> void:
 	for i: int in CHIP_SHORTCUTS:
 		Actions.get_action(StringName("worktree.select_%d" % (i + 1))).label = tr("Show worktree %d") % (i + 1)
+	for i: int in VIEW_SHORTCUTS:
+		Actions.get_action(StringName("view.select_%d" % (i + 1))).label = tr("Show view %d") % (i + 1)
 	for choice: String in ["system", "light", "dark"]:
 		Actions.get_action(StringName("view.theme_" + choice)).label = tr("Theme: %s") % tr(choice.capitalize())
 
@@ -1212,6 +1239,9 @@ func _focused_diff() -> DiffView:
 ## else the one on screen; null when it has no rows or no changes source.
 func _navigable_diff() -> DiffView:
 	var diff: DiffView = _focused_diff()
+	var view: WorktreeView = current_view()
+	if diff == null and view != null and view.view == WorktreeView.View.FILE and view.file_view().is_blame():
+		diff = view.file_view().blame_view()
 	if diff == null:
 		for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
 			var panel: DiffPanel = node as DiffPanel
@@ -1264,6 +1294,8 @@ func _view_diff_panel(page: RepoTab) -> DiffPanel:
 			return page.history().details().diff_panel()
 		WorktreeView.View.COMPARE:
 			return page.active_view().compare().diff_panel()
+		WorktreeView.View.FILE:
+			return page.active_view().file_view().diff_panel()
 	return page.changes().diff_panel()
 
 
@@ -1274,6 +1306,8 @@ static func _diff_slot(page: RepoTab) -> String:
 			return "commit"
 		WorktreeView.View.COMPARE:
 			return "compare"
+		WorktreeView.View.FILE:
+			return FileView.SLOT
 	return "changes"
 
 
@@ -1376,6 +1410,87 @@ func _palette_entries() -> Array[Dictionary]:
 
 ## Compare (PLAN M7.12): the view, its bar, and the ways in: ref menus,
 ## History's commits and Branch → Compare….
+## File history (PLAN M8a): opening a file's history from whatever view has
+## a file in focus, and what a version in it offers.
+func _register_file_history_actions() -> void:
+	var page: Callable = func() -> WorktreeView: return current_view()
+	var is_ready: Callable = func() -> bool:
+		return page.call() != null and page.call().session != null and page.call().session.is_ready()
+	var has_open: Callable = func() -> bool:
+		return is_ready.call() and page.call().file_view().has_history()
+	var shown: Callable = func() -> bool:
+		return has_open.call() and page.call().view == WorktreeView.View.FILE
+	var target: Callable = func() -> Dictionary:
+		return page.call().file_history_target() if is_ready.call() else {}
+	var no_history: Callable = _says("No file history is open.")
+	Actions.register(&"file_history.open", "File history", "File history",
+			func() -> void:
+				var file: Dictionary = target.call()
+				page.call().open_file_history(String(file["path"]), String(file["start"]), String(file["start_name"])),
+			PackedStringArray(["Ctrl+Shift+H"]),
+			func() -> bool: return not target.call().is_empty(), _says("Select a file first."))
+	# Blame is the File history's switch: there it turns it on and off;
+	# anywhere else it opens the file's history with it on.
+	Actions.register(&"file_history.blame", "Blame", "File history",
+			func() -> void:
+				var file: Dictionary = target.call()
+				if shown.call():
+					var file_view: FileView = page.call().file_view()
+					file_view.set_blame(not file_view.is_blame(), int(file.get("line", -1)))
+					return
+				page.call().open_file_history(String(file["path"]), String(file["start"]), String(file["start_name"]),
+						true, int(file["line"])),
+			PackedStringArray(["Ctrl+Alt+B"]),
+			func() -> bool: return shown.call() or not target.call().is_empty(), _says("Select a file first."))
+	var blaming: Callable = func() -> bool:
+		return shown.call() and page.call().file_view().is_blame()
+	Actions.register(&"blame.before", "Blame before this commit", "Blame",
+			func() -> void: page.call().file_view().blame_before(), PackedStringArray(),
+			func() -> bool: return blaming.call() and page.call().file_view().can_blame_before(),
+			func() -> String:
+				return page.call().file_view().blame_before_reason() if blaming.call() else tr("No blame is open."))
+	Actions.register(&"blame.show_changes", "Show changes", "Blame",
+			func() -> void: page.call().file_view().show_blame_changes(), PackedStringArray(),
+			func() -> bool: return blaming.call() and page.call().file_view().can_show_blame_changes(),
+			func() -> String:
+				return page.call().file_view().show_blame_changes_reason() if blaming.call() else tr("No blame is open."))
+	Actions.register(&"blame.toggle_ignore_whitespace", "Ignore whitespace in blame", "Blame",
+			func() -> void:
+				Core.set_blame_ignore_whitespace(not Core.blame_ignore_whitespace())
+				get_tree().call_group(FileView.GROUP, &"refresh_blame_options"))
+	Actions.register(&"blame.toggle_detect_moves", "Detect moved lines in blame", "Blame",
+			func() -> void:
+				Core.set_blame_detect_moves(not Core.blame_detect_moves())
+				get_tree().call_group(FileView.GROUP, &"refresh_blame_options"))
+	Actions.register(&"view.file_history", "File history", "View",
+			func() -> void: page.call().show_view(WorktreeView.View.FILE), PackedStringArray(),
+			has_open, no_history)
+	Actions.register(&"file_history.close", "Close file history", "File history",
+			func() -> void: page.call().close_file_history(), PackedStringArray(), has_open, no_history)
+	Actions.register(&"file_history.compare_versions", "Compare versions", "File history",
+			func() -> void: page.call().file_view().compare_versions(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().file_view().can_compare_versions(),
+			_says("Ctrl+click a second version in the file's history to compare two versions."))
+	Actions.register(&"file_history.restore", "Restore version", "File history",
+			func() -> void: page.call().file_view().restore(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().file_view().can_restore(),
+			func() -> String:
+				return page.call().file_view().restore_reason() if shown.call() else tr("No file history is open."))
+	Actions.register(&"file_history.open_version", "Open version", "File history",
+			func() -> void: page.call().file_view().open_version(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().file_view().can_open_version(),
+			_says("Select a version of the file."))
+	Actions.register(&"file_history.show_in_history", "Open in History", "File history",
+			func() -> void: page.call().file_view().show_in_history(), PackedStringArray(),
+			func() -> bool: return shown.call() and page.call().file_view().can_show_in_history(),
+			_says("Select one commit in the file's history."))
+	Actions.register(&"file_history.copy_hash", "Copy commit hash", "File history",
+			func() -> void: page.call().ops().copy_hash(page.call().file_view().target_commit()),
+			PackedStringArray(),
+			func() -> bool: return shown.call() and not page.call().file_view().target_commit().is_empty(),
+			_says("Select a commit in the file's history."))
+
+
 func _register_compare_actions() -> void:
 	var page: Callable = func() -> WorktreeView: return current_view()
 	var is_ready: Callable = func() -> bool:
@@ -1393,7 +1508,7 @@ func _register_compare_actions() -> void:
 	var commit: Callable = func() -> Dictionary:
 		return page.call().commit_target() if is_ready.call() else {}
 	Actions.register(&"view.compare", "Compare", "View",
-			func() -> void: page.call().show_view(WorktreeView.View.COMPARE), PackedStringArray(["Alt+4"]),
+			func() -> void: page.call().show_view(WorktreeView.View.COMPARE), PackedStringArray(),
 			comparing, no_comparison)
 	Actions.register(&"compare.close", "Close comparison", "Compare",
 			func() -> void: page.call().close_compare(), PackedStringArray(), comparing, no_comparison)
@@ -1467,7 +1582,7 @@ func _register_compare_actions() -> void:
 				return has_head.call() and not commit.call().is_empty() \
 						and page.call().history().selected_pair().is_empty(),
 			_says("Select a commit in History."))
-	Actions.register(&"history.compare_selected", "Compare these commits", "History",
+	Actions.register(&"history.compare_selected", "Compare commits", "History",
 			func() -> void:
 				var pair: PackedStringArray = page.call().history().selected_pair()
 				page.call().open_compare(pair[0], pair[1], false),

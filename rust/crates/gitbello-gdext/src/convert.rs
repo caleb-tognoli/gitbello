@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use gitbello_core::blame::BlameLoad;
 use gitbello_core::changes::{change_code, is_conflicted, FilePick};
 use gitbello_core::compare::{
     CompareCommit, CompareFile, CompareMode, CompareSide, OnlyOn, RecentComparison, ResolvedSide,
@@ -13,6 +14,7 @@ use gitbello_core::diff::{
     viewer::{self, Offered},
     DiffContent, DiffKind, FileDiff, LayoutRow, LineKind,
 };
+use gitbello_core::file_history::FileVersion;
 use gitbello_core::git::{GitError, GitErrorKind};
 use gitbello_core::highlight::{highlight, language_for, Language};
 use gitbello_core::ignore::{
@@ -25,7 +27,10 @@ use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
     RefKind, RepoStatus, Shelf, ShelfFile, StashEntry, Worktree,
 };
-use gitbello_core::runtime::{CompareState, ConflictState, DiffState, RepoState};
+use gitbello_core::runtime::{
+    BlameState, CompareState, ConflictState, DiffState, FileHistoryState, FileSelection, RepoState,
+    WorkingVersion,
+};
 use gitbello_core::sidebar::{operation_label, Badge, BranchNode, LabelKind, RefLabel};
 use godot::prelude::*;
 
@@ -542,6 +547,93 @@ pub fn compare_commit_row(commit: &CompareCommit, refs: &[RefLabel]) -> VarDicti
         },
         "parents" => i64::from(commit.parents),
         "in_head" => commit.in_head,
+    }
+}
+
+/// A version of a file's history, shaped like a History row (`graph_rows`)
+/// without the graph: `{oid, hash, subject, author, email, coauthors, time,
+/// refs, outgoing, parents, path, original_path, code, additions, deletions,
+/// exists}`. `path` is the file's name in that commit, `code` what the
+/// commit did to it; the counts are -1 for a binary file; `exists` is false
+/// when the commit deleted the file.
+pub fn file_version_row(version: &FileVersion, refs: &[RefLabel]) -> VarDictionary {
+    let coauthors: Vec<(&str, &str)> = version
+        .coauthors
+        .iter()
+        .map(|(name, email)| (name.as_str(), email.as_str()))
+        .collect();
+    let (additions, deletions) = version
+        .stats
+        .map_or((-1, -1), |(a, r)| (i64::from(a), i64::from(r)));
+    vdict! {
+        "oid" => &gstr(&version.oid),
+        "hash" => &gstr(&version.oid),
+        "subject" => &gstr(&version.subject),
+        "author" => &gstr(&version.author),
+        "email" => &gstr(&version.email),
+        "coauthors" => &identities(&coauthors),
+        "refs" => &labels(refs),
+        "outgoing" => false,
+        "time" => version.time,
+        "parents" => to_i64(version.parents.len()),
+        "path" => &path_str(&version.path),
+        "original_path" => &version.original_path.as_deref().map_or_else(GString::new, path_str),
+        "code" => change_letter(version.change),
+        "additions" => additions,
+        "deletions" => deletions,
+        "exists" => version.exists(),
+    }
+}
+
+/// The open file history: `{open, path, names, start, start_name, count,
+/// total, filter, loading, error, has_working, working, selected}`. `names`
+/// are every name the file had (the given one first), `start` is empty for
+/// HEAD, `count` is the commits shown and `total` all of them (they differ
+/// under `filter`), `error` is an `error_dict` or empty, `has_working` says
+/// whether the Uncommitted changes row shows, `working` is that row
+/// (`{code, original_path, additions, deletions}`, as `file_version_row`,
+/// with `?` for an untracked file and `U` for a conflicted one; the counts
+/// are -1 until counted and for a binary file) or empty, and `selected` is
+/// a commit, `working` or "".
+pub fn file_history_info(
+    history: Option<&FileHistoryState>,
+    working: Option<WorkingVersion>,
+) -> VarDictionary {
+    let Some(history) = history else {
+        return vdict! { "open" => false };
+    };
+    let request = history.request();
+    let names: PackedStringArray = history.names().iter().map(|p| path_str(p)).collect();
+    let selected = match history.selected() {
+        Some(FileSelection::Working) => "working".to_owned(),
+        Some(FileSelection::Version(oid)) => oid.clone(),
+        None => String::new(),
+    };
+    let working_row = working.as_ref().map_or_else(VarDictionary::new, |row| {
+        let (additions, deletions) = row
+            .stats
+            .map_or((-1, -1), |(a, d)| (i64::from(a), i64::from(d)));
+        vdict! {
+            "code" => row.code,
+            "original_path" => &row.original_path.as_deref().map_or_else(GString::new, path_str),
+            "additions" => additions,
+            "deletions" => deletions,
+        }
+    });
+    vdict! {
+        "open" => true,
+        "path" => &path_str(&request.path),
+        "names" => &names,
+        "start" => &gstr(request.start.as_deref().unwrap_or_default()),
+        "start_name" => &gstr(&request.start_name),
+        "count" => to_i64(history.row_count()),
+        "total" => to_i64(history.total_count()),
+        "filter" => &gstr(history.filter()),
+        "loading" => history.is_loading(),
+        "error" => &history.error().as_ref().map(error_dict).unwrap_or_default(),
+        "has_working" => working.is_some(),
+        "working" => &working_row,
+        "selected" => &gstr(&selected),
     }
 }
 
@@ -1360,5 +1452,118 @@ pub fn ignore_preview(preview: &IgnorePreview) -> VarDictionary {
         "hidden_sample" => &paths(&preview.hidden_sample),
         "tracked_count" => to_i64(preview.tracked_count),
         "tracked_sample" => &paths(&preview.tracked_sample),
+    }
+}
+
+/// A blame: `{open, state, oid, path, lines, blamed, commits, loading,
+/// error, focus}`. `state` is `loading` (the text or more lines are to
+/// come), `done`, `error`, `binary`, `too_large` or `missing` (the working
+/// copy has no such file); `oid` is empty for the working copy; `lines` and
+/// `blamed` count the file's lines and those git has reported so far;
+/// `focus` is the focused commit's hash.
+pub fn blame_info(blame: Option<&BlameState>) -> VarDictionary {
+    let Some(blame) = blame else {
+        return vdict! { "open" => false };
+    };
+    let load = blame.load();
+    let state = match &load {
+        BlameLoad::Loading => "loading",
+        BlameLoad::Done => "done",
+        BlameLoad::Failed(_) | BlameLoad::Cancelled => "error",
+        BlameLoad::Binary => "binary",
+        BlameLoad::TooLarge(_) => "too_large",
+        BlameLoad::Missing => "missing",
+    };
+    let error = match &load {
+        BlameLoad::Failed(error) => error_dict(error),
+        _ => VarDictionary::new(),
+    };
+    let request = blame.request();
+    let table = blame.table();
+    vdict! {
+        "open" => true,
+        "state" => state,
+        "oid" => &gstr(request.rev.as_deref().unwrap_or_default()),
+        "path" => &path_str(&request.path),
+        "lines" => to_i64(table.line_count()),
+        "blamed" => to_i64(table.blamed_count()),
+        "commits" => to_i64(table.commits().len()),
+        "loading" => load == BlameLoad::Loading,
+        "error" => &error,
+        "focus" => &gstr(blame.focus().unwrap_or_default()),
+    }
+}
+
+/// Lines `start..start + count` of a blame, shaped as the diff view's
+/// unchanged lines (`index` -1, `kind` 1, the line's number as `old` and
+/// `new`, `text`, `syntax`) plus who wrote them: `commit` (the hash; empty
+/// until git reports the line), `first` (the line starts a run of its
+/// commit), `author`, `email`, `time`, `summary`, `age` (0 for the oldest
+/// commit of the file, 1 for the newest), `working` (not committed yet)
+/// and `focus` (the line is the focused commit's).
+pub fn blame_rows(blame: &BlameState, start: usize, count: usize) -> Array<VarDictionary> {
+    let language = diff_language(&blame.request().path);
+    let focus = blame.focus();
+    let table = blame.table();
+    let end = start.saturating_add(count).min(table.line_count());
+    let mut out = Array::new();
+    for line in start.min(end)..end {
+        let number = u32::try_from(line + 1).unwrap_or(u32::MAX);
+        let mut row = plain_line(
+            1,
+            number,
+            number,
+            &display_text(table.line_text(line)),
+            language,
+        );
+        match table.commit_of(line) {
+            Some(commit) => {
+                row.set("commit", &gstr(&commit.oid));
+                row.set("first", table.starts_run(line));
+                row.set("author", &gstr(&commit.author));
+                row.set("email", &gstr(&commit.email));
+                row.set("time", commit.time);
+                row.set("summary", &gstr(&commit.summary));
+                row.set("age", f64::from(table.age(commit)));
+                row.set("working", commit.is_working());
+                row.set("focus", focus == Some(commit.oid.as_str()));
+            }
+            None => {
+                row.set("commit", &GString::new());
+                row.set("first", false);
+                row.set("focus", false);
+            }
+        }
+        out.push(&row);
+    }
+    out
+}
+
+/// What blame says of line `line` (0-based): `{commit, author, email, time,
+/// summary, working, boundary, path, orig_line, previous, previous_path}`.
+/// `path` is the file's name in the commit, `orig_line` the line's number
+/// there, `previous` the commit the line came from ("" when this commit
+/// added it). Empty until git reports the line.
+pub fn blame_line(blame: &BlameState, line: usize) -> VarDictionary {
+    let table = blame.table();
+    let (Some(block), Some(commit)) = (table.block_of(line), table.commit_of(line)) else {
+        return VarDictionary::new();
+    };
+    let (previous, previous_path) = match &block.previous {
+        Some((oid, path)) => (gstr(oid), path_str(path)),
+        None => (GString::new(), GString::new()),
+    };
+    vdict! {
+        "commit" => &gstr(&commit.oid),
+        "author" => &gstr(&commit.author),
+        "email" => &gstr(&commit.email),
+        "time" => commit.time,
+        "summary" => &gstr(&commit.summary),
+        "working" => commit.is_working(),
+        "boundary" => commit.boundary,
+        "path" => &path_str(&block.path),
+        "orig_line" => table.orig_line(line).map_or(0, i64::from),
+        "previous" => &previous,
+        "previous_path" => &previous_path,
     }
 }

@@ -13,6 +13,7 @@ pub use loader::{
     GRAPH_JOB_LABEL,
 };
 pub use log::{LogParseError, LogRecord, RecordSplitter, LOG_ARGS};
+pub(crate) use search::{contains_folded, MIN_HASH_DIGITS};
 pub use search::{CommitMatcher, CommitSearch, SEARCH_CHUNK_ROWS, SEARCH_JOB_LABEL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

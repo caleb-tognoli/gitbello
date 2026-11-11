@@ -210,6 +210,7 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
                     DiffSlot::Changes => "diff_changed",
                     DiffSlot::Commit => "commit_diff_changed",
                     DiffSlot::Compare => "compare_diff_changed",
+                    DiffSlot::File => "file_history_diff_changed",
                 };
                 session.emit_signal(signal, &[]);
             }
@@ -217,6 +218,22 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
         RuntimeEvent::CompareChanged { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
                 session.emit_signal("compare_changed", &[]);
+            }
+        }
+        RuntimeEvent::FileHistoryChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("file_history_changed", &[]);
+            }
+        }
+        RuntimeEvent::BlameChanged { repo } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                session.emit_signal("blame_changed", &[]);
+            }
+        }
+        RuntimeEvent::BlameVersionFound { repo, oid } => {
+            if let Some(mut session) = find(sessions, &repo) {
+                let oid = gstr(oid.as_deref().unwrap_or_default());
+                session.emit_signal("blame_version_found", &[oid.to_variant()]);
             }
         }
         RuntimeEvent::Missing { repo } => {
@@ -971,6 +988,38 @@ impl AppCore {
     fn set_history_compact(&mut self, value: bool) -> bool {
         runtime_cell::with(|rt| {
             rt.config_mut().history_compact = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
+    /// Whether blame skips changes that only touched whitespace (saved in
+    /// the config).
+    #[func]
+    fn blame_ignore_whitespace(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().blame_ignore_whitespace).unwrap_or(false)
+    }
+
+    #[func]
+    fn set_blame_ignore_whitespace(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().blame_ignore_whitespace = value;
+            rt.save_config().is_ok()
+        })
+        .unwrap_or(false)
+    }
+
+    /// Whether blame follows lines moved within the file (saved in the
+    /// config).
+    #[func]
+    fn blame_detect_moves(&self) -> bool {
+        runtime_cell::with(|rt| rt.config().blame_detect_moves).unwrap_or(false)
+    }
+
+    #[func]
+    fn set_blame_detect_moves(&mut self, value: bool) -> bool {
+        runtime_cell::with(|rt| {
+            rt.config_mut().blame_detect_moves = value;
             rt.save_config().is_ok()
         })
         .unwrap_or(false)

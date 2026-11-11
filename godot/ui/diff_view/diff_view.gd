@@ -123,6 +123,9 @@ var block_count: int = 0:
 	set(value):
 		block_count = value
 		queue_redraw()
+## Number columns of the unified layout: the old and the new line's, or one
+## for a file shown as it is (blame).
+var number_columns: int = 2
 ## Show the commit checkboxes' gutter.
 var pickable: bool = false:
 	set(value):
@@ -609,7 +612,7 @@ func block_button_rect(row: int, action: String) -> Rect2:
 	if int(data.get("block", -1)) < 0 or int(data.get("kind", -1)) != KIND_HUNK:
 		return Rect2()
 	var top: float = row * row_height() - scroll_offset()
-	var rect: Rect2 = Rect2(_pick_width(), top, content_width() - _pick_width(), row_height())
+	var rect: Rect2 = Rect2(_lead_width(), top, content_width() - _lead_width(), row_height())
 	for entry: Array in _block_rects(rect):
 		if String(entry[0]) == action:
 			return entry[1]
@@ -836,9 +839,39 @@ func _selected_columns(row: int, side: int, length: int) -> Vector2i:
 # --- Geometry -------------------------------------------------------------------
 
 
-## Width of the checkbox gutter (0 when not `pickable`).
-func _pick_width() -> float:
+## Width of the gutter before the line numbers: the checkboxes' when
+## `pickable`, else none. A subclass with its own gutter says how wide it is
+## and draws it (`_draw_lead`, `_lead_pressed`, `_lead_hot`).
+func _lead_width() -> float:
 	return _picks.size + _padding if pickable else 0.0
+
+
+## Draws the leading gutter of row `index` in `rect`.
+func _draw_lead(index: int, _data: Dictionary, rect: Rect2) -> void:
+	draw_rect(rect, _colors[&"gutter_bg"])
+	var state: String = row_pick(index)
+	if not state.is_empty():
+		_picks.draw(self, _picks.box_rect(rect, rect.position.x + _padding * 0.5), state)
+
+
+## The leading gutter of `row` was clicked.
+func _lead_pressed(row: int, _mouse: InputEventMouseButton) -> void:
+	if not pickable or row_pick(row).is_empty():
+		return
+	var lines: PackedInt32Array = PackedInt32Array()
+	for data: Dictionary in _row_lines(row):
+		lines.append(int(data.get("index", -1)))
+	pick_clicked.emit(lines, row_pick(row) != "all")
+
+
+## Whether the leading gutter of `row` can be clicked (the pointing hand).
+func _lead_hot(row: int) -> bool:
+	return pickable and not row_pick(row).is_empty()
+
+
+## A colour drawn over the background of a line (none by default).
+func _line_tint(_data: Dictionary) -> Color:
+	return Color(0, 0, 0, 0)
 
 
 ## Width of a number gutter: `columns` number columns, the +/- mark, a space.
@@ -848,7 +881,7 @@ func _gutter_width(columns: int) -> float:
 
 ## Left edge and width of `side` (0 for the unified layout or the left side).
 func _side_span(side: int) -> Vector2:
-	var left: float = _pick_width()
+	var left: float = _lead_width()
 	var width: float = content_width() - left
 	if not side_by_side:
 		return Vector2(left, width)
@@ -863,7 +896,7 @@ func text_left(side: int) -> float:
 
 
 func _text_left(side: int) -> float:
-	return _side_span(side).x + _gutter_width(1 if side_by_side else 2)
+	return _side_span(side).x + _gutter_width(1 if side_by_side else number_columns)
 
 
 ## The side under `x` (always 0 unified).
@@ -972,7 +1005,7 @@ func _block_at(at: Vector2) -> Array:
 	if data.is_empty() or int(data.get("kind", -1)) != KIND_HUNK or int(data.get("block", -1)) < 0:
 		return []
 	var top: float = row * row_height() - scroll_offset()
-	var rect: Rect2 = Rect2(_pick_width(), top, content_width() - _pick_width(), row_height())
+	var rect: Rect2 = Rect2(_lead_width(), top, content_width() - _lead_width(), row_height())
 	for entry: Array in _block_rects(rect):
 		if (entry[1] as Rect2).has_point(at):
 			return [row, entry[0]]
@@ -989,7 +1022,7 @@ func _expander_at(at: Vector2) -> Array:
 		return []
 	var top: float = row * row_height() - scroll_offset()
 	var rect: Rect2 = Rect2(0.0, top, content_width(), row_height())
-	for entry: Array in _expander_rects(data, _pick_width(), rect):
+	for entry: Array in _expander_rects(data, _lead_width(), rect):
 		if (entry[1] as Rect2).has_point(at):
 			return [row, entry[0]]
 	return []
@@ -1055,13 +1088,10 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 	var data: Dictionary = _cache.get(index, {})
 	if data.is_empty():
 		return
-	if pickable:
-		var gutter: float = _pick_width()
-		draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), _colors[&"gutter_bg"])
-		var state: String = row_pick(index)
-		if not state.is_empty():
-			_picks.draw(self, _picks.box_rect(rect, rect.position.x + _padding * 0.5), state)
-		rect = Rect2(rect.position + Vector2(gutter, 0.0), Vector2(rect.size.x - gutter, rect.size.y))
+	var lead: float = _lead_width()
+	if lead > 0.0:
+		_draw_lead(index, data, Rect2(rect.position, Vector2(lead, rect.size.y)))
+		rect = Rect2(rect.position + Vector2(lead, 0.0), Vector2(rect.size.x - lead, rect.size.y))
 	if _choice_rows.x >= 0 and index >= _choice_rows.x and index < _choice_rows.x + _choice_rows.y:
 		_draw_choice(index, rect)
 		return
@@ -1071,7 +1101,7 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 ## A row of the diff (after the checkbox gutter).
 func _draw_line_row(data: Dictionary, index: int, rect: Rect2) -> void:
 	if not side_by_side:
-		_draw_side(data, index, 0, rect, 2)
+		_draw_side(data, index, 0, rect, number_columns)
 		return
 	var left: Dictionary = data["left"]
 	var right: Dictionary = data["right"]
@@ -1126,6 +1156,9 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 	var bg: Color = _row_bg(kind, conflict_side)
 	if bg.a > 0.0:
 		draw_rect(rect, bg)
+	var tint: Color = _line_tint(data)
+	if tint.a > 0.0:
+		draw_rect(rect, tint)
 	if kind == KIND_MARKER:
 		_draw_marker(data, rect, gutter)
 		return
@@ -1139,6 +1172,8 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 		_draw_text(data, kind, row, side, maxf(rect.position.x + gutter, span.x), text_rect, baseline)
 		return
 	draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), _colors[&"gutter_bg"])
+	if tint.a > 0.0:
+		draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), tint)
 	var x: float = rect.position.x + _padding
 	var column: float = _number_digits * _char_width
 	var numbers: Array[int] = [int(data["old"]), int(data["new"])]
@@ -1415,12 +1450,8 @@ func _on_left_press(mouse: InputEventMouseButton) -> void:
 	grab_focus()
 	var at: Vector2 = mouse.position
 	var row: int = row_at(at)
-	if pickable and at.x < _pick_width() and row >= 0:
-		if not row_pick(row).is_empty():
-			var lines: PackedInt32Array = PackedInt32Array()
-			for data: Dictionary in _row_lines(row):
-				lines.append(int(data.get("index", -1)))
-			pick_clicked.emit(lines, row_pick(row) != "all")
+	if at.x < _lead_width() and row >= 0:
+		_lead_pressed(row, mouse)
 		return
 	var expander: Array = _expander_at(at)
 	if not expander.is_empty():
@@ -1509,8 +1540,8 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 	if over_undo:
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		return
-	var over_box: bool = pickable and motion.position.x < _pick_width() \
-			and row_at(motion.position) >= 0 and not row_pick(row_at(motion.position)).is_empty()
+	var over_box: bool = motion.position.x < _lead_width() \
+			and row_at(motion.position) >= 0 and _lead_hot(row_at(motion.position))
 	if not expander.is_empty() or over_box:
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	elif motion.position.x >= _text_left(_side_at(motion.position.x)) and row_at(motion.position) >= 0:
@@ -1613,8 +1644,8 @@ func _select_range(from: int, to: int, _keep: bool) -> void:
 
 
 func _update_h_range() -> void:
-	var columns: int = 1 if side_by_side else 2
-	var text_width: float = (content_width() - _pick_width()) / (2.0 if side_by_side else 1.0) - _gutter_width(columns)
+	var columns: int = 1 if side_by_side else number_columns
+	var text_width: float = (content_width() - _lead_width()) / (2.0 if side_by_side else 1.0) - _gutter_width(columns)
 	var total: float = _widest + _char_width * 4.0
 	_h_scroll.max_value = total
 	_h_scroll.page = maxf(0.0, text_width)

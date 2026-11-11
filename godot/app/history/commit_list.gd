@@ -10,7 +10,9 @@ extends VirtualList
 ## `refs_requested`. `compact` keeps one line: the graph, the subject, and
 ## on the right an icon-only chip per kind of ref (`RefChip.shape_icons`)
 ## and the author's avatar. `show_graph` off leaves the graph out: the
-## text starts at the left edge.
+## text starts at the left edge. A subclass can draw marks of its own after
+## the ref chips (`_trailing_width`, `_draw_trailing`): a file history's
+## line counts, for one.
 ## While a search is on
 ## (`set_search`), rows it does not match are dimmed (subject and graph dot)
 ## and the query is highlighted in the subjects of the rows it matches,
@@ -63,6 +65,8 @@ class RowText:
 	var labels_width: float = 0.0
 	## "Author +N · 3 h ago" (two-line rows only).
 	var meta: TextLine = null
+	## Width of the subclass's marks after the chips (`_trailing_width`).
+	var trailing_width: float = 0.0
 
 
 var _graph: GraphView = GraphView.new()
@@ -497,6 +501,9 @@ func _draw_two_line_text(row: int, data: Dictionary, text: RowText, band: Rect2,
 	var alpha: float = _dim_node_alpha if dimmed else 1.0
 	var right: float = meta_band.end.x - _padding
 	_draw_chips(row, text, right - maxf(0.0, text.labels_width - _label_gap), meta_band)
+	if text.trailing_width > 0.0:
+		_draw_trailing(row, data, Rect2(right - text.trailing_width, meta_band.position.y,
+				text.trailing_width, meta_band.size.y), alpha)
 
 	var people: Array[Dictionary] = [{"name": String(data.get("author", "")), "email": String(data.get("email", ""))}]
 	for person: Dictionary in data.get("coauthors", []):
@@ -534,6 +541,9 @@ func _draw_compact_text(row: int, data: Dictionary, text: RowText, rect: Rect2,
 	_meta_rects[row] = Rect2(right - _compact_avatar_size, rect.position.y, _compact_avatar_size, rect.size.y)
 	var chips_x: float = right - _compact_avatar_size - _avatar_gap - maxf(0.0, text.labels_width - _label_gap)
 	_draw_chips(row, text, chips_x, rect)
+	if text.trailing_width > 0.0:
+		_draw_trailing(row, data, Rect2(right - _compact_avatar_size - _avatar_gap - text.trailing_width,
+				rect.position.y, text.trailing_width, rect.size.y), _dim_node_alpha if dimmed else 1.0)
 	var top: float = rect.position.y + (rect.size.y - text.subject.get_size().y) * 0.5
 	var origin: Vector2 = Vector2(subject_x + _outgoing_width(data), top)
 	if not _query.is_empty() and not dimmed:
@@ -584,6 +594,9 @@ func _shape_row(data: Dictionary, subject_width: float, line_width: float) -> Ro
 		text.chips.append(chip)
 		text.chip_items.append(item)
 		text.labels_width += chip.size.x + _label_gap
+	text.trailing_width = _trailing_width(data)
+	if text.trailing_width > 0.0:
+		text.labels_width += text.trailing_width + _label_gap
 	if compact:
 		text.subject = _shape(data["subject"], subject_width - _outgoing_width(data)
 				- text.labels_width - _compact_avatar_size - _avatar_gap)
@@ -595,6 +608,19 @@ func _shape_row(data: Dictionary, subject_width: float, line_width: float) -> Ro
 	text.meta = _shape(meta_text(data), line_width - avatars_width - text.labels_width,
 			_meta_font_size)
 	return text
+
+
+## Width of what a subclass draws at the right of a row, after its ref
+## chips (on the author line; in a compact row before the avatar): 0 for
+## nothing. The row's text leaves it free.
+func _trailing_width(_data: Dictionary) -> float:
+	return 0.0
+
+
+## Draws a row's marks in `rect` (`_trailing_width` wide, the height of the
+## line they are on), faded by `alpha` on a dimmed row.
+func _draw_trailing(_row: int, _data: Dictionary, _rect: Rect2, _alpha: float) -> void:
+	pass
 
 
 ## Room the push icon takes before a compact row's subject: none unless the

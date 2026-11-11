@@ -53,10 +53,14 @@ use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 mod amend;
+mod blame;
 mod branch_delete;
 mod compare;
+mod file_history;
 mod ignore;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
+use blame::{apply_blame_commit, apply_blamed_version, blame_after_status};
+pub use blame::{BlameState, BLAME_COMMIT_JOB_LABEL, BLAME_JOB_LABEL, BLAME_VERSION_JOB_LABEL};
 use branch_delete::BranchDeleteState;
 pub use branch_delete::{
     BranchDelete, BranchDeleteInfo, DeletedBranch, RemoteBranch, BRANCH_DELETE_INFO_JOB_LABEL,
@@ -67,6 +71,11 @@ use compare::{apply_compare, compare_after_refs, compare_after_status};
 pub use compare::{
     CompareState, COMPARE_COMMIT_JOB_LABEL, COMPARE_DIFF_JOB_LABEL, COMPARE_JOB_LABEL,
     RESTORE_FROM_JOB_LABEL,
+};
+use file_history::{apply_file_commit, apply_working_stats, file_history_after_status};
+pub use file_history::{
+    FileHistoryRequest, FileHistoryState, FileSelection, WorkingVersion, FILE_COMMIT_JOB_LABEL,
+    FILE_DIFF_JOB_LABEL, FILE_HISTORY_JOB_LABEL, FILE_STATS_JOB_LABEL,
 };
 use ignore::{apply_ignore_picks, reload_ignore_rules, IgnoreState};
 pub use ignore::{
@@ -206,6 +215,9 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | COMPARE_JOB_LABEL
         | COMPARE_COMMIT_JOB_LABEL
         | COMPARE_DIFF_JOB_LABEL
+        | FILE_DIFF_JOB_LABEL
+        | FILE_COMMIT_JOB_LABEL
+        | BLAME_COMMIT_JOB_LABEL
         | COMMIT_DETAILS_JOB_LABEL
         | MERGE_PREVIEW_JOB_LABEL
         | IGNORE_PREVIEW_JOB_LABEL => (Interactive, true),
@@ -218,8 +230,9 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | LOCATION_JOB_LABEL
         | CLEANUP_SCAN_JOB_LABEL
         | FETCH_JOB_LABEL
+        | BLAME_VERSION_JOB_LABEL
         | BRANCH_DELETE_INFO_JOB_LABEL => (Interactive, false),
-        HEAD_INFO_JOB_LABEL | CONFLICT_SCAN_JOB_LABEL => (Normal, true),
+        HEAD_INFO_JOB_LABEL | CONFLICT_SCAN_JOB_LABEL | FILE_STATS_JOB_LABEL => (Normal, true),
         ENDINGS_SCAN_JOB_LABEL => (Background, true),
         SUMMARY_JOB_LABEL | AUTO_FETCH_JOB_LABEL | SEARCH_JOB_LABEL | GRAPH_JOB_LABEL => {
             (Background, false)
@@ -298,6 +311,24 @@ pub enum RuntimeEvent {
     /// The comparison opened with [`Runtime::open_compare`] loaded or failed.
     CompareChanged {
         repo: PathBuf,
+    },
+    /// The file history opened with [`Runtime::open_file_history`] has more
+    /// rows, ended, failed, was reloaded, or its Uncommitted changes row
+    /// came or went.
+    FileHistoryChanged {
+        repo: PathBuf,
+    },
+    /// The blame started with [`Runtime::blame_file_version`] has its text
+    /// or more lines, ended, failed, ran again, or its focused commit
+    /// changed or loaded.
+    BlameChanged {
+        repo: PathBuf,
+    },
+    /// What [`Runtime::blame_before`] found: the version of the file the
+    /// line came from, `None` when the history has none.
+    BlameVersionFound {
+        repo: PathBuf,
+        oid: Option<String>,
     },
     /// The worktree folder of this repository is gone; refreshes stop.
     Missing {
@@ -554,6 +585,9 @@ pub struct RepoState {
     commit_diff: Option<DiffState>,
     compare: Option<CompareState>,
     compare_diff: Option<DiffState>,
+    file_history: Option<FileHistoryState>,
+    file_diff: Option<DiffState>,
+    blame: Option<BlameState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
     /// Modified files whose only unstaged changes are line endings or the
@@ -635,6 +669,9 @@ impl RepoState {
             commit_diff: None,
             compare: None,
             compare_diff: None,
+            file_history: None,
+            file_diff: None,
+            blame: None,
             discards: Vec::new(),
             endings_only: HashSet::new(),
             endings_inputs: None,
@@ -1177,6 +1214,7 @@ impl RepoState {
             DiffSlot::Changes => &mut self.diff,
             DiffSlot::Commit => &mut self.commit_diff,
             DiffSlot::Compare => &mut self.compare_diff,
+            DiffSlot::File => &mut self.file_diff,
         }
     }
 
@@ -1345,12 +1383,13 @@ impl RepoState {
 }
 
 /// Which of a repository's diffs: the changes panel's, the commit details
-/// panel's or Compare's.
+/// panel's, Compare's or the file history's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiffSlot {
     Changes,
     Commit,
     Compare,
+    File,
 }
 
 impl DiffSlot {
@@ -1359,6 +1398,7 @@ impl DiffSlot {
             Self::Changes => DIFF_JOB_LABEL,
             Self::Commit => COMMIT_DIFF_JOB_LABEL,
             Self::Compare => COMPARE_DIFF_JOB_LABEL,
+            Self::File => FILE_DIFF_JOB_LABEL,
         }
     }
 }
@@ -1606,6 +1646,7 @@ impl Runtime {
             (DiffSlot::Changes, None) => state.diff()?.target().clone(),
             (DiffSlot::Commit, _) => state.commit_diff()?.target().clone(),
             (DiffSlot::Compare, _) => state.compare_diff()?.target().clone(),
+            (DiffSlot::File, _) => state.file_diff()?.target().clone(),
         };
         let dir = self.versions_dir.clone()?;
         Some(
@@ -3284,6 +3325,8 @@ impl Runtime {
         self.swap_reloaded_graphs(&mut out);
         self.report_refreshing(&mut out);
         self.advance_searches(&mut out);
+        self.advance_file_histories(&mut out);
+        self.advance_blames(&mut out);
         self.run_auto_fetch();
         let latest = self.runner.log().latest_seq();
         if latest != self.log_seq {
@@ -3379,8 +3422,10 @@ impl Runtime {
             }
             return;
         }
-        // Searches report through `SearchChanged`, not as jobs.
-        if label == SEARCH_JOB_LABEL {
+        // Searches report through `SearchChanged`, not as jobs; file
+        // histories through `FileHistoryChanged`.
+        if label == SEARCH_JOB_LABEL || label == FILE_HISTORY_JOB_LABEL || label == BLAME_JOB_LABEL
+        {
             return;
         }
         if label == OPEN_JOB_LABEL {
@@ -3459,6 +3504,27 @@ impl Runtime {
         if label == COMPARE_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Compare, kind, &repo, out);
             submit_old_file(&self.scheduler, state, DiffSlot::Compare);
+            return;
+        }
+        if label == FILE_COMMIT_JOB_LABEL {
+            apply_file_commit(state, kind, &repo, out);
+            return;
+        }
+        if label == FILE_STATS_JOB_LABEL {
+            apply_working_stats(state, kind, &repo, out);
+            return;
+        }
+        if label == BLAME_COMMIT_JOB_LABEL {
+            apply_blame_commit(state, kind, &repo, out);
+            return;
+        }
+        if label == BLAME_VERSION_JOB_LABEL {
+            apply_blamed_version(kind, &repo, out);
+            return;
+        }
+        if label == FILE_DIFF_JOB_LABEL {
+            apply_diff(state, DiffSlot::File, kind, &repo, out);
+            submit_old_file(&self.scheduler, state, DiffSlot::File);
             return;
         }
         if label == COMPARE_JOB_LABEL || label == COMPARE_COMMIT_JOB_LABEL {
@@ -3634,6 +3700,14 @@ impl Runtime {
                             reload_changes_diff(&self.scheduler, state, &mut self.diff_generation);
                         }
                         compare_after_status(&self.scheduler, state, &mut self.diff_generation);
+                        file_history_after_status(
+                            &self.scheduler,
+                            state,
+                            &mut self.diff_generation,
+                            false,
+                            out,
+                        );
+                        blame_after_status(&self.scheduler, state, out);
                         // Conflict markers live in the files, not the status.
                         if state.conflict.is_some() || state.operation.is_some() {
                             self.diff_generation += 1;
@@ -3656,6 +3730,14 @@ impl Runtime {
                     }
                     if refresh == RefreshKind::Status {
                         compare_after_status(&self.scheduler, state, &mut self.diff_generation);
+                        file_history_after_status(
+                            &self.scheduler,
+                            state,
+                            &mut self.diff_generation,
+                            true,
+                            out,
+                        );
+                        blame_after_status(&self.scheduler, state, out);
                     }
                     if refresh == RefreshKind::Refs {
                         compare_after_refs(&self.scheduler, state, &mut self.diff_generation);
@@ -4131,6 +4213,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Compare { .. }
         | JobOutput::Discarded(_)
         | JobOutput::EndingsOnly(_)
+        | JobOutput::WorkingStats { .. }
+        | JobOutput::BlamedVersion(_)
         | JobOutput::ShelfFiles(..)
         | JobOutput::ShelfDropped { .. }
         | JobOutput::MergePreview(_)
@@ -4891,7 +4975,12 @@ fn apply_old_file(
         Some(JobOutput::OldFile { oid, text: None }) => (None, Some(oid)),
         _ => (None, None),
     };
-    for slot in [DiffSlot::Changes, DiffSlot::Commit, DiffSlot::Compare] {
+    for slot in [
+        DiffSlot::Changes,
+        DiffSlot::Commit,
+        DiffSlot::Compare,
+        DiffSlot::File,
+    ] {
         let Some(diff) = state.slot_mut(slot).as_mut().filter(|d| d.old_loading) else {
             continue;
         };

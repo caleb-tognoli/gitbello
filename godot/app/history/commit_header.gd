@@ -47,7 +47,7 @@ var _pair_button: Button = Button.new()
 func _ready() -> void:
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(copy_action, _copy_hash))
 	_copy_hash.tooltip_text = tr("Copy the full hash")
-	_pair_button.text = "Compare these commits"
+	_pair_button.text = "Compare commits"
 	_pair_button.theme_type_variation = &"ToolbarButton"
 	_pair_button.focus_mode = Control.FOCUS_NONE
 	_pair_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -116,7 +116,7 @@ func has_body() -> bool:
 	return _body.visible
 
 
-## Shows "Compare these commits" while two commits are selected.
+## Shows "Compare commits" while two commits are selected.
 func show_pair_action(shown: bool) -> void:
 	_pair_button.icon = AppTheme.icon(&"GitCompare")
 	_pair_button.visible = shown

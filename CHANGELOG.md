@@ -4,6 +4,54 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 (`workspace.package.version`), `godot/project.godot` (`application/config/version`) and
 `godot/export_presets.cfg`, and shown in Help > About.
 
+## Unreleased
+
+### File history
+- File history (Ctrl+Shift+H, or a file's menu in Changes, History, Compare and
+  Shelves) opens a File history view: every commit that changed the file, each with the
+  lines it added and removed and its diff of that file.
+- Renames are followed across branches: commits made under an old name on a branch merged
+  after the rename are listed too. A chip marks the commit that added, renamed or deleted
+  the file.
+- The file's uncommitted changes come first while there are any, with their lines added
+  and removed. A history opened from a commit or a comparison is read from there, so a
+  file deleted since still has one.
+- The field over the versions filters them by message, author or hash (Ctrl+F), counts
+  the matches and holds Compact rows.
+- File history has its own icon, a page with a clock.
+- A version can be restored into the working copy (with Undo), opened, or shown in
+  History; two Ctrl+clicked versions open in Compare, filtered to the file.
+
+### Blame
+- File history's bar has a Blame switch (Ctrl+Alt+B): on, the selected version's diff
+  gives way to the file's lines, each run with the avatar and name of who last changed it
+  and when, and a bar that is stronger the newer the commit. Off, the diff is back.
+  Ctrl+Alt+B on a file anywhere else opens its history with Blame on, at the line under
+  the diff's caret.
+- The version selected in the list is the one blamed: the working copy (uncommitted lines
+  say so) or the file as any commit left it, under the name it had there.
+- Clicking a line's gutter focuses its commit: its details show over the file, its lines
+  are tinted and marked in the minimap, its row is marked in the versions, and Next and
+  Previous change step through its lines.
+- Blame before this commit blames the file as it was before the line's commit, across
+  renames; Show changes turns Blame off on that commit's diff of the file.
+- Blame options: Ignore whitespace and Detect moved lines, both remembered.
+- The text shows at once and the gutter fills as git reports the lines.
+
+### Compare
+- A path in double quotes in the files' filter shows only the file at exactly that path.
+  File history's Compare versions uses it, so files whose path merely contains the file's
+  no longer show.
+
+### Views
+- Alt+1 to Alt+5 show the first to fifth view of the switch as it is shown, so the number
+  matches the screen when Shelves, Compare or File history come and go. Tooltips and the
+  View menu show a view's current number.
+- Alt+PageDown and Alt+PageUp go to the next and previous view (were Ctrl+PageDown and
+  Ctrl+PageUp).
+- Ctrl+F focuses the filter in Compare.
+- Compare commits is the shorter name of Compare these commits.
+
 ## 1.1.0
 
 ### Compare

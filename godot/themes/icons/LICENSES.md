@@ -2,7 +2,7 @@
 
 The icons in this folder named like Godot's editor icons (`Add`, `Close`, `Folder`,
 `GuiTreeArrowDown`, …) come from the Godot Engine editor and are under its MIT
-license, below. The `Git*`, `Chevron*`, `Expand*`, `AutoScroll*`, `Rows*`, `KeyCaps`, `Terminal`, `User`, `Clock`, `Filter`, `Home`, `More`, `Image*`, `Zoom*` and `Swap` icons were drawn for gitbello
+license, below. The `Git*`, `Chevron*`, `Expand*`, `AutoScroll*`, `Rows*`, `KeyCaps`, `Terminal`, `User`, `Clock`, `FileHistory`, `Filter`, `Home`, `More`, `Image*`, `Zoom*` and `Swap` icons were drawn for gitbello
 in the same style, and the `File*` status icons after GitHub Desktop's; they are
 under gitbello's license (MIT).
 

@@ -286,7 +286,8 @@ func run() -> void:
 	var hovered: Control = get_viewport().gui_get_hovered_control()
 	expect(view.context_menu().visible, "right-clicking a shelved file opens its menu: files %s; mouse %s; hovered %s; overlay %s" % [
 			shelf_files.get_global_rect(), get_viewport().get_mouse_position(), str(hovered.get_path()) if hovered != null else "none", page.active_view().overlay().visible])
-	expect_eq(view.menu_labels(), PackedStringArray(["Restore file", "Discard file", "Open"]), "file menu has the per-file actions and Open")
+	expect_eq(view.menu_labels(), PackedStringArray(["Restore file", "Discard file", "Open", "File history"]),
+			"file menu has the per-file actions, Open and the history")
 	expect_eq(view.selected_shelf_file(), "notes.txt", "the right-clicked file is the action target")
 	view.context_menu().hide()
 	var original_oid: String = String(view.selected_shelf()["oid"])

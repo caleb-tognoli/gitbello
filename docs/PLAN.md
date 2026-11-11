@@ -437,8 +437,8 @@ This runs as a single job with rollback if any step fails.
 | Ctrl+Tab / Ctrl+Shift+Tab | next / previous repo tab |
 | Ctrl+1 … Ctrl+9 | select worktree chip 1–9 |
 | Ctrl+B | branch popover (was the sidebar toggle) |
-| Alt+1 … Alt+4 | Changes / History / Shelves / Compare (were Ctrl+Shift+G and Ctrl+Shift+H) |
-| Ctrl+PageDown / Ctrl+PageUp | next / previous view, round the switch's shown buttons |
+| Alt+1 … Alt+5 | the first … fifth view of the switch as it shows: Changes, History, then Shelves, Compare and File history while they are there (by place since M8a; were one fixed number per view, and before that Ctrl+Shift+G and Ctrl+Shift+H) |
+| Alt+PageDown / Alt+PageUp | next / previous view, round the switch's shown buttons (were Ctrl+PageDown / Ctrl+PageUp until M8a) |
 | Ctrl+T | new worktree |
 | Ctrl+N | Home tab (M7.5) |
 | Ctrl+O | Add existing folder (M7.5; was Open repository) |
@@ -447,6 +447,7 @@ This runs as a single job with rollback if any step fails.
 | Alt+O / Alt+T / Alt+B | Resolver: use ours / theirs / both for the conflict at the cursor (M7) |
 | F8 / Shift+F8 | Resolver: next / previous conflict (M7) |
 | Ctrl+/ | Settings → Keyboard (M7.11) |
+| Ctrl+Shift+H | History of the file in focus (M8a) |
 
 The other existing shortcuts stay.
 
@@ -995,7 +996,7 @@ Scope settled in the Q&A of 2026-11-08. Compare two states of a repository: bran
 
 **Entry points** (all actions, so also in the palette):
 - Ref menus (branch picker, ref chips, the "+N" popover): **Compare with current branch** and **Compare with…** (the ref on the right, the other side's picker open).
-- History: Ctrl+click a second commit selects two rows (the older one becomes the left side) → **Compare these commits** in the context menu and the details pane. A single commit's menu: **Compare with working copy** and **Compare with…**.
+- History: Ctrl+click a second commit selects two rows (the older one becomes the left side) → **Compare commits** in the context menu and the details pane. A single commit's menu: **Compare with working copy** and **Compare with…**.
 - **Branch → Compare…** (`Ctrl+Shift+C`; `Ctrl+Shift+D` is the diff mode cycle): the current branch on the left, the right picker open.
 
 **Actions.**
@@ -1012,7 +1013,7 @@ Scope settled in the Q&A of 2026-11-08. Compare two states of a repository: bran
 - [x] Entry points: ref menus, Branch → Compare…, History's two-commit selection
 - [x] Smoke test (open, swap, mode, filter, close); review stop
 
-As built in a: the view's bar holds Back, the two side chips with ⇄ between them, the ↑/↓ commit counts, the mode switch and Close (the switch's Compare tab has no × of its own). The Files tab is a flat list (the tree toggle comes with the Commits tab in b). "Compare these commits" is in the commit menu and the palette, not yet in the details pane. A comparison opened only to pick its other side (Branch → Compare…, Compare with…) is replaced by the pick, not kept for Back. Compare keeps its own diff slot, so the History and Changes selections are untouched.
+As built in a: the view's bar holds Back, the two side chips with ⇄ between them, the ↑/↓ commit counts, the mode switch and Close (the switch's Compare tab has no × of its own). The Files tab is a flat list (the tree toggle comes with the Commits tab in b). "Compare commits" is in the commit menu and the palette, not yet in the details pane. A comparison opened only to pick its other side (Branch → Compare…, Compare with…) is replaced by the pick, not kept for Back. Compare keeps its own diff slot, so the History and Changes selections are untouched.
 
 #### b — Commits, live sides, actions (≈1 week)
 - [x] Commits tab with both sections, All changes and narrowing
@@ -1021,7 +1022,7 @@ As built in a: the view's bar holds Back, the two side chips with ⇄ between th
 - [x] Recent comparisons in the picker
 - [x] Smoke test; shots in both themes (`tests/visual/compare_screenshots.tscn`); review stop
 
-As built in b: the Commits tab shows the commit list above the file list (2:3, draggable) rather than replacing it, so a narrowed commit's files stay in view; the rows are plain (subject, short hash, author, date) without lane colours, and the list stops at 2000 commits with a "More commits are not listed" row. The Files tab stays flat: Changes has no tree view to share. Narrowing to a commit compares it with its first parent (a root commit with the empty tree); a strip above the files names it and its × returns to All changes. Restore takes the left side's own revision (not the merge base) and, while narrowed, the commit's parent or the commit. A multi-commit cherry-pick refuses merge commits (one merge alone keeps the mainline-1 flow), and finishing a conflicted step through gitbello's commit continues the rest of the sequence. The Compare tab has its own × and the details pane shows "Compare these commits" while two commits are selected. Recent comparisons skip the one already open.
+As built in b: the Commits tab shows the commit list above the file list (2:3, draggable) rather than replacing it, so a narrowed commit's files stay in view; the rows are plain (subject, short hash, author, date) without lane colours, and the list stops at 2000 commits with a "More commits are not listed" row. The Files tab stays flat: Changes has no tree view to share. Narrowing to a commit compares it with its first parent (a root commit with the empty tree); a strip above the files names it and its × returns to All changes. Restore takes the left side's own revision (not the merge base) and, while narrowed, the commit's parent or the commit. A multi-commit cherry-pick refuses merge commits (one merge alone keeps the mainline-1 flow), and finishing a conflicted step through gitbello's commit continues the rest of the sequence. The Compare tab has its own × and the details pane shows "Compare commits" while two commits are selected. Recent comparisons skip the one already open.
 
 #### c — Layout pass (≈1 week)
 From Caleb's review of b (2026-11-08). It replaces the Files/Commits tabs, the mode switch and Back described above.
@@ -1050,11 +1051,184 @@ As built in c: `CommitHeader` (summary, people, date, hash, refs, message) is sp
 
 After review: the bar has a line under it and a divider before Recent, which follows the sides. The section headers are one-line rows (`VirtualList` gained `row_top`, `row_extent` and `row_at_offset` for lists with rows of other heights) with a fold arrow; a click folds the section, moving the cursor to All changes when its commit is folded away. Recent comparisons save the subjects of commit sides to list them by name, and the side picker lists commits by subject.
 
-### M8 — History tools and editing (≈2 weeks)
-- [ ] Blame view (`git blame --porcelain`, streamed), clickable to show the commit
-- [ ] File history (`git log --follow`) with per-commit diffs; two picked versions open Compare (M7.12) filtered to the file, and Compare's file menu gets "History of this file"
-- [ ] Editable working copy in `DiffView` with live re-diff, save, and dirty protection (§3.10)
-- [ ] Graph filter: "Show only matches", search by path and in full messages (find and highlight by subject, author and hash moved to M6.5 P5)
+### M8 — History tools and editing (a ≈1.5 weeks; b–d estimated when planned)
+
+Split on 2026-11-10 into four phases, each planned in its own Q&A and ending in a review stop (the four together had been estimated at 2 weeks): **a** file history, **b** blame, **c** the editable working copy, **d** the graph filter. File history comes first and is built so that b–d reuse its pieces (see **Shared with b–d**).
+
+#### M8a — File history (≈1.5 weeks)
+
+Scope settled in the Q&A of 2026-11-10. The commits that changed one file, each with its diff of that file. Files only: a folder's history is History filtered by path and comes with M8d.
+
+**View.** A *File history* view joins Changes | History | Shelves | Compare only while one is open, with a close × on its tab, like Compare. One per worktree: opening another file replaces it; closing returns to the view it was opened from. Not restored on restart. History and Compare keep their own selection and scroll (the view has its own diff slot).
+
+```
+( Changes 3 | History | File history × )
+ src/login/auth.rs · 12 commits
++--------------------------------+----------------------------------+
+| Uncommitted changes            | Improve login                    |
+| Improve login                  | (C) Caleb · 3 h ago · 1a2b3c4    |
+|  (C) Caleb · 3 h ago   +40 −12 | body…                            |
+| Move auth into login/          +----------------------------------+
+|  (A) Ann · Mar 4  [Renamed] +2 | src/login/auth.rs   +40 −12      |
+| Add auth                       |  @@ -10,6 +10,9 @@               |
+|  (A) Ann · Feb 20  [Added] +88 |  ...diff of this file only...    |
++--------------------------------+----------------------------------+
+```
+
+- **Bar:** the file's icon and path (folder dim, name strong; a long path cut in the middle) and the commit count ("Loading…" until the list is complete; removed at M8b's review, see there). When the file had other names, the tooltip lists them ("Also: src/auth.rs"). When the history starts from a commit other than HEAD, a chip names it ("as of <branch, tag or subject>").
+- **Rows:** History's two-line rows without the graph (`CommitList` with its own row source, as Compare's): the subject; below it the avatars, "Author +N · date" and, on the right, the lines this commit added and removed in the file (`+40 −12`, in the added and removed colours; nothing for a binary file) after a chip when the commit **Added**, **Renamed** (tooltip "Renamed from src/auth.rs") or **Deleted** the file. No ref chips in the rows; the details show them. Compact rows follow History's setting.
+- **Uncommitted changes:** a first row, in a one-line row like Compare's All changes, while the history starts from HEAD and the file has local changes; it shows the working copy against HEAD, read-only. A file that is new and not committed yet shows this row alone.
+- **Right side:** the selected commit's details (`CommitHeader`, as History and Compare) over the diff of the file in that commit against its first parent. There is no file list. The diff is read-only and keeps the diff modes, Show whole file, the minimap and the image viewer. A renaming commit's diff header reads old → new.
+- **Order and merges:** newest first, as git lists them. A merge shows only when the file after it differs from every parent (git's history simplification), with its diff against the first parent, as everywhere else in the app.
+
+**Start.** The history is read from the revision the file was seen at: HEAD from Changes, Shelves and the working-copy side of Compare; the selected commit from History's file list; the side (or the narrowed commit) from Compare. So a file deleted or renamed since then still has its history, under the name it had there.
+
+**Renames.** `git log --follow` is not used: it tracks one name at a time while it walks, so it loses commits made under the old name on a branch merged after the rename (measured 2026-11-10 on a throwaway repo: 4 of 6 commits listed; the side edit and the merge were missing). Instead the log is limited to every name the file is known to have had (`git log -M -- <new> <old>`): the first pass takes the given name; when it reaches the commit that added a name, the tree diff of that commit with rename detection (`diff-tree -r -M`) says whether it was a rename, and if so the old name joins the set and one more pass runs with both. Passes stop when no new name turns up, at most 8 names. A later pass lists a superset of the earlier one in the same order, so the list only gains rows and the selection is kept by commit. Copies are not followed.
+
+**Entry points.** One action, **File history** (`file_history.open`, `Ctrl+Shift+H`), on the file that has the focus: the highlighted file of Changes, History's commit files, Compare's files and a shelf's files, or the file of the diff shown. It is in each of those lists' menus and in the diff's menu, and so in the palette. Disabled with the reason for a submodule or an ignored file's row. While one is open, the Alt+number of its tab's place in the switch shows the view; `file_history.close` closes it.
+
+**A version's menu** (also actions):
+- **Compare versions** with two rows selected (Ctrl+click the second, as History): opens Compare with the older version on the left and the newer on the right as a full difference, its filter filled with the file's path and the file selected. Clearing the filter shows everything else that changed between the two.
+- **Restore version** (`file_history.restore`): writes the file as it was at that commit into the working copy, under the name the file has now (the one the history was opened with), backed up first; the toast offers Undo, as for discard and Compare's Restore. Disabled for a commit that deleted the file and for Uncommitted changes.
+- **Open version** (`file_history.open_version`): the file as of that commit in the default app, through Open's versions cache (M7.8 P3).
+- **Open in History** (`file_history.show_in_history`): switches to History with the commit selected and revealed; when it is not in the current scope, History switches to All branches first.
+- **Copy hash.**
+
+**Refresh.** A history that starts from HEAD reloads when HEAD moves (commit, pull, checkout), keeping the selected commit when it is still listed, and its Uncommitted changes row follows the status like Changes. A history that starts from a fixed commit never reloads.
+
+**Core.**
+- `path_log` (new module): `git log <start> -z -M --raw --numstat --format=<the graph's fields> -- <paths>` (merges read separately, see As built), streamed and parsed into `PathCommit { oid, parents, author, email, coauthors, time, subject, files: [{ change, path, original_path, stats }] }`. It knows nothing of renames or of a single file: it is the pathspec-limited log.
+- `file_history` (new module): the passes above on top of `path_log`, giving `FileVersion { commit fields, path (the file's name in that commit), original_path, change, stats }` and the names table; the diff of a version is a `DiffKind::Commit` target (the version's commit against its first parent, `original_path` from the row), the working row a `DiffKind::Working` target against HEAD, as in Compare.
+- Runtime: `FileHistoryState` per worktree (request, rows, names, loading, error, selection), a read job `file history` at normal priority that supersedes the same worktree's older one and is cancelled on close, rows published in batches as they stream, and a fourth diff slot `DiffSlot::File` loaded at interactive priority like the others. `restore_file_version` is a write job reusing `restore_from`'s backup and Undo, extended to write a blob to another path.
+- `gitbello-cli file-history <repo> <path> [--from <rev>] [--rows a..b] [--time]` for headless checks and timings.
+
+**gdext** (interface change, approved with this plan): `open_file_history(path, start)` (`start` empty for HEAD), `close_file_history()`, `file_history_info() -> { path, names, start, start_name, count, loading, error, has_working }`, `file_history_rows(start, count)` (commit rows as Compare's plus `path`, `original_path`, `change`, `added`, `removed`, `working`), `file_history_index(oid)`, `select_file_version(oid, full)` (empty `oid` for Uncommitted changes), `restore_file_version(oid) -> job`; signals `file_history_changed` and `file_history_diff_changed`. The diff of the new slot is read through slot-keyed calls, `slot_diff_info(slot)` and `slot_diff_lines(slot, start, count)`, beside the existing `diff_split_rows(slot, …)`, `image_side(slot, …)`, `open_version(slot, …)`, `expand_diff(slot, …)` and minimap calls, which take `file` as a slot. The per-slot calls of Changes, History and Compare stay as they are.
+
+**Performance.** The first rows must show before the log ends, and nothing of it may run on the main thread. `gitbello-cli file-history --time` reports the time to the first row, to the full list and the number of passes; numbers on `git/git` for a file with a long history (`Makefile`), a renamed one (`builtin/log.c`, once `builtin-log.c`) and a file changed a handful of times go into `docs/perf.md`. If a full pass over a large repository is slow, the list still fills from the top and the count shows when it ends; a commit-graph changed-path filter (`commit-graph write --changed-paths`) is noted as the user's option, not something gitbello writes.
+
+**Shared with b–d.** What this phase builds so the next ones do not build it again:
+- `path_log` is the path-limited log M8d's "search by path" and a folder's history need; file history only adds the rename passes on top.
+- A file at a revision (`oid` plus the file's name there, from the names table) is what blame takes. M8b's blame is planned as a second mode of this view (the same file, bar and start; a click on a blamed line selects that commit's row here), not another tab. The view and its state are therefore named for the file (`FileView`, `DiffSlot::File`, the `file` slot id), with History as its first mode; whether the tab then reads the file's name is decided in M8b's Q&A.
+- Tabs with a ×: Compare's tab button, its ×, its "view it was opened from" and its `_can_show` rule are generalised in `WorktreeView` into one closable-tab helper used by Compare and File history, so a later view adds an entry, not a copy.
+- Rows: the plain commit row source Compare introduced (`CommitList._fetch_rows`) gains the right-hand slot the stats and the status chip are drawn in, used here and free for blame's or the filter's needs; nothing of it is specific to files.
+- The working row uses Compare's `DiffKind::Working` target, so M8c's editable diff reaches it by the same path as it reaches Compare's working-copy side.
+- The slot-keyed diff calls above let a new diff slot be added without three more `RepoSession` calls each time.
+
+**Out of scope for a:** folders (M8d); the history of a line range (`git log -L`); an All branches scope (the history is what the start revision reaches); Compare with working copy from a version; searching inside the file's history; following copies.
+
+- [x] Core: `path_log` parser (unit tests with captured output: a rename, a merge against its first parent, a binary file, a path with spaces and non-ASCII characters, records split across chunks)
+- [x] Core: `file_history` passes and versions (tests on fixture repos: a rename on main with an edit under the old name on a merged side branch, listing all 6 commits; two renames in a row; a file deleted since, read from an older start; a merge row; the working row; cancel and supersede)
+- [x] Core: restore a version, also of a file renamed since, with backup and Undo (tests, a non-ASCII path with spaces)
+- [x] `gitbello-cli file-history`; timings on `git/git` in `docs/perf.md`
+- [x] gdext calls and signals above; slot-keyed diff calls
+- [x] Closable view tabs shared by Compare and File history (`compare_smoke` unchanged)
+- [x] `FileView` with the bar, the rows (stats and status chips), the Uncommitted changes row, the details and the diff; loading and error states
+- [x] Actions and menus: File history in the Changes, History, Compare and Shelves file menus and the diff menu; the version menu (Compare versions, Restore version, Open version, Open in History, Copy hash); `Ctrl+Shift+H`, Alt+number by place; the Italian strings
+- [x] `file_history_smoke.gd` (open from each list, rows and chips, select a version and its diff, a renamed file, two versions into Compare with the filter, restore and Undo, Open in History, close and return, no default shortcut clashes; after the review: the uncommitted row's counts, the filter, Compact rows from the field, Alt+number by place)
+- [x] Shots in both themes (`tests/visual/file_history_screenshots.tscn`; the CLI fixture gains a renamed file with a side-branch edit)
+- [x] Review stop
+
+As built in a:
+- **Merges.** `git log` is asked for no merge diffs: `--diff-merges=first-parent` on `log` turns git's history simplification off (on `git/git`, 21,072 commits listed for `Makefile` instead of 3,285, in 2.2 s instead of 0.8 s, most of them merges that did not change the file). The log lists the merges git's default keeps (those whose file differs from every parent) without a diff, and `git diff-tree --stdin --diff-merges=first-parent` reads those, a batch per chunk of the log, in the same record format. The commits listed are exactly `git log -- <names>`'s.
+- **Core.** `path_log` (`PATH_LOG_ARGS`, `MERGE_DIFF_ARGS`, `PathCommit`, `PathLogSplitter`; records are cut at NUL + `\x1e`, so a subject holding `\x1e` parses) and `file_history` (`FileHistoryLoader`, `FileVersion`, at most `MAX_NAMES` = 8 names). `GitBackend` gains `path_log(toplevel, start, paths, cancel, sink)`, `rename_source(toplevel, commit, parent, path)` and `restore_file_as(toplevel, oid, source, dest)` (a file under another name is written from `cat-file --filters --path=<dest>`, so line endings and filters follow the destination; only regular files). The Uncommitted changes row uses Changes' own diff target (`changes::diff_target`: the working tree against HEAD, an untracked file in full), not Compare's `Working`: M8c's editable diff reaches it as it reaches Changes. A rename that is not committed yet reads the history of the old name. Runtime: `FileHistoryState` with the loader, a reload behind the rows when HEAD moves (`next`, swapped in when it ends), the selection (`FileSelection`) and the selected commit's details (job `load file history commit`); `DiffSlot::File` (job `load file history diff`); `RuntimeEvent::FileHistoryChanged`. The load reports through that event, not as a job. Restore reuses the label `restore from revision`.
+- **gdext.** As planned, plus `clear_file_diff()`, `file_version_details()` (shaped as `commit_info`, with `refs`) and `open_file_history(path, start, start_name)` taking the start's name from the view that opens it; `file_history_info` has `selected` and no separate `start` resolution. Rows carry `exists` (false for the deleting commit).
+- **View.** `FileView` (`godot/app/file_history/`), `FileHistoryList` (a `CommitList`), `ClosableViewTab` (`godot/app/repo_tab/`, used by Compare and File history) and `PathLabel` (`godot/ui/path_label/`: a path with its folder muted, cut first when narrow). `CommitList` gained `_trailing_width` and `_draw_trailing` for a subclass's marks after the ref chips. The bar is one padded line: the file's icon and path, then on the right the "as of …" chip and the commit count. The Uncommitted changes row has the rows' height: one line, with the rows' marks on the right. Until a version's commit is read, the details show what its row knows. The open action reads **File history**, as the view's own action and tab; it is in the file and diff menus and the palette, not in the menu bar. `HistoryView.reveal_commit(oid, in_head)` selects a commit once it is listed and, for a history read from elsewhere than HEAD, lists all branches first when the current scope lacks it. Compare takes a starting filter (`CompareView.open(…, filter)`).
+- **After the review (2026-11-11).**
+  - *The Uncommitted changes row* says what the edit is instead of "Not committed yet": the status chip (Added for a new or untracked file, Renamed, Deleted, Conflicted) and the lines added and removed, counted by a read job after every status refresh (`git diff --numstat -M <HEAD or the empty tree> -- [old name] <path>`, an untracked file's lines; job `count file history changes`, `GitBackend::working_line_stats`, `WorkingVersion`). `file_history_info` has `working` (`{code, original_path, additions, deletions}`).
+  - *A filter* over the versions, History's field: it lists only the commits whose subject, author, email, co-authors or hash (4 or more hex digits) contain the text, marks the text in the subjects and leaves the uncommitted changes out. The bar then reads "2 of 6 commits" (since M8b's review the field counts the matches instead, as History's search does: "2", or "No matches"). It lives in core (`FileHistoryState`'s `VersionFilter`, positions cached per loader version; `Runtime::set_file_history_filter`, `RepoSession.set_file_history_filter`; `file_history_info` has `total` and `filter`), so rows, the selection and `file_history_index` follow it. Find (Ctrl+F) focuses it, and Compare's filter in Compare. The field's options button holds **Compact rows**, History's setting.
+  - *Names.* File history (was History of this file), Compare versions, Restore version, Open version, Open in History (was Show commit in History), and History's Compare commits (was Compare these commits).
+  - *Icon.* The tab and the File history action have their own icon, `FileHistory` (a page with a clock, drawn for gitbello), not History's; Open in History takes History's.
+  - *Shortcuts.* Alt+1 … Alt+5 are the first … fifth button of the switch as it shows (hidden actions `view.select_1` … `view.select_5`, listed in Settings → Keyboard as "Show view N"), since Shelves, Compare and File history come and go and a fixed number per view did not match the screen. The views' own actions have no default shortcut and borrow that one for display (`Action.shortcut_from`, `Actions.shown_shortcuts`): the tabs' tooltips and the View menu show the number a view has right now. Next and previous view moved to Alt+PageDown and Alt+PageUp; lists do not page on Alt+Page keys.
+- **Fixture.** `gitbello-cli fixture <dir> --history` builds `history`: a file renamed on `main`, edited under its old name on a merged `side`, with one more commit on an unmerged `topic`, a file added and deleted, and local changes.
+- **Numbers** (`docs/perf.md`, `git/git`, 82,797 commits, release build): the first row in 11 to 52 ms; the full list of `Makefile` (3,285 commits, one pass) in 1.5 to 1.7 s; `builtin/log.c` (863 commits, two passes for its rename) in 1.7 to 1.8 s. `git log --follow` lists 611 of those 863, in 2.9 s.
+
+#### M8b — Blame (≈1.5 weeks)
+
+Scope settled in the Q&A of 2026-11-11. Who last changed each line of a file: a second mode of M8a's file view.
+
+**Settled.**
+- The tab keeps reading **File history**; History | Blame is a switch in the view's bar. A new action **Blame** opens the same view in Blame mode.
+- Extras in: an **Ignore whitespace** option (`git blame -w`), a **Detect moved lines** option (`-M`), both saved; menu bar entries for File history and Blame; Compare versions filters by the exact path (a's known gap).
+- **Decided on screenshots of built variants (2026-11-11):** in Blame mode the versions list **stays** and picks what is blamed (the other variant hid it and gave the blame the full width), and the gutter shows the **avatar, author and date** (the others: author and date; subject, author and date). The variants were switches in the built view until the choice and are removed.
+
+**Mode.** The bar gains a History | Blame switch after the path. Both modes share the file, the bar, the start ("as of …"), the versions list and its selection. In History the right side is the selected version's commit over its diff (M8a); in Blame it is a commit's details over the blamed file.
+
+```
+( Changes 3 | History | File history × )
+ src/login/auth.rs   ( History | Blame ) [options]            12 commits
++--------------------------------+----------------------------------+
+| Uncommitted changes            | Move auth into login/            |
+|>Improve login                  | (A) Ann · Mar 4 · 9f8e7d6        |
+|  (C) Caleb · 3 h ago   +40 −12 +----------------------------------+
+|▌Move auth into login/          | Caleb  3 h ago | 10 | fn login() |
+|  (A) Ann · Mar 4  [Renamed] +2 |                | 11 |   check(); |
+| Add auth                       |▌Ann    Mar 4   | 12 |   let y;   |
+|  (A) Ann · Feb 20  [Added] +88 |▌               | 13 |   let z;   |
++--------------------------------+ Ann    Feb 20  | 14 | }          |
+```
+
+- **What is blamed:** the version selected in the list: the file as that commit has it, under the name it had there, or the working copy on the Uncommitted changes row (lines not committed yet read "Uncommitted"). Selecting another version blames that one. The commit that deleted the file and a deleted working copy have nothing to blame and say so.
+- **The blamed file:** the file's text in the diff's font with syntax colours, line numbers and the diff view's text selection, copy, horizontal scroll and minimap (`BlameView`, a `DiffView` with a leading gutter). The text shows as soon as it is read; the gutter fills as git reports blocks, with a count of the lines still to come in the bar.
+- **Gutter:** on the first line of each block of lines from one commit, who and when (the author's avatar and name, the date); a thin line separates blocks. An age bar at the gutter's edge tints the newest commits strongest. The tooltip has the subject, author, date and hash.
+- **A click on a line** focuses its commit: its details show in the details pane (`CommitHeader`, as History mode), its lines are highlighted in the text and marked on the minimap strip, and its row in the versions list is marked (not selected: the selection stays the blamed version) and scrolled into view. Next/previous change steps through the focused commit's blocks.
+- **Blame before this commit** (`blame.before`, on the focused line): blames the file as it was before that commit, by selecting that version in the list. git names the parent the lines came through (`previous`); the version is the newest listed commit that parent reaches (`git log -1 <previous> -- <names>`), whose file is the parent's. Disabled when the commit added the lines' file, with the reason.
+- **Show changes** (`blame.show_changes`): back to History mode with the focused commit selected, so its diff of the file shows.
+- **Open in History** and **Copy commit hash** act on the commit in the details pane: the focused line's in Blame mode, the selected version's in History mode. **Open version** opens the blamed version.
+- **Options** (a button after the switch, shown in Blame mode): Ignore whitespace, Detect moved lines. Changing one blames again.
+- **Refresh:** the working copy's blame runs again when the file or HEAD changed (checked after a status refresh, by the file's size and time); a commit's blame never does. The focused line is kept by number.
+- **Entry points:** **Blame** (`file_history.blame`, `Ctrl+Alt+B`) on the focused file, beside File history in the same menus and in the diff's menu; from a diff it opens at the line under the cursor. In the view itself, File history and Blame switch the mode. Menu bar: View → Selected file → File history, Blame.
+
+**Core.**
+- `blame` (new module): the parser of `git blame --incremental` (blocks `oid, original line, final line, count`, a commit's fields the first time it shows, `previous` and `filename` per block; fed in chunks) and `BlameLoader`, as `FileHistoryLoader`: a read job fills a shared table (the text's lines, the block of each line, the commits) that readers take short locks on. The text is read first (`cat-file blob <rev>:<path>`, the working file from disk; binary and larger than `LARGE_BLAME_BYTES` are states, not errors).
+- `GitBackend::blame(toplevel, rev, path, options, cancel, sink)` and `last_change(toplevel, rev, paths, cancel)`.
+- Runtime: `BlameState` beside the file history (request, loader, focused commit and its details), `Runtime::blame_file_version`, `close_blame`, `focus_blame_commit`, `blame_before`; `RuntimeEvent::BlameChanged` and `BlameVersionFound`; jobs `blame` (normal priority, superseding), `load blame commit`, `find blamed version`. Closing the file history closes its blame.
+- A `BlameMinimap` (`MinimapSource`): the lines as context, the focused commit's as marked.
+- Config: `blame_ignore_whitespace`, `blame_detect_moves`.
+- `gitbello-cli blame <root> <file> [--rev <rev>] [-w] [-M] [--lines a..b] [--time]`.
+
+**gdext** (interface change, the new calls of this phase): `blame_file_version(oid, ignore_whitespace, detect_moves)` (`oid` empty for the working copy), `close_blame()`, `blame_info() -> { open, state, oid, path, lines, blamed, loading, error, focus, max_line }`, `blame_lines(start, count)` (the diff view's line shape plus `commit`, `first`, `author`, `email`, `time`, `summary`, `age`, `working`, `focus`), `blame_line(line)` (the block's commit, its path there, the original line, `previous`), `focus_blame_commit(oid)`, `blame_details()`, `blame_before(line) -> job`; signals `blame_changed` and `blame_version_found(oid)`. The minimap and change-row calls take `blame` as a slot. `Core.blame_ignore_whitespace()` / `blame_detect_moves()` and their setters. `compare_filter` gains an exact-path form.
+
+**Performance.** Nothing on the main thread; the text first, the gutter as it streams. Measured on `git/git` before planning (git 2.43, warm): `git blame --incremental` of `Makefile` (4,144 lines; 3,285 commits in its history) takes 1.5 s, the same as `--porcelain`, with the first block after tens of ms; 2.6 s with `-w -M`. `gitbello-cli blame --time` reports the time to the text, to the first block and to the end; numbers go into `docs/perf.md`.
+
+**Out of scope for b:** blame of a line range's history (`git log -L`); copies from other files (`-C`); an ignore-revs editor (`blame.ignoreRevsFile` is honoured by git itself when set); editing; blame in the Changes diff.
+
+- [x] Core: the incremental parser (unit tests with captured output: a commit's fields once, `previous` and `filename` per block, uncommitted lines, a boundary commit, records split across chunks, a path with spaces and non-ASCII characters)
+- [x] Core: `BlameLoader` and the backend calls (tests on fixture repos: a file with lines from several commits, a renamed file, the working copy with uncommitted lines, `-w` and `-M`, a binary file, a missing file, cancel and supersede; `last_change`)
+- [x] Runtime: `BlameState`, focus and details, Blame before this commit, the working copy's reload (tests)
+- [x] `gitbello-cli blame`; timings on `git/git` in `docs/perf.md`
+- [x] gdext calls and signals above; config settings
+- [x] `DiffView`'s leading gutter generalised (the checkboxes' and the blame's); `BlameView` with the gutter (variants until the choice), the focus highlight, the age bar and the minimap marks
+- [x] `FileView`: the mode switch, the blame under the details, the marked row, the options button, loading and message states (two layout variants until the choice)
+- [x] Actions and menus: Blame in the file and diff menus, the blame's menu (Blame before this commit, Show changes, Open in History, Copy commit hash), the options, View → Selected file; `Ctrl+Alt+B`; the Italian strings
+- [x] Compare versions filters by the exact path
+- [x] `blame_smoke.gd`; `file_history_smoke` and `compare_smoke` still pass
+- [x] Shots of the variants in both themes (`tests/visual/blame_screenshots.tscn`), then the choice and the removal of the others
+- [x] Review stop
+- [x] Changes asked at the review (below)
+
+**Changed at the review (2026-11-11).** Blame is an addition to File history, not a view beside it, so:
+- The bar has **one Blame toggle** at its right end (person icon, "Blame", the shortcut in its tooltip) in place of the History | Blame switch. On: the selected version's blame replaces its diff. Off: the diff is back. `FileView.set_blame(on, line)`, `toggle_blame()`, `is_blame()`; `open(path, start, start_name, blame, line)`.
+- The bar's **commit count is gone** ("12 commits", "Loading…"; the list has its own loading indicator). With a filter, the field counts the matches as History's search does ("2", or "No matches").
+- **Blame is in no menu**: the files' and diffs' menus (Changes, Shelves, History, Compare, the versions) offer File history only, and View → Selected file holds File history alone. The action `file_history.blame` stays for the toggle, its shortcut (`Ctrl+Alt+B`) and the palette: in the File history view it turns Blame on and off (on from a diff, at the caret's line); anywhere else it opens the selected file's history with Blame on.
+- File history on a file whose history is already open leaves Blame as it is (it used to go back to the diffs). A newly opened history starts with Blame off.
+
+Where the text of this phase says "History mode" and "Blame mode", read Blame off and on.
+
+As built in b:
+- **Core.** `blame` (`BlameParser`, `BlameTable`, `BlameLoader`, `BlameOptions`, `BlameMinimap`), `GitBackend::blame` and `last_change`, `runtime/blame.rs` (`BlameState`; the working copy's blame runs again after a status refresh when HEAD or the file's size and time changed). git reports the lines not committed yet under the zero hash with `previous` = HEAD, so **Blame before this commit works on them too** and goes to the last commit; the plan had it off there.
+- **gdext.** As planned, except `blame_info` has `commits` (how many the lines name) and no `max_line` (the view sizes its number column from `lines`). `blame_line(line)` gives `{commit, author, email, time, summary, working, boundary, path, orig_line, previous, previous_path}`. The `blame` slot serves the minimap and `diff_change_row` (the focused commit's runs, wrapping).
+- **Views.** `DiffView` gained hooks for a subclass (`_lead_width`, `_draw_lead`, `_lead_pressed`, `_lead_hot`, `_line_tint`, `number_columns`) and `DiffMinimap` `color_overrides`; `BlameView` (`godot/ui/blame_view/`) is a `DiffView` on them. The gutter also names the commit on the top row, so a long run keeps its name while it scrolls. In `FileView` the blame sits under the details with its own strip: what is blamed ("Working copy" / "As of 1a2b3c4 subject"), then "Blaming… 40%" or "68 lines · 10 commits", then the options button. `FileHistoryList.marked` draws the focused commit's bar.
+- **Target of the actions.** Blame before this commit, Show changes, Open in History and Copy commit hash act on the caret's line (a right click puts the caret there), else on the focused commit's first line: the menu works on a line without focusing it first. Clicking a focused commit's gutter again lets go of it. A version that has no line of the focused commit (after Blame before, or another version selected) drops the focus with its details and mark.
+- **Blame before** keeps the caret on the same line number in the earlier version; a version hidden by the filter clears the filter; "No earlier version in this file's history." shows in the strip when the parent is outside what the view lists.
+- **Compare.** A filter in double quotes names one path (`compare::filter_files`): the file at exactly that path, or renamed from it. Compare versions fills the field with the quoted path; an opening quote alone still filters as text.
+- **Menus.** As first built, Blame sat beside File history in every file and diff menu and in View → Selected file; the review took it out of all of them (above).
+- **Numbers** (`docs/perf.md`, `git/git`, release build, warm): the text in 2 to 5 ms and the first named lines in 12 to 17 ms; the whole blame of `Makefile` (4,144 lines, 956 commits named) in 1.5 s, 2.0 to 2.1 s with both options; `builtin/log.c` in 0.84 s.
+
+#### M8c — Editable working copy (to be planned)
+- [ ] Editable working copy in `DiffView` with live re-diff, save, and dirty protection (§3.10); also on Compare's working-copy side and File history's Uncommitted changes
+
+#### M8d — Graph filter (to be planned)
+- [ ] Graph filter: "Show only matches", search by path (on M8a's `path_log`, which also gives a folder's history) and in full messages (find and highlight by subject, author and hash moved to M6.5 P5)
 
 ### M9 — Power features (≈1.5 weeks)
 - [ ] Operation log and undo (§3.11) with an "advanced restore" reflog view

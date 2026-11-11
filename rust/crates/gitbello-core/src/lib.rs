@@ -4,10 +4,12 @@
 //! live here. This crate must never depend on Godot.
 
 pub mod backend;
+pub mod blame;
 pub mod changes;
 pub mod compare;
 pub mod config;
 pub mod diff;
+pub mod file_history;
 pub mod fuzzy;
 pub mod git;
 pub mod graph;
@@ -21,6 +23,7 @@ pub mod merge;
 pub mod new_repo;
 
 pub mod ops;
+pub mod path_log;
 pub mod paths;
 pub mod repo;
 pub mod runtime;

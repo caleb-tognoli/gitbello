@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::blame::{BlameBlock, BlameOptions, BlameSource};
 use crate::changes::IndexEntry;
 use crate::compare::{CompareRequest, Comparison};
 use crate::diff::{
@@ -25,6 +26,7 @@ use crate::merge::{
 };
 use crate::new_repo::{init_folder_error, CloneOptions};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
+use crate::path_log::PathCommit;
 use crate::repo::{
     detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
     parse_repo_paths, parse_shortstat, parse_stash_list, parse_status, parse_worktrees,
@@ -35,9 +37,11 @@ use crate::repo::{
 use crate::worktrees::new_worktree_path_error;
 
 mod amend;
+mod blame;
 mod compare;
 mod ignore;
 mod merge;
+mod path_log;
 mod shelf_files;
 
 pub use amend::AmendSnapshot;
@@ -559,6 +563,98 @@ pub trait GitBackend: Send + Sync {
         _cancel: &CancelToken,
     ) -> Result<Vec<(PathBuf, String)>, GitError> {
         Err(unsupported("restore from a revision"))
+    }
+
+    /// The path log (PLAN M8a): the commits reachable from `start` that
+    /// changed any of `paths` (literal, relative to `toplevel`), newest
+    /// first, each handed to `sink` as it is read with what it did to them
+    /// against its first parent. An unborn `start` has none. A cancel ends
+    /// it with [`GitErrorKind::Cancelled`].
+    fn path_log(
+        &self,
+        _toplevel: &Path,
+        _start: &str,
+        _paths: &[PathBuf],
+        _cancel: &CancelToken,
+        _sink: &mut dyn FnMut(PathCommit),
+    ) -> Result<(), GitError> {
+        Err(unsupported("path logs"))
+    }
+    /// The name `path` had before `commit` when that commit renamed it
+    /// (its tree diff against `parent`, with rename detection).
+    fn rename_source(
+        &self,
+        _toplevel: &Path,
+        _commit: &str,
+        _parent: &str,
+        _path: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Option<PathBuf>, GitError> {
+        Err(unsupported("rename lookups"))
+    }
+    /// Writes the file `source` of commit `oid` into the working tree as
+    /// `dest` (not the index), as a checkout would write it there. Returns
+    /// the backup, as [`GitBackend::restore_from`].
+    fn restore_file_as(
+        &self,
+        _toplevel: &Path,
+        _oid: &str,
+        _source: &Path,
+        _dest: &Path,
+        _cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        Err(unsupported("restore under another name"))
+    }
+    /// The text blame reads (PLAN M8b): the file `path` of commit `rev`,
+    /// or of the working tree without one. Larger than `limit` bytes and a
+    /// working tree without the file are answers, not errors.
+    fn blame_source(
+        &self,
+        _toplevel: &Path,
+        _rev: Option<&str>,
+        _path: &Path,
+        _limit: usize,
+        _cancel: &CancelToken,
+    ) -> Result<BlameSource, GitError> {
+        Err(unsupported("blame"))
+    }
+    /// Blames `path` as commit `rev` has it (the working tree without
+    /// one): each run of lines goes to `sink` as git finds it, newest
+    /// commits first. A cancel ends it with [`GitErrorKind::Cancelled`].
+    fn blame(
+        &self,
+        _toplevel: &Path,
+        _rev: Option<&str>,
+        _path: &Path,
+        _options: BlameOptions,
+        _cancel: &CancelToken,
+        _sink: &mut dyn FnMut(BlameBlock),
+    ) -> Result<(), GitError> {
+        Err(unsupported("blame"))
+    }
+    /// The newest commit `rev` reaches that changed any of `paths`
+    /// (literal), by git's history simplification: the files are in `rev`
+    /// as that commit left them.
+    fn last_change(
+        &self,
+        _toplevel: &Path,
+        _rev: &str,
+        _paths: &[PathBuf],
+        _cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        Err(unsupported("last-change lookups"))
+    }
+    /// Lines the working tree adds to and removes from the file of `target`
+    /// (a Changes diff: against HEAD, or an untracked file in full). `None`
+    /// for a binary file, a conflicted one and an untracked one too large
+    /// to count.
+    fn working_line_stats(
+        &self,
+        _toplevel: &Path,
+        _target: &DiffTarget,
+        _cancel: &CancelToken,
+    ) -> Result<Option<(u32, u32)>, GitError> {
+        Err(unsupported("working line counts"))
     }
 }
 
@@ -2053,6 +2149,81 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<Vec<(PathBuf, String)>, GitError> {
         self.restore_paths_from(toplevel, oid, paths, cancel)
+    }
+
+    fn path_log(
+        &self,
+        toplevel: &Path,
+        start: &str,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+        sink: &mut dyn FnMut(PathCommit),
+    ) -> Result<(), GitError> {
+        self.stream_path_log(toplevel, start, paths, cancel, sink)
+    }
+
+    fn rename_source(
+        &self,
+        toplevel: &Path,
+        commit: &str,
+        parent: &str,
+        path: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Option<PathBuf>, GitError> {
+        self.find_rename_source(toplevel, commit, parent, path, cancel)
+    }
+
+    fn restore_file_as(
+        &self,
+        toplevel: &Path,
+        oid: &str,
+        source: &Path,
+        dest: &Path,
+        cancel: &CancelToken,
+    ) -> Result<Vec<(PathBuf, String)>, GitError> {
+        self.restore_file_to(toplevel, oid, source, dest, cancel)
+    }
+
+    fn working_line_stats(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        cancel: &CancelToken,
+    ) -> Result<Option<(u32, u32)>, GitError> {
+        self.count_working_lines(toplevel, target, cancel)
+    }
+
+    fn blame_source(
+        &self,
+        toplevel: &Path,
+        rev: Option<&str>,
+        path: &Path,
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<BlameSource, GitError> {
+        self.read_blame_source(toplevel, rev, path, limit, cancel)
+    }
+
+    fn blame(
+        &self,
+        toplevel: &Path,
+        rev: Option<&str>,
+        path: &Path,
+        options: BlameOptions,
+        cancel: &CancelToken,
+        sink: &mut dyn FnMut(BlameBlock),
+    ) -> Result<(), GitError> {
+        self.stream_blame(toplevel, rev, path, options, cancel, sink)
+    }
+
+    fn last_change(
+        &self,
+        toplevel: &Path,
+        rev: &str,
+        paths: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        self.find_last_change(toplevel, rev, paths, cancel)
     }
 
     fn head_info(&self, repo: &Path, cancel: &CancelToken) -> Result<HeadInfo, GitError> {

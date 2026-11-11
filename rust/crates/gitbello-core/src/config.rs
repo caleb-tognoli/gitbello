@@ -88,6 +88,10 @@ pub struct Config {
     pub history_compact: bool,
     /// Draw the commit graph beside History's rows.
     pub history_graph: bool,
+    /// Blame skips changes that only touched whitespace (`git blame -w`).
+    pub blame_ignore_whitespace: bool,
+    /// Blame follows lines moved within the file (`git blame -M`).
+    pub blame_detect_moves: bool,
     /// Offer to ignore a folder such as `node_modules/` that fills Changes.
     pub ignore_hint: bool,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
@@ -175,6 +179,8 @@ impl Default for Config {
             diff_minimap: true,
             history_compact: false,
             history_graph: true,
+            blame_ignore_whitespace: false,
+            blame_detect_moves: false,
             ignore_hint: true,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
@@ -274,6 +280,8 @@ const KEYS: &[&str] = &[
     "diff_minimap",
     "history_compact",
     "history_graph",
+    "blame_ignore_whitespace",
+    "blame_detect_moves",
     "ignore_hint",
     "keybindings",
 ];
@@ -369,6 +377,9 @@ impl Config {
             diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
             history_compact: take_bool(&mut table, "history_compact")?.unwrap_or(false),
             history_graph: take_bool(&mut table, "history_graph")?.unwrap_or(true),
+            blame_ignore_whitespace: take_bool(&mut table, "blame_ignore_whitespace")?
+                .unwrap_or(false),
+            blame_detect_moves: take_bool(&mut table, "blame_detect_moves")?.unwrap_or(false),
             ignore_hint: take_bool(&mut table, "ignore_hint")?.unwrap_or(true),
             keybindings: migrate_keybindings(take_string_map(&mut table, "keybindings")?),
             extra: table,
@@ -444,6 +455,14 @@ impl Config {
             Value::Boolean(self.history_compact),
         );
         table.insert("history_graph".into(), Value::Boolean(self.history_graph));
+        table.insert(
+            "blame_ignore_whitespace".into(),
+            Value::Boolean(self.blame_ignore_whitespace),
+        );
+        table.insert(
+            "blame_detect_moves".into(),
+            Value::Boolean(self.blame_detect_moves),
+        );
         table.insert("ignore_hint".into(), Value::Boolean(self.ignore_hint));
         if !self.keybindings.is_empty() {
             let bindings: Table = self
@@ -645,6 +664,8 @@ mod tests {
             diff_minimap: false,
             history_compact: true,
             history_graph: false,
+            blame_ignore_whitespace: true,
+            blame_detect_moves: true,
             ignore_hint: false,
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),

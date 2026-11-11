@@ -18,7 +18,7 @@ use crate::repo::{parse_name_status, Change, FileState};
 
 /// `git diff` flags for the working-copy side's file list, stable whatever
 /// the user's config.
-const WORKING_DIFF_ARGS: &[&str] = &[
+pub(super) const WORKING_DIFF_ARGS: &[&str] = &[
     "diff",
     "--no-ext-diff",
     "--no-textconv",
@@ -406,7 +406,7 @@ impl CliBackend {
 
 /// Lines of an untracked file as added lines; `None` when binary, too large
 /// or unreadable.
-fn untracked_stats(path: &Path) -> Option<(u32, u32)> {
+pub(super) fn untracked_stats(path: &Path) -> Option<(u32, u32)> {
     let size = fs::metadata(path).ok()?.len();
     if size > UNTRACKED_COUNT_LIMIT {
         return None;

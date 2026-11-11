@@ -583,7 +583,8 @@ func _show_shelf_file_menu(row: int, at: Vector2) -> void:
 	_shelf_files.choose_path(path)
 	_menu.clear()
 	_menu_actions.clear()
-	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file", &"", &"diff.open_file"]:
+	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file", &"", &"diff.open_file",
+			&"file_history.open"]:
 		if id == &"":
 			_menu.add_separator()
 			_menu_actions.append(&"")
@@ -1024,7 +1025,8 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 	# The files' menu acts on the highlighted file: open it, resolve it, ignore
 	# it, then shelve or discard it. The checked files' actions are in the
 	# header's.
-	var ids: Array[StringName] = [&"diff.open_file", &"changes.show_file", &"changes.copy_path", &"",
+	var ids: Array[StringName] = [&"diff.open_file", &"changes.show_file", &"changes.copy_path",
+		&"file_history.open", &"",
 		&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
 		IGNORE_MENU, &"changes.restore_line_endings", &"", &"changes.shelve", &"changes.discard",
 		&"changes.undo_discard"]
@@ -1034,7 +1036,7 @@ func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
 		if has_conflict_blocks():
 			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
 				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
-		ids.append_array([&"", &"diff.open_file", &"", &"diff.toggle_minimap"])
+		ids.append_array([&"", &"diff.open_file", &"file_history.open", &"", &"diff.toggle_minimap"])
 	elif _highlights_ignored():
 		# An ignored file is not a change: it can only be opened or brought back.
 		ids = [&"diff.open_file", &"changes.show_file", &"changes.copy_path", &"",

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use gitbello_core::blame::{BlameMinimap, BlameOptions};
 use gitbello_core::changes::{commit_message, ChangeFilter, PickState};
 use gitbello_core::compare::{CompareMode, CompareRequest, CompareSide, OnlyOn};
 use gitbello_core::diff::image::{ImageSides, SideImage};
@@ -13,7 +14,9 @@ use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
 use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
-use gitbello_core::runtime::{BranchDelete, DiffSlot, DiffState, RepoState};
+use gitbello_core::runtime::{
+    BranchDelete, DiffSlot, DiffState, FileHistoryRequest, FileSelection, RepoState,
+};
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
@@ -113,6 +116,23 @@ impl RepoSession {
     /// The compare file diff loaded or failed (`compare_diff_info`).
     #[signal]
     fn compare_diff_changed();
+    /// The file history has more rows, ended, failed or was reloaded, its
+    /// Uncommitted changes row came or went, or the selected version's
+    /// commit arrived (`file_history_info`, `file_version_details`).
+    #[signal]
+    fn file_history_changed();
+    /// The file history's diff loaded or failed (`slot_diff_info("file")`).
+    #[signal]
+    fn file_history_diff_changed();
+    /// The blame has its text or more lines, ended, failed or ran again,
+    /// or its focused commit changed or arrived (`blame_info`,
+    /// `blame_details`).
+    #[signal]
+    fn blame_changed();
+    /// The version `blame_before` looked for: its commit, or "" when the
+    /// file's history has none.
+    #[signal]
+    fn blame_version_found(oid: GString);
     /// The worktree folder is gone; the session no longer refreshes.
     #[signal]
     fn missing();
@@ -1369,6 +1389,16 @@ impl RepoSession {
     #[func]
     fn diff_change_row(&self, slot: GString, split: bool, from_row: i64, forward: bool) -> i64 {
         let from = usize::try_from(from_row).unwrap_or(0);
+        if slot == BLAME_SLOT {
+            // The blame's blocks of changes are the focused commit's runs.
+            return self
+                .read(|s| {
+                    let blame = s.blame()?;
+                    blame.table().next_run_of(blame.focus()?, from, forward)
+                })
+                .flatten()
+                .map_or(-1, to_i64);
+        }
         self.with_minimap(&slot, split, |source| {
             minimap::change_row(source, from, forward)
         })
@@ -1420,7 +1450,8 @@ impl RepoSession {
             .unwrap_or_else(|| convert::compare_info(None))
     }
 
-    /// Shows only the files whose path contains `text` (any case).
+    /// Shows only the files whose path contains `text` (any case); a path in
+    /// double quotes shows only the file at exactly that path.
     #[func]
     fn set_compare_filter(&self, text: GString) {
         runtime_cell::with(|rt| rt.set_compare_filter(&self.key, &text.to_string()));
@@ -1557,6 +1588,226 @@ impl RepoSession {
         let start = usize::try_from(start).unwrap_or(0);
         let count = usize::try_from(count).unwrap_or(0);
         self.read(|s| Some(convert::diff_rows(s.compare_diff()?, false, start, count)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    // --- File history (M8a) ------------------------------------------------
+
+    /// Opens the history of `path` (repository-relative), replacing any
+    /// other. `start` is the revision it is read from, or "" for HEAD,
+    /// which the history then follows; `start_name` is what the view calls
+    /// a fixed start. `file_history_changed` follows, again as rows arrive.
+    #[func]
+    fn open_file_history(&self, path: GString, start: GString, start_name: GString) {
+        let start = start.to_string();
+        let request = FileHistoryRequest {
+            path: PathBuf::from(path.to_string()),
+            start: (!start.is_empty()).then_some(start),
+            start_name: start_name.to_string(),
+        };
+        runtime_cell::with(|rt| rt.open_file_history(&self.key, request));
+    }
+
+    #[func]
+    fn close_file_history(&self) {
+        runtime_cell::with(|rt| rt.close_file_history(&self.key));
+    }
+
+    /// See `convert::file_history_info`.
+    #[func]
+    fn file_history_info(&self) -> VarDictionary {
+        self.read(|s| convert::file_history_info(s.file_history(), s.file_history_working()))
+            .unwrap_or_else(|| convert::file_history_info(None, None))
+    }
+
+    /// Shows only the commits whose subject, author, co-authors or hash
+    /// (from its start) contain `text`, any case; "" shows them all. The
+    /// Uncommitted changes row hides while a filter is on.
+    /// `file_history_changed` follows.
+    #[func]
+    fn set_file_history_filter(&self, text: GString) {
+        runtime_cell::with(|rt| rt.set_file_history_filter(&self.key, &text.to_string()));
+    }
+
+    /// The versions the filter shows, `start..start + count`, newest first
+    /// (`convert::file_version_row`). The Uncommitted changes row is not
+    /// among them (`file_history_info`'s `has_working`).
+    #[func]
+    fn file_history_rows(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            let mut rows = Array::new();
+            if let Some(history) = s.file_history() {
+                for version in history.rows(start, count) {
+                    rows.push(&convert::file_version_row(&version, s.labels(&version.oid)));
+                }
+            }
+            rows
+        })
+        .unwrap_or_default()
+    }
+
+    /// The row of commit `oid` among `file_history_rows`, or -1.
+    #[func]
+    fn file_history_index(&self, oid: GString) -> i64 {
+        let oid = oid.to_string();
+        self.read(|s| s.file_history()?.index_of(&oid))
+            .flatten()
+            .map_or(-1, to_i64)
+    }
+
+    /// Shows the diff of the file in commit `oid` against its first parent,
+    /// or of the uncommitted changes for "" (`slot_diff_info("file")`,
+    /// `file_history_diff_changed`); the commit's details follow as
+    /// `file_history_changed` (`file_version_details`).
+    #[func]
+    fn select_file_version(&self, oid: GString, full: bool) {
+        let oid = oid.to_string();
+        let selection = if oid.is_empty() {
+            FileSelection::Working
+        } else {
+            FileSelection::Version(oid)
+        };
+        runtime_cell::with(|rt| rt.select_file_version(&self.key, Some(selection), full));
+    }
+
+    #[func]
+    fn clear_file_diff(&self) {
+        runtime_cell::with(|rt| rt.select_file_version(&self.key, None, false));
+    }
+
+    /// The selected version's commit, shaped as `commit_info` plus `refs`
+    /// (empty until it loads, and for the uncommitted changes).
+    #[func]
+    fn file_version_details(&self) -> VarDictionary {
+        self.read(|s| {
+            let commit = s.file_history()?.details()?;
+            let mut info = convert::commit_info(commit);
+            info.set("refs", &convert::labels(s.labels(&commit.oid)));
+            Some(info)
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Writes the file as commit `oid` has it into the working copy, under
+    /// the name the history was opened with, backed up for `undo_discard`.
+    /// Label `restore from revision`; -1 when that commit deleted the file.
+    #[func]
+    fn restore_file_version(&self, oid: GString) -> i64 {
+        let oid = oid.to_string();
+        job_id(runtime_cell::with(|rt| rt.restore_file_version(&self.key, &oid)).flatten())
+    }
+
+    // --- Blame (M8b) --------------------------------------------------------
+
+    /// Blames the open file history's file as version `oid` has it (the
+    /// working copy for ""), with `git blame`'s `-w` and `-M` as asked.
+    /// `blame_changed` follows, again as lines arrive. The same blame is
+    /// kept; a version without the file closes the blame.
+    #[func]
+    fn blame_file_version(&self, oid: GString, ignore_whitespace: bool, detect_moves: bool) {
+        let oid = oid.to_string();
+        let selection = if oid.is_empty() {
+            FileSelection::Working
+        } else {
+            FileSelection::Version(oid)
+        };
+        let options = BlameOptions {
+            ignore_whitespace,
+            detect_moves,
+        };
+        runtime_cell::with(|rt| rt.blame_file_version(&self.key, &selection, options));
+    }
+
+    #[func]
+    fn close_blame(&self) {
+        runtime_cell::with(|rt| rt.close_blame(&self.key));
+    }
+
+    /// See `convert::blame_info`.
+    #[func]
+    fn blame_info(&self) -> VarDictionary {
+        self.read(|s| convert::blame_info(s.blame()))
+            .unwrap_or_else(|| convert::blame_info(None))
+    }
+
+    /// See `convert::blame_rows`.
+    #[func]
+    fn blame_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| Some(convert::blame_rows(s.blame()?, start, count)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// See `convert::blame_line`.
+    #[func]
+    fn blame_line(&self, line: i64) -> VarDictionary {
+        let Ok(line) = usize::try_from(line) else {
+            return VarDictionary::new();
+        };
+        self.read(|s| Some(convert::blame_line(s.blame()?, line)))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Focuses commit `oid` of the blame ("" for none): its lines are
+    /// flagged in `blame_lines` and its details load (`blame_details`).
+    /// `blame_changed` follows.
+    #[func]
+    fn focus_blame_commit(&self, oid: GString) {
+        let oid = oid.to_string();
+        runtime_cell::with(|rt| {
+            rt.focus_blame_commit(&self.key, (!oid.is_empty()).then_some(oid.as_str()));
+        });
+    }
+
+    /// The focused commit, shaped as `commit_info` plus `refs` (empty until
+    /// it loads, and for lines not committed yet).
+    #[func]
+    fn blame_details(&self) -> VarDictionary {
+        self.read(|s| {
+            let commit = s.blame()?.details()?;
+            let mut info = convert::commit_info(commit);
+            info.set("refs", &convert::labels(s.labels(&commit.oid)));
+            Some(info)
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Looks for the version of the file that line `line` (0-based) came
+    /// from, before the commit it is blamed on; `blame_version_found`
+    /// carries it. Label `find blamed version`; -1 when that commit added
+    /// the line with the file.
+    #[func]
+    fn blame_before(&self, line: i64) -> i64 {
+        let Ok(line) = usize::try_from(line) else {
+            return -1;
+        };
+        job_id(runtime_cell::with(|rt| rt.blame_before(&self.key, line)).flatten())
+    }
+
+    /// Like `diff_info`, for the diff in `slot` (`changes`, `commit`,
+    /// `compare` or `file`).
+    #[func]
+    fn slot_diff_info(&self, slot: GString) -> VarDictionary {
+        let slot = parse_slot(&slot);
+        self.read(|s| convert::diff_info(slot_diff(s, slot)))
+            .unwrap_or_default()
+    }
+
+    /// Like `diff_lines`, for the diff in `slot`, without commit picks.
+    #[func]
+    fn slot_diff_lines(&self, slot: GString, start: i64, count: i64) -> Array<VarDictionary> {
+        let slot = parse_slot(&slot);
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| Some(convert::diff_rows(slot_diff(s, slot)?, false, start, count)))
             .flatten()
             .unwrap_or_default()
     }
@@ -2297,11 +2548,16 @@ impl RepoSession {
 
 /// `commit` is the commit file diff; anything else the Changes diff.
 /// `changes`, `commit` or `compare`.
+/// The slot id the minimap and change-row calls take for the blame.
+const BLAME_SLOT: &str = "blame";
+
 fn parse_slot(id: &GString) -> DiffSlot {
     if *id == "commit" {
         DiffSlot::Commit
     } else if *id == "compare" {
         DiffSlot::Compare
+    } else if *id == "file" {
+        DiffSlot::File
     } else {
         DiffSlot::Changes
     }
@@ -2313,6 +2569,7 @@ fn slot_diff(s: &RepoState, slot: DiffSlot) -> Option<&DiffState> {
         DiffSlot::Changes => s.diff(),
         DiffSlot::Commit => s.commit_diff(),
         DiffSlot::Compare => s.compare_diff(),
+        DiffSlot::File => s.file_diff(),
     }
 }
 
@@ -2376,6 +2633,16 @@ impl RepoSession {
         split: bool,
         f: impl FnOnce(&dyn MinimapSource) -> R,
     ) -> Option<R> {
+        if *slot == BLAME_SLOT {
+            return self
+                .read(|s| {
+                    let blame = s.blame()?;
+                    let language = convert::diff_language(&blame.request().path);
+                    let table = blame.table();
+                    Some(f(&BlameMinimap::new(&table, blame.focus(), language)))
+                })
+                .flatten();
+        }
         let slot = parse_slot(slot);
         self.read(|s| {
             if let (DiffSlot::Changes, Some(conflict)) = (slot, s.conflict()) {

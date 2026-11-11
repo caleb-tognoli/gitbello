@@ -227,3 +227,71 @@ The extra ~190 ms is git's: `git log` alone takes 833 to 1011 ms with the
 old format, 980 to 1033 ms with the trailers and 1077 to 1167 ms with the
 whole body (`%b`). Co-authors are stored only for the rows that have them
 (three `u32` vectors), so the index does not grow per commit.
+
+## M8a — file history
+
+2026-11-10, git/git (82,797 commits), git 2.43.0, Linux, 4 cores, release
+`gitbello-cli file-history <root> <file> --time`, warm, three runs each.
+"First row" is the time from the request to the first commit a view could
+show; "full list" is every pass done (one pass per name the file had).
+
+```text
+file              commits  passes  first row     full list
+Makefile          3,285    1       13 to 34 ms   1.50 to 1.68 s
+builtin/log.c     863      2       11 to 15 ms   1.70 to 1.81 s
+t/t4202-log.sh    177      1       45 to 52 ms   1.33 to 1.38 s
+README.md         55       2       47 to 52 ms   0.97 to 1.00 s
+```
+
+The 100 ms target to the first rows is met; the full list is git's walk of
+the whole history, once per pass. For reference, on the same clone:
+`git log -- Makefile` takes about 0.8 s and
+`git log -- builtin/log.c builtin-log.c` about 0.75 s without diffs; the
+raw entries, the line counts and rename detection (`--raw --numstat -M`)
+make up most of the rest, and the second pass of a renamed file costs
+another walk.
+
+- **`--follow`.** `git log --follow -- builtin/log.c` lists 611 commits in
+  2.9 s. The path-limited log over both names lists 863, the same commits
+  as `git log -- builtin/log.c builtin-log.c`: the 252 others were made
+  under the old name on branches merged after the rename.
+- **Merges.** `--diff-merges=first-parent` on `git log` turns history
+  simplification off: `Makefile` lists 21,072 commits instead of 3,285, in
+  2.2 s instead of 0.8 s. The log is read without merge diffs and
+  `git diff-tree --stdin` reads the merges it lists, a batch per chunk.
+- **Cold.** After dropping the page cache, `Makefile`'s full list took
+  1.92 s (`git log --raw --numstat -M -- Makefile` alone: 2.09 s).
+- **One outlier.** A run started right after `cargo xtask check` took
+  2.2 s to the first row and 32.7 s to the full list of `Makefile`. It did
+  not come back in the runs above, cold or warm; the machine was most
+  likely still busy, but the cause was not measured.
+
+## M8b — blame
+
+2026-11-11, git/git (82,797 commits), git 2.43.0, Linux, 4 cores, release
+`gitbello-cli blame <root> <file> --rev HEAD --time`, warm, three runs each.
+"Text" is the time from the request to the file's lines (what the view
+shows first), "first block" to the first lines git names a commit for, and
+"blame" to the last.
+
+```text
+file              lines   commits  text       first block   blame
+Makefile          4,144   956      3 to 5 ms  12 to 13 ms   1.49 to 1.51 s
+builtin/log.c     2,858   395      3 ms       13 ms         0.84 s
+README.md         75      19       2 to 3 ms  16 to 17 ms   0.40 to 0.46 s
+```
+
+The text and the first names are on screen well inside the 100 ms target;
+the rest is git's walk, streamed into the gutter as it goes
+(`git blame --incremental` of `Makefile` alone: 1.5 s, the same as
+`--porcelain`).
+
+- **Options.** `Makefile` with `-w -M` (Ignore whitespace and Detect moved
+  lines): 2.03 to 2.09 s, 1,000 commits named instead of 956.
+- **Working copy.** `Makefile` without `--rev` (the file on disk, no
+  uncommitted lines): the text in under 1 ms, the first block in 8 to
+  10 ms, the blame in 1.22 to 1.41 s.
+- **One outlier.** The first run after `cargo build --release` took 1.8 s
+  to the text, 2.8 s to the first block and 24.4 s to the end. It did not
+  come back in the eleven runs that followed; as M8a's, the machine was
+  most likely still busy, and the cause was not measured.

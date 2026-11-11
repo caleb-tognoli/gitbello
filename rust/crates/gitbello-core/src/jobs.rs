@@ -206,6 +206,14 @@ pub enum JobOutput {
     /// The modified files whose only unstaged changes are line endings or
     /// the final newline.
     EndingsOnly(Vec<PathBuf>),
+    /// Lines the uncommitted changes add to and remove from `path` (a file
+    /// history's Uncommitted changes row); `None` when they are not counted.
+    WorkingStats {
+        path: PathBuf,
+        stats: Option<(u32, u32)>,
+    },
+    /// The version of a file a blamed line came from (`Runtime::blame_before`).
+    BlamedVersion(Option<String>),
     /// The files of shelf `oid`.
     ShelfFiles(String, Vec<ShelfFile>),
     /// Shelf `oid` was dropped; storing it again with `subject` undoes it.

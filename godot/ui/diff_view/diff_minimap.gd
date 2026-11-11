@@ -63,6 +63,14 @@ var _tile_order: Array[int] = []
 ## The scale and preview width the tiles were rendered for.
 var _tile_scale: float = 0.0
 var _tile_width: float = 0.0
+## Colours that replace the theme's, by name: a view whose marks mean
+## something else (the blame's focused commit) draws them in its own.
+var color_overrides: Dictionary[StringName, Color] = {}:
+	set(value):
+		color_overrides = value
+		_update_theme()
+		reset()
+
 var _palette: PackedColorArray = PackedColorArray()
 var _overview: PackedByteArray = PackedByteArray()
 var _overview_buckets: int = -1
@@ -201,7 +209,12 @@ func _scale() -> float:
 func _update_theme() -> void:
 	_palette = PackedColorArray()
 	for color_name: StringName in PALETTE_COLORS:
-		_palette.append(get_theme_color(color_name, THEME_TYPE))
+		_palette.append(_color(color_name))
+
+
+## Theme colour `color_name`, or the view's own for it (`color_overrides`).
+func _color(color_name: StringName) -> Color:
+	return color_overrides[color_name] if color_overrides.has(color_name) else get_theme_color(color_name, THEME_TYPE)
 
 
 # --- Drawing --------------------------------------------------------------------
@@ -320,7 +333,7 @@ func _draw_marks(strip: Rect2, top: float, height: float, flags: int) -> void:
 				Color(get_theme_color(&"conflict_mark", THEME_TYPE), alpha))
 	elif flags & RESOLVED:
 		draw_rect(Rect2(strip.position.x, top, strip.size.x, height_px),
-				get_theme_color(&"resolved_mark", THEME_TYPE))
+				_color(&"resolved_mark"))
 	elif flags & ADDED and flags & REMOVED:
 		var half: float = strip.size.x / 2.0
 		draw_rect(Rect2(strip.position.x, top, half, height_px), Color(removed, alpha))

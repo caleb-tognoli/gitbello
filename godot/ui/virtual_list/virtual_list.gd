@@ -271,10 +271,10 @@ func _handle_key(key: InputEventKey) -> void:
 		target = cursor - 1
 	elif key.is_action("ui_down"):
 		target = cursor + 1
-	# Ctrl+Page Up/Down switch views (see `view.next`).
-	elif key.is_action("ui_page_up") and not key.is_command_or_control_pressed():
+	# With Alt (or Ctrl), Page Up/Down switch views (see `view.next`).
+	elif key.is_action("ui_page_up") and not key.is_command_or_control_pressed() and not key.alt_pressed:
 		target = cursor - page
-	elif key.is_action("ui_page_down") and not key.is_command_or_control_pressed():
+	elif key.is_action("ui_page_down") and not key.is_command_or_control_pressed() and not key.alt_pressed:
 		target = cursor + page
 	elif key.is_action("ui_home"):
 		target = 0

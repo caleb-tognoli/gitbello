@@ -25,7 +25,7 @@ pub const SEARCH_CHUNK_ROWS: usize = 4096;
 
 /// Shortest query that also matches hash prefixes (shorter hex runs are
 /// common words and numbers in subjects).
-const MIN_HASH_DIGITS: usize = 4;
+pub(crate) const MIN_HASH_DIGITS: usize = 4;
 
 /// Matches rows of a graph index against one query. Remembers which author
 /// identities match, so each is checked once.
@@ -144,7 +144,7 @@ fn hash_starts_with(hash: &[u8], digits: &[u8]) -> bool {
 }
 
 /// Whether `haystack` contains `needle` (already lowercase), ignoring case.
-fn contains_folded(haystack: &str, needle: &str) -> bool {
+pub(crate) fn contains_folded(haystack: &str, needle: &str) -> bool {
     if needle.is_ascii() {
         // No allocation: non-ASCII bytes never equal an ASCII needle's.
         let needle = needle.as_bytes();
