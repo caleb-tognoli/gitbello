@@ -25,6 +25,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 
+use crate::avatars::AvatarAnswer;
 use crate::backend::{GitBackend, ShelfChange};
 use crate::diff::image::ImageSides;
 use crate::diff::FileDiff;
@@ -266,6 +267,8 @@ pub enum JobOutput {
     },
     /// What Home shows of a repository without a tab.
     Summary(Box<RepoSummary>),
+    /// A profile picture's cache entry or lookup, for the normalized email.
+    Avatar(Box<(String, AvatarAnswer)>),
     /// Repositories a folder scan found.
     Scan(Vec<ScanHit>),
     /// Where a chosen folder leads (Add existing folder, Change location).

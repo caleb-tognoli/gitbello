@@ -279,6 +279,8 @@ fn smoke(args: &[String]) -> Result<()> {
         .env("GITBELLO_CONFIG", fixtures.join("config.toml"))
         // Versions written for Open go with the fixtures.
         .env("GITBELLO_CACHE_DIR", fixtures.join("cache"))
+        // No network: every avatar source at a port nothing listens on.
+        .env("GITBELLO_AVATAR_ENDPOINT", "http://127.0.0.1:9")
         .env("GIT_CONFIG_GLOBAL", fixtures.join("global.gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_COUNT", "1")

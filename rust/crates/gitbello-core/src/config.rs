@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use toml::{Table, Value};
 
+use crate::avatars::Providers;
 use crate::diff::viewer::{DiffMode, Viewer};
 use crate::ops::PullMode;
 
@@ -94,6 +95,10 @@ pub struct Config {
     pub blame_detect_moves: bool,
     /// Offer to ignore a folder such as `node_modules/` that fills Changes.
     pub ignore_hint: bool,
+    /// Look up profile pictures (M7.10); off draws initials only.
+    pub avatars: bool,
+    /// The providers profile pictures are asked of.
+    pub avatar_providers: Providers,
     /// Action id to shortcut text (`"Ctrl+Shift+P"`); overrides the defaults.
     pub keybindings: BTreeMap<String, String>,
     /// Keys this version does not model, kept as read.
@@ -182,6 +187,8 @@ impl Default for Config {
             blame_ignore_whitespace: false,
             blame_detect_moves: false,
             ignore_hint: true,
+            avatars: true,
+            avatar_providers: Providers::ALL,
             keybindings: BTreeMap::new(),
             extra: Table::new(),
         }
@@ -283,6 +290,8 @@ const KEYS: &[&str] = &[
     "blame_ignore_whitespace",
     "blame_detect_moves",
     "ignore_hint",
+    "avatars",
+    "avatar_providers",
     "keybindings",
 ];
 
@@ -381,6 +390,8 @@ impl Config {
                 .unwrap_or(false),
             blame_detect_moves: take_bool(&mut table, "blame_detect_moves")?.unwrap_or(false),
             ignore_hint: take_bool(&mut table, "ignore_hint")?.unwrap_or(true),
+            avatars: take_bool(&mut table, "avatars")?.unwrap_or(true),
+            avatar_providers: take_providers(&mut table, "avatar_providers")?,
             keybindings: migrate_keybindings(take_string_map(&mut table, "keybindings")?),
             extra: table,
         };
@@ -464,6 +475,16 @@ impl Config {
             Value::Boolean(self.blame_detect_moves),
         );
         table.insert("ignore_hint".into(), Value::Boolean(self.ignore_hint));
+        table.insert("avatars".into(), Value::Boolean(self.avatars));
+        table.insert(
+            "avatar_providers".into(),
+            Value::Array(
+                self.avatar_providers
+                    .iter()
+                    .map(|p| Value::String(p.name().into()))
+                    .collect(),
+            ),
+        );
         if !self.keybindings.is_empty() {
             let bindings: Table = self
                 .keybindings
@@ -538,6 +559,29 @@ fn take_paths(table: &mut Table, key: &'static str) -> Result<Vec<PathBuf>, Conf
                 }),
             })
             .collect(),
+        Some(_) => Err(invalid),
+    }
+}
+
+/// Provider names; a missing key is every provider, unknown names are
+/// left out (a newer version's).
+fn take_providers(table: &mut Table, key: &'static str) -> Result<Providers, ConfigError> {
+    let invalid = ConfigError::Invalid {
+        key,
+        expected: "an array of provider names",
+    };
+    match table.remove(key) {
+        None => Ok(Providers::ALL),
+        Some(Value::Array(items)) => {
+            let mut names = Vec::new();
+            for item in &items {
+                match item {
+                    Value::String(name) => names.push(name.as_str()),
+                    _ => return Err(invalid),
+                }
+            }
+            Ok(Providers::from_names(names))
+        }
         Some(_) => Err(invalid),
     }
 }
@@ -667,6 +711,8 @@ mod tests {
             blame_ignore_whitespace: true,
             blame_detect_moves: true,
             ignore_hint: false,
+            avatars: false,
+            avatar_providers: Providers::ALL.with(crate::avatars::Provider::Gravatar, false),
             keybindings: [("palette".to_owned(), "Ctrl+Shift+K".to_owned())].into(),
             extra: Table::new(),
         };

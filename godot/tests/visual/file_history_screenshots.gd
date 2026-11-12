@@ -142,11 +142,11 @@ func _ready() -> void:
 	await _shot("diff-menu", view.diff_menu())
 	view.diff_menu().hide()
 	# Open in History, and the menu of a commit's file there.
-	var renamed: String = String(list.version_at(4).get("oid", ""))
+	var renamed_oid: String = String(list.version_at(4).get("oid", ""))
 	Actions.run_action(&"file_history.show_in_history")
 	var history: HistoryView = page.history()
 	if not await _wait(func() -> bool:
-		return String(history.selected_commit().get("hash", "")) == renamed and history.details().file_list().row_count() > 0):
+		return String(history.selected_commit().get("hash", "")) == renamed_oid and history.details().file_list().row_count() > 0):
 		return
 	await _shot("shown-in-history", null)
 	history.details().file_list().context_menu_requested.emit(0, Vector2(120, 12))

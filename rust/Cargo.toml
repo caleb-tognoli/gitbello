@@ -17,6 +17,8 @@ thiserror = "2"
 notify = "8.2"
 # Config fields are mapped by hand from toml::Table (no serde derive), so unknown keys survive a save.
 toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse", "display"] }
+# SHA-256 of emails for Gravatar and Libravatar (avatars, PLAN M7.10).
+sha2 = { version = "0.10", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

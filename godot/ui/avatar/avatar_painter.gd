@@ -2,8 +2,8 @@ class_name AvatarPainter
 extends RefCounted
 ## Draws a person as a round avatar (M7.10): their initials on a colour
 ## chosen from their email, from the `Avatar` theme type's palette
-## (`color_0`… with `text_0`…, `colors` of them). Profile pictures will be
-## drawn over the same circle once loaded.
+## (`color_0`… with `text_0`…, `colors` of them), or their profile picture
+## once `AvatarPictures` has it.
 
 const THEME_TYPE: StringName = &"Avatar"
 
@@ -52,12 +52,19 @@ static func colors_for(control: Control, name: String, email: String) -> PackedC
 ## CanvasItem drawing in its `_draw`), `diameter` wide. `ring` (alpha > 0)
 ## draws a border of `ring_width` around it in that colour, to separate
 ## avatars that overlap. `alpha` fades the whole avatar (dimmed rows).
+## `session` asks for the picture (see `AvatarPictures.texture`); the canvas
+## redraws on `AvatarPictures.changed`.
 static func draw(canvas: CanvasItem, control: Control, center: Vector2, diameter: float,
 		name: String, email: String, font: Font, ring: Color = Color(0, 0, 0, 0),
-		ring_width: float = 1.5, alpha: float = 1.0) -> void:
+		ring_width: float = 1.5, alpha: float = 1.0, session: RepoSession = null) -> void:
 	var radius: float = diameter * 0.5
 	if ring.a > 0.0:
 		canvas.draw_circle(center, radius + ring_width, ring, true, -1.0, true)
+	var picture: Texture2D = AvatarPictures.shared().texture(email, session)
+	if picture != null:
+		canvas.draw_texture_rect(picture, Rect2(center - Vector2(radius, radius), Vector2(diameter, diameter)),
+				false, Color(1, 1, 1, alpha))
+		return
 	var colors: PackedColorArray = colors_for(control, name, email)
 	var fill: Color = colors[0]
 	var ink: Color = colors[1]

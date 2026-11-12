@@ -53,12 +53,15 @@ use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
 mod amend;
+mod avatars;
 mod blame;
 mod branch_delete;
 mod compare;
 mod file_history;
 mod ignore;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
+use avatars::{apply_avatar, AvatarBook};
+pub use avatars::{Picture, AVATAR_CACHE_JOB_LABEL, AVATAR_JOB_LABEL};
 use blame::{apply_blame_commit, apply_blamed_version, blame_after_status};
 pub use blame::{BlameState, BLAME_COMMIT_JOB_LABEL, BLAME_JOB_LABEL, BLAME_VERSION_JOB_LABEL};
 use branch_delete::BranchDeleteState;
@@ -399,6 +402,11 @@ pub enum RuntimeEvent {
     /// The summary of `repo` requested with [`Runtime::load_summaries`] arrived.
     SummaryLoaded {
         repo: PathBuf,
+    },
+    /// A profile picture asked for with [`Runtime::request_avatar`] arrived
+    /// or went away (`email` normalized).
+    AvatarChanged {
+        email: String,
     },
     /// The file [`Runtime::open_version`] asked for: where it is, or why it
     /// could not be read.
@@ -1562,6 +1570,7 @@ pub struct Runtime {
     leftover_worktrees: Arc<Mutex<HashSet<PathBuf>>>,
     /// Where Open writes versions from the index and commits.
     versions_dir: Option<PathBuf>,
+    avatars: AvatarBook,
 }
 
 impl Runtime {
@@ -1622,6 +1631,7 @@ impl Runtime {
             locations: HashMap::new(),
             leftover_worktrees: Arc::default(),
             versions_dir: crate::paths::versions_dir(),
+            avatars: AvatarBook::from_env(),
         }
     }
 
@@ -3343,6 +3353,9 @@ impl Runtime {
             label,
             kind,
         } = event;
+        let Some(kind) = apply_avatar(self, &label, kind, out) else {
+            return;
+        };
         if label == SUMMARY_JOB_LABEL {
             if let EventKind::Finished(_) | EventKind::Cancelled = kind {
                 self.summary_running = self.summary_running.saturating_sub(1);
@@ -4201,6 +4214,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Cleanup(_)
         | JobOutput::Done
         | JobOutput::Summary(_)
+        | JobOutput::Avatar(_)
         | JobOutput::Scan(_)
         | JobOutput::Location(_)
         | JobOutput::Version(_)

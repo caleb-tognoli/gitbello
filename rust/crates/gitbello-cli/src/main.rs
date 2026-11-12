@@ -50,6 +50,11 @@ commands:
                                    keep changing (clones <source> into <work>)
   in-use <dir>                     programs running files from a folder
                                    (Windows; what blocks deleting it)
+  avatar <email> [--repo <path>] [--github <owner/repo> --commit <oid>] [--gitlab <url>] [--out <file>]
+                                   looks up a profile picture (network; no
+                                   cache) and prints where it came from;
+                                   --repo takes the hosts from its remotes
+                                   and the commit from its GitHub remote
 
 Set GITBELLO_LOG=1 to print the git commands a command ran.";
 
@@ -78,12 +83,101 @@ fn main() -> Result<()> {
         Some("home-bench") => repo_cmds::home_bench(rest),
         Some("busy-bench") => busy_bench::run(rest),
         Some("in-use") => in_use(rest),
+        Some("avatar") => avatar(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");
             Ok(())
         }
         Some(other) => bail!("unknown command `{other}`\n\n{USAGE}"),
     }
+}
+
+fn avatar(args: &[String]) -> Result<()> {
+    use gitbello_core::avatars::{
+        AvatarRequest, AvatarSources, CurlRunner, Endpoints, GithubRemote, Lookup, RemoteHosts,
+    };
+    use gitbello_core::backend::{CliBackend, GitBackend};
+    use gitbello_core::git::CancelToken;
+    let Some((email, mut rest)) = args.split_first() else {
+        bail!("avatar needs an email");
+    };
+    let mut request = AvatarRequest {
+        email: email.clone(),
+        ..AvatarRequest::default()
+    };
+    let mut out = None;
+    let mut repo = None;
+    while let [flag, value, tail @ ..] = rest {
+        match flag.as_str() {
+            "--repo" => repo = Some(PathBuf::from(value)),
+            "--github" => {
+                request.hosts.github = Some(GithubRemote {
+                    remote: "origin".into(),
+                    repo: value.clone(),
+                })
+            }
+            "--commit" => request.commit = Some(value.clone()),
+            "--gitlab" => request
+                .hosts
+                .gitlab
+                .push(value.trim_end_matches('/').to_string()),
+            "--out" => out = Some(PathBuf::from(value)),
+            other => bail!("unknown option `{other}`"),
+        }
+        rest = tail;
+    }
+    if !rest.is_empty() {
+        bail!("`{}` needs a value", rest[0]);
+    }
+    let Some(curl) = CurlRunner::discover() else {
+        bail!("curl was not found");
+    };
+    println!("curl: {}", curl.executable().display());
+    let cancel = CancelToken::new();
+    let started = Instant::now();
+    if let Some(repo) = repo {
+        let backend = CliBackend::new(repo_cmds::runner()?);
+        let remotes = backend.remotes(&repo, &cancel)?;
+        let hosts = RemoteHosts::from_remotes(&remotes);
+        request.hosts.github = request.hosts.github.or(hosts.github);
+        request.hosts.gitlab.extend(hosts.gitlab);
+        request.repo = Some(repo);
+        request.find_commit(&backend, &cancel);
+        println!(
+            "github: {}, commit: {} ({:.0} ms)",
+            request
+                .hosts
+                .github
+                .as_ref()
+                .map_or("none", |g| g.repo.as_str()),
+            request.commit.as_deref().unwrap_or("none"),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let sources = AvatarSources::new(Some(curl), Endpoints::default());
+    let lookup = sources.lookup(&request, &cancel);
+    let elapsed = started.elapsed();
+    match lookup {
+        Lookup::Found {
+            bytes,
+            format,
+            source,
+        } => {
+            println!(
+                "found: {source:?}, {} bytes of {}",
+                bytes.len(),
+                format.extension()
+            );
+            if let Some(out) = out {
+                std::fs::write(&out, &bytes)?;
+                println!("wrote {}", out.display());
+            }
+        }
+        Lookup::Missing => println!("no picture"),
+        Lookup::Unavailable => println!("unavailable (offline, rate limit or a server error)"),
+    }
+    println!("time: {:.0} ms", elapsed.as_secs_f64() * 1000.0);
+    Ok(())
 }
 
 fn in_use(args: &[String]) -> Result<()> {

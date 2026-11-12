@@ -270,6 +270,7 @@ func set_session(value: RepoSession) -> void:
 	session = value
 	_files.session = session
 	_commits.session = session
+	_details_header.session = session
 	_picker.session = session
 	_request = {}
 	if session != null:

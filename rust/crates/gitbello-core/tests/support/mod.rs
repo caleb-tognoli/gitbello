@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gitbello_core::git::{GitCommand, GitError, GitOutput, GitRunner};
 
+pub mod http_stub;
+
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
 /// Fixed base time so fixture hashes are reproducible.

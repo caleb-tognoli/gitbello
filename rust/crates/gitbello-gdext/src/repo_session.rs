@@ -182,6 +182,15 @@ impl RepoSession {
         path_str(&self.key)
     }
 
+    /// Asks for `email`'s profile picture (once per email; nothing while
+    /// pictures are off). This repository's remotes say which hosts to ask,
+    /// and on GitHub the core finds a commit of `email` that GitHub knows.
+    /// `AppCore.avatar_changed` says when it is there.
+    #[func]
+    fn request_avatar(&self, email: GString) {
+        runtime_cell::with(|rt| rt.request_avatar(Some(&self.key), &email.to_string()));
+    }
+
     /// Worktree root once resolved, else the opened path.
     #[func]
     fn toplevel(&self) -> GString {

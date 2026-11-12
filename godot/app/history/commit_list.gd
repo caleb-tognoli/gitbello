@@ -125,6 +125,7 @@ func _ready() -> void:
 	_strip.jumped.connect(func(fraction: float) -> void:
 		set_scroll_offset(fraction * row_count() * row_height() - size.y / 2.0))
 	add_child(_strip, false, Node.INTERNAL_MODE_FRONT)
+	AvatarPictures.shared().changed.connect(func(_email: String) -> void: queue_redraw())
 	_update_theme()
 
 
@@ -517,7 +518,7 @@ func _draw_two_line_text(row: int, data: Dictionary, text: RowText, band: Rect2,
 		var center: Vector2 = Vector2(subject_x + _avatar_size * 0.5 + i * _avatar_step, center_y)
 		AvatarPainter.draw(self, self, center, _avatar_size, String(people[i]["name"]),
 				String(people[i]["email"]), AppTheme.bold_font(),
-				ring if people.size() > 1 else Color(0, 0, 0, 0), 2.0, alpha)
+				ring if people.size() > 1 else Color(0, 0, 0, 0), 2.0, alpha, session)
 	var avatars_width: float = _avatar_size + (people.size() - 1) * _avatar_step
 	var meta_x: float = subject_x + avatars_width + _avatar_gap
 	var meta_color: Color = _meta_color
@@ -537,7 +538,7 @@ func _draw_compact_text(row: int, data: Dictionary, text: RowText, rect: Rect2,
 	var center: Vector2 = Vector2(right - _compact_avatar_size * 0.5, rect.position.y + rect.size.y * 0.5)
 	AvatarPainter.draw(self, self, center, _compact_avatar_size, String(data.get("author", "")),
 			String(data.get("email", "")), AppTheme.bold_font(), Color(0, 0, 0, 0), 0.0,
-			_dim_node_alpha if dimmed else 1.0)
+			_dim_node_alpha if dimmed else 1.0, session)
 	_meta_rects[row] = Rect2(right - _compact_avatar_size, rect.position.y, _compact_avatar_size, rect.size.y)
 	var chips_x: float = right - _compact_avatar_size - _avatar_gap - maxf(0.0, text.labels_width - _label_gap)
 	_draw_chips(row, text, chips_x, rect)

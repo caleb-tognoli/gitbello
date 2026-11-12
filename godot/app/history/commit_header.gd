@@ -26,6 +26,8 @@ var date_format: Callable = Callable()
 var copy_action: StringName = &"commit.copy_hash"
 ## Shows a merge's parents as links (History, which can go to them).
 var links_parents: bool = true
+## Asks for the people's profile pictures (set by the owner).
+var session: RepoSession = null
 
 var _parent_links: Array[LinkButton] = []
 var _shown_oid: String = ""
@@ -197,6 +199,7 @@ func _person_card(person: String, email: String, role: String) -> Control:
 	card.set_meta(&"person", {"name": person, "email": email, "role": role})
 	card.tooltip_text = CommitList.identity_text(person, email)
 	var avatar: AvatarView = AvatarView.new(person, email, float(get_theme_constant(&"avatar_size", THEME_TYPE)))
+	avatar.session = session
 	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	card.add_child(avatar)
 	var lines: VBoxContainer = VBoxContainer.new()

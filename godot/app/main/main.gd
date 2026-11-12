@@ -555,13 +555,13 @@ func _register_actions() -> void:
 	# Alt+number follows the switch as it shows: Shelves, Compare and File
 	# history come and go, so the third button is not always the same view.
 	for i: int in VIEW_SHORTCUTS:
-		var position: int = i
+		var index: int = i
 		var numbered: ActionRegistry.Action = Actions.register(StringName("view.select_%d" % (i + 1)),
 				"Show view %d" % (i + 1), "View",
-				func() -> void: Actions.run_action(current_view().view_action_at(position)),
+				func() -> void: Actions.run_action(current_view().view_action_at(index)),
 				PackedStringArray(["Alt+%d" % (i + 1)]),
 				func() -> bool:
-					return current_view() != null and Actions.is_enabled(current_view().view_action_at(position)))
+					return current_view() != null and Actions.is_enabled(current_view().view_action_at(index)))
 		numbered.hidden = true
 	for i: int in CHIP_SHORTCUTS:
 		var index: int = i

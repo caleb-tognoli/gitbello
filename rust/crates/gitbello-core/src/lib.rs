@@ -3,6 +3,7 @@
 //! All git logic, parsing, models, graph layout, watching and job scheduling
 //! live here. This crate must never depend on Godot.
 
+pub mod avatars;
 pub mod backend;
 pub mod blame;
 pub mod changes;

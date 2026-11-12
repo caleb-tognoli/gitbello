@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use gitbello_core::avatars::{Provider, Providers};
 use gitbello_core::changes::split_message;
 use gitbello_core::compare::{push_recent, CompareMode, CompareSide, RecentComparison};
 use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
@@ -137,6 +138,9 @@ fn dispatch(core: &mut Gd<Node>, sessions: &[(PathBuf, Gd<RepoSession>)], event:
         }
         RuntimeEvent::SummaryLoaded { repo } => {
             core.emit_signal("repo_summary_ready", &[path_str(&repo).to_variant()]);
+        }
+        RuntimeEvent::AvatarChanged { email } => {
+            core.emit_signal("avatar_changed", &[gstr(&email).to_variant()]);
         }
         RuntimeEvent::Opened { repo } => {
             if let Some(mut session) = find(sessions, &repo) {
@@ -449,6 +453,11 @@ impl AppCore {
     /// The summary of library entry `path` (see `repo_summary`) arrived.
     #[signal]
     fn repo_summary_ready(path: GString);
+
+    /// The profile picture of `email` (normalized: trimmed, lowercase)
+    /// arrived or went away; see `avatar`.
+    #[signal]
+    fn avatar_changed(email: GString);
 
     /// Emitted in response to `ping` (M0 boundary check).
     #[signal]
@@ -977,6 +986,23 @@ impl AppCore {
         .unwrap_or(false)
     }
 
+    /// The profile picture of `email` once found (ask with the session's
+    /// `request_avatar`): `{bytes (the image file), format ("png", "jpg"
+    /// or "webp")}`, or {} (draw initials).
+    #[func]
+    fn avatar(&self, email: GString) -> VarDictionary {
+        runtime_cell::with(|rt| {
+            rt.avatar(&email.to_string()).map(|picture| {
+                vdict! {
+                    "bytes" => &PackedByteArray::from(&picture.bytes[..]),
+                    "format" => picture.format.extension(),
+                }
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
     /// Whether History shows one-line rows (saved in the config); else two
     /// lines with the author line.
     #[func]
@@ -1088,7 +1114,9 @@ impl AppCore {
     /// The settings the Settings dialog edits: `{pull_mode,
     /// auto_fetch_minutes, terminal_command,
     /// worktree_template, branch_prefix, language, accent, added_color,
-    /// removed_color, clone_folder, diff_minimap, ignore_hint}`; an empty terminal command
+    /// removed_color, clone_folder, diff_minimap, ignore_hint, avatars,
+    /// avatar_providers}` (provider names: github, gitlab, gravatar,
+    /// libravatar); an empty terminal command
     /// means the platform's, an empty colour the theme's (else `#rrggbb`), an
     /// empty clone folder the last one used.
     #[func]
@@ -1108,6 +1136,12 @@ impl AppCore {
                 "clone_folder" => &c.clone_folder.as_deref().map_or_else(GString::new, path_str),
                 "diff_minimap" => c.diff_minimap,
                 "ignore_hint" => c.ignore_hint,
+                "avatars" => c.avatars,
+                "avatar_providers" => &c
+                    .avatar_providers
+                    .iter()
+                    .map(|p| GString::from(p.name()))
+                    .collect::<PackedStringArray>(),
             }
         })
         .unwrap_or_default()
@@ -1182,7 +1216,29 @@ impl AppCore {
                 Err(_) => return gstr("Suggest folders to ignore must be true or false."),
             },
         };
+        let avatars = match settings.get("avatars") {
+            None => None,
+            Some(value) => match value.try_to::<bool>() {
+                Ok(shown) => Some(shown),
+                Err(_) => return gstr("Show profile pictures must be true or false."),
+            },
+        };
+        let providers = match settings.get("avatar_providers") {
+            None => None,
+            Some(value) => match provider_names(&value) {
+                Some(names) => Some(names),
+                None => {
+                    return gstr("Picture sources must be github, gitlab, gravatar or libravatar.")
+                }
+            },
+        };
         runtime_cell::with(|rt| {
+            if let Some(shown) = avatars {
+                rt.set_avatars_enabled(shown);
+            }
+            if let Some(providers) = providers {
+                rt.set_avatar_providers(providers);
+            }
             let config = rt.config_mut();
             if let Some(shown) = minimap {
                 config.diff_minimap = shown;
@@ -1323,4 +1379,22 @@ fn summary_dict(summary: &RepoSummary) -> VarDictionary {
         "ahead" => i64::from(summary.ahead),
         "behind" => i64::from(summary.behind),
     }
+}
+
+/// The providers a list of names (`PackedStringArray` or `Array`) names, or
+/// `None` when one is not a provider.
+fn provider_names(value: &Variant) -> Option<Providers> {
+    let names: Vec<String> = match value.try_to::<PackedStringArray>() {
+        Ok(names) => names.as_slice().iter().map(GString::to_string).collect(),
+        Err(_) => value
+            .try_to::<VarArray>()
+            .ok()?
+            .iter_shared()
+            .map(|v| v.try_to::<GString>().map(|s| s.to_string()).ok())
+            .collect::<Option<_>>()?,
+    };
+    if names.iter().any(|n| Provider::parse(n).is_none()) {
+        return None;
+    }
+    Some(Providers::from_names(names.iter().map(String::as_str)))
 }

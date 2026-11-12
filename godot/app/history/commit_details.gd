@@ -113,6 +113,7 @@ func set_session(value: RepoSession) -> void:
 		session.commit_loaded.disconnect(_on_commit_loaded)
 		session.commit_diff_changed.disconnect(_on_diff_changed)
 	session = value
+	_header.session = session
 	show_placeholder()
 	_files.session = session
 	if session != null:

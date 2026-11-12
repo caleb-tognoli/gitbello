@@ -32,8 +32,8 @@ func run() -> void:
 		print("file_history_smoke: no --fixtures, skipped")
 		return
 	var opener: Callable = RepoOps.opener
-	RepoOps.opener = func(path: String) -> Error:
-		_opened.append(path)
+	RepoOps.opener = func(opened: String) -> Error:
+		_opened.append(opened)
 		return OK
 	var main: Main = MAIN.instantiate() as Main
 	add_child(main)
@@ -135,9 +135,9 @@ func run() -> void:
 	expect_eq(rename, 4, "the rename's row")
 	list.select_only(rename)
 	expect(await _diff_ready(session, FILE), "the rename's diff loads")
-	var renamed: Dictionary = list.version_at(rename)
-	expect_eq(String(renamed["code"]), "R", "it is a rename")
-	expect_eq(String(renamed["original_path"]), OLD, "from the old name")
+	var renamed_version: Dictionary = list.version_at(rename)
+	expect_eq(String(renamed_version["code"]), "R", "it is a rename")
+	expect_eq(String(renamed_version["original_path"]), OLD, "from the old name")
 	expect(list.marks_text(rename).contains(OLD), "the chip's tooltip names it: %s" % list.marks_text(rename))
 	expect_eq(String(session.slot_diff_info("file").get("original_path", "")), OLD, "the diff reads old → new")
 	var side: int = list.row_of(String(_oid(list, "Handle empty passwords")))

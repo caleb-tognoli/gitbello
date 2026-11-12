@@ -817,13 +817,13 @@ func show_view(which: View) -> void:
 	focus_view()
 
 
-## The action of the switch's button at `position` among the shown ones
+## The action of the switch's button at `index` among the shown ones
 ## (0 first), or &"": what Alt+1 … Alt+5 run.
-func view_action_at(position: int) -> StringName:
+func view_action_at(index: int) -> StringName:
 	var shown: int = 0
 	for button: Button in _switch_actions:
 		if button.visible:
-			if shown == position:
+			if shown == index:
 				return _switch_actions[button]
 			shown += 1
 	return &""

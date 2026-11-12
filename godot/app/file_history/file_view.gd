@@ -323,19 +323,19 @@ func _build_blame() -> void:
 	_blame_view.source = func(start: int, count: int) -> Array:
 		return session.blame_lines(start, count) if session != null else []
 	_blame_view.set_minimap_sources(
-		func(_split: bool, first: int, rows: int, columns: int, row_px: int, char_px: int,
+		func(_side_by_side: bool, first: int, rows: int, columns: int, row_px: int, char_px: int,
 				palette: PackedColorArray) -> PackedByteArray:
 			if session == null:
 				return PackedByteArray()
 			return session.diff_minimap_tile(BLAME_SLOT, false, first, rows, columns, row_px, char_px, palette),
-		func(_split: bool, buckets: int) -> PackedByteArray:
+		func(_side_by_side: bool, buckets: int) -> PackedByteArray:
 			return session.diff_overview(BLAME_SLOT, false, buckets, true) if session != null else PackedByteArray(),
-		func(_split: bool, row: float) -> float:
-			return session.diff_strip_position(BLAME_SLOT, false, row, true) if session != null else 0.0,
-		func(_split: bool, fraction: float) -> Dictionary:
+		func(_side_by_side: bool, at_row: float) -> float:
+			return session.diff_strip_position(BLAME_SLOT, false, at_row, true) if session != null else 0.0,
+		func(_side_by_side: bool, fraction: float) -> Dictionary:
 			return session.diff_strip_target(BLAME_SLOT, false, fraction, true) if session != null else {})
 	# The next and previous change step through the focused commit's lines.
-	_blame_view.change_source = func(_split: bool, from_row: int, forward: bool) -> int:
+	_blame_view.change_source = func(_side_by_side: bool, from_row: int, forward: bool) -> int:
 		return session.diff_change_row(BLAME_SLOT, false, from_row, forward) if session != null else -1
 	_blame_view.commit_clicked.connect(_on_commit_clicked)
 	_blame_view.gui_input.connect(_on_blame_key)
@@ -378,6 +378,8 @@ func set_session(value: RepoSession) -> void:
 		session.blame_version_found.disconnect(_on_blame_version)
 	session = value
 	_list.session = session
+	_details_header.session = session
+	_blame_view.session = session
 	_request = {}
 	if session != null:
 		session.file_history_changed.connect(_on_history_changed)
@@ -809,10 +811,10 @@ func _on_blame_changed() -> void:
 		return
 	var info: Dictionary = session.blame_info()
 	_blame_info = info
-	var open: bool = bool(info.get("open", false))
-	var state: String = String(info.get("state", "")) if open else "closed"
+	var is_open: bool = bool(info.get("open", false))
+	var state: String = String(info.get("state", "")) if is_open else "closed"
 	var lines: int = int(info.get("lines", 0))
-	var key: String = "%s\n%s" % [String(info.get("oid", "")), String(info.get("path", ""))] if open else ""
+	var key: String = "%s\n%s" % [String(info.get("oid", "")), String(info.get("path", ""))] if is_open else ""
 	var message: String = ""
 	match state:
 		"closed":
@@ -865,7 +867,7 @@ func _on_blame_changed() -> void:
 		# This version has no line of the focused commit: let go of it.
 		_blame_info["focus"] = ""
 		session.focus_blame_commit("")
-	_list.marked = String(_blame_info.get("focus", "")) if open else ""
+	_list.marked = String(_blame_info.get("focus", "")) if is_open else ""
 	_update_blame_bar()
 	_show_blame_details()
 

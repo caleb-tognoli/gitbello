@@ -23,6 +23,9 @@ const BLAME_THEME_TYPE: StringName = &"BlameView"
 ## Shaped gutter texts kept (cleared when full).
 const TEXT_CACHE: int = 512
 
+## Asks for the authors' profile pictures (`AvatarPainter`).
+var session: RepoSession = null
+
 ## The commit whose gutter rows the mouse is over.
 var _hover_commit: String = ""
 var _meta_font_size: int = 0
@@ -45,6 +48,7 @@ func _init() -> void:
 func _ready() -> void:
 	super()
 	mouse_exited.connect(func() -> void: _set_hover_commit(""))
+	AvatarPictures.shared().changed.connect(func(_email: String) -> void: queue_redraw())
 	_utc_offset = RelativeDate.local_offset()
 
 
@@ -135,7 +139,8 @@ func _draw_lead(index: int, data: Dictionary, rect: Rect2) -> void:
 		return
 	var author: String = String(data.get("author", ""))
 	AvatarPainter.draw(self, self, Vector2(x + _avatar * 0.5, center), _avatar, author,
-			String(data.get("email", "")), AppTheme.bold_font())
+			String(data.get("email", "")), AppTheme.bold_font(), Color(0, 0, 0, 0), 1.5, 1.0,
+			session)
 	x += _avatar + _gap
 	var author_width: float = _widths[&"author"]
 	_draw_gutter_text(&"author", author, x, center, _blame_colors[&"author_color"], author_width)

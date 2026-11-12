@@ -42,6 +42,7 @@ mod compare;
 mod ignore;
 mod merge;
 mod path_log;
+mod people;
 mod shelf_files;
 
 pub use amend::AmendSnapshot;
@@ -655,6 +656,17 @@ pub trait GitBackend: Send + Sync {
         _cancel: &CancelToken,
     ) -> Result<Option<(u32, u32)>, GitError> {
         Err(unsupported("working line counts"))
+    }
+    /// The newest commit on `remote`'s branches that `email` authored, or
+    /// else committed: one the remote's host knows (for profile pictures).
+    fn published_commit_by(
+        &self,
+        _repo: &Path,
+        _remote: &str,
+        _email: &str,
+        _cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        Err(unsupported("commit lookups by person"))
     }
 }
 
@@ -2191,6 +2203,16 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<Option<(u32, u32)>, GitError> {
         self.count_working_lines(toplevel, target, cancel)
+    }
+
+    fn published_commit_by(
+        &self,
+        repo: &Path,
+        remote: &str,
+        email: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<String>, GitError> {
+        self.find_published_commit(repo, remote, email, cancel)
     }
 
     fn blame_source(

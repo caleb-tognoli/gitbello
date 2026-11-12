@@ -38,6 +38,8 @@ const CATEGORIES: Array = [
 			[&"added_color", "Added colour", &"change_color"],
 			[&"removed_color", "Removed colour", &"change_color"],
 			[&"diff_minimap", "Show minimap", &"check"],
+			[&"avatars", "Show profile pictures", &"check"],
+			[&"avatar_providers", "Picture sources", &"providers"],
 		],
 	],
 ]
@@ -55,6 +57,8 @@ const DETAILS: Dictionary = {
 	&"removed_color": "Removed lines in diffs, the minimap and change counts, in both themes",
 	&"ignore_hint": "Offers to ignore a folder such as node_modules/ when it fills Changes",
 	&"diff_minimap": "A small picture of the whole diff beside it. Off, only the strip of change marks shows.",
+	&"avatars": "Looks up authors' pictures by email on GitHub, GitLab, Gravatar and Libravatar. Off, avatars show initials.",
+	&"avatar_providers": "Which services are asked for profile pictures. GitHub and GitLab get the email; Gravatar and Libravatar a hash of it.",
 }
 const DEFAULTS: Dictionary = {
 	&"pull_mode": "ff-only",
@@ -70,6 +74,8 @@ const DEFAULTS: Dictionary = {
 	&"removed_color": "",
 	&"diff_minimap": true,
 	&"ignore_hint": true,
+	&"avatars": true,
+	&"avatar_providers": AvatarPictures.PROVIDERS,
 }
 
 var categories: ItemList = ItemList.new()
@@ -204,6 +210,8 @@ func reset_to_defaults() -> void:
 		_show_error(&"", error)
 		return
 	get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", bool(DEFAULTS[&"diff_minimap"]))
+	AvatarPictures.shared().set_enabled(bool(DEFAULTS[&"avatars"]))
+	AvatarPictures.shared().reset()
 	Core.set_theme_choice(String(DEFAULTS[&"theme"]))
 	ThemeManager.apply(self)
 	L10n.apply(String(DEFAULTS[&"language"]))
@@ -307,6 +315,8 @@ func _create_control(key: StringName, kind: StringName, options: Array) -> Contr
 			return _create_color_control(key)
 		&"change_color":
 			return _create_change_color_control(key)
+		&"providers":
+			return _create_providers_control(key)
 		&"check":
 			var check: CheckBox = CheckBox.new()
 			check.toggled.connect(func(on: bool) -> void: _set_value(key, on))
@@ -352,6 +362,36 @@ func _create_color_control(key: StringName) -> Control:
 		picker.color = color
 		for i: int in swatches.size():
 			swatches[i].set_pressed_no_signal(AppTheme.ACCENT_PRESETS[i].is_equal_approx(color))
+	return row
+
+
+## A toggle per profile picture provider (`AvatarPictures.PROVIDERS`),
+## usable while "Show profile pictures" is on.
+func _create_providers_control(key: StringName) -> Control:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.theme_type_variation = &"ChipRow"
+	var toggles: Array[Button] = []
+	for i: int in AvatarPictures.PROVIDERS.size():
+		var toggle: Button = Button.new()
+		toggle.text = AvatarPictures.PROVIDER_NAMES[i]
+		toggle.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+		toggle.theme_type_variation = &"ToolbarButton"
+		toggle.toggle_mode = true
+		toggle.toggled.connect(func(_on: bool) -> void:
+			var chosen: Array = []
+			for j: int in toggles.size():
+				if toggles[j].button_pressed:
+					chosen.append(AvatarPictures.PROVIDERS[j])
+			_set_value(key, chosen))
+		toggles.append(toggle)
+		row.add_child(toggle)
+	row.set_meta(&"editor", toggles[0])
+	_refreshers[key] = func() -> void:
+		var chosen: Array = _current_value(key)
+		var shown: bool = bool(_current_value(&"avatars"))
+		for i: int in toggles.size():
+			toggles[i].set_pressed_no_signal(AvatarPictures.PROVIDERS[i] in chosen)
+			toggles[i].disabled = not shown
 	return row
 
 
@@ -401,6 +441,11 @@ func _set_value(key: StringName, value: Variant) -> bool:
 				ThemeManager.apply(self)
 			elif error.is_empty() and key == &"diff_minimap":
 				get_tree().call_group(DiffPanel.GROUP, &"set_minimap_enabled", bool(value))
+			elif error.is_empty() and key == &"avatars":
+				AvatarPictures.shared().set_enabled(bool(value))
+				_refresh(&"avatar_providers")
+			elif error.is_empty() and key == &"avatar_providers":
+				AvatarPictures.shared().reset()
 	_show_error(key, error)
 	if error.is_empty():
 		_refresh(key)
@@ -420,6 +465,8 @@ func _validation_error(key: StringName, value: Variant) -> String:
 func _current_value(key: StringName) -> Variant:
 	if key == &"theme":
 		return Core.theme_choice()
+	if key == &"avatar_providers":
+		return Array(Core.settings().get(key, PackedStringArray()) as PackedStringArray)
 	return Core.settings().get(key, DEFAULTS[key])
 
 
