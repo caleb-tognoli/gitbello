@@ -1,0 +1,29 @@
+| id  name    city, country   score
+  ^^ column.0
+    ^^ punctuation
+      ^^^^ column.1
+          ^^^^ punctuation
+              ^^^^^^^^^^^^^ column.2
+                           ^^^ punctuation
+                              ^^^^^ column.3
+| 1   Ada London, UK  12.5
+  ^ column.0
+   ^^^ punctuation
+      ^^^ column.1
+         ^ punctuation
+          ^^^^^^^^^^ column.2
+                    ^^ punctuation
+                      ^^^^ column.3
+| 2   Linus   Helsinki    7
+  ^ column.0
+   ^^^ punctuation
+      ^^^^^ column.1
+           ^^^ punctuation
+              ^^^^^^^^ column.2
+                      ^^^^ punctuation
+                          ^ column.3
+|         empty first 
+  ^^^^ punctuation
+      ^^^^ punctuation
+          ^^^^^^^^^^^ column.2
+                     ^ punctuation

@@ -72,10 +72,6 @@ const FLASH_MSEC: int = 1200
 const CHOICE_UNDO_MSEC: int = 6000
 ## Longest side name a block button shows before it is shortened with "…".
 const BLOCK_NAME_CHARS: int = 18
-## Theme colors of `highlight::TokenKind` ids 0..4.
-const SYNTAX_COLORS: Array[StringName] = [
-	&"syntax_keyword", &"syntax_type", &"syntax_string", &"syntax_number", &"syntax_comment",
-]
 ## The buttons of each `expand` value, left to right.
 const EXPANDERS: Dictionary[String, Array] = {
 	"up": ["up"], "down": ["down"], "both": ["down", "up"], "all": ["all"],
@@ -195,7 +191,13 @@ var _button_hover_box: StyleBoxFlat = StyleBoxFlat.new()
 var _char_width: float = 0.0
 var _padding: float = 0.0
 var _colors: Dictionary[StringName, Color] = {}
-var _syntax: Array[Color] = []
+## Colours by syntax token kind id (`AppTheme.syntax_colors`); transparent for
+## kinds drawn as plain text.
+var _syntax: PackedColorArray = PackedColorArray()
+## `_syntax`, then plain text and hunk text, made readable on a background
+## (`AppTheme.readable_colors`), by that background: the row's, the
+## changed words' or the selection over either.
+var _tables: Dictionary[Color, PackedColorArray] = {}
 var _picks: PickPainter = PickPainter.new()
 
 
@@ -533,6 +535,11 @@ func select_only(row: int) -> void:
 	_anchor = row
 	if row >= 0:
 		scroll_to_row(row)
+
+
+## Selects the whole text of rows `from` to `to`.
+func select_lines(from: int, to: int) -> void:
+	_select_lines(from, to)
 
 
 func clear_selection() -> void:
@@ -1159,6 +1166,8 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 	var tint: Color = _line_tint(data)
 	if tint.a > 0.0:
 		draw_rect(rect, tint)
+		# The text reads on the tinted line (see `_table`).
+		bg = _colors[&"background"].blend(bg).blend(tint)
 	if kind == KIND_MARKER:
 		_draw_marker(data, rect, gutter)
 		return
@@ -1169,7 +1178,7 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 	if kind == KIND_HUNK:
 		var span: Vector2 = _draw_expanders(data, row, rect)
 		var text_rect: Rect2 = Rect2(rect.position, Vector2(span.y - rect.position.x, rect.size.y))
-		_draw_text(data, kind, row, side, maxf(rect.position.x + gutter, span.x), text_rect, baseline)
+		_draw_text(data, kind, row, side, maxf(rect.position.x + gutter, span.x), text_rect, baseline, bg)
 		return
 	draw_rect(Rect2(rect.position, Vector2(gutter, rect.size.y)), _colors[&"gutter_bg"])
 	if tint.a > 0.0:
@@ -1188,7 +1197,7 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 					HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, _colors[&"line_number_color"])
 	if conflict_side in ["ours", "theirs", "base"]:
 		draw_rect(Rect2(rect.position, Vector2(CONFLICT_BAR_WIDTH, rect.size.y)), _colors[StringName(conflict_side + "_mark")])
-		_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
+		_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline, bg)
 		# Side by side, the column says the side; only the base gets a tag.
 		if (conflict_side == "base" or not side_by_side) \
 				and String(_side_line(row - 1, side).get("side", "")) != conflict_side:
@@ -1203,7 +1212,7 @@ func _draw_side(data: Dictionary, row: int, side: int, rect: Rect2, columns: int
 			mark_color = _colors[&"removed_mark"]
 		draw_string(_font, Vector2(x + (column + _char_width) * columns, baseline), mark,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, mark_color)
-	_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline)
+	_draw_text(data, kind, row, side, rect.position.x + gutter, rect, baseline, bg)
 
 
 ## A marker row, drawn like a hunk header: what it notes in the code font,
@@ -1320,8 +1329,11 @@ func _draw_block_header(data: Dictionary, row: int, rect: Rect2) -> void:
 
 
 ## The line's text from `left`, scrolled sideways: changed-word background,
-## selection, then syntax-colored segments, clipped to `rect`; the caret.
-func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, rect: Rect2, baseline: float) -> void:
+## selection, then syntax-colored pieces, clipped to `rect`; the caret. Each
+## piece takes its colour from the table of what it is drawn on (`bg`, the
+## row's background, or the changed words' and the selection over it).
+func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, rect: Rect2, baseline: float,
+		bg: Color) -> void:
 	var text: String = String(data["text"])
 	var length: int = text.length()
 	var skip: int = int(_h_scroll.value / _char_width) if _char_width > 0.0 and kind != KIND_HUNK else 0
@@ -1329,8 +1341,10 @@ func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, r
 	var column_x: Callable = func(column: int) -> float: return left + (column - skip) * _char_width
 	var spans: Array[Array] = []
 	var hl: PackedInt32Array = data.get("hl", PackedInt32Array())
-	if hl.size() == 2 and hl[1] > hl[0]:
-		spans.append([hl[0], hl[1], _colors[&"added_hl_bg"] if kind == KIND_ADDED else _colors[&"removed_hl_bg"]])
+	var words: bool = hl.size() == 2 and hl[1] > hl[0]
+	var word_bg: Color = _colors[&"added_hl_bg"] if kind == KIND_ADDED else _colors[&"removed_hl_bg"]
+	if words:
+		spans.append([hl[0], hl[1], word_bg])
 	var selected: Vector2i = _selected_columns(row, side, length)
 	if selected.x >= 0:
 		spans.append([selected.x, selected.y, _colors[&"selection_bg"]])
@@ -1339,28 +1353,53 @@ func _draw_text(data: Dictionary, kind: int, row: int, side: int, left: float, r
 		var to: float = minf(column_x.call(int(span[1])), right)
 		if to > from:
 			draw_rect(Rect2(from, rect.position.y, to - from, rect.size.y), span[2])
-	var base: Color = _colors[&"hunk_color"] if kind == KIND_HUNK else _colors[&"text_color"]
-	var segments: Array = _segments(text.length(), data.get("syntax", PackedInt32Array()), base)
-	for segment: Array in segments:
+	var under: Color = bg if bg.a >= 1.0 else _colors[&"background"].blend(bg)
+	var edges: PackedInt32Array = PackedInt32Array()
+	if words:
+		edges.append_array([hl[0], hl[1]])
+	if selected.x >= 0:
+		edges.append_array([selected.x, selected.y])
+	var base: int = _syntax.size() + (1 if kind == KIND_HUNK else 0)
+	# The row's own table; pieces under the changed words or the selection
+	# look theirs up.
+	var row_table: PackedColorArray = _table(under)
+	var past_right: bool = false
+	for segment: Array in _segments(length, data.get("syntax", PackedInt32Array()), base):
 		var start: int = maxi(int(segment[0]), skip)
 		var end: int = int(segment[1])
-		if end <= start:
-			continue
-		var x: float = column_x.call(start)
-		if x >= right:
+		while start < end:
+			var x: float = column_x.call(start)
+			if x >= right:
+				past_right = true
+				break
+			var stop: int = end
+			var table: PackedColorArray = row_table
+			if not edges.is_empty():
+				for edge: int in edges:
+					if edge > start and edge < stop:
+						stop = edge
+				var in_words: bool = words and start >= hl[0] and start < hl[1]
+				var in_selection: bool = selected.x >= 0 and start >= selected.x and start < selected.y
+				if in_words or in_selection:
+					var piece_bg: Color = word_bg if in_words else under
+					if in_selection:
+						piece_bg = piece_bg.blend(_colors[&"selection_bg"])
+					table = _table(piece_bg)
+			var chars: int = mini(stop - start, int((right - x) / _char_width) + 1)
+			draw_string(_font, Vector2(x, baseline), text.substr(start, chars), HORIZONTAL_ALIGNMENT_LEFT, -1,
+					_font_size, table[int(segment[2])])
+			start = stop
+		if past_right:
 			break
-		var chars: int = mini(end - start, int((right - x) / _char_width) + 1)
-		draw_string(_font, Vector2(x, baseline), text.substr(start, chars), HORIZONTAL_ALIGNMENT_LEFT, -1,
-				_font_size, segment[2])
 	if caret_shown() and row == _sel_to.x and side == _sel_side:
 		var caret: float = column_x.call(_sel_to.y)
 		if caret >= left and caret < right:
 			draw_rect(Rect2(caret, rect.position.y + 2.0, 1.0, rect.size.y - 4.0), _colors[&"caret_color"])
 
 
-## `[start, end, color]` runs covering `length` characters: syntax tokens in
-## their colors, the gaps in `base`.
-func _segments(length: int, syntax: PackedInt32Array, base: Color) -> Array:
+## `[start, end, index]` runs covering `length` characters: syntax tokens by
+## their kind's index in a `_table`, the gaps and plain kinds by `base`.
+func _segments(length: int, syntax: PackedInt32Array, base: int) -> Array:
 	var out: Array = []
 	var at: int = 0
 	for i: int in range(0, syntax.size() - 2, 3):
@@ -1369,11 +1408,25 @@ func _segments(length: int, syntax: PackedInt32Array, base: Color) -> Array:
 		if start > at:
 			out.append([at, start, base])
 		var kind: int = syntax[i + 2]
-		out.append([start, end, _syntax[kind] if kind >= 0 and kind < _syntax.size() else base])
+		var plain: bool = kind < 0 or kind >= _syntax.size() or _syntax[kind].a == 0.0
+		out.append([start, end, base if plain else kind])
 		at = end
 	if at < length:
 		out.append([at, length, base])
 	return out
+
+
+## The text colours readable on the opaque `background`: one per syntax
+## kind, then plain text and hunk text (see `_tables`).
+func _table(background: Color) -> PackedColorArray:
+	var table: PackedColorArray = _tables.get(background, PackedColorArray())
+	if table.is_empty():
+		var colors: PackedColorArray = _syntax.duplicate()
+		colors.append(_colors[&"text_color"])
+		colors.append(_colors[&"hunk_color"])
+		table = AppTheme.readable_colors(colors, background)
+		_tables[background] = table
+	return table
 
 
 ## The background of a line of `kind`; a conflict's ours and theirs (`side`)
@@ -1658,7 +1711,7 @@ func _update_theme() -> void:
 	_font_size = get_theme_font_size(&"font_size", DIFF_THEME_TYPE)
 	_char_width = _font.get_char_size(ord("M"), _font_size).x
 	_padding = float(get_theme_constant(&"padding", DIFF_THEME_TYPE))
-	for color_name: StringName in [&"text_color", &"line_number_color", &"hunk_color", &"hunk_bg",
+	for color_name: StringName in [&"text_color", &"background", &"line_number_color", &"hunk_color", &"hunk_bg",
 			&"added_bg", &"removed_bg", &"added_mark", &"removed_mark", &"gutter_bg", &"empty_bg",
 			&"added_hl_bg", &"removed_hl_bg", &"selection_bg", &"caret_color", &"expander_color",
 			&"expander_hover_color", &"expander_hover_bg", &"base_bg", &"base_mark", &"ours_bg", &"ours_mark", &"theirs_bg", &"theirs_mark", &"block_button_bg",
@@ -1672,7 +1725,6 @@ func _update_theme() -> void:
 		box.bg_color = _colors[entry[1]]
 		box.set_corner_radius_all(3)
 	_picks.update_theme(self)
-	_syntax.clear()
-	for color_name: StringName in SYNTAX_COLORS:
-		_syntax.append(get_theme_color(color_name, DIFF_THEME_TYPE))
+	_syntax = AppTheme.syntax_colors(self, DIFF_THEME_TYPE, Color.TRANSPARENT)
+	_tables.clear()
 	_update_h_range()

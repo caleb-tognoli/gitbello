@@ -1,0 +1,172 @@
+| @model IndexModel
+  ^ macro
+   ^^^^^ keyword
+         ^^^^^^^^^^ type
+| @{
+  ^ macro
+   ^ punctuation
+|     ViewData["Title"] = "Home";
+      ^^^^^^^^ type
+               ^^^^^^^ string
+                          ^^^^^^ string
+|     var x = @"verbatim
+      ^^^ type
+              ^^^^^^^^^^ string
+| string }";
+  ^^^^^^^^^ string
+| }
+  ^ punctuation
+| <Counter
+  ^ punctuation
+   ^^^^^^^ tag
+|     IncrementAmount="5"
+      ^^^^^^^^^^^^^^^ attribute
+                     ^ operator
+                      ^^^ string
+|     @ref="counter" />
+      ^^^^ attribute
+          ^ operator
+           ^ string
+                   ^ string
+                     ^^ punctuation
+| <div>
+  ^ punctuation
+   ^^^ tag
+      ^ punctuation
+| @switch (Model.Kind)
+  ^ macro
+   ^^^^^^ keyword.control
+           ^^^^^ type
+| {
+  ^ punctuation
+|     case 1:
+      ^^^^ keyword.control
+           ^ number
+|         <b>one</b>
+          ^ punctuation
+           ^ tag
+            ^ punctuation
+                ^^ punctuation
+                  ^ tag
+                   ^ punctuation
+|         break;
+          ^^^^^ keyword.control
+|     default:
+      ^^^^^^^ keyword.control
+|         <text>other @Model.Kind</text>
+          ^ punctuation
+           ^^^^ tag
+               ^ punctuation
+                      ^ macro
+                       ^^^^^ type
+                                 ^^ punctuation
+                                   ^^^^ tag
+                                       ^ punctuation
+|         break;
+          ^^^^^ keyword.control
+| }
+  ^ punctuation
+| </div>
+  ^^ punctuation
+    ^^^ tag
+       ^ punctuation
+| @try { Do(); } catch (Exception e) { <p>@e.Message</p> } finally { Done(); }
+  ^ macro
+   ^^^ keyword.control
+       ^ punctuation
+         ^^ function
+               ^ punctuation
+                 ^^^^^ keyword.control
+                        ^^^^^^^^^ type
+                                     ^ punctuation
+                                       ^ punctuation
+                                        ^ tag
+                                         ^ punctuation
+                                          ^ macro
+                                                    ^^ punctuation
+                                                      ^ tag
+                                                       ^ punctuation
+                                                         ^ punctuation
+                                                           ^^^^^^^ keyword.control
+                                                                   ^ punctuation
+                                                                     ^^^^ function
+                                                                             ^ punctuation
+| @do { i++; } while (i < 3);
+  ^ macro
+   ^^ keyword.control
+      ^ punctuation
+             ^ punctuation
+               ^^^^^ keyword.control
+                          ^ number
+                            ^ punctuation
+| @if (a) {
+  ^ macro
+   ^^ keyword.control
+          ^ punctuation
+|     <section>
+      ^ punctuation
+       ^^^^^^^ tag
+              ^ punctuation
+|         @if (b)
+          ^ macro
+           ^^ keyword.control
+|         {
+          ^ punctuation
+|             <em>deep</em>
+              ^ punctuation
+               ^^ tag
+                 ^ punctuation
+                      ^^ punctuation
+                        ^^ tag
+                          ^ punctuation
+|         }
+          ^ punctuation
+|         <input value="@x" />
+          ^ punctuation
+           ^^^^^ tag
+                 ^^^^^ attribute
+                      ^ operator
+                       ^ string
+                        ^ macro
+                          ^ string
+                            ^^ punctuation
+|     </section>
+      ^^ punctuation
+        ^^^^^^^ tag
+               ^ punctuation
+| } else if (c) { <i>c</i> }
+  ^ punctuation
+    ^^^^ keyword.control
+         ^^ keyword.control
+                ^ punctuation
+                  ^ punctuation
+                   ^ tag
+                    ^ punctuation
+                      ^^ punctuation
+                        ^ tag
+                         ^ punctuation
+                           ^ punctuation
+| <p>after</p>
+  ^ punctuation
+   ^ tag
+    ^ punctuation
+          ^^ punctuation
+            ^ tag
+             ^ punctuation
+| @section Scripts {
+  ^ macro
+   ^^^^^^^ keyword
+           ^^^^^^^ type
+                   ^ punctuation
+|     <script src="~/x.js"></script>
+      ^ punctuation
+       ^^^^^^ tag
+              ^^^ attribute
+                 ^ operator
+                  ^^^^^^^^ string
+                          ^ punctuation
+                           ^^ punctuation
+                             ^^^^^^ tag
+                                   ^ punctuation
+| }
+  ^ punctuation

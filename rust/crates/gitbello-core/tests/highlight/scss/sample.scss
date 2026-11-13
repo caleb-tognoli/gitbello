@@ -1,0 +1,34 @@
+// Variables and mixins
+@use "sass:math";
+$base: 16px !default;
+$theme: (primary: #0af, muted: #888);
+
+@mixin center($width: 100%) {
+  margin: 0 auto;
+  width: $width;
+}
+
+.card {
+  @include center(80%);
+  padding: math.div($base, 2);
+
+  &:hover { box-shadow: 0 2px 4px rgba(#000, 0.2); }
+  &__title { font-weight: bold; }
+
+  .icon-#{$name} {
+    content: "#{$name}";
+  }
+
+  @if $base > 12px {
+    font-size: $base;
+  } @else {
+    font-size: 12px;
+  }
+}
+
+%placeholder { color: red; }
+.button { @extend %placeholder; }
+
+@each $key, $value in $theme {
+  .text-#{$key} { color: $value; }
+}

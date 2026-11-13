@@ -1,0 +1,147 @@
+| //! A small allocator demo.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| const std = @import("std");
+  ^^^^^ keyword
+              ^^^^^^^ macro
+                      ^^^^^ string
+| const Allocator = std.mem.Allocator;
+  ^^^^^ keyword
+        ^^^^^^^^^ type
+|
+| /// The largest buffer.
+  ^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| pub const max_len: usize = 0x1000;
+  ^^^ keyword
+      ^^^^^ keyword
+                     ^^^^^ type
+                             ^^^^^^ number
+|
+| // A packed flag set.
+  ^^^^^^^^^^^^^^^^^^^^^ comment
+| const Flags = packed struct(u8) {
+  ^^^^^ keyword
+        ^^^^^ type
+                ^^^^^^ keyword
+                       ^^^^^^ keyword
+                              ^^ type
+|     ready: bool = false,
+             ^^^^ type
+                    ^^^^^ constant
+|     level: u7 = 0,
+             ^^ type
+                  ^ number
+| };
+|
+| const Error = error{ OutOfMemory, TooLong };
+  ^^^^^ keyword
+        ^^^^^ type
+                ^^^^^ keyword
+                       ^^^^^^^^^^^ type
+                                    ^^^^^^^ type
+|
+| pub fn copy(allocator: Allocator, text: []const u8) Error![]u8 {
+  ^^^ keyword
+      ^^ keyword
+         ^^^^ function
+                         ^^^^^^^^^ type
+                                            ^^^^^ keyword
+                                                  ^^ type
+                                                      ^^^^^ type
+                                                              ^^ type
+|     if (text.len > max_len) return error.TooLong;
+      ^^ keyword.control
+                              ^^^^^^ keyword.control
+                                     ^^^^^ keyword
+|     const out = try allocator.alloc(u8, text.len);
+      ^^^^^ keyword
+                  ^^^ keyword.control
+                                ^^^^^ function
+                                      ^^ type
+|     errdefer allocator.free(out);
+      ^^^^^^^^ keyword.control
+                         ^^^^ function
+|     @memcpy(out, text);
+      ^^^^^^^ macro
+|     return out;
+      ^^^^^^ keyword.control
+| }
+|
+| fn sum(items: []const i24) i64 {
+  ^^ keyword
+     ^^^ function
+                  ^^^^^ keyword
+                        ^^^ type
+                             ^^^ type
+|     var total: i64 = 0;
+      ^^^ keyword
+                 ^^^ type
+                       ^ number
+|     for (items) |item| {
+      ^^^ keyword.control
+|         total += @as(i64, item);
+                   ^^^ macro
+                       ^^^ type
+|     }
+|     while (total > 1_000) : (total -= 1) {
+      ^^^^^ keyword.control
+                     ^^^^^ number
+                                        ^ number
+|         if (total == 500) break else continue;
+          ^^ keyword.control
+                       ^^^ number
+                            ^^^^^ keyword.control
+                                  ^^^^ keyword.control
+                                       ^^^^^^^^ keyword.control
+|     }
+|     return total;
+      ^^^^^^ keyword.control
+| }
+|
+| test "copy" {
+  ^^^^ keyword
+       ^^^^^^ string
+|     const banner =
+      ^^^^^ keyword
+|         \\multi-line
+          ^^^^^^^^^^^^ string
+|         \\string
+          ^^^^^^^^ string
+|     ;
+|     const c: u8 = 'z';
+      ^^^^^ keyword
+               ^^ type
+                    ^^^ string
+|     const nl = '\n';
+      ^^^^^ keyword
+                 ^^^^ string
+|     const @"weird name" = 2.5e-3;
+      ^^^^^ keyword
+                            ^^^^^^ number
+|     var flags = Flags{};
+      ^^^ keyword
+                  ^^^^^ type
+|     flags.ready = true;
+                    ^^^^ constant
+|     const value = switch (c) {
+      ^^^^^ keyword
+                    ^^^^^^ keyword.control
+|         'a'...'y' => null,
+          ^^^ string
+                ^^^ string
+                       ^^^^ constant
+|         else => undefined,
+          ^^^^ keyword.control
+                  ^^^^^^^^^ constant
+|     };
+|     _ = .{ banner, nl, value, @"weird name", comptime sum(&.{}) };
+                                               ^^^^^^^^ keyword
+                                                        ^^^ function
+|     std.debug.print("{s}\n", .{"done"});
+                ^^^^^ function
+                      ^^^^ string
+                          ^^ string.escape
+                            ^ string
+                                 ^^^^^^ string
+|     unreachable;
+      ^^^^^^^^^^^ keyword.control
+| }

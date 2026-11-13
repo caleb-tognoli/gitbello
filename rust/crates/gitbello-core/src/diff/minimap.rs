@@ -6,7 +6,7 @@
 //! lines a collapsed gap hides take their room.
 
 use crate::changes::PickState;
-use crate::highlight::{highlight, Language};
+use crate::highlight::{DiffStates, LineState, LineStates, Syntax, TokenKind};
 use crate::merge::{ConflictFile, ConflictLayout, ConflictRow, ConflictRowKind};
 
 use std::ops::Range;
@@ -62,6 +62,8 @@ pub struct MiniLine<'a> {
     pub text: &'a [u8],
     /// A changed line left out of the commit.
     pub left_out: bool,
+    /// The state the line starts in (see [`crate::highlight::LineStates`]).
+    pub state: LineState,
 }
 
 /// A minimap row: `left` only when unified; side by side, either side may
@@ -79,7 +81,8 @@ pub trait MinimapSource {
     fn row_count(&self) -> usize;
     fn row(&self, row: usize) -> MiniRow<'_>;
     fn split(&self) -> bool;
-    fn language(&self) -> Option<Language>;
+    /// How the rows' text is coloured.
+    fn syntax(&self) -> Syntax;
     /// The changed characters `[start, end)` of each side of a row against
     /// the line it pairs with (as `changed_ranges` finds them). Apart from
     /// `row` because only tiles draw them.
@@ -111,7 +114,8 @@ pub struct DiffMinimap<'a> {
     /// cannot be picked.
     picks: &'a [PickState],
     split: bool,
-    language: Option<Language>,
+    syntax: Syntax,
+    states: &'a DiffStates,
 }
 
 impl<'a> DiffMinimap<'a> {
@@ -121,7 +125,8 @@ impl<'a> DiffMinimap<'a> {
         old: Option<&'a OldFile>,
         picks: &'a [PickState],
         split: bool,
-        language: Option<Language>,
+        syntax: Syntax,
+        states: &'a DiffStates,
     ) -> Self {
         Self {
             diff,
@@ -129,7 +134,8 @@ impl<'a> DiffMinimap<'a> {
             old,
             picks,
             split,
-            language,
+            syntax,
+            states,
         }
     }
 
@@ -146,6 +152,9 @@ impl<'a> DiffMinimap<'a> {
             mark,
             text: if mark == Mark::Header { b"" } else { line.text },
             left_out: changed && self.picks.get(index) == Some(&PickState::None),
+            state: self
+                .states
+                .before(mark == Mark::Removed, line.old_line, line.new_line),
         })
     }
 
@@ -174,6 +183,7 @@ const HEADER: MiniLine<'static> = MiniLine {
     mark: Mark::Header,
     text: b"",
     left_out: false,
+    state: LineState::START,
 };
 
 impl MinimapSource for DiffMinimap<'_> {
@@ -201,13 +211,14 @@ impl MinimapSource for DiffMinimap<'_> {
                 let hides = self.layout.hidden_lines(header.hunk) != Some(0);
                 self.both(HEADER, hides)
             }
-            Some(LayoutRow::Hidden { old, .. }) => {
+            Some(LayoutRow::Hidden { old, new }) => {
                 let text = self.old.and_then(|f| f.line(old)).unwrap_or_default();
                 self.both(
                     MiniLine {
                         mark: Mark::Context,
                         text,
                         left_out: false,
+                        state: self.states.before(false, Some(old), Some(new)),
                     },
                     false,
                 )
@@ -222,8 +233,8 @@ impl MinimapSource for DiffMinimap<'_> {
         self.split
     }
 
-    fn language(&self) -> Option<Language> {
-        self.language
+    fn syntax(&self) -> Syntax {
+        self.syntax
     }
 
     fn words(&self, row: usize) -> [Option<(usize, usize)>; 2] {
@@ -261,7 +272,8 @@ pub struct ConflictMinimap<'a> {
     /// Lines of the file that block choices wrote this session.
     resolved: &'a [Range<usize>],
     split: bool,
-    language: Option<Language>,
+    syntax: Syntax,
+    states: Option<&'a LineStates>,
 }
 
 impl<'a> ConflictMinimap<'a> {
@@ -270,14 +282,16 @@ impl<'a> ConflictMinimap<'a> {
         layout: &'a ConflictLayout,
         resolved: &'a [Range<usize>],
         split: bool,
-        language: Option<Language>,
+        syntax: Syntax,
+        states: Option<&'a LineStates>,
     ) -> Self {
         Self {
             file,
             layout,
             resolved,
             split,
-            language,
+            syntax,
+            states,
         }
     }
 
@@ -295,10 +309,15 @@ impl<'a> ConflictMinimap<'a> {
             ConflictRowKind::Theirs => Mark::Theirs,
         };
         let text = row.line.and_then(|l| self.file.line(l)).unwrap_or_default();
+        let state = match (self.states, row.line) {
+            (Some(states), Some(line)) => states.before(line),
+            _ => LineState::START,
+        };
         Some(MiniLine {
             mark,
             text: if mark == Mark::Header { b"" } else { text },
             left_out: false,
+            state,
         })
     }
 }
@@ -334,8 +353,8 @@ impl MinimapSource for ConflictMinimap<'_> {
         self.split
     }
 
-    fn language(&self) -> Option<Language> {
-        self.language
+    fn syntax(&self) -> Syntax {
+        self.syntax
     }
 }
 
@@ -349,8 +368,6 @@ pub struct MinimapPalette {
     pub rows: [Rgba; MARK_COUNT],
     /// Text without a syntax colour.
     pub text: Rgba,
-    /// Text by `TokenKind::id`.
-    pub syntax: [Rgba; 5],
     /// The dashes of a collapsed gap.
     pub divider: Rgba,
     /// Drawn over lines left out of the commit.
@@ -358,12 +375,17 @@ pub struct MinimapPalette {
     /// Drawn over the changed words of an added and a removed line.
     pub added_word: Rgba,
     pub removed_word: Rgba,
+    /// Text by `TokenKind::id` (a kind drawn as plain text has `text`).
+    pub syntax: [Rgba; TokenKind::COUNT],
 }
 
+/// Colours of [`MinimapPalette::from_colors`] before the syntax colours.
+const FIXED_COLORS: usize = MARK_COUNT + 5;
+
 /// Colours [`MinimapPalette::from_colors`] takes: the row backgrounds, the
-/// text, the five syntax colours, the divider, the veil and the added and
-/// removed words.
-pub const PALETTE_LEN: usize = MARK_COUNT + 1 + 5 + 2 + 2;
+/// text, the divider, the veil, the added and removed words, then one per
+/// token kind in id order.
+pub const PALETTE_LEN: usize = FIXED_COLORS + TokenKind::COUNT;
 
 impl MinimapPalette {
     /// The palette from [`PALETTE_LEN`] colours in field order, or `None`
@@ -374,16 +396,16 @@ impl MinimapPalette {
         }
         let mut rows = [[0; 4]; MARK_COUNT];
         rows.copy_from_slice(&colors[..MARK_COUNT]);
-        let mut syntax = [[0; 4]; 5];
-        syntax.copy_from_slice(&colors[MARK_COUNT + 1..MARK_COUNT + 6]);
+        let mut syntax = [[0; 4]; TokenKind::COUNT];
+        syntax.copy_from_slice(&colors[FIXED_COLORS..PALETTE_LEN]);
         Some(Self {
             rows,
             text: colors[MARK_COUNT],
+            divider: colors[MARK_COUNT + 1],
+            veil: colors[MARK_COUNT + 2],
+            added_word: colors[MARK_COUNT + 3],
+            removed_word: colors[MARK_COUNT + 4],
             syntax,
-            divider: colors[MARK_COUNT + 6],
-            veil: colors[MARK_COUNT + 7],
-            added_word: colors[MARK_COUNT + 8],
-            removed_word: colors[MARK_COUNT + 9],
         })
     }
 }
@@ -437,7 +459,7 @@ pub fn render_tile(
                     &mut canvas,
                     &line,
                     word,
-                    source.language(),
+                    &source.syntax(),
                     (left, right),
                     top,
                     row_px,
@@ -481,7 +503,7 @@ fn draw_line(
     canvas: &mut Canvas,
     line: &MiniLine<'_>,
     word: Option<(usize, usize)>,
-    language: Option<Language>,
+    syntax: &Syntax,
     (left, right): (usize, usize),
     top: usize,
     row_px: usize,
@@ -502,10 +524,7 @@ fn draw_line(
     }
     if !line.text.is_empty() {
         let text = display_text(line.text);
-        let tokens = match language {
-            Some(language) => highlight(language, &text),
-            None => Vec::new(),
-        };
+        let tokens = syntax.highlight_line_from(line.text, line.state);
         let block_px = (row_px - row_px / 3).max(1);
         let mut token = 0;
         for (column, ch) in text.chars().enumerate() {
@@ -740,6 +759,11 @@ mod tests {
     use crate::diff::{parse_diff, Expansion};
     use crate::merge::ConflictKind;
 
+    static NO_STATES: DiffStates = DiffStates {
+        old: None,
+        new: None,
+    };
+
     const DIFF: &[u8] = b"diff --git a/a.rs b/a.rs
 index 1111111..2222222 100644
 --- a/a.rs
@@ -760,6 +784,10 @@ two theirs
 three
 ";
 
+    fn rust() -> Syntax {
+        Syntax::new(crate::highlight::Language::by_id("rust"), &[])
+    }
+
     fn palette() -> MinimapPalette {
         let mut colors = vec![[0, 0, 0, 0]; PALETTE_LEN];
         colors[Mark::Header.index()] = [10, 10, 10, 255];
@@ -768,11 +796,11 @@ three
         colors[Mark::Ours.index()] = [0, 0, 200, 255];
         colors[Mark::Theirs.index()] = [200, 0, 200, 255];
         colors[MARK_COUNT] = [255, 255, 255, 255];
-        colors[MARK_COUNT + 1] = [255, 255, 0, 255]; // keywords
-        colors[MARK_COUNT + 6] = [128, 128, 128, 255];
-        colors[MARK_COUNT + 7] = [0, 0, 0, 128];
-        colors[MARK_COUNT + 8] = [0, 255, 0, 255]; // added words
-        colors[MARK_COUNT + 9] = [255, 0, 0, 255]; // removed words
+        colors[MARK_COUNT + 1] = [128, 128, 128, 255];
+        colors[MARK_COUNT + 2] = [0, 0, 0, 128];
+        colors[MARK_COUNT + 3] = [0, 255, 0, 255]; // added words
+        colors[MARK_COUNT + 4] = [255, 0, 0, 255]; // removed words
+        colors[FIXED_COLORS] = [255, 255, 0, 255]; // keywords
         MinimapPalette::from_colors(&colors).unwrap()
     }
 
@@ -807,7 +835,15 @@ three
     fn diff_rows_mark_headers_changes_and_gaps() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
-        let source = DiffMinimap::new(&diff, &layout, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         use Mark::*;
         assert_eq!(
             marks(&source),
@@ -819,7 +855,7 @@ three
                 (Some(Context), None, false),
             ]
         );
-        let split = DiffMinimap::new(&diff, &layout, None, &[], true, None);
+        let split = DiffMinimap::new(&diff, &layout, None, &[], true, Syntax::plain(), &NO_STATES);
         assert_eq!(
             marks(&split),
             vec![
@@ -840,7 +876,15 @@ three
             .find(|&i| diff.line(i).unwrap().kind == LineKind::Removed)
             .unwrap();
         picks[removed] = PickState::None;
-        let source = DiffMinimap::new(&diff, &layout, None, &picks, false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &picks,
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         let left_out: Vec<bool> = (0..source.row_count())
             .map(|r| source.row(r).left.is_some_and(|l| l.left_out))
             .collect();
@@ -865,7 +909,7 @@ three
             Some(CONFLICT.to_vec()),
         );
         let layout = ConflictLayout::build(&file, false);
-        let source = ConflictMinimap::new(&file, &layout, &[], false, None);
+        let source = ConflictMinimap::new(&file, &layout, &[], false, Syntax::plain(), None);
         use Mark::*;
         let unified: Vec<Option<Mark>> = marks(&source).into_iter().map(|m| m.0).collect();
         assert_eq!(
@@ -879,7 +923,7 @@ three
             ]
         );
         assert_eq!(overview(&source, 1, false), vec![OVERVIEW_CONFLICT]);
-        let split = ConflictMinimap::new(&file, &layout, &[], true, None);
+        let split = ConflictMinimap::new(&file, &layout, &[], true, Syntax::plain(), None);
         assert!(marks(&split).contains(&(Some(Ours), Some(Theirs), false)));
     }
 
@@ -887,7 +931,7 @@ three
     fn tiles_draw_backgrounds_blocks_and_syntax() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
-        let source = DiffMinimap::new(&diff, &layout, None, &[], false, Some(Language::Rust));
+        let source = DiffMinimap::new(&diff, &layout, None, &[], false, rust(), &NO_STATES);
         let width = 20;
         let tile = render_tile(&source, 0, 8, &style(width));
         assert_eq!(
@@ -914,7 +958,7 @@ three
     fn split_tiles_put_each_side_in_its_half() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
-        let source = DiffMinimap::new(&diff, &layout, None, &[], true, None);
+        let source = DiffMinimap::new(&diff, &layout, None, &[], true, Syntax::plain(), &NO_STATES);
         let width = 41;
         let tile = render_tile(&source, 2, 1, &style(width));
         assert_eq!(
@@ -939,7 +983,15 @@ three
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
         let picks = vec![PickState::None; diff.line_count()];
-        let source = DiffMinimap::new(&diff, &layout, None, &picks, false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &picks,
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         let tile = render_tile(&source, 3, 1, &style(20));
         assert_eq!(pixel(&tile, 20, 15, 0), [0, 99, 0, 255]);
     }
@@ -948,7 +1000,15 @@ three
     fn overview_spreads_short_diffs_and_merges_long_ones() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
-        let source = DiffMinimap::new(&diff, &layout, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         let tall = overview(&source, 10, false);
         assert_eq!(tall[4..6], [OVERVIEW_REMOVED, OVERVIEW_REMOVED]);
         assert_eq!(tall[6..8], [OVERVIEW_ADDED, OVERVIEW_ADDED]);
@@ -980,7 +1040,15 @@ index 1111111..2222222 100644
         .unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
         // Rows: header, a, -b, +B, c, d, -e, +E, f.
-        let source = DiffMinimap::new(&diff, &layout, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         assert_eq!(change_row(&source, 0, true), Some(2));
         assert_eq!(change_row(&source, 2, true), Some(6));
         assert_eq!(change_row(&source, 3, true), Some(6));
@@ -988,7 +1056,7 @@ index 1111111..2222222 100644
         assert_eq!(change_row(&source, 6, false), Some(2));
         assert_eq!(change_row(&source, 7, false), Some(6));
         assert_eq!(change_row(&source, 2, false), Some(6));
-        let split = DiffMinimap::new(&diff, &layout, None, &[], true, None);
+        let split = DiffMinimap::new(&diff, &layout, None, &[], true, Syntax::plain(), &NO_STATES);
         // Rows: header, a, b|B, c, d, e|E, f.
         assert_eq!(change_row(&split, 2, true), Some(5));
         let file = ConflictFile::new(
@@ -997,13 +1065,22 @@ index 1111111..2222222 100644
             Some(CONFLICT.to_vec()),
         );
         let conflict_layout = ConflictLayout::build(&file, false);
-        let conflict = ConflictMinimap::new(&file, &conflict_layout, &[], false, None);
+        let conflict =
+            ConflictMinimap::new(&file, &conflict_layout, &[], false, Syntax::plain(), None);
         assert_eq!(change_row(&conflict, 0, true), Some(2));
         assert_eq!(change_row(&conflict, 2, true), Some(2));
         // A single block is found from inside it, both ways.
         let one = parse_diff(DIFF).unwrap();
         let one_layout = DiffLayout::build(&one, &Expansion::default(), None);
-        let source = DiffMinimap::new(&one, &one_layout, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &one,
+            &one_layout,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         assert_eq!(change_row(&source, 2, true), Some(2));
         assert_eq!(change_row(&source, 3, false), Some(2));
         let unchanged = ConflictFile::new(
@@ -1016,7 +1093,14 @@ index 1111111..2222222 100644
             ),
         );
         let unchanged_layout = ConflictLayout::build(&unchanged, false);
-        let source = ConflictMinimap::new(&unchanged, &unchanged_layout, &[], false, None);
+        let source = ConflictMinimap::new(
+            &unchanged,
+            &unchanged_layout,
+            &[],
+            false,
+            Syntax::plain(),
+            None,
+        );
         assert_eq!(change_row(&source, 0, true), None);
     }
 
@@ -1024,12 +1108,20 @@ index 1111111..2222222 100644
     fn paired_lines_carry_and_draw_their_changed_words() {
         let diff = parse_diff(DIFF).unwrap();
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
-        let source = DiffMinimap::new(&diff, &layout, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         // "let b = 2;" became "let b = 3;": the number changed.
         assert_eq!(source.words(2), [Some((8, 9)), None]);
         assert_eq!(source.words(3), [Some((8, 9)), None]);
         assert_eq!(source.words(1), [None, None]);
-        let split = DiffMinimap::new(&diff, &layout, None, &[], true, None);
+        let split = DiffMinimap::new(&diff, &layout, None, &[], true, Syntax::plain(), &NO_STATES);
         assert_eq!(split.words(2), [Some((8, 9)), Some((8, 9))]);
         // Three pixels a row: the text's blocks leave the bottom one bare.
         let tall = MinimapStyle {
@@ -1070,8 +1162,8 @@ index 1111111..2222222 100644
         fn split(&self) -> bool {
             false
         }
-        fn language(&self) -> Option<Language> {
-            None
+        fn syntax(&self) -> Syntax {
+            Syntax::plain()
         }
         fn gaps(&self) -> Vec<StripGap> {
             self.gaps.clone()
@@ -1130,13 +1222,29 @@ index 1111111..2222222 100644
         )
         .unwrap();
         let unknown = DiffLayout::build(&open_end, &Expansion::default(), None);
-        let source = DiffMinimap::new(&open_end, &unknown, None, &[], false, None);
+        let source = DiffMinimap::new(
+            &open_end,
+            &unknown,
+            None,
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         assert!(source.gaps().is_empty(), "the file's length is unknown");
         let diff = parse_diff(DIFF).unwrap();
         let text: String = (1..=10).map(|n| format!("line {n}\n")).collect();
         let old = OldFile::new("1", text.into_bytes());
         let layout = DiffLayout::build(&diff, &Expansion::default(), Some(&old));
-        let source = DiffMinimap::new(&diff, &layout, Some(&old), &[], false, None);
+        let source = DiffMinimap::new(
+            &diff,
+            &layout,
+            Some(&old),
+            &[],
+            false,
+            Syntax::plain(),
+            &NO_STATES,
+        );
         // Rows: header (2 lines above the hunk), 4 lines, end (5 below).
         assert_eq!(
             source.gaps(),
@@ -1170,8 +1278,14 @@ index 1111111..2222222 100644
         );
         let layout = ConflictLayout::build(&file, false);
         let chosen = 6..7;
-        let source =
-            ConflictMinimap::new(&file, &layout, std::slice::from_ref(&chosen), false, None);
+        let source = ConflictMinimap::new(
+            &file,
+            &layout,
+            std::slice::from_ref(&chosen),
+            false,
+            Syntax::plain(),
+            None,
+        );
         use Mark::*;
         let unified: Vec<Option<Mark>> = marks(&source).into_iter().map(|m| m.0).collect();
         assert_eq!(

@@ -1,0 +1,80 @@
+| shader_type spatial;
+  ^^^^^^^^^^^ keyword
+              ^^^^^^^ type
+| render_mode unshaded, cull_disabled, depth_draw_opaque;
+  ^^^^^^^^^^^ keyword
+              ^^^^^^^^ attribute
+                        ^^^^^^^^^^^^^ attribute
+                                       ^^^^^^^^^^^^^^^^^ attribute
+|
+| // Line comment
+  ^^^^^^^^^^^^^^^ comment
+| uniform vec4 albedo : source_color = vec4(1.0);
+  ^^^^^^^ keyword
+          ^^^^ type
+                        ^^^^^^^^^^^^ annotation
+                                       ^^^^ type
+                                            ^^^ number
+| uniform float speed : hint_range(0.0, 10.0, 0.1) = 1.5;
+  ^^^^^^^ keyword
+          ^^^^^ type
+                        ^^^^^^^^^^ annotation
+                                   ^^^ number
+                                        ^^^^ number
+                                              ^^^ number
+                                                     ^^^ number
+| uniform sampler2D noise : filter_linear_mipmap, repeat_enable;
+  ^^^^^^^ keyword
+          ^^^^^^^^^ type
+                            ^^^^^^^^^^^^^^^^^^^^ annotation
+                                                  ^^^^^^^^^^^^^ annotation
+| varying vec3 world_pos;
+  ^^^^^^^ keyword
+          ^^^^ type
+| const int STEPS = 8;
+  ^^^^^ keyword
+        ^^^ type
+            ^^^^^ constant
+                    ^ number
+|
+| /* Block comment */
+  ^^^^^^^^^^^^^^^^^^^ comment
+| void vertex() {
+  ^^^^ type
+       ^^^^^^ function
+|     world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+                   ^^^^^^^^^^^^ variable
+                                  ^^^^ type
+                                       ^^^^^^ variable
+                                               ^^^ number
+|     VERTEX.y += sin(TIME * speed) * 0.25;
+      ^^^^^^ variable
+                  ^^^ function
+                      ^^^^ variable
+                                      ^^^^ number
+| }
+|
+| void fragment() {
+  ^^^^ type
+       ^^^^^^^^ function
+|     vec4 tex = texture(noise, UV + TIME * 0.1);
+      ^^^^ type
+                 ^^^^^^^ function
+                                ^^ variable
+                                     ^^^^ variable
+                                            ^^^ number
+|     if (tex.r < 0.5) {
+      ^^ keyword.control
+                  ^^^ number
+|         discard;
+          ^^^^^^^ keyword.control
+|     }
+|     ALBEDO = albedo.rgb * tex.rgb;
+      ^^^^^^ variable
+|     ALPHA = clamp(tex.a, 0.0, 1.0) * PI;
+      ^^^^^ variable
+              ^^^^^ function
+                           ^^^ number
+                                ^^^ number
+                                       ^^ constant
+| }

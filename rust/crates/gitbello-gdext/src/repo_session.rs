@@ -1297,13 +1297,22 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// The syntax token kinds in id order, `{name, parent}`: the `syntax`
+    /// triples of diff rows and the minimap palette's syntax colours use
+    /// these ids.
+    #[func]
+    fn syntax_kinds() -> Array<VarDictionary> {
+        convert::syntax_kinds()
+    }
+
     /// Minimap rows `first_row..first_row + rows` of a diff (`slot` as for
     /// `diff_split_rows`; the resolver's file in `changes`) as RGBA8 bytes,
     /// `columns` wide and `rows * row_px` high, `char_px` per character.
     /// `palette` holds `minimap::PALETTE_LEN` colours: the row backgrounds
     /// (context, header, added, removed, ours, theirs, base, resolved), the
-    /// text, the five syntax colours, the gap dashes, the veil over lines
-    /// left out and the changed words of added and removed lines.
+    /// text, the gap dashes, the veil over lines left out, the changed words
+    /// of added and removed lines, then one colour per syntax token kind
+    /// (`syntax_kinds()` order).
     /// Empty when there is no diff or the palette is short.
     #[func]
     #[allow(clippy::too_many_arguments)]
@@ -2646,9 +2655,8 @@ impl RepoSession {
             return self
                 .read(|s| {
                     let blame = s.blame()?;
-                    let language = convert::diff_language(&blame.request().path);
                     let table = blame.table();
-                    Some(f(&BlameMinimap::new(&table, blame.focus(), language)))
+                    Some(f(&BlameMinimap::new(&table, blame.focus())))
                 })
                 .flatten();
         }
@@ -2656,13 +2664,13 @@ impl RepoSession {
         self.read(|s| {
             if let (DiffSlot::Changes, Some(conflict)) = (slot, s.conflict()) {
                 let file = conflict.file()?;
-                let language = convert::diff_language(conflict.path());
                 return Some(f(&ConflictMinimap::new(
                     file,
                     conflict.layout(),
                     conflict.resolved(),
                     split,
-                    language,
+                    conflict.syntax(),
+                    conflict.line_states(),
                 )));
             }
             let state = slot_diff(s, slot)?;
@@ -2671,14 +2679,14 @@ impl RepoSession {
             } else {
                 &[]
             };
-            let language = convert::diff_language(&state.target().path);
             Some(f(&DiffMinimap::new(
                 state.diff()?,
                 state.layout(),
                 state.old_file(),
                 picks,
                 split,
-                language,
+                state.syntax(),
+                state.line_states(),
             )))
         })
         .flatten()

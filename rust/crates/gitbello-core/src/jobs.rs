@@ -177,12 +177,16 @@ pub enum JobOutput {
         staged: Option<Box<FileDiff>>,
         /// Both sides, when the image viewer shows the diff.
         images: Option<Box<ImageSides>>,
+        /// How the diff's text is coloured.
+        syntax: crate::highlight::Syntax,
     },
     /// The old side of a diff (blob `oid`); `None` when it was too large.
     OldFile {
         oid: String,
         text: Option<Vec<u8>>,
     },
+    /// The line states of a diff's sides or of the conflicted file.
+    LineStates(Box<crate::runtime::StatesOutput>),
     /// The HEAD commit's message.
     HeadMessage(String),
     Amend(Box<crate::backend::AmendSnapshot>),

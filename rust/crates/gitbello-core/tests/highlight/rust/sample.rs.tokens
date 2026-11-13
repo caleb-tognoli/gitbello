@@ -1,0 +1,137 @@
+| //! Module docs.
+  ^^^^^^^^^^^^^^^^ comment.doc
+| use std::collections::HashMap;
+  ^^^ keyword
+                        ^^^^^^^ type
+|
+| /// A point in 2D.
+  ^^^^^^^^^^^^^^^^^^ comment.doc
+| #[derive(Debug, Clone, Copy)]
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ annotation
+| pub struct Point<'a> {
+  ^^^ keyword
+      ^^^^^^ keyword
+             ^^^^^ type
+|     pub x: f64,
+      ^^^ keyword
+             ^^^ type
+|     name: &'a str,
+                ^^^ type
+| }
+|
+| impl<'a> Point<'a> {
+  ^^^^ keyword
+           ^^^^^ type
+|     pub const ORIGIN_NAME: &'static str = "origin";
+      ^^^ keyword
+          ^^^^^ keyword
+                ^^^^^^^^^^^ constant
+                               ^^^^^^ keyword
+                                      ^^^ type
+                                            ^^^^^^^^ string
+|
+|     pub fn new(x: f64, name: &'a str) -> Self {
+      ^^^ keyword
+          ^^ keyword
+             ^^^ function
+                    ^^^ type
+                                   ^^^ type
+                                           ^^^^ keyword
+|         Self { x, name }
+          ^^^^ keyword
+|     }
+| }
+|
+| fn main() -> Result<(), Box<dyn std::error::Error>> {
+  ^^ keyword
+     ^^^^ function
+               ^^^^^^ type
+                          ^^^ type
+                              ^^^ keyword
+                                              ^^^^^ type
+|     let mut map: HashMap<u32, String> = HashMap::new();
+      ^^^ keyword
+          ^^^ keyword
+                   ^^^^^^^ type
+                           ^^^ type
+                                ^^^^^^ type
+                                          ^^^^^^^ type
+                                                   ^^^ function
+|     let c = 'c'; let nl = '\n'; let q = '\'';
+      ^^^ keyword
+              ^^^ string
+                   ^^^ keyword
+                            ^^^^ string
+                                  ^^^ keyword
+                                          ^^^^ string
+|     let raw = r"C:\path"; let bytes = b"abc";
+      ^^^ keyword
+                ^^^^^^^^^^ string
+                            ^^^ keyword
+                                        ^^^^^^ string
+|     let hashed = r#"a "raw" one"#; const LIMIT: usize = 3;
+      ^^^ keyword
+                   ^^^^^^^^^^^^^^^^ string
+                                     ^^^^^ keyword
+                                           ^^^^^ constant
+                                                  ^^^^^ type
+                                                          ^ number
+|     let s = "a \"quoted\" word"; /* inline block */ let n = 0x1F_u8;
+      ^^^ keyword
+              ^^^ string
+                 ^^ string.escape
+                   ^^^^^^ string
+                         ^^ string.escape
+                           ^^^^^^ string
+                                   ^^^^^^^^^^^^^^^^^^ comment
+                                                      ^^^ keyword
+                                                              ^^^^^^^ number
+|     for i in 0..10 {
+      ^^^ keyword.control
+            ^^ keyword
+               ^ number
+                  ^^ number
+|         map.insert(i, format!("{i}: {:?}", 1.5e3));
+              ^^^^^^ function
+                        ^^^^^^^ macro
+                                ^ string
+                                 ^^^ string.interpolation
+                                    ^^ string
+                                      ^^^^ string.interpolation
+                                          ^ string
+                                             ^^^^^ number
+|     }
+|     println!("{}", map.len()); // trailing comment
+      ^^^^^^^^ macro
+               ^ string
+                ^^ string.interpolation
+                  ^ string
+                         ^^^ function
+                                 ^^^^^^^^^^^^^^^^^^^ comment
+|     if let Some(v) = map.get(&3) { return Ok(()); }
+      ^^ keyword.control
+         ^^^ keyword
+             ^^^^ function
+                           ^^^ function
+                                ^ number
+                                     ^^^^^^ keyword.control
+                                            ^^ function
+|     let multi = "a string that
+      ^^^ keyword
+                  ^^^^^^^^^^^^^^ string
+|         goes on"; let after = 1;
+  ^^^^^^^^^^^^^^^^ string
+                    ^^^ keyword
+                                ^ number
+|     /* a block comment
+      ^^^^^^^^^^^^^^^^^^ comment
+|        over two lines */
+  ^^^^^^^^^^^^^^^^^^^^^^^^ comment
+|     let raw = r#"raw "text"
+      ^^^ keyword
+                ^^^^^^^^^^^^^ string
+|         on two lines"#;
+  ^^^^^^^^^^^^^^^^^^^^^^ string
+|     Ok(())
+      ^^ function
+| }

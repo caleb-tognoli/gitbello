@@ -1,0 +1,65 @@
+| # Comment
+  ^^^^^^^^^ comment
+| [package]
+  ^^^^^^^^^ type
+| name = "gitbello"
+  ^^^^ key
+       ^ operator
+| version = "1.1.0"
+  ^^^^^^^ key
+          ^ operator
+| edition = '2021'
+  ^^^^^^^ key
+          ^ operator
+| publish = false
+  ^^^^^^^ key
+          ^ operator
+            ^^^^^ constant
+| count = 1_000
+  ^^^^^ key
+        ^ operator
+          ^^^^^ number
+| ratio = 0.5
+  ^^^^^ key
+        ^ operator
+          ^^^ number
+| date = 1979-05-27T07:32:00Z
+  ^^^^ key
+       ^ operator
+         ^^^^^^^^^^^^^^^^^^^^ number
+|
+| [[bin]]
+  ^^^^^^^ type
+| name = "cli"
+  ^^^^ key
+       ^ operator
+|
+| [dependencies]
+  ^^^^^^^^^^^^^^ type
+| toml = { version = "0.8", features = ["parse"] }  # inline
+  ^^^^ key
+       ^ operator
+           ^^^^^^^ key
+                   ^ operator
+                            ^^^^^^^^ key
+                                     ^ operator
+                                                    ^^^^^^^^ comment
+| "quoted key" = true
+  ^^^^^^^^^^^^ key
+               ^ operator
+                 ^^^^ constant
+| ; ini-style comment
+| text = """
+  ^^^^ key
+       ^ operator
+| a "basic" string
+| on lines"""
+| path = '''
+  ^^^^ key
+       ^ operator
+| C:\literal
+| '''
+| after = 1
+  ^^^^^ key
+        ^ operator
+          ^ number

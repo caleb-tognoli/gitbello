@@ -1,0 +1,112 @@
+| #pragma once
+  ^^^^^^^ macro
+| #include <vector>
+  ^^^^^^^^ macro
+           ^^^^^^^^ string
+| #include "inventory.h"
+  ^^^^^^^^ macro
+           ^^^^^^^^^^^^^ string
+|
+| /// A bag of items.
+  ^^^^^^^^^^^^^^^^^^^ comment.doc
+| namespace store {
+  ^^^^^^^^^ keyword
+            ^^^^^ type
+|
+| template <typename T>
+  ^^^^^^^^ keyword
+            ^^^^^^^^ keyword
+                     ^ type
+| class [[nodiscard]] Bag final : public Container<T> {
+  ^^^^^ keyword
+        ^^^^^^^^^^^^^ annotation
+                      ^^^ type
+                          ^^^^^ keyword
+                                  ^^^^^^ keyword
+                                         ^^^^^^^^^ type
+                                                   ^ type
+| public:
+  ^^^^^^ keyword
+|     explicit Bag(std::size_t capacity) noexcept : items_{}, capacity_(capacity) {}
+      ^^^^^^^^ keyword
+               ^^^ function
+                        ^^^^^^ type
+                                         ^^^^^^^^ keyword
+                                                              ^^^^^^^^^ function
+|     virtual ~Bag() override = default;
+      ^^^^^^^ keyword
+               ^^^ function
+                     ^^^^^^^^ keyword
+                                ^^^^^^^ keyword.control
+|
+|     constexpr bool empty() const { return items_.size() == 0; }
+      ^^^^^^^^^ keyword
+                ^^^^ type
+                     ^^^^^ function
+                             ^^^^^ keyword
+                                     ^^^^^^ keyword.control
+                                                   ^^^^ function
+                                                             ^ number
+|     auto add(T item) -> void {
+      ^^^^ keyword
+           ^^^ function
+               ^ type
+                          ^^^^ type
+|         if (items_.size() >= MAX_ITEMS) throw std::length_error("full");
+          ^^ keyword.control
+                     ^^^^ function
+                               ^^^^^^^^^ constant
+                                          ^^^^^ keyword.control
+                                                     ^^^^^^^^^^^^ function
+                                                                  ^^^^^^ string
+|         items_.push_back(std::move(item));
+                 ^^^^^^^^^ function
+                                ^^^^ function
+|     }
+|
+| private:
+  ^^^^^^^ keyword
+|     std::vector<T> items_;
+                  ^ type
+|     std::size_t capacity_ = 0x10;
+           ^^^^^^ type
+                              ^^^^ number
+| };
+|
+| }  // namespace store
+     ^^^^^^^^^^^^^^^^^^ comment
+|
+| auto raw = R"(C:\no\escapes "here")"; auto wide = L"wide\n";
+  ^^^^ keyword
+             ^^^^^^^^^^^^^^^^^^^^^^^^^ string
+                                        ^^^^ keyword
+                                                    ^^^^^^ string
+                                                          ^^ string.escape
+                                                            ^ string
+| char c = 'x'; int n = 1'000'000; double d = 1.5e3; float f = 2.0f;
+  ^^^^ type
+           ^^^ string
+                ^^^ type
+                        ^^^^^^^^^ number
+                                   ^^^^^^ type
+                                              ^^^^^ number
+                                                     ^^^^^ type
+                                                               ^^^^ number
+| struct Point { int x, y; };
+  ^^^^^^ keyword
+         ^^^^^ type
+                 ^^^ type
+| enum class Color : uint8_t { Red, Green };
+  ^^^^ keyword
+       ^^^^^ keyword
+             ^^^^^ type
+                     ^^^^^^^ type
+                               ^^^ type
+                                    ^^^^^ type
+| const char* name = nullptr; /* block */ bool ok = true;
+  ^^^^^ keyword
+        ^^^^ type
+                     ^^^^^^^ constant
+                              ^^^^^^^^^^^ comment
+                                          ^^^^ type
+                                                    ^^^^ constant

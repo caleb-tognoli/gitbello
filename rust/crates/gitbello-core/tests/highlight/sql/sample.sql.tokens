@@ -1,0 +1,108 @@
+| -- Schema
+  ^^^^^^^^^ comment
+| CREATE TABLE users (
+  ^^^^^^ keyword
+         ^^^^^ keyword
+|     id BIGSERIAL PRIMARY KEY,
+         ^^^^^^^^^ type
+                   ^^^^^^^ keyword
+                           ^^^ keyword
+|     name VARCHAR(100) NOT NULL DEFAULT 'it''s me',
+           ^^^^^^^ type
+                   ^^^ number
+                        ^^^ keyword
+                            ^^^^ constant
+                                 ^^^^^^^ keyword
+                                         ^^^ string
+                                            ^^ string.escape
+                                              ^^^^^ string
+|     "order" INTEGER,
+              ^^^^^^^ type
+|     created TIMESTAMP DEFAULT now()
+              ^^^^^^^^^ type
+                        ^^^^^^^ keyword
+                                ^^^ function
+| );
+|
+| /* Queries */
+  ^^^^^^^^^^^^^ comment
+| select u.name, count(*) as total
+  ^^^^^^ keyword
+                 ^^^^^ function
+                          ^^ keyword
+| from users u
+  ^^^^ keyword
+| left join orders o on o.user_id = u.id
+  ^^^^ keyword
+       ^^^^ keyword
+                     ^^ keyword
+| where u.created > '2024-01-01' and o.amount >= 10.5e2
+  ^^^^^ keyword
+                    ^^^^^^^^^^^^ string
+                                 ^^^ keyword
+                                                 ^^^^^^ number
+| group by u.name
+  ^^^^^ keyword
+        ^^ keyword
+| having count(*) > 1
+  ^^^^^^ keyword
+         ^^^^^ function
+                    ^ number
+| order by total desc
+  ^^^^^ keyword
+        ^^ keyword
+                 ^^^^ keyword
+| limit 10;
+  ^^^^^ keyword
+        ^^ number
+|
+| SELECT CASE WHEN active THEN 'yes' ELSE 'no' END FROM [dbo].[Users] WHERE id = @id;
+  ^^^^^^ keyword
+         ^^^^ keyword.control
+              ^^^^ keyword.control
+                          ^^^^ keyword.control
+                               ^^^^^ string
+                                     ^^^^ keyword.control
+                                          ^^^^ string
+                                               ^^^ keyword.control
+                                                   ^^^^ keyword
+                                                                      ^^^^^ keyword
+                                                                                 ^^^ variable
+| UPDATE users SET name = :name, flags = E'a\tb' WHERE id = $1 AND tag::text IS NOT NULL;
+  ^^^^^^ keyword
+               ^^^ keyword
+                          ^^^^^ variable
+                                         ^^^ string
+                                            ^^ string.escape
+                                              ^^ string
+                                                 ^^^^^ keyword
+                                                            ^^ variable
+                                                               ^^^ keyword
+                                                                        ^^^^ type
+                                                                             ^^ keyword
+                                                                                ^^^ keyword
+                                                                                    ^^^^ constant
+| INSERT INTO log (msg) VALUES (N'naïve'), (NULL), (TRUE);
+  ^^^^^^ keyword
+         ^^^^ keyword
+                        ^^^^^^ keyword
+                                ^^^^^^^^ string
+                                            ^^^^ constant
+                                                    ^^^^ constant
+| DECLARE @@total INT = 0;
+  ^^^^^^^ keyword
+          ^^^^^^^ variable
+                  ^^^ type
+                        ^ number
+| /* a block
+  ^^^^^^^^^^ comment
+|    comment */ SELECT 1;
+  ^^^^^^^^^^^^^ comment
+                ^^^^^^ keyword
+                       ^ number
+| SELECT 'a string
+  ^^^^^^ keyword
+         ^^^^^^^^^ string
+| over lines' AS note;
+  ^^^^^^^^^^^ string
+              ^^ keyword

@@ -1,0 +1,75 @@
+| // Package store keeps items.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| package store
+  ^^^^^^^ keyword
+|
+| import (
+  ^^^^^^ keyword
+|     "errors"
+      ^^^^^^^^ string
+|     "fmt"
+      ^^^^^ string
+| )
+|
+| /* Block comment */
+  ^^^^^^^^^^^^^^^^^^^ comment
+| type Item struct {
+  ^^^^ keyword
+       ^^^^ type
+            ^^^^^^ keyword
+|     Name  string `json:"name"`
+            ^^^^^^ type
+                   ^^^^^^^^^^^^^ string
+|     Count int
+            ^^^ type
+| }
+|
+| var ErrEmpty = errors.New("empty")
+  ^^^ keyword
+                        ^^^ function
+                            ^^^^^^^ string
+|
+| func (s *Store) Add(item Item) error {
+  ^^^^ keyword
+                  ^^^ function
+                                 ^^^^^ type
+|     if item.Count <= 0 {
+      ^^ keyword.control
+                       ^ number
+|         return ErrEmpty
+          ^^^^^^ keyword.control
+|     }
+|     ch := make(chan int, 10)
+            ^^^^ function
+                 ^^^^ keyword
+                      ^^^ type
+                           ^^ number
+|     defer close(ch)
+      ^^^^^ keyword.control
+            ^^^^^ function
+|     go func() { ch <- 0x1F }()
+      ^^ keyword
+         ^^^^ keyword
+                        ^^^^ number
+|     r := 'r'
+           ^^^ string
+|     fmt.Printf("%s: %d %c %v\n", item.Name, item.Count, r, 1.5e3)
+          ^^^^^^ function
+                 ^^^^^^^^^^^^^ string
+                              ^^ string.escape
+                                ^ string
+                                                             ^^^^^ number
+|     for i := range s.items {
+      ^^^ keyword.control
+               ^^^^^ keyword.control
+|         _ = i
+|     }
+|     return nil
+      ^^^^^^ keyword.control
+             ^^^ constant
+| }
+| var usage = `usage: tool [flags]
+  ^^^ keyword
+              ^^^^^^^^^^^^^^^^^^^^ string
+|   -v "verbose"`
+  ^^^^^^^^^^^^^^^ string

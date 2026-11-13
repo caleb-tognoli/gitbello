@@ -1,0 +1,106 @@
+| package store;
+  ^^^^^^^ keyword
+|
+| import java.util.List;
+  ^^^^^^ keyword
+| import java.util.ArrayList;
+  ^^^^^^ keyword
+|
+| /** A bag of items. */
+  ^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| public final class Bag<T extends Comparable<T>> implements Iterable<T> {
+  ^^^^^^ keyword
+         ^^^^^ keyword
+               ^^^^^ keyword
+                     ^^^ type
+                         ^ type
+                           ^^^^^^^ keyword
+                                   ^^^^^^^^^^ type
+                                              ^ type
+                                                  ^^^^^^^^^^ keyword
+                                                             ^^^^^^^^ type
+                                                                      ^ type
+|     private static final int MAX_ITEMS = 64;
+      ^^^^^^^ keyword
+              ^^^^^^ keyword
+                     ^^^^^ keyword
+                           ^^^ type
+                               ^^^^^^^^^ constant
+                                           ^^ number
+|     private final List<T> items = new ArrayList<>();
+      ^^^^^^^ keyword
+              ^^^^^ keyword
+                    ^^^^ type
+                         ^ type
+                                    ^^^ keyword
+                                        ^^^^^^^^^ type
+|
+|     @Override
+      ^^^^^^^^^ annotation
+|     public Iterator<T> iterator() {
+      ^^^^^^ keyword
+             ^^^^^^^^ type
+                      ^ type
+                         ^^^^^^^^ function
+|         return items.iterator();
+          ^^^^^^ keyword.control
+                       ^^^^^^^^ function
+|     }
+|
+|     @SuppressWarnings("unchecked")
+      ^^^^^^^^^^^^^^^^^ annotation
+                        ^^^^^^^^^^^ string
+|     public boolean add(T item) throws IllegalStateException {
+      ^^^^^^ keyword
+             ^^^^^^^ type
+                     ^^^ function
+                         ^ type
+                                 ^^^^^^ keyword
+                                        ^^^^^^^^^^^^^^^^^^^^^ type
+|         if (items.size() >= MAX_ITEMS) {
+          ^^ keyword.control
+                    ^^^^ function
+                              ^^^^^^^^^ constant
+|             throw new IllegalStateException("full: \"" + item + "\"");
+              ^^^^^ keyword.control
+                    ^^^ keyword
+                        ^^^^^^^^^^^^^^^^^^^^^ type
+                                              ^^^^^^^ string
+                                                     ^^ string.escape
+                                                       ^ string
+                                                                  ^ string
+                                                                   ^^ string.escape
+                                                                     ^ string
+|         }
+|         char c = 'x'; long big = 0xFFL; double d = 1.5e3; // trailing
+          ^^^^ type
+                   ^^^ string
+                        ^^^^ type
+                                   ^^^^^ number
+                                          ^^^^^^ type
+                                                     ^^^^^ number
+                                                            ^^^^^^^^^^^ comment
+|         String text = """
+          ^^^^^^ type
+                        ^^^ string
+|             Hello, "%s"
+  ^^^^^^^^^^^^^^^^^^^^^^^ string
+|             """;
+  ^^^^^^^^^^^^^^^ string
+|         return items.add(item) && item != null;
+          ^^^^^^ keyword.control
+                       ^^^ function
+                                            ^^^^ constant
+|     }
+|
+|     record Point(int x, int y) {}
+      ^^^^^^ keyword
+             ^^^^^ type
+                   ^^^ type
+                          ^^^ type
+|     enum Color { RED, GREEN }
+      ^^^^ keyword
+           ^^^^^ type
+                   ^^^ constant
+                        ^^^^^ constant
+| }

@@ -40,6 +40,12 @@ func _ready() -> void:
 	var info: Dictionary = session.diff_info()
 	print("BENCH lines %d" % int(info["line_count"]))
 	print("BENCH load_ms %.1f" % ((Time.get_ticks_usec() - started) / 1000.0))
+	# The line states land after the diff (P5a); builds without them say
+	# nothing.
+	if info.has("states"):
+		while String(session.diff_info().get("states", "")) == "loading" and Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+		print("BENCH states_ms %.1f (%s)" % [(Time.get_ticks_usec() - started) / 1000.0, session.diff_info().get("states", "")])
 
 	for split: bool in [false, true]:
 		var times: PackedFloat64Array = PackedFloat64Array()
@@ -57,7 +63,7 @@ func _ready() -> void:
 		print("BENCH %s_fetch_%d_us_max %.0f" % [layout_name, WINDOW, times[times.size() - 1]])
 
 	var palette: PackedColorArray = PackedColorArray()
-	for i: int in DiffMinimap.PALETTE_COLORS.size():
+	for i: int in DiffMinimap.palette_size():
 		palette.append(Color(0.5, 0.6, 0.7, 0.5))
 	var rows: int = int(info["line_count"])
 	for split: bool in [false, true]:

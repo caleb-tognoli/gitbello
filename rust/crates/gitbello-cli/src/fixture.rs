@@ -1,5 +1,5 @@
-//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol] [--history]`: builds throwaway repositories for
-//! the Godot smoke tests (GDScript never runs git itself).
+//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history]`: builds
+//! throwaway repositories for the Godot smoke tests (GDScript never runs git itself).
 //!
 //! Each `repo-<n>` has: two commits on `main`, a `feature/login` branch, a
 //! `v1.0` tag, a bare `origin` remote with `main` pushed and one commit ahead,
@@ -7,7 +7,8 @@
 //! remote also has a commit (`remote.txt`) that `repo-<n>` has not fetched,
 //! so a fetch leaves `main` one ahead and one behind. `--images` adds the
 //! image repositories of `image_fixture`, `--eol` the line-endings one of
-//! `eol_fixture`, `--history` the file-history one of `history_fixture`.
+//! `eol_fixture`, `--syntax` the syntax one of `syntax_fixture`, `--history` the file-history one
+//! of `history_fixture`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut repos = 1usize;
     let mut images = false;
     let mut eol = false;
+    let mut syntax = false;
     let mut history = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -33,6 +35,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             "--images" => images = true,
             "--eol" => eol = true,
+            "--syntax" => syntax = true,
             "--history" => history = true,
             other if dir.is_none() => dir = Some(PathBuf::from(other)),
             other => bail!("unexpected argument `{other}`"),
@@ -69,6 +72,15 @@ pub fn run(args: &[String]) -> Result<()> {
         };
         crate::eol_fixture::build(&git, &dir).context("building the line-endings repository")?;
         println!("{}", dir.join("eol").display());
+    }
+    if syntax {
+        let git = Git {
+            runner: &runner,
+            global_config: &global_config,
+            clock: std::cell::Cell::new(1_700_000_000),
+        };
+        crate::syntax_fixture::build(&git, &dir).context("building the syntax repository")?;
+        println!("{}", dir.join("syntax").display());
     }
     if history {
         let git = Git {

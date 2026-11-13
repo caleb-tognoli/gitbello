@@ -1,0 +1,173 @@
+| #!/usr/bin/env ruby
+  ^^^^^^^^^^^^^^^^^^^ comment
+| # frozen_string_literal: true
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| require "json"
+  ^^^^^^^ function
+          ^^^^^^ string
+| require_relative 'lib/item'
+  ^^^^^^^^^^^^^^^^ function
+                   ^^^^^^^^^^ string
+|
+| =begin
+  ^^^^^^ comment
+| A block comment: if x then y
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| =end
+  ^^^^ comment
+|
+| module Shop
+  ^^^^^^ keyword
+         ^^^^ type
+|   MAX_ITEMS = 1_000
+    ^^^^^^^^^ constant
+                ^^^^^ number
+|
+|   class Cart < Base
+    ^^^^^ keyword
+          ^^^^ type
+                 ^^^^ type
+|     attr_reader :items, :owner
+      ^^^^^^^^^^^ function
+                  ^^^^^^ constant
+                          ^^^^^^ constant
+|     @@count = 0
+      ^^^^^^^ variable
+                ^ number
+|
+|     def initialize(owner, items: [])
+      ^^^ keyword
+          ^^^^^^^^^^ function
+                            ^^^^^ key
+|       @owner = owner
+        ^^^^^^ variable
+|       @items = items
+        ^^^^^^ variable
+|       @@count += 1
+        ^^^^^^^ variable
+                   ^ number
+|     end
+      ^^^ keyword
+|
+|     def empty?
+      ^^^ keyword
+          ^^^^^^ function
+|       @items.empty?
+        ^^^^^^ variable
+               ^^^^^^ function
+|     end
+      ^^^ keyword
+|
+|     def add!(item, qty = 1)
+      ^^^ keyword
+          ^^^^ function
+                           ^ number
+|       raise ArgumentError, "bad qty: #{qty}" unless qty.positive?
+        ^^^^^ keyword.control
+              ^^^^^^^^^^^^^ type
+                             ^^^^^^^^^^ string
+                                       ^^ string.interpolation
+                                            ^ string.interpolation
+                                             ^ string
+                                               ^^^^^^ keyword.control
+                                                          ^^^^^^^^^ function
+|       @items << { name: item.name, qty: qty, tags: %w[new sale] }
+        ^^^^^^ variable
+                    ^^^^ key
+                                     ^^^ key
+                                               ^^^^ key
+                                                     ^^^^^^^^^^^^ string
+|       self
+        ^^^^ variable
+|     end
+      ^^^ keyword
+|
+|     def self.find(id)
+      ^^^ keyword
+          ^^^^ variable
+               ^^^^ function
+|       return nil if id.nil?
+        ^^^^^^ keyword.control
+               ^^^ constant
+                   ^^ keyword.control
+                         ^^^^ function
+|       list = %i[a b c]
+               ^^^^^^^^^ constant
+|       pattern = /cart-(\d+)/i
+                  ^^^^^^^^^^^^^ regex
+|       text = `git rev-parse #{id}`
+               ^^^^^^^^^^^^^^^ string
+                              ^^ string.interpolation
+                                  ^ string.interpolation
+                                   ^ string
+|       body = <<~SQL
+               ^^^^^^ string
+|         SELECT * FROM carts WHERE id = #{id}
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ string
+                                         ^^ string.interpolation
+                                             ^ string.interpolation
+|       SQL
+        ^^^ string
+|       $stdout.puts(:"quoted sym", %r{^/x}, $1)
+        ^^^^^^^ variable
+                ^^^^ function
+                     ^^^^^^^^^^^^^ constant
+                                    ^^^^^^^ regex
+                                             ^^ variable
+|       yield id if block_given?
+        ^^^^^ keyword.control
+                 ^^ keyword.control
+                    ^^^^^^^^^^^^ keyword
+|     rescue StandardError => e
+      ^^^^^^ keyword.control
+             ^^^^^^^^^^^^^ type
+|       puts "error: #{e.message}\n"
+        ^^^^ function
+             ^^^^^^^^ string
+                     ^^ string.interpolation
+                                ^ string.interpolation
+                                 ^^ string.escape
+                                   ^ string
+|     ensure
+      ^^^^^^ keyword.control
+|       defined?(Foo) ? :yes : :no
+        ^^^^^^^^ keyword
+                 ^^^ type
+                        ^^^^ constant
+                               ^^^ constant
+|     end
+      ^^^ keyword
+|   end
+    ^^^ keyword
+| end
+  ^^^ keyword
+|
+| [1, 2.5, 3e2].each do |n|
+   ^ number
+      ^^^ number
+           ^^^ number
+                     ^^ keyword
+|   next if n == 2
+    ^^^^ keyword.control
+         ^^ keyword.control
+                 ^ number
+|   puts n.to_s
+    ^^^^ function
+| end
+  ^^^ keyword
+| case __FILE__
+  ^^^^ keyword.control
+       ^^^^^^^^ constant
+| when "a" then p true
+  ^^^^ keyword.control
+       ^^^ string
+           ^^^^ keyword
+                ^ function
+                  ^^^^ constant
+| else p false, __method__
+  ^^^^ keyword.control
+       ^ function
+         ^^^^^ constant
+                ^^^^^^^^^^ constant
+| end
+  ^^^ keyword

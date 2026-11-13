@@ -31,7 +31,9 @@ func run() -> void:
 	var diff: DiffView = view.diff_view()
 	expect(await wait_until(func() -> bool: return diff.row_count() == 4 and diff.pickable),
 			"README diff has 4 rows with checkboxes: %d" % diff.row_count())
-	expect(Array(diff.line(1).get("syntax", [])) == [0, 8, 0], "Markdown heading is colored: %s" % [diff.line(1)])
+	var heading: int = RepoSession.syntax_kinds().map(
+			func(kind: Dictionary) -> String: return String(kind["name"])).find("markup.heading")
+	expect(Array(diff.line(1).get("syntax", [])) == [0, 8, heading], "Markdown heading is colored: %s" % [diff.line(1)])
 	expect_eq(diff.row_pick(2), "all", "+line a starts picked")
 
 	# Right moves into the diff; Down three times to `+line b`; Space leaves it out.

@@ -1,0 +1,137 @@
+| package store
+  ^^^^^^^ keyword
+|
+| import kotlinx.coroutines.delay
+  ^^^^^^ keyword
+|
+| /** A bag of items. */
+  ^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| @JvmInline
+  ^^^^^^^^^^ annotation
+| value class Id(val raw: String)
+  ^^^^^ keyword
+        ^^^^^ keyword
+              ^^ type
+                 ^^^ keyword
+                          ^^^^^^ type
+|
+| data class Item(val name: String, var count: Int = 0)
+  ^^^^ keyword
+       ^^^^^ keyword
+             ^^^^ type
+                  ^^^ keyword
+                            ^^^^^^ type
+                                    ^^^ keyword
+                                               ^^^ type
+                                                     ^ number
+|
+| sealed interface Shape
+  ^^^^^^ keyword
+         ^^^^^^^^^ keyword
+                   ^^^^^ type
+| object Unit : Shape
+  ^^^^^^ keyword
+         ^^^^ type
+                ^^^^^ type
+|
+| class Bag<T : Any>(private val capacity: Int) {
+  ^^^^^ keyword
+        ^^^ type
+            ^ type
+                ^^^ type
+                     ^^^^^^^ keyword
+                             ^^^ keyword
+                                           ^^^ type
+|     private val items = mutableListOf<T>()
+      ^^^^^^^ keyword
+              ^^^ keyword
+                                        ^ type
+|
+|     suspend fun add(item: T): Boolean {
+      ^^^^^^^ keyword
+              ^^^ keyword
+                  ^^^ function
+                            ^ type
+                                ^^^^^^^ type
+|         if (items.size >= MAX_ITEMS) throw IllegalStateException("full")
+          ^^ keyword.control
+                            ^^^^^^^^^ constant
+                                       ^^^^^ keyword.control
+                                             ^^^^^^^^^^^^^^^^^^^^^ function
+                                                                   ^^^^^^ string
+|         delay(10L)
+          ^^^^^ function
+                ^^^ number
+|         val label = "Added $item (${items.size} of $capacity)"
+          ^^^ keyword
+                      ^^^^^^^ string
+                             ^^^^^ variable
+                                  ^^ string
+                                    ^^ string.interpolation
+                                                ^ string.interpolation
+                                                 ^^^^ string
+                                                     ^^^^^^^^^ variable
+                                                              ^^ string
+|         val raw = """C:\no\escapes $label"""
+          ^^^ keyword
+                    ^^^^^^^^^^^^^^^^^ string
+                                     ^^^^^^ variable
+                                           ^^^ string
+|         val c = 'x'; val hex = 0xFF; val d = 1.5e3 // trailing
+          ^^^ keyword
+                  ^^^ string
+                       ^^^ keyword
+                                 ^^^^ number
+                                       ^^^ keyword
+                                               ^^^^^ number
+                                                     ^^^^^^^^^^^ comment
+|         return when (item) {
+          ^^^^^^ keyword.control
+                 ^^^^ keyword.control
+|             is String -> item.isNotEmpty()
+              ^^ keyword
+                 ^^^^^^ type
+                                ^^^^^^^^^^ function
+|             else -> items.add(item) && item != null
+              ^^^^ keyword.control
+                            ^^^ function
+                                                 ^^^^ constant
+|         }
+|     }
+|
+|     companion object {
+      ^^^^^^^^^ keyword
+                ^^^^^^ keyword
+|         const val MAX_ITEMS = 64 /* block */
+          ^^^^^ keyword
+                ^^^ keyword
+                    ^^^^^^^^^ constant
+                                ^^ number
+                                   ^^^^^^^^^^^ comment
+|     }
+| }
+|
+| fun <T> List<T>.second(): T = this[1]
+  ^^^ keyword
+       ^ type
+          ^^^^ type
+               ^ type
+                  ^^^^^^ function
+                            ^ type
+                                ^^^^ keyword
+                                     ^ number
+| /**
+  ^^^ comment.doc
+|  * A doc comment over lines.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+|  */
+  ^^^ comment.doc
+| val json = """
+  ^^^ keyword
+             ^^^ string
+|     {"name": "$name"}
+  ^^^^^^^^^^^^^^ string
+                ^^^^^ variable
+                     ^^ string
+| """
+  ^^^ string

@@ -1,0 +1,30 @@
+| From 3f2a9c1e5b7d4a8f6e0c2b1a9d8e7f6c5b4a3920 Mon Sep 17 00:00:00 2001
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ diff.header
+| From: A Dev <dev@example.com>
+  ^^^^ key
+| Subject: [PATCH] Fix the parser
+  ^^^^^^^ key
+|
+| ---
+|  src/parse.rs | 3 ++-
+| diff --git a/src/parse.rs b/src/parse.rs
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ diff.header
+| index 1a2b3c4..5d6e7f8 100644
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ diff.header
+| --- a/src/parse.rs
+  ^^^^^^^^^^^^^^^^^^ diff.header
+| +++ b/src/parse.rs
+  ^^^^^^^^^^^^^^^^^^ diff.header
+| @@ -10,7 +10,8 @@ fn parse(input: &str) -> Result<Ast> {
+  ^^^^^^^^^^^^^^^^^ diff.header
+|      let tokens = lex(input);
+| -    let ast = build(tokens);
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ diff.removed
+| +    let ast = build(tokens)?;
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ diff.added
+| +    check(&ast)?;
+  ^^^^^^^^^^^^^^^^^^ diff.added
+|      Ok(ast)
+|  }
+| \ No newline at end of file
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment

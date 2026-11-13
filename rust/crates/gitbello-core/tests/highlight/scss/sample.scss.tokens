@@ -1,0 +1,152 @@
+| // Variables and mixins
+  ^^^^^^^^^^^^^^^^^^^^^^^ comment
+| @use "sass:math";
+  ^^^^ keyword
+       ^^^^^^^^^^^ string
+                  ^ punctuation
+| $base: 16px !default;
+  ^^^^^ variable
+       ^ punctuation
+         ^^^^ number
+              ^^^^^^^^ keyword
+                      ^ punctuation
+| $theme: (primary: #0af, muted: #888);
+  ^^^^^^ variable
+        ^ punctuation
+           ^^^^^^^ key
+                    ^^^^ constant
+                          ^^^^^ key
+                                 ^^^^ constant
+                                      ^ punctuation
+|
+| @mixin center($width: 100%) {
+  ^^^^^^ keyword
+         ^^^^^^ function
+                ^^^^^^ variable
+                        ^^^^ number
+                              ^ punctuation
+|   margin: 0 auto;
+    ^^^^^^ key
+          ^ punctuation
+            ^ number
+                  ^ punctuation
+|   width: $width;
+    ^^^^^ key
+         ^ punctuation
+           ^^^^^^ variable
+                 ^ punctuation
+| }
+  ^ punctuation
+|
+| .card {
+  ^^^^^ attribute
+        ^ punctuation
+|   @include center(80%);
+    ^^^^^^^^ keyword
+             ^^^^^^ function
+                    ^^^ number
+                        ^ punctuation
+|   padding: math.div($base, 2);
+    ^^^^^^^ key
+           ^ punctuation
+                  ^^^ function
+                      ^^^^^ variable
+                             ^ number
+                               ^ punctuation
+|
+|   &:hover { box-shadow: 0 2px 4px rgba(#000, 0.2); }
+    ^ operator
+     ^^^^^^ attribute
+            ^ punctuation
+              ^^^^^^^^^^ key
+                        ^ punctuation
+                          ^ number
+                            ^^^ number
+                                ^^^ number
+                                    ^^^^ function
+                                         ^^^^ constant
+                                               ^^^ number
+                                                   ^ punctuation
+                                                     ^ punctuation
+|   &__title { font-weight: bold; }
+    ^ operator
+     ^^^^^^^ attribute
+             ^ punctuation
+               ^^^^^^^^^^^ key
+                          ^ punctuation
+                                ^ punctuation
+                                  ^ punctuation
+|
+|   .icon-#{$name} {
+    ^^^^^^ attribute
+          ^^ string.interpolation
+            ^^^^^ variable
+                 ^ string.interpolation
+                   ^ punctuation
+|     content: "#{$name}";
+      ^^^^^^^ key
+             ^ punctuation
+               ^^^^^^^^^^ string
+                         ^ punctuation
+|   }
+    ^ punctuation
+|
+|   @if $base > 12px {
+    ^^^ keyword.control
+        ^^^^^ variable
+                ^^^^ number
+                     ^ punctuation
+|     font-size: $base;
+      ^^^^^^^^^ key
+               ^ punctuation
+                 ^^^^^ variable
+                      ^ punctuation
+|   } @else {
+    ^ punctuation
+      ^^^^^ keyword.control
+            ^ punctuation
+|     font-size: 12px;
+      ^^^^^^^^^ key
+               ^ punctuation
+                 ^^^^ number
+                     ^ punctuation
+|   }
+    ^ punctuation
+| }
+  ^ punctuation
+|
+| %placeholder { color: red; }
+  ^^^^^^^^^^^^ attribute
+               ^ punctuation
+                 ^^^^^ key
+                      ^ punctuation
+                           ^ punctuation
+                             ^ punctuation
+| .button { @extend %placeholder; }
+  ^^^^^^^ attribute
+          ^ punctuation
+            ^^^^^^^ keyword
+                    ^^^^^^^^^^^^ attribute
+                                ^ punctuation
+                                  ^ punctuation
+|
+| @each $key, $value in $theme {
+  ^^^^^ keyword.control
+        ^^^^ variable
+              ^^^^^^ variable
+                     ^^ keyword
+                        ^^^^^^ variable
+                               ^ punctuation
+|   .text-#{$key} { color: $value; }
+    ^^^^^^ attribute
+          ^^ string.interpolation
+            ^^^^ variable
+                ^ string.interpolation
+                  ^ punctuation
+                    ^^^^^ key
+                         ^ punctuation
+                           ^^^^^^ variable
+                                 ^ punctuation
+                                   ^ punctuation
+| }
+  ^ punctuation

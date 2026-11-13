@@ -1,0 +1,162 @@
+| <?php
+  ^^^^^ tag
+| declare(strict_types=1);
+  ^^^^^^^ keyword
+                       ^ number
+|
+| namespace App\Models;
+  ^^^^^^^^^ keyword
+            ^^^ type
+                ^^^^^^ type
+|
+| use App\Contracts\HasName;
+  ^^^ keyword
+      ^^^ type
+          ^^^^^^^^^ type
+                    ^^^^^^^ type
+|
+| /** A product in the catalogue. */
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| #[Entity(table: "products")]
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ annotation
+| final class Product extends Model implements HasName
+  ^^^^^ keyword
+        ^^^^^ keyword
+              ^^^^^^^ type
+                      ^^^^^^^ keyword
+                              ^^^^^ type
+                                    ^^^^^^^^^^ keyword
+                                               ^^^^^^^ type
+| {
+|     public const MAX_PRICE = 1_000;
+      ^^^^^^ keyword
+             ^^^^^ keyword
+                   ^^^^^^^^^ constant
+                               ^^^^^ number
+|     private static int $count = 0;
+      ^^^^^^^ keyword
+              ^^^^^^ keyword
+                     ^^^ type
+                         ^^^^^^ variable
+                                  ^ number
+|
+|     public function __construct(private string $name, protected ?float $price = null)
+      ^^^^^^ keyword
+             ^^^^^^^^ keyword
+                      ^^^^^^^^^^^ function
+                                  ^^^^^^^ keyword
+                                          ^^^^^^ type
+                                                 ^^^^^ variable
+                                                        ^^^^^^^^^ keyword
+                                                                   ^^^^^ type
+                                                                         ^^^^^^ variable
+                                                                                  ^^^^ constant
+|     {
+|         self::$count++;
+          ^^^^ keyword
+                ^^^^^^ variable
+|     }
+|
+|     // Line comment.
+      ^^^^^^^^^^^^^^^^ comment
+|     # Hash comment.
+      ^^^^^^^^^^^^^^^ comment
+|     public function label(): string
+      ^^^^^^ keyword
+             ^^^^^^^^ keyword
+                      ^^^^^ function
+                               ^^^^^^ type
+|     {
+|         $tag = 'it\'s';
+          ^^^^ variable
+                 ^^^ string
+                    ^^ string.escape
+                      ^^ string
+|         if ($this->price === null || !isset($this->name)) {
+          ^^ keyword.control
+              ^^^^^ variable
+                               ^^^^ constant
+                                        ^^^^^ keyword
+                                              ^^^^^ variable
+|             return "{$this->name} (no price)\n";
+              ^^^^^^ keyword.control
+                     ^^ string
+                       ^^^^^ variable
+                            ^^^^^^^^^^^^^^^^^^ string
+                                              ^^ string.escape
+                                                ^ string
+|         } elseif ($this->price > self::MAX_PRICE) {
+            ^^^^^^ keyword.control
+                    ^^^^^ variable
+                                   ^^^^ keyword
+                                         ^^^^^^^^^ constant
+|             throw new \InvalidArgumentException("too much: $this->price");
+              ^^^^^ keyword.control
+                    ^^^ keyword
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^ type
+                                                  ^^^^^^^^^^^ string
+                                                             ^^^^^ variable
+                                                                  ^^^^^^^^ string
+|         }
+|         foreach ([1, 2.5, 0x1F] as $i => $value) {
+          ^^^^^^^ keyword.control
+                    ^ number
+                       ^^^ number
+                            ^^^^ number
+                                  ^^ keyword
+                                     ^^ variable
+                                           ^^^^^^ variable
+|             echo $value . PHP_EOL;
+              ^^^^ keyword
+                   ^^^^^^ variable
+                            ^^^^^^^ constant
+|         }
+|         $fn = fn(int $x): int => $x * 2;
+          ^^^ variable
+                ^^ keyword
+                   ^^^ type
+                       ^^ variable
+                            ^^^ type
+                                   ^^ variable
+                                        ^ number
+|         $text = <<<EOT
+          ^^^^^ variable
+                  ^^^^^^ string
+|             Hello {$this->name}, $tag
+  ^^^^^^^^^^^^^^^^^^^ string
+                     ^^^^^ variable
+                          ^^^^^^^^^ string
+                                   ^^^^ variable
+|             EOT;
+              ^^^ string
+|         return match (true) {
+          ^^^^^^ keyword.control
+                 ^^^^^ keyword.control
+                        ^^^^ constant
+|             $fn(1) > 1 => sprintf('%s: %.2f', $this->name, $this->price),
+              ^^^ variable
+                  ^ number
+                       ^ number
+                            ^^^^^^^ function
+                                    ^^^^^^^^^^ string
+                                                ^^^^^ variable
+                                                             ^^^^^ variable
+|             default => $tag,
+              ^^^^^^^ keyword.control
+                         ^^^^ variable
+|         };
+|     }
+| }
+| ?>
+  ^^ tag
+| <p><?= htmlspecialchars($name) ?></p>
+  ^ punctuation
+   ^ tag
+    ^ punctuation
+     ^^^ tag
+         ^^^^^^^^^^^^^^^^ function
+                          ^^^^^ variable
+                                 ^^ tag
+                                   ^^ punctuation
+                                     ^ tag
+                                      ^ punctuation

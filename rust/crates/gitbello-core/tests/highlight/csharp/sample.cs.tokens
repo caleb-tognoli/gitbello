@@ -1,0 +1,123 @@
+| using System;
+  ^^^^^ keyword
+        ^^^^^^ type
+| using System.Collections.Generic;
+  ^^^^^ keyword
+        ^^^^^^ type
+|
+| #nullable enable
+  ^^^^^^^^^ macro
+| namespace Store;
+  ^^^^^^^^^ keyword
+            ^^^^^ type
+|
+| /// <summary>A bag of items.</summary>
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| [Serializable]
+  ^^^^^^^^^^^^^^ annotation
+| public sealed record Item(string Name, int Count);
+  ^^^^^^ keyword
+         ^^^^^^ keyword
+                ^^^^^^ keyword
+                       ^^^^ type
+                            ^^^^^^ type
+                                   ^^^^ type
+                                         ^^^ type
+                                             ^^^^^ type
+|
+| public class Bag<T> : IEnumerable<T> where T : notnull
+  ^^^^^^ keyword
+         ^^^^^ keyword
+               ^^^ type
+                   ^ type
+                        ^^^^^^^^^^^ type
+                                    ^ type
+                                       ^^^^^ keyword
+                                             ^ type
+| {
+|     private readonly List<T> _items = new();
+      ^^^^^^^ keyword
+              ^^^^^^^^ keyword
+                       ^^^^ type
+                            ^ type
+                                        ^^^ keyword
+|     public const int MaxItems = 64;
+      ^^^^^^ keyword
+             ^^^^^ keyword
+                   ^^^ type
+                       ^^^^^^^^ type
+                                  ^^ number
+|
+|     public async Task<bool> AddAsync(T item, CancellationToken token = default)
+      ^^^^^^ keyword
+             ^^^^^ keyword
+                   ^^^^ type
+                        ^^^^ type
+                              ^^^^^^^^ function
+                                       ^ type
+                                               ^^^^^^^^^^^^^^^^^ type
+                                                                         ^^^^^^^ keyword.control
+|     {
+|         if (_items.Count >= MaxItems) throw new InvalidOperationException("full");
+          ^^ keyword.control
+                              ^^^^^^^^ type
+                                        ^^^^^ keyword.control
+                                              ^^^ keyword
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^ type
+                                                                            ^^^^^^ string
+|         _items.Add(item);
+                 ^^^ function
+|         var label = $"Added {item} ({_items.Count:D2} of {{max}})";
+          ^^^ type
+                      ^^^^^^^^ string
+                              ^ string.interpolation
+                                   ^ string.interpolation
+                                    ^^ string
+                                      ^ string.interpolation
+                                                    ^^ type
+                                                      ^ string.interpolation
+                                                       ^^^^ string
+                                                           ^^ string.escape
+                                                             ^^^ string
+                                                                ^^ string.escape
+                                                                  ^^ string
+|         var path = @"C:\no\escapes ""quoted""";
+          ^^^ type
+                     ^^^^^^^^^^^^^^^^ string
+                                     ^^ string.escape
+                                       ^^^^^^ string
+                                             ^^ string.escape
+                                               ^ string
+|         var both = $@"{path}\{label}";
+          ^^^ type
+                     ^^^ string
+                        ^ string.interpolation
+                             ^ string.interpolation
+                              ^ string
+                               ^ string.interpolation
+                                     ^ string.interpolation
+                                      ^ string
+|         char c = 'x'; decimal price = 9.99m; long big = 0xFF_FFL;
+          ^^^^ type
+                   ^^^ string
+                        ^^^^^^^ type
+                                        ^^^^^ number
+                                               ^^^^ type
+                                                          ^^^^^^^^ number
+|         foreach (var x in _items) Console.WriteLine(x?.ToString() ?? "null");
+          ^^^^^^^ keyword.control
+                   ^^^ type
+                         ^^ keyword
+                                    ^^^^^^^ type
+                                            ^^^^^^^^^ function
+                                                         ^^^^^^^^ function
+                                                                       ^^^^^^ string
+|         return await Task.FromResult(true); /* block */
+          ^^^^^^ keyword.control
+                 ^^^^^ keyword
+                       ^^^^ type
+                            ^^^^^^^^^^ function
+                                       ^^^^ constant
+                                              ^^^^^^^^^^^ comment
+|     }
+| }

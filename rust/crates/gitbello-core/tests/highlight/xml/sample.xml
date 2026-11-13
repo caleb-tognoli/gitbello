@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A project file -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <TargetFramework>net8.0</TargetFramework>
+    <Description>Tools &amp; more &lt;fast&gt;</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <svg:rect xmlns:svg="http://www.w3.org/2000/svg" width='10'/>
+  <script><![CDATA[ if (a < b) { go(); } ]]></script>
+  <Item
+      Name="split across lines"
+      Kind="tag">text</Item>
+</Project>
+<!--
+  a comment over lines
+-->
+<Data><![CDATA[ first
+second ]]></Data>

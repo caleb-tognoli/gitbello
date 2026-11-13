@@ -1,0 +1,102 @@
+| # Comment
+  ^^^^^^^^^ comment
+| name: CI
+  ^^^^ key
+      ^ punctuation
+| on:
+  ^^ key
+    ^ punctuation
+|   push:
+    ^^^^ key
+        ^ punctuation
+|     branches: [main]
+      ^^^^^^^^ key
+              ^ punctuation
+| env:
+  ^^^ key
+     ^ punctuation
+|   DEBUG: true
+    ^^^^^ key
+         ^ punctuation
+           ^^^^ constant
+|   LEVEL: 3
+    ^^^^^ key
+         ^ punctuation
+           ^ number
+|   RATIO: 0.5
+    ^^^^^ key
+         ^ punctuation
+           ^^^ number
+|   EMPTY: null
+    ^^^^^ key
+         ^ punctuation
+           ^^^^ constant
+|   YES_VALUE: yes
+    ^^^^^^^^^ key
+             ^ punctuation
+               ^^^ constant
+| jobs:
+  ^^^^ key
+      ^ punctuation
+|   build:
+    ^^^^^ key
+         ^ punctuation
+|     runs-on: "ubuntu-latest"
+      ^^^^^^^ key
+             ^ punctuation
+|     steps:
+      ^^^^^ key
+           ^ punctuation
+|       - uses: actions/checkout@v4
+        ^ punctuation
+          ^^^^ key
+              ^ punctuation
+|       - run: echo 'hello' # trailing
+        ^ punctuation
+          ^^^ key
+             ^ punctuation
+                            ^^^^^^^^^^ comment
+|       - name: Multi
+        ^ punctuation
+          ^^^^ key
+              ^ punctuation
+|         run: |
+          ^^^ key
+             ^ punctuation
+               ^ operator
+|           cargo build
+| base: &base
+  ^^^^ key
+      ^ punctuation
+        ^^^^^ variable
+|   key: value
+    ^^^ key
+       ^ punctuation
+| derived: *base
+  ^^^^^^^ key
+         ^ punctuation
+           ^^^^^ variable
+| tagged: !!str 123
+  ^^^^^^ key
+        ^ punctuation
+          ^^^^^ type
+                ^^^ number
+| ---
+  ^^^ keyword
+| notes: >-
+  ^^^^^ key
+       ^ punctuation
+         ^^ operator
+|   folded text
+|   # not a comment
+|
+|   still folded
+| after: "a quoted
+  ^^^^^ key
+       ^ punctuation
+|   string" # comment
+            ^^^^^^^^^ comment
+| next: 'single
+  ^^^^ key
+      ^ punctuation
+|   quoted'

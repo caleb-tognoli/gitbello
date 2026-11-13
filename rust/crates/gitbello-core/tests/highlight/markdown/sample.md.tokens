@@ -1,0 +1,107 @@
+| # Title
+  ^^^^^^^ markup.heading
+|
+| ## Section with `code`
+  ^^^^^^^^^^^^^^^^^^^^^^ markup.heading
+|
+| Some *emphasis*, **strong**, and `inline code` in a paragraph.
+       ^^^^^^^^^^ markup.emphasis
+                   ^^^^^^^^^^ markup.emphasis
+                                   ^^^^^^^^^^^^^ markup.code
+| Also ~~struck~~, snake_case_word, \*escaped\*, <br> and https://example.com/path.
+       ^^^^^^^^^^ markup.emphasis
+                                    ^^ string.escape
+                                             ^^ string.escape
+                                                 ^^^^ tag
+                                                          ^^^^^^^^^^^^^^^^^^^^^^^^ markup.link
+| A [link](https://example.com) and an ![image](a.png).
+    ^^^^^^ markup.link
+          ^^^^^^^^^^^^^^^^^^^^^ string
+                                       ^^^^^^^^ markup.link
+                                               ^^^^^^^ string
+|
+| > A quote with `code`.
+  ^^^^^^^^^^^^^^^^^^^^^^ markup.quote
+|
+| - List item
+  ^ markup.list
+| - Another item
+  ^ markup.list
+| - [x] Done task
+  ^ markup.list
+    ^^^ markup.list
+| 1. Numbered
+  ^^ markup.list
+|
+| ```rust
+  ^^^ markup.code
+     ^^^^ type
+| fn main() {}
+  ^^ keyword
+     ^^^^ function
+| ```
+  ^^^ markup.code
+|
+| | Column | Other |
+  ^ punctuation
+           ^ punctuation
+                   ^ punctuation
+| | ------ | ----- |
+  ^^^^^^^^^^^^^^^^^^ punctuation
+| | a      | b     |
+  ^ punctuation
+           ^ punctuation
+                   ^ punctuation
+|
+| Unclosed `code
+           ^^^^^ markup.code
+|
+| ```js
+  ^^^ markup.code
+     ^^ type
+| const s = `multi
+  ^^^^^ keyword
+            ^^^^^^ string
+| line ${x}`; /* open
+  ^^^^^ string
+       ^^ string.interpolation
+          ^ string.interpolation
+           ^ string
+              ^^^^^^^ comment
+| still a comment */
+  ^^^^^^^^^^^^^^^^^^ comment
+| ```
+  ^^^ markup.code
+|
+| ~~~~python
+  ^^^^ markup.code
+      ^^^^^^ type
+| doc = """a
+        ^^^^ string
+| ``` not a close
+  ^^^^^^^^^^^^^^^ string
+| """
+  ^^^ string
+| ~~~~
+  ^^^^ markup.code
+|
+| ```unknown-lang
+  ^^^ markup.code
+     ^^^^^^^^^^^^ type
+| plain <b>
+| ```
+  ^^^ markup.code
+|
+| ````md
+  ^^^^ markup.code
+      ^^ type
+| ```rust
+  ^^^ markup.code
+     ^^^^ type
+| let nested = 1;
+  ^^^ keyword
+               ^ number
+| ```
+  ^^^ markup.code
+| ````
+  ^^^^ markup.code

@@ -1,0 +1,33 @@
+@page "/todo"
+@using System.Linq
+@inject ILogger<Todo> Logger
+@* a comment
+   on two lines *@
+<h3 class="title @cls">Todo (@todos.Count(t => !t.Done))</h3>
+<p>Mail me@example.com or @@handle, total @(items.Sum(i => i.Price) * 2).</p>
+<button class="btn" @onclick="() => Count++" @bind-Value:event="oninput">Add</button>
+@if (todos.Any())
+{
+    <ul>
+        @foreach (var todo in todos)
+        {
+            <li>@todo.Title.</li>
+            var n = todo.Title.Length; // a } in a comment
+            @:Plain text @n
+        }
+    </ul>
+}
+else
+{
+    <p>None</p>
+}
+@code {
+    private List<TodoItem> todos = new();
+    /* block
+       } comment */
+    private void Add() { todos.Add(new TodoItem { Title = "}" }); }
+}
+<script>
+  var data = @Json.Serialize(Model);
+  // still js
+</script>

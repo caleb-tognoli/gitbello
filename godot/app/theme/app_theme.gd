@@ -69,8 +69,9 @@ static var _tintable: Dictionary[StringName, DPITexture] = {}
 ## How strongly the changed words of paired lines are tinted, in percent of
 ## the added or removed colour: the diff's word background, and the
 ## minimap's word blocks over its row tint. A variable so that
-## `tests/visual/word_tint_sheet.tscn` can compare intensities.
-static var word_tint_percent: int = 60
+## `tests/visual/word_tint_sheet.tscn` can compare intensities; 40 keeps the
+## syntax hues readable on it (M7.13 P6).
+static var word_tint_percent: int = 40
 
 
 class Palette:
@@ -106,10 +107,30 @@ class Palette:
 	## The two sides of a conflict: ours (the checked-out branch) and theirs.
 	var ours: Color
 	var theirs: Color
-	var syntax_keyword: Color
-	var syntax_type: Color
-	var syntax_string: Color
-	var syntax_number: Color
+	## Syntax colours by token kind name (`string.escape`); kinds left out
+	## take their parent's colour or plain text (see `syntax_colors`).
+	var syntax: Dictionary[String, Color] = {}
+
+
+## Fills `p.syntax` from the theme's syntax hues: comments (doc comments
+## too) in the muted text colour, the last CSV column in the text colour,
+## and the base kinds without a hue of their own sharing one (constants and
+## attributes the numbers', tags the variables', headings the macros',
+## emphasis the annotations', links and diff headers the types'). Function
+## names, operators and punctuation stay plain. No hue is green or red
+## except a patch's added and removed lines: they would read as the diff's
+## own colours (and are the pair red-green colour blindness confuses).
+static func _syntax_palette(p: Palette, hues: Dictionary[String, Color]) -> void:
+	p.syntax = hues.duplicate()
+	p.syntax["comment"] = p.text_muted
+	p.syntax["column.7"] = p.text
+	var shared: Dictionary[String, String] = {
+		"constant": "number", "attribute": "number", "tag": "variable",
+		"markup.heading": "macro", "markup.emphasis": "annotation", "markup.link": "type",
+		"diff.header": "type",
+	}
+	for kind_name: String in shared:
+		p.syntax[kind_name] = hues[shared[kind_name]]
 
 
 ## `added` and `removed` replace the theme's colours of added and removed
@@ -149,10 +170,26 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT,
 		p.renamed = Color(0.13, 0.4, 0.85)
 		p.ours = Color(0.13, 0.42, 0.85)
 		p.theirs = Color(0.85, 0.45, 0.05)
-		p.syntax_keyword = Color(0.55, 0.2, 0.7)
-		p.syntax_type = Color(0.0, 0.45, 0.55)
-		p.syntax_string = Color(0.15, 0.5, 0.1)
-		p.syntax_number = Color(0.7, 0.35, 0.0)
+		_syntax_palette(p, {
+			"keyword": Color(0.55, 0.2, 0.7),
+			"type": Color(0.0, 0.45, 0.55),
+			"string": Color(0.47, 0.36, 0.2),
+			"number": Color(0.7, 0.14, 0.5),
+			"macro": Color(0.1, 0.36, 0.8),
+			"variable": Color(0.645, 0.32, 0.0),
+			"annotation": Color(0.5, 0.38, 0.0),
+			"string.escape": Color(0.0, 0.46, 0.42),
+			"key": Color(0.13, 0.33, 0.62),
+			"diff.added": Color(0.096, 0.48, 0.144),
+			"diff.removed": Color(0.75, 0.12, 0.12),
+			"column.0": Color(0.1, 0.36, 0.8),
+			"column.1": Color(0.645, 0.32, 0.0),
+			"column.2": Color(0.55, 0.2, 0.7),
+			"column.3": Color(0.47, 0.36, 0.2),
+			"column.4": Color(0.0, 0.45, 0.55),
+			"column.5": Color(0.7, 0.14, 0.5),
+			"column.6": Color(0.5, 0.38, 0.0),
+		})
 	else:
 		p.background = Color("1b1c1f")
 		p.surface = Color("25262a")
@@ -183,10 +220,26 @@ static func palette(light: bool, accent: Color = DEFAULT_ACCENT,
 		p.renamed = Color(0.45, 0.7, 1.0)
 		p.ours = Color(0.35, 0.62, 1.0)
 		p.theirs = Color(1.0, 0.62, 0.25)
-		p.syntax_keyword = Color(0.78, 0.55, 0.95)
-		p.syntax_type = Color(0.4, 0.78, 0.85)
-		p.syntax_string = Color(0.6, 0.82, 0.5)
-		p.syntax_number = Color(0.95, 0.65, 0.4)
+		_syntax_palette(p, {
+			"keyword": Color(0.78, 0.55, 0.95),
+			"type": Color(0.4, 0.78, 0.85),
+			"string": Color(0.86, 0.75, 0.6),
+			"number": Color(0.95, 0.56, 0.78),
+			"macro": Color(0.47, 0.69, 1.0),
+			"variable": Color(0.95, 0.65, 0.4),
+			"annotation": Color(0.9, 0.8, 0.45),
+			"string.escape": Color(0.45, 0.84, 0.78),
+			"key": Color(0.62, 0.85, 1.0),
+			"diff.added": Color(0.5, 0.85, 0.55),
+			"diff.removed": Color(0.97, 0.52, 0.52),
+			"column.0": Color(0.5, 0.72, 1.0),
+			"column.1": Color(0.95, 0.65, 0.4),
+			"column.2": Color(0.78, 0.55, 0.95),
+			"column.3": Color(0.86, 0.75, 0.6),
+			"column.4": Color(0.4, 0.8, 0.85),
+			"column.5": Color(0.95, 0.56, 0.78),
+			"column.6": Color(0.9, 0.8, 0.45),
+		})
 	if added.a > 0.0:
 		p.added = added
 	if removed.a > 0.0:
@@ -225,6 +278,173 @@ static func contrast_ratio(a: Color, b: Color) -> float:
 	var la: float = a.srgb_to_linear().get_luminance()
 	var lb: float = b.srgb_to_linear().get_luminance()
 	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
+
+
+## The contrast diff text reaches on every background it is drawn on.
+const MIN_TEXT_CONTRAST: float = 4.5
+## Tables `readable_colors` keeps before it starts over (themes, accents
+## and chosen colours each make their own).
+const MAX_READABLE_TABLES: int = 256
+## `readable_colors` results by `[colors, background, target]`.
+static var _readable_tables: Dictionary[Array, PackedColorArray] = {}
+
+
+## `color` readable on the opaque `background`: its OKLCH hue kept, as much
+## of its chroma as sRGB holds, and its lightness moved, as little as it
+## takes, until it reaches `target` (towards white or black, whichever
+## stands further from the background). A colour that reaches it already is
+## returned as it is.
+static func readable(color: Color, background: Color, target: float = MIN_TEXT_CONTRAST) -> Color:
+	if contrast_ratio(color, background) >= target:
+		return color
+	var lab: Vector3 = _oklab(color)
+	var chroma: float = Vector2(lab.y, lab.z).length()
+	var hue: float = atan2(lab.z, lab.y)
+	var lighter: bool = contrast_ratio(Color.WHITE, background) >= contrast_ratio(Color.BLACK, background)
+	# `fails` short of the target, `reaches` at it or past.
+	var fails: float = lab.x
+	var reaches: float = 1.0 if lighter else 0.0
+	# 12 halvings: lightness within 1/4096, finer than an 8-bit step.
+	for i: int in 12:
+		var middle: float = (fails + reaches) / 2.0
+		if contrast_ratio(_oklch_in_gamut(middle, chroma, hue), background) >= target:
+			reaches = middle
+		else:
+			fails = middle
+	var out: Color = _oklch_in_gamut(reaches, chroma, hue)
+	out.a = color.a
+	return out
+
+
+## `readable` for each colour of `colors`; transparent ones (plain text)
+## stay transparent. Kept for later calls with the same colours and
+## background (every diff view shares them; a table takes a few
+## milliseconds).
+static func readable_colors(colors: PackedColorArray, background: Color,
+		target: float = MIN_TEXT_CONTRAST) -> PackedColorArray:
+	var key: Array = [colors, background, target]
+	if _readable_tables.has(key):
+		return _readable_tables[key]
+	var out: PackedColorArray = PackedColorArray()
+	out.resize(colors.size())
+	var done: Dictionary[Color, Color] = {}
+	for i: int in colors.size():
+		var color: Color = colors[i]
+		if color.a == 0.0:
+			out[i] = color
+			continue
+		if not done.has(color):
+			done[color] = readable(color, background, target)
+		out[i] = done[color]
+	if _readable_tables.size() >= MAX_READABLE_TABLES:
+		_readable_tables.clear()
+	_readable_tables[key] = out
+	return out
+
+
+## The opaque backgrounds diff text is drawn on, by name: lines unchanged,
+## added and removed, their changed words, the resolver's ours, theirs and
+## base, and the selection over each of these (`selection_<name>`).
+static func diff_backgrounds(control: Control) -> Dictionary[StringName, Color]:
+	var t: StringName = &"DiffView"
+	var under: Color = control.get_theme_color(&"background", t)
+	var out: Dictionary[StringName, Color] = {&"unchanged": under}
+	for entry: Array in [[&"added", &"added_bg"], [&"removed", &"removed_bg"],
+			[&"added_word", &"added_hl_bg"], [&"removed_word", &"removed_hl_bg"],
+			[&"ours", &"ours_bg"], [&"theirs", &"theirs_bg"], [&"base", &"base_bg"]]:
+		out[entry[0]] = under.blend(control.get_theme_color(entry[1], t))
+	var selection: Color = control.get_theme_color(&"selection_bg", t)
+	for name: StringName in out.keys():
+		out[StringName("selection_" + name)] = out[name].blend(selection)
+	return out
+
+
+## The syntax colours of `DiffView` (`syntax_colors`, plain kinds
+## transparent) made readable on each of `diff_backgrounds`, by name.
+static func syntax_color_tables(control: Control) -> Dictionary[StringName, PackedColorArray]:
+	var colors: PackedColorArray = syntax_colors(control, &"DiffView", Color.TRANSPARENT)
+	var out: Dictionary[StringName, PackedColorArray] = {}
+	var backgrounds: Dictionary[StringName, Color] = diff_backgrounds(control)
+	for name: StringName in backgrounds:
+		out[name] = readable_colors(colors, backgrounds[name])
+	return out
+
+
+## OKLab (lightness, a, b) of an sRGB colour (Björn Ottosson's matrices).
+static func _oklab(color: Color) -> Vector3:
+	var c: Color = color.srgb_to_linear()
+	var l: float = _cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b)
+	var m: float = _cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b)
+	var s: float = _cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b)
+	return Vector3(
+			0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+			1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+			0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+
+
+## Linear sRGB of an OKLab colour, possibly outside [0, 1].
+static func _linear_of_oklab(lightness: float, a: float, b: float) -> Vector3:
+	var l: float = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3.0)
+	var m: float = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3.0)
+	var s: float = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3.0)
+	return Vector3(
+			4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+			-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+			-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+
+
+## The sRGB colour of OKLCH (`lightness`, `chroma`, `hue`), its chroma
+## lowered as little as it takes to fit in sRGB.
+static func _oklch_in_gamut(lightness: float, chroma: float, hue: float) -> Color:
+	var fits: Callable = func(amount: float) -> bool:
+		var linear: Vector3 = _linear_of_oklab(lightness, amount * cos(hue), amount * sin(hue))
+		return linear.x >= -0.0001 and linear.y >= -0.0001 and linear.z >= -0.0001 \
+				and linear.x <= 1.0001 and linear.y <= 1.0001 and linear.z <= 1.0001
+	var c: float = chroma
+	if not fits.call(c):
+		var low: float = 0.0
+		var high: float = chroma
+		for i: int in 10:
+			var middle: float = (low + high) / 2.0
+			if fits.call(middle):
+				low = middle
+			else:
+				high = middle
+		c = low
+	var rgb: Vector3 = _linear_of_oklab(lightness, c * cos(hue), c * sin(hue)).clamp(Vector3.ZERO, Vector3.ONE)
+	return Color(rgb.x, rgb.y, rgb.z).linear_to_srgb()
+
+
+static func _cbrt(x: float) -> float:
+	return signf(x) * pow(absf(x), 1.0 / 3.0)
+
+
+## The theme colour name of a syntax token kind (`string.escape` →
+## `syntax_string_escape`).
+static func syntax_color_name(kind_name: String) -> StringName:
+	return StringName("syntax_" + kind_name.replace(".", "_"))
+
+
+## One colour per syntax token kind, in core's id order
+## (`RepoSession.syntax_kinds()`): the kind's own `syntax_<name>` colour of
+## `theme_type`, else its parent's, else `plain` (drawn as plain text).
+static func syntax_colors(control: Control, theme_type: StringName, plain: Color) -> PackedColorArray:
+	var kinds: Array[Dictionary] = RepoSession.syntax_kinds()
+	var ids: Dictionary[String, int] = {}
+	var out: PackedColorArray = PackedColorArray()
+	for kind: Dictionary in kinds:
+		var name: String = kind["name"]
+		var parent: String = kind["parent"]
+		var color_name: StringName = syntax_color_name(name)
+		var color: Color = plain
+		if control.has_theme_color(color_name, theme_type):
+			color = control.get_theme_color(color_name, theme_type)
+		elif ids.has(parent):
+			# Parents come before their children.
+			color = out[ids[parent]]
+		ids[name] = out.size()
+		out.append(color)
+	return out
 
 
 ## `background` darkened under light `text` or lightened under dark text, as
@@ -916,6 +1136,8 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_font(&"font", &"DiffView", mono_font())
 	theme.set_font_size(&"font_size", &"DiffView", 13)
 	theme.set_color(&"text_color", &"DiffView", p.text)
+	# Under the rows (not drawn by the view): what text is made readable on
+	theme.set_color(&"background", &"DiffView", p.background)
 	theme.set_color(&"line_number_color", &"DiffView", p.text_muted)
 	theme.set_color(&"hunk_color", &"DiffView", p.text_muted)
 	theme.set_color(&"hunk_bg", &"DiffView", p.background.blend(Color(p.accent, 0.1)))
@@ -928,11 +1150,8 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"removed_mark", &"DiffView", p.removed)
 	theme.set_color(&"gutter_bg", &"DiffView", p.surface)
 	theme.set_color(&"empty_bg", &"DiffView", p.surface)
-	theme.set_color(&"syntax_keyword", &"DiffView", p.syntax_keyword)
-	theme.set_color(&"syntax_type", &"DiffView", p.syntax_type)
-	theme.set_color(&"syntax_string", &"DiffView", p.syntax_string)
-	theme.set_color(&"syntax_number", &"DiffView", p.syntax_number)
-	theme.set_color(&"syntax_comment", &"DiffView", p.text_muted)
+	for kind_name: String in p.syntax:
+		theme.set_color(syntax_color_name(kind_name), &"DiffView", p.syntax[kind_name])
 	theme.set_color(&"message_color", &"DiffView", p.text_muted)
 	theme.set_color(&"selection_bg", &"DiffView", Color(p.accent, 0.35))
 	theme.set_color(&"caret_color", &"DiffView", p.text)
@@ -987,11 +1206,9 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"added_word", &"DiffMinimap", Color(p.added, word_tint))
 	theme.set_color(&"removed_word", &"DiffMinimap", Color(p.removed, word_tint))
 	theme.set_color(&"text_color", &"DiffMinimap", Color(p.text, 0.45))
-	theme.set_color(&"syntax_keyword", &"DiffMinimap", Color(p.syntax_keyword, 0.75))
-	theme.set_color(&"syntax_type", &"DiffMinimap", Color(p.syntax_type, 0.75))
-	theme.set_color(&"syntax_string", &"DiffMinimap", Color(p.syntax_string, 0.75))
-	theme.set_color(&"syntax_number", &"DiffMinimap", Color(p.syntax_number, 0.75))
-	theme.set_color(&"syntax_comment", &"DiffMinimap", Color(p.text_muted, 0.6))
+	for kind_name: String in p.syntax:
+		var alpha: float = 0.6 if kind_name.begins_with("comment") else 0.75
+		theme.set_color(syntax_color_name(kind_name), &"DiffMinimap", Color(p.syntax[kind_name], alpha))
 	theme.set_color(&"divider_color", &"DiffMinimap", Color(p.text_muted, 0.7))
 	theme.set_color(&"veil_color", &"DiffMinimap", Color(p.background, 0.6))
 	theme.set_color(&"slider_color", &"DiffMinimap", Color(p.text, 0.16))

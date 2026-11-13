@@ -1,0 +1,86 @@
+| #include <stdio.h>
+  ^^^^^^^^ macro
+           ^^^^^^^^^ string
+| #define MAX_ITEMS 64
+  ^^^^^^^ macro
+          ^^^^^^^^^ constant
+                    ^^ number
+| #ifdef DEBUG
+  ^^^^^^ macro
+         ^^^^^ constant
+| #endif
+  ^^^^^^ macro
+|
+| /* Block comment */
+  ^^^^^^^^^^^^^^^^^^^ comment
+| typedef struct {
+  ^^^^^^^ keyword
+          ^^^^^^ keyword
+|     unsigned int count;
+      ^^^^^^^^ type
+               ^^^ type
+|     const char *name;
+      ^^^^^ keyword
+            ^^^^ type
+| } Inventory;
+    ^^^^^^^^^ type
+|
+| static int total(const Inventory *inv) {
+  ^^^^^^ keyword
+         ^^^ type
+             ^^^^^ function
+                   ^^^^^ keyword
+                         ^^^^^^^^^ type
+|     // Line comment
+      ^^^^^^^^^^^^^^^ comment
+|     long sum = 0L;
+      ^^^^ type
+                 ^^ number
+|     for (int i = 0; i < inv->count; i++) {
+      ^^^ keyword.control
+           ^^^ type
+                   ^ number
+|         sum += i * 2.5f;
+                     ^^^^ number
+|     }
+|     char c = 'x'; char esc = '\n';
+      ^^^^ type
+               ^^^ string
+                    ^^^^ type
+                               ^^^^ string
+|     printf("%s has %d items\n", inv->name, inv->count);
+      ^^^^^^ function
+             ^^^^^^^^^^^^^^^^ string
+                             ^^ string.escape
+                               ^ string
+|     return sum > 0 ? (int)sum : -1;
+      ^^^^^^ keyword.control
+                   ^ number
+                        ^^^ type
+                                   ^ number
+| }
+|
+| int main(void) {
+  ^^^ type
+      ^^^^ function
+           ^^^^ type
+|     Inventory inv = { 3, "bag" };
+      ^^^^^^^^^ type
+                        ^ number
+                           ^^^^^ string
+|     if (total(&inv) == 0x10) return 1; else return 0;
+      ^^ keyword.control
+          ^^^^^ function
+                         ^^^^ number
+                               ^^^^^^ keyword.control
+                                      ^ number
+                                         ^^^^ keyword.control
+                                              ^^^^^^ keyword.control
+                                                     ^ number
+| }
+| /* a block
+  ^^^^^^^^^^ comment
+|    comment */ int after = 1;
+  ^^^^^^^^^^^^^ comment
+                ^^^ type
+                            ^ number

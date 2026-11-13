@@ -1,0 +1,84 @@
+| // Theme
+  ^^^^^^^^ comment
+| @import (reference) "base.less";
+  ^^^^^^^ keyword
+                      ^^^^^^^^^^^ string
+                                 ^ punctuation
+| @primary: #428bca;
+  ^^^^^^^^ variable
+          ^ punctuation
+            ^^^^^^^ constant
+                   ^ punctuation
+| @radius: 4px;
+  ^^^^^^^ variable
+         ^ punctuation
+           ^^^ number
+              ^ punctuation
+|
+| .rounded(@r: @radius) {
+  ^^^^^^^^ attribute
+           ^^ variable
+               ^^^^^^^ variable
+                        ^ punctuation
+|   border-radius: @r;
+    ^^^^^^^^^^^^^ key
+                 ^ punctuation
+                   ^^ variable
+                     ^ punctuation
+| }
+  ^ punctuation
+|
+| .panel {
+  ^^^^^^ attribute
+         ^ punctuation
+|   .rounded(6px);
+     ^^^^^^^ function
+             ^^^ number
+                 ^ punctuation
+|   color: darken(@primary, 10%);
+    ^^^^^ key
+         ^ punctuation
+           ^^^^^^ function
+                  ^^^^^^^^ variable
+                            ^^^ number
+                                ^ punctuation
+|   &:hover { color: @primary; }
+    ^ operator
+     ^^^^^^ attribute
+            ^ punctuation
+              ^^^^^ key
+                   ^ punctuation
+                     ^^^^^^^^ variable
+                             ^ punctuation
+                               ^ punctuation
+|
+|   .@{name}-icon {
+     ^^^^^^^ variable
+                  ^ punctuation
+|     width: ~"calc(100% - @{radius})";
+      ^^^^^ key
+           ^ punctuation
+              ^^^^^^^^^^^^^^^^^^^^^^^^ string
+                                      ^ punctuation
+|   }
+    ^ punctuation
+| }
+  ^ punctuation
+|
+| .mixin(@a) when (lightness(@a) >= 50%) {
+  ^^^^^^ attribute
+         ^^ variable
+             ^^^^ keyword
+                   ^^^^^^^^^ function
+                             ^^ variable
+                                    ^^^ number
+                                         ^ punctuation
+|   background: black;
+    ^^^^^^^^^^ key
+              ^ punctuation
+                     ^ punctuation
+| }
+  ^ punctuation
+|
+| /* Done */
+  ^^^^^^^^^^ comment

@@ -1,0 +1,125 @@
+| #!/usr/bin/env bash
+  ^^^^^^^^^^^^^^^^^^^ comment
+| # Comment
+  ^^^^^^^^^ comment
+| set -euo pipefail
+  ^^^ function
+      ^^^^ attribute
+|
+| export NAME="world"
+  ^^^^^^ keyword
+         ^^^^ variable
+              ^^^^^^^ string
+| local_var='single quoted'
+  ^^^^^^^^^ variable
+            ^^^^^^^^^^^^^^^ string
+|
+| function greet() {
+  ^^^^^^^^ keyword
+           ^^^^^ function
+|   local who="${1:-$NAME}"
+    ^^^^^ keyword
+          ^^^ variable
+              ^ string
+               ^^^^^^^^^^^ variable
+                          ^ string
+|   echo "Hello $who" # trailing
+    ^^^^ function
+         ^^^^^^^ string
+                ^^^^ variable
+                    ^ string
+                      ^^^^^^^^^^ comment
+|   return 0
+    ^^^^^^ keyword.control
+           ^ number
+| }
+|
+| if [ -f "$HOME/.bashrc" ]; then
+  ^^ keyword.control
+       ^^ attribute
+          ^ string
+           ^^^^^ variable
+                ^^^^^^^^^ string
+                             ^^^^ keyword.control
+|   cd "$HOME" || exit 1
+    ^^ function
+       ^ string
+        ^^^^^ variable
+             ^ string
+                  ^^^^ keyword.control
+                       ^ number
+| elif [[ $# -gt 2 ]]; then
+  ^^^^ keyword.control
+          ^^ variable
+             ^^^ attribute
+                 ^ number
+                       ^^^^ keyword.control
+|   echo "args: $@"
+    ^^^^ function
+         ^^^^^^^ string
+                ^^ variable
+                  ^ string
+| fi
+  ^^ keyword.control
+|
+| for f in *.txt; do
+  ^^^ keyword.control
+        ^^ keyword
+                  ^^ keyword.control
+|   case "$f" in
+    ^^^^ keyword.control
+         ^ string
+          ^^ variable
+            ^ string
+              ^^ keyword
+|     a*) echo a ;;
+          ^^^^ function
+|     *) echo "other#notcomment" ;;
+         ^^^^ function
+              ^^^^^^^^^^^^^^^^^^ string
+|   esac
+    ^^^^ keyword.control
+| done
+  ^^^^ keyword.control
+| while read -r line; do echo "$line"; done < input.txt
+  ^^^^^ keyword.control
+        ^^^^ function
+             ^^ attribute
+                      ^^ keyword.control
+                         ^^^^ function
+                              ^ string
+                               ^^^^^ variable
+                                    ^ string
+                                       ^^^^ keyword.control
+| count=$((count + 1))
+  ^^^^^ variable
+        ^^ string.interpolation
+                   ^ number
+                     ^ string.interpolation
+| echo "$(date +%s)"
+  ^^^^ function
+       ^ string
+        ^^ string.interpolation
+                  ^ string.interpolation
+                   ^ string
+| cat <<EOF > out.txt
+      ^^^^^ string
+| Hello $USER, today is $(date)
+  ^^^^^^ string
+        ^^^^^ variable
+             ^^^^^^^^^^^^^^^^^^ string
+| EOF
+  ^^^ string
+| cat <<-'RAW'
+      ^^^^^^^^ string
+|     $NOT_EXPANDED
+  ^^^^^^^^^^^^^^^^^ string
+|     RAW
+      ^^^ string
+| echo "a string
+  ^^^^ function
+       ^^^^^^^^^ string
+| over two lines" && echo done
+  ^^^^^^^^^^^^^^^ string
+                     ^^^^ function
+                          ^^^^ keyword.control

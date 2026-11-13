@@ -1,0 +1,159 @@
+| /* Layout */
+  ^^^^^^^^^^^^ comment
+| @import url(theme.css);
+  ^^^^^^^ keyword
+          ^^^ function
+              ^^^^^^^^^ string
+                        ^ punctuation
+| @import "print.css" print;
+  ^^^^^^^ keyword
+          ^^^^^^^^^^^ string
+                           ^ punctuation
+|
+| :root {
+  ^^^^^ attribute
+        ^ punctuation
+|   --accent: #3366ff;
+    ^^^^^^^^ variable
+            ^ punctuation
+              ^^^^^^^ constant
+                     ^ punctuation
+|   --gap: 0.5rem;
+    ^^^^^ variable
+         ^ punctuation
+           ^^^^^^ number
+                 ^ punctuation
+| }
+  ^ punctuation
+|
+| body, html {
+  ^^^^ tag
+        ^^^^ tag
+             ^ punctuation
+|   margin: 0;
+    ^^^^^^ key
+          ^ punctuation
+            ^ number
+             ^ punctuation
+|   font: 14px/1.5 "Segoe UI", sans-serif;
+    ^^^^ key
+        ^ punctuation
+          ^^^^ number
+               ^^^ number
+                   ^^^^^^^^^^ string
+                                         ^ punctuation
+| }
+  ^ punctuation
+|
+| a:hover,
+  ^ tag
+   ^^^^^^ attribute
+| nav > ul li.active::before {
+  ^^^ tag
+      ^ operator
+        ^^ tag
+           ^^ tag
+             ^^^^^^^ attribute
+                    ^^^^^^^^ attribute
+                             ^ punctuation
+|   color: var(--accent) !important;
+    ^^^^^ key
+         ^ punctuation
+           ^^^ function
+               ^^^^^^^^ variable
+                         ^^^^^^^^^^ keyword
+                                   ^ punctuation
+|   background: rgba(0, 0, 0, .5) url("bg.png") no-repeat;
+    ^^^^^^^^^^ key
+              ^ punctuation
+                ^^^^ function
+                     ^ number
+                        ^ number
+                           ^ number
+                              ^^ number
+                                  ^^^ function
+                                      ^^^^^^^^ string
+                                                         ^ punctuation
+|   transition: opacity 0.2s ease-in,
+    ^^^^^^^^^^ key
+              ^ punctuation
+                        ^^^^ number
+|     transform -1.5s;
+                ^^^^^ number
+                     ^ punctuation
+| }
+  ^ punctuation
+|
+| input[type="text"]:not(:focus) { border: 1px solid #ccc; }
+  ^^^^^ tag
+       ^^^^^^^^^^^^^ attribute
+                    ^^^^ attribute
+                         ^^^^^^ attribute
+                                 ^ punctuation
+                                   ^^^^^^ key
+                                         ^ punctuation
+                                           ^^^ number
+                                                     ^^^^ constant
+                                                         ^ punctuation
+                                                           ^ punctuation
+|
+| @media screen and (max-width: 600px) {
+  ^^^^^^ keyword
+                ^^^ keyword
+                     ^^^^^^^^^ key
+                                ^^^^^ number
+                                       ^ punctuation
+|   .grid { grid-template-columns: repeat(2, 1fr); width: calc(100% - 2 * var(--gap)); }
+    ^^^^^ attribute
+          ^ punctuation
+            ^^^^^^^^^^^^^^^^^^^^^ key
+                                 ^ punctuation
+                                   ^^^^^^ function
+                                          ^ number
+                                             ^^^ number
+                                                 ^ punctuation
+                                                   ^^^^^ key
+                                                        ^ punctuation
+                                                          ^^^^ function
+                                                               ^^^^ number
+                                                                      ^ number
+                                                                          ^^^ function
+                                                                              ^^^^^ variable
+                                                                                     ^ punctuation
+                                                                                       ^ punctuation
+| }
+  ^ punctuation
+|
+| @keyframes spin {
+  ^^^^^^^^^^ keyword
+                  ^ punctuation
+|   from { transform: rotate(0deg); }
+    ^^^^ tag
+         ^ punctuation
+           ^^^^^^^^^ key
+                    ^ punctuation
+                      ^^^^^^ function
+                             ^^^^ number
+                                  ^ punctuation
+                                    ^ punctuation
+|   50% { opacity: 0.5; }
+    ^^^ number
+        ^ punctuation
+          ^^^^^^^ key
+                 ^ punctuation
+                   ^^^ number
+                      ^ punctuation
+                        ^ punctuation
+| }
+  ^ punctuation
+| /* a comment
+  ^^^^^^^^^^^^ comment
+|    over two lines */
+  ^^^^^^^^^^^^^^^^^^^^ comment
+| .after { color: red; }
+  ^^^^^^ attribute
+         ^ punctuation
+           ^^^^^ key
+                ^ punctuation
+                     ^ punctuation
+                       ^ punctuation

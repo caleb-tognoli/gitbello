@@ -1,0 +1,157 @@
+| @page "/todo"
+  ^ macro
+   ^^^^ keyword
+        ^^^^^^^ string
+| @using System.Linq
+  ^ macro
+   ^^^^^ keyword
+         ^^^^^^ type
+| @inject ILogger<Todo> Logger
+  ^ macro
+   ^^^^^^ keyword
+          ^^^^^^^ type
+                  ^^^^ type
+                        ^^^^^^ type
+| @* a comment
+  ^^^^^^^^^^^^ comment
+|    on two lines *@
+  ^^^^^^^^^^^^^^^^^^ comment
+| <h3 class="title @cls">Todo (@todos.Count(t => !t.Done))</h3>
+  ^ punctuation
+   ^^ tag
+      ^^^^^ attribute
+           ^ operator
+            ^^^^^^^ string
+                   ^ macro
+                       ^ string
+                        ^ punctuation
+                               ^ macro
+                                      ^^^^^ function
+                                                          ^^ punctuation
+                                                            ^^ tag
+                                                              ^ punctuation
+| <p>Mail me@example.com or @@handle, total @(items.Sum(i => i.Price) * 2).</p>
+  ^ punctuation
+   ^ tag
+    ^ punctuation
+                            ^^ string.escape
+                                            ^ macro
+                                             ^ punctuation
+                                                    ^^^ function
+                                                                        ^ number
+                                                                         ^ punctuation
+                                                                           ^^ punctuation
+                                                                             ^ tag
+                                                                              ^ punctuation
+| <button class="btn" @onclick="() => Count++" @bind-Value:event="oninput">Add</button>
+  ^ punctuation
+   ^^^^^^ tag
+          ^^^^^ attribute
+               ^ operator
+                ^^^^^ string
+                      ^^^^^^^^ attribute
+                              ^ operator
+                               ^ string
+                                      ^^^^^ type
+                                             ^ string
+                                               ^^^^^^^^^^^^^^^^^ attribute
+                                                                ^ operator
+                                                                 ^ string
+                                                                         ^ string
+                                                                          ^ punctuation
+                                                                              ^^ punctuation
+                                                                                ^^^^^^ tag
+                                                                                      ^ punctuation
+| @if (todos.Any())
+  ^ macro
+   ^^ keyword.control
+             ^^^ function
+| {
+  ^ punctuation
+|     <ul>
+      ^ punctuation
+       ^^ tag
+         ^ punctuation
+|         @foreach (var todo in todos)
+          ^ macro
+           ^^^^^^^ keyword.control
+                    ^^^ type
+                             ^^ keyword
+|         {
+          ^ punctuation
+|             <li>@todo.Title.</li>
+              ^ punctuation
+               ^^ tag
+                 ^ punctuation
+                  ^ macro
+                              ^^ punctuation
+                                ^^ tag
+                                  ^ punctuation
+|             var n = todo.Title.Length; // a } in a comment
+              ^^^ type
+                                         ^^^^^^^^^^^^^^^^^^^ comment
+|             @:Plain text @n
+              ^ macro
+               ^ punctuation
+                           ^ macro
+|         }
+          ^ punctuation
+|     </ul>
+      ^^ punctuation
+        ^^ tag
+          ^ punctuation
+| }
+  ^ punctuation
+| else
+  ^^^^ keyword.control
+| {
+  ^ punctuation
+|     <p>None</p>
+      ^ punctuation
+       ^ tag
+        ^ punctuation
+             ^^ punctuation
+               ^ tag
+                ^ punctuation
+| }
+  ^ punctuation
+| @code {
+  ^ macro
+   ^^^^ keyword
+        ^ punctuation
+|     private List<TodoItem> todos = new();
+      ^^^^^^^ keyword
+              ^^^^ type
+                   ^^^^^^^^ type
+                                     ^^^ keyword
+|     /* block
+      ^^^^^^^^ comment
+|        } comment */
+  ^^^^^^^^^^^^^^^^^^^ comment
+|     private void Add() { todos.Add(new TodoItem { Title = "}" }); }
+      ^^^^^^^ keyword
+              ^^^^ type
+                   ^^^ function
+                                 ^^^ function
+                                     ^^^ keyword
+                                         ^^^^^^^^ type
+                                                    ^^^^^ type
+                                                            ^^^ string
+| }
+  ^ punctuation
+| <script>
+  ^ punctuation
+   ^^^^^^ tag
+         ^ punctuation
+|   var data = @Json.Serialize(Model);
+    ^^^ keyword
+               ^ macro
+                ^^^^ type
+                     ^^^^^^^^^ function
+                               ^^^^^ type
+|   // still js
+    ^^^^^^^^^^^ comment
+| </script>
+  ^^ punctuation
+    ^^^^^^ tag
+          ^ punctuation

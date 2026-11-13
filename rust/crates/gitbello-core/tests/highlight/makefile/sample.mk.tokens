@@ -1,0 +1,88 @@
+| # Comment
+  ^^^^^^^^^ comment
+| CC ?= gcc
+  ^^ variable
+     ^^ operator
+| CFLAGS := -O2 -Wall
+  ^^^^^^ variable
+         ^^ operator
+| SRCS = $(wildcard src/*.c)
+  ^^^^ variable
+       ^ operator
+         ^^ variable
+           ^^^^^^^^ function
+                           ^ variable
+| OBJS += $(patsubst %.c,%.o,$(SRCS))
+  ^^^^ variable
+       ^^ operator
+          ^^ variable
+            ^^^^^^^^ function
+                             ^^^^^^^ variable
+                                    ^ variable
+| export PATH := $(HOME)/bin:$(PATH)
+  ^^^^^^ keyword
+         ^^^^ variable
+              ^^ operator
+                 ^^^^^^^ variable
+                             ^^^^^^^ variable
+|
+| .PHONY: all clean
+  ^^^^^^ keyword
+        ^ operator
+|
+| all: build/app
+  ^^^ function
+     ^ operator
+|
+| build/app: $(OBJS) | build
+  ^^^^^^^^^ function
+           ^ operator
+             ^^^^^^^ variable
+|     @echo "Linking $@ from $^"
+      ^ operator
+       ^^^^ function
+            ^^^^^^^^^ string
+                     ^^ variable
+                       ^^^^^^ string
+                             ^^ variable
+                               ^ string
+|     $(CC) $(CFLAGS) -o $@ $^
+      ^^^^^ variable
+            ^^^^^^^^^ variable
+                      ^^ attribute
+                         ^^ variable
+                            ^^ variable
+|
+| %.o: %.c
+  ^^^ function
+     ^ operator
+|     -$(CC) -c $< -o $@ # trailing
+      ^ operator
+       ^^^^^ variable
+             ^^ attribute
+                ^^ variable
+                   ^^ attribute
+                      ^^ variable
+                         ^^^^^^^^^^ comment
+|
+| ifeq ($(OS),Windows_NT)
+  ^^^^ keyword.control
+        ^^^^^ variable
+|     EXE := .exe
+      ^^^ variable
+          ^^ operator
+| else
+  ^^^^ keyword.control
+|     EXE :=
+      ^^^ variable
+          ^^ operator
+| endif
+  ^^^^^ keyword.control
+|
+| include config.mk
+  ^^^^^^^ keyword
+| clean: ; rm -rf build $(OBJS)
+  ^^^^^ function
+       ^ operator
+              ^^^ attribute
+                        ^^^^^^^ variable

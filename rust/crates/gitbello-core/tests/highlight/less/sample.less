@@ -1,0 +1,24 @@
+// Theme
+@import (reference) "base.less";
+@primary: #428bca;
+@radius: 4px;
+
+.rounded(@r: @radius) {
+  border-radius: @r;
+}
+
+.panel {
+  .rounded(6px);
+  color: darken(@primary, 10%);
+  &:hover { color: @primary; }
+
+  .@{name}-icon {
+    width: ~"calc(100% - @{radius})";
+  }
+}
+
+.mixin(@a) when (lightness(@a) >= 50%) {
+  background: black;
+}
+
+/* Done */

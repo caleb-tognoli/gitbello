@@ -1,0 +1,9 @@
+# Build output
+/target/
+*.log
+**/node_modules/
+build-?.tmp
+*.[oa]
+!keep.log
+\#not-a-comment
+docs/**/*.pdf

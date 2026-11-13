@@ -1,0 +1,111 @@
+| <#
+  ^^ comment
+| .SYNOPSIS
+  ^^^^^^^^^ comment
+| #>
+  ^^ comment
+| # Line comment
+  ^^^^^^^^^^^^^^ comment
+| param(
+  ^^^^^ keyword
+|     [Parameter(Mandatory = $true)]
+       ^^^^^^^^^ function
+                             ^^^^^ constant
+|     [string]$Path,
+      ^^^^^^^^ type
+              ^^^^^ variable
+|     [int[]]$Sizes = @(1, 2, 0x10)
+      ^^^^^^^ type
+             ^^^^^^ variable
+                        ^ number
+                           ^ number
+                              ^^^^ number
+| )
+|
+| function Get-Inventory {
+  ^^^^^^^^ keyword
+           ^^^^^^^^^^^^^ function
+|     [CmdletBinding()]
+       ^^^^^^^^^^^^^ function
+|     param([string]$Name = 'bag')
+      ^^^^^ keyword
+            ^^^^^^^^ type
+                    ^^^^^ variable
+                            ^^^^^ string
+|     $items = Get-ChildItem -Path $Path -Filter "*.txt" -Recurse
+      ^^^^^^ variable
+               ^^^^^^^^^^^^^ function
+                             ^^^^^ attribute
+                                   ^^^^^ variable
+                                         ^^^^^^^ attribute
+                                                 ^^^^^^^ string
+                                                         ^^^^^^^^ attribute
+|     foreach ($item in $items) {
+      ^^^^^^^ keyword.control
+               ^^^^^ variable
+                     ^^ keyword
+                        ^^^^^^ variable
+|         if ($item.Length -gt 1kb -and -not $item.PSIsContainer) {
+          ^^ keyword.control
+              ^^^^^ variable
+                           ^^^ keyword
+                               ^^^ number
+                                   ^^^^ keyword
+                                        ^^^^ keyword
+                                             ^^^^^ variable
+|             Write-Host "Found $($item.Name) in $env:TEMP `n done"
+              ^^^^^^^^^^ function
+                         ^^^^^^^ string
+                                ^^ string.interpolation
+                                  ^^^^^ variable
+                                            ^ string.interpolation
+                                             ^^^^ string
+                                                 ^^^^ variable
+                                                     ^^^^^^ string
+                                                           ^^ string.escape
+                                                             ^^^^^^ string
+|         } elseif ($null -eq $item) {
+            ^^^^^^ keyword.control
+                    ^^^^^ constant
+                          ^^^ keyword
+                              ^^^^^ variable
+|             continue
+              ^^^^^^^^ keyword.control
+|         }
+|     }
+|     $label = 'it''s literal'
+      ^^^^^^ variable
+               ^^^ string
+                  ^^ string.escape
+                    ^^^^^^^^^^ string
+|     $here = @"
+      ^^^^^ variable
+              ^^ string
+|     Hello $Name, $(Get-Date)
+  ^^^^^^^^^^ string
+            ^^^^^ variable
+                 ^^ string
+                   ^^ string.interpolation
+                     ^^^^^^^^ function
+                             ^ string.interpolation
+| "@
+  ^^ string
+|     return [System.IO.Path]::Combine($Path, $Name) <# inline #>
+      ^^^^^^ keyword.control
+             ^^^^^^^^^^^^^^^^ type
+                               ^^^^^^^ function
+                                       ^^^^^ variable
+                                              ^^^^^ variable
+                                                     ^^^^^^^^^^^^ comment
+| }
+|
+| Get-Inventory -Name "box" | Out-Null
+  ^^^^^^^^^^^^^ function
+                ^^^^^ attribute
+                      ^^^^^ string
+                              ^^^^^^^^ function
+| $global:count += 1; $? ; $_
+  ^^^^^^^^^^^^^ variable
+                   ^ number
+                      ^^ variable
+                           ^^ variable

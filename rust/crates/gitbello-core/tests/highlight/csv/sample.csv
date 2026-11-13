@@ -1,0 +1,5 @@
+id,name,city,amount,notes,active,created,tag,extra
+1,Ada,"London, UK",12.50,"says ""hi""",true,2024-01-02,a,x
+2,Linus,Helsinki,7,,false,2024-02-03,b,y
+3,"Grace",New York,1e3,"multi
+line",true,2024-03-04,c,z

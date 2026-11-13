@@ -25,12 +25,11 @@ const THEME_TYPE: StringName = &"DiffMinimap"
 const TILE_ROWS: int = 256
 ## Tiles kept; the least recently drawn go first.
 const MAX_TILES: int = 12
-## Theme colours of the tile palette, in core's `minimap::PALETTE_LEN` order.
+## Theme colours that start the tile palette, in core's `minimap::PALETTE_LEN`
+## order; one colour per syntax token kind follows (`AppTheme.syntax_colors`).
 const PALETTE_COLORS: Array[StringName] = [
 	&"context_bg", &"header_bg", &"added_bg", &"removed_bg", &"ours_bg", &"theirs_bg", &"base_bg",
-	&"resolved_bg", &"text_color", &"syntax_keyword", &"syntax_type", &"syntax_string",
-	&"syntax_number", &"syntax_comment", &"divider_color", &"veil_color", &"added_word",
-	&"removed_word",
+	&"resolved_bg", &"text_color", &"divider_color", &"veil_color", &"added_word", &"removed_word",
 ]
 ## Overview flags (`RepoSession.diff_overview`).
 const ADDED: int = 1
@@ -201,6 +200,11 @@ func rows_shown() -> void:
 	center_on(strip_row_at(fraction * size.y), true)
 
 
+## Colours `RepoSession.diff_minimap_tile` takes.
+static func palette_size() -> int:
+	return PALETTE_COLORS.size() + RepoSession.syntax_kinds().size()
+
+
 func _scale() -> float:
 	var window: Window = get_window()
 	return window.content_scale_factor if window != null else 1.0
@@ -210,6 +214,7 @@ func _update_theme() -> void:
 	_palette = PackedColorArray()
 	for color_name: StringName in PALETTE_COLORS:
 		_palette.append(_color(color_name))
+	_palette.append_array(AppTheme.syntax_colors(self, THEME_TYPE, _color(&"text_color")))
 
 
 ## Theme colour `color_name`, or the view's own for it (`color_overrides`).

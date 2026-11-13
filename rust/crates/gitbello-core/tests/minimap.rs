@@ -11,7 +11,6 @@ use gitbello_core::diff::minimap::{
     PALETTE_LEN,
 };
 use gitbello_core::diff::LineKind;
-use gitbello_core::highlight::language_for;
 use gitbello_core::merge::BlockChoice;
 use gitbello_core::runtime::Runtime;
 use support::rt::{ok, open, poll_until};
@@ -56,7 +55,8 @@ fn a_partly_picked_diff_marks_the_lines_left_out() {
         shown.old_file(),
         state.diff_picks(),
         false,
-        language_for(&shown.target().path),
+        shown.syntax(),
+        shown.line_states(),
     );
     let rows: Vec<(Mark, bool)> = (0..source.row_count())
         .filter_map(|r| source.row(r).left.map(|l| (l.mark, l.left_out)))
@@ -103,7 +103,8 @@ fn a_conflicted_file_marks_its_blocks() {
             conflict.layout(),
             conflict.resolved(),
             split,
-            None,
+            conflict.syntax(),
+            conflict.line_states(),
         );
         let marks: Vec<Mark> = (0..source.row_count())
             .flat_map(|r| {
@@ -183,7 +184,8 @@ fn chosen_blocks_stay_marked_until_undone_or_edited_elsewhere() {
         conflict.layout(),
         conflict.resolved(),
         false,
-        None,
+        conflict.syntax(),
+        conflict.line_states(),
     );
     let marks: Vec<Mark> = (0..source.row_count())
         .filter_map(|r| source.row(r).left.map(|l| l.mark))

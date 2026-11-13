@@ -1,0 +1,112 @@
+| <?xml version="1.0" encoding="utf-8"?>
+  ^^ punctuation
+    ^^^ keyword
+        ^^^^^^^ attribute
+               ^ operator
+                      ^^^^^^^^ attribute
+                              ^ operator
+                                      ^^ punctuation
+| <!-- A project file -->
+  ^^^^^^^^^^^^^^^^^^^^^^^ comment
+| <Project Sdk="Microsoft.NET.Sdk">
+  ^ punctuation
+   ^^^^^^^ tag
+           ^^^ attribute
+              ^ operator
+                                  ^ punctuation
+|   <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    ^ punctuation
+     ^^^^^^^^^^^^^ tag
+                   ^^^^^^^^^ attribute
+                            ^ operator
+                                                                ^ punctuation
+|     <TargetFramework>net8.0</TargetFramework>
+      ^ punctuation
+       ^^^^^^^^^^^^^^^ tag
+                      ^ punctuation
+                             ^^ punctuation
+                               ^^^^^^^^^^^^^^^ tag
+                                              ^ punctuation
+|     <Description>Tools &amp; more &lt;fast&gt;</Description>
+      ^ punctuation
+       ^^^^^^^^^^^ tag
+                  ^ punctuation
+                         ^^^^^ string.escape
+                                    ^^^^ string.escape
+                                            ^^^^ string.escape
+                                                ^^ punctuation
+                                                  ^^^^^^^^^^^ tag
+                                                             ^ punctuation
+|   </PropertyGroup>
+    ^^ punctuation
+      ^^^^^^^^^^^^^ tag
+                   ^ punctuation
+|   <ItemGroup>
+    ^ punctuation
+     ^^^^^^^^^ tag
+              ^ punctuation
+|     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+      ^ punctuation
+       ^^^^^^^^^^^^^^^^ tag
+                        ^^^^^^^ attribute
+                               ^ operator
+                                                  ^^^^^^^ attribute
+                                                         ^ operator
+                                                                   ^^ punctuation
+|   </ItemGroup>
+    ^^ punctuation
+      ^^^^^^^^^ tag
+               ^ punctuation
+|   <svg:rect xmlns:svg="http://www.w3.org/2000/svg" width='10'/>
+    ^ punctuation
+     ^^^^^^^^ tag
+              ^^^^^^^^^ attribute
+                       ^ operator
+                                                     ^^^^^ attribute
+                                                          ^ operator
+                                                               ^^ punctuation
+|   <script><![CDATA[ if (a < b) { go(); } ]]></script>
+    ^ punctuation
+     ^^^^^^ tag
+           ^ punctuation
+            ^^^^^^^^^ keyword
+                     ^^^^^^^^^^^^^^^^^^^^^^ markup.code
+                                           ^^^ keyword
+                                              ^^ punctuation
+                                                ^^^^^^ tag
+                                                      ^ punctuation
+|   <Item
+    ^ punctuation
+     ^^^^ tag
+|       Name="split across lines"
+        ^^^^ attribute
+            ^ operator
+|       Kind="tag">text</Item>
+        ^^^^ attribute
+            ^ operator
+                  ^ punctuation
+                       ^^ punctuation
+                         ^^^^ tag
+                             ^ punctuation
+| </Project>
+  ^^ punctuation
+    ^^^^^^^ tag
+           ^ punctuation
+| <!--
+  ^^^^ comment
+|   a comment over lines
+  ^^^^^^^^^^^^^^^^^^^^^^ comment
+| -->
+  ^^^ comment
+| <Data><![CDATA[ first
+  ^ punctuation
+   ^^^^ tag
+       ^ punctuation
+        ^^^^^^^^^ keyword
+                 ^^^^^^ markup.code
+| second ]]></Data>
+  ^^^^^^^ markup.code
+         ^^^ keyword
+            ^^ punctuation
+              ^^^^ tag
+                  ^ punctuation

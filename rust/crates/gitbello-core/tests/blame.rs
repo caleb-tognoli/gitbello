@@ -11,6 +11,7 @@ use gitbello_core::blame::{
 };
 use gitbello_core::diff::minimap::{Mark, MinimapSource};
 use gitbello_core::git::{CancelToken, GitErrorKind};
+use gitbello_core::highlight::LineState;
 use gitbello_core::runtime::{FileHistoryRequest, FileSelection, Runtime, RuntimeEvent};
 use support::rt::{open, poll_until, settle};
 use support::TestRepo;
@@ -268,7 +269,7 @@ fn the_minimap_marks_the_focused_commit() {
     let loader = blame(&repo, Some("HEAD"), NEW);
     let table = loader.table();
     let focus = table.commit_of(1).expect("blamed").oid.clone();
-    let source = BlameMinimap::new(&table, Some(&focus), None);
+    let source = BlameMinimap::new(&table, Some(&focus));
     assert_eq!(source.row_count(), 4);
     let marks: Vec<Mark> = (0..4)
         .map(|row| source.row(row).left.expect("a line").mark)
@@ -277,8 +278,48 @@ fn the_minimap_marks_the_focused_commit() {
         marks,
         [Mark::Context, Mark::Resolved, Mark::Context, Mark::Context]
     );
-    let plain = BlameMinimap::new(&table, None, None);
+    let plain = BlameMinimap::new(&table, None);
     assert!((0..4).all(|row| plain.row(row).left.is_some_and(|l| l.mark == Mark::Context)));
+}
+
+#[test]
+fn the_blamed_text_is_coloured_with_its_line_states() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "bin/tool",
+        "#!/usr/bin/env python3\n'''opens\nstill a string'''\nx = 1\n",
+        "Add tool",
+    );
+    repo.commit(
+        "src/lib.rs",
+        "/* a comment\nover two lines */\nfn f() {}\n",
+        "Add lib",
+    );
+    let rust = blame(&repo, Some("HEAD"), "src/lib.rs");
+    let table = rust.table();
+    assert_eq!(table.syntax().language.map(|l| l.id()), Some("rust"));
+    assert_eq!(table.line_state(0), LineState::default());
+    assert_ne!(
+        table.line_state(1),
+        LineState::default(),
+        "inside the comment"
+    );
+    assert_eq!(table.line_state(2), LineState::default());
+    let source = BlameMinimap::new(&table, None);
+    assert_eq!(source.syntax().language.map(|l| l.id()), Some("rust"));
+    assert_eq!(
+        source.row(1).left.expect("a line").state,
+        table.line_state(1)
+    );
+    // No extension: the shebang names the language.
+    let python = blame(&repo, Some("HEAD"), "bin/tool");
+    let table = python.table();
+    assert_eq!(table.syntax().language.map(|l| l.id()), Some("python"));
+    assert_ne!(
+        table.line_state(2),
+        LineState::default(),
+        "inside the string"
+    );
 }
 
 // --- Runtime ------------------------------------------------------------------

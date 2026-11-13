@@ -1,0 +1,86 @@
+| #version 450 core
+  ^^^^^^^^ macro
+           ^^^ number
+| #define MAX_LIGHTS 4
+  ^^^^^^^ macro
+          ^^^^^^^^^^ constant
+                     ^ number
+|
+| layout(location = 0) in vec2 vUv;
+  ^^^^^^ keyword
+                    ^ number
+                       ^^ keyword
+                          ^^^^ type
+| layout(location = 0) out vec4 fragColor;
+  ^^^^^^ keyword
+                    ^ number
+                       ^^^ keyword
+                           ^^^^ type
+|
+| uniform sampler2D uTexture;
+  ^^^^^^^ keyword
+          ^^^^^^^^^ type
+| uniform float uTime; // seconds
+  ^^^^^^^ keyword
+          ^^^^^ type
+                       ^^^^^^^^^^ comment
+|
+| /* Block comment */
+  ^^^^^^^^^^^^^^^^^^^ comment
+| struct Light {
+  ^^^^^^ keyword
+         ^^^^^ type
+|     vec3 position;
+      ^^^^ type
+|     float intensity;
+      ^^^^^ type
+| };
+|
+| float falloff(float d) {
+  ^^^^^ type
+        ^^^^^^^ function
+                ^^^^^ type
+|     return 1.0 / (1.0 + d * d);
+      ^^^^^^ keyword.control
+             ^^^ number
+                    ^^^ number
+| }
+|
+| void main() {
+  ^^^^ type
+       ^^^^ function
+|     vec4 color = texture(uTexture, vUv);
+      ^^^^ type
+                   ^^^^^^^ function
+|     for (int i = 0; i < MAX_LIGHTS; i++) {
+      ^^^ keyword.control
+           ^^^ type
+                   ^ number
+                          ^^^^^^^^^^ constant
+|         if (color.a < 0.5) discard;
+          ^^ keyword.control
+                        ^^^ number
+                             ^^^^^^^ keyword.control
+|         color.rgb *= falloff(float(i)) * 2.5e-1;
+                       ^^^^^^^ function
+                               ^^^^^ type
+                                           ^^^^^^ number
+|     }
+|     gl_FragDepth = gl_FragCoord.z;
+      ^^^^^^^^^^^^ variable
+                     ^^^^^^^^^^^^ variable
+|     fragColor = color;
+| }
+|
+| float4 PSMain(float4 pos : SV_Position) : SV_Target { return float4(1, 0, 0, 1); }
+  ^^^^^^ type
+         ^^^^^^ function
+                ^^^^^^ type
+                             ^^^^^^^^^^^ annotation
+                                            ^^^^^^^^^ annotation
+                                                        ^^^^^^ keyword.control
+                                                               ^^^^^^ type
+                                                                      ^ number
+                                                                         ^ number
+                                                                            ^ number
+                                                                               ^ number

@@ -93,6 +93,17 @@ pub trait GitBackend: Send + Sync {
         limit: usize,
         cancel: &CancelToken,
     ) -> Result<Option<Vec<u8>>, GitError>;
+    /// The first `bytes` bytes of blob `oid` (all of it when shorter), for
+    /// a file's first line; `None` when the read was cancelled.
+    fn blob_head(
+        &self,
+        _repo: &Path,
+        _oid: &str,
+        _bytes: usize,
+        _cancel: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        Ok(None)
+    }
     /// Full message of the HEAD commit (for amending).
     fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError>;
 
@@ -1134,6 +1145,21 @@ impl GitBackend for CliBackend {
             Limited::Read(text) => Some(text),
             Limited::TooLarge(_) | Limited::Cancelled => None,
         })
+    }
+
+    fn blob_head(
+        &self,
+        repo: &Path,
+        oid: &str,
+        bytes: usize,
+        cancel: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        let stream = self
+            .runner
+            .read(repo)
+            .args(["cat-file", "blob", oid])
+            .stream()?;
+        read_head(stream, bytes, cancel)
     }
 
     fn head_message(&self, repo: &Path, cancel: &CancelToken) -> Result<String, GitError> {
@@ -2672,6 +2698,34 @@ fn read_limited(
     }
     stream.finish()?;
     Ok(Limited::Read(output))
+}
+
+/// The first `bytes` bytes of `stream`, then git is stopped; `None` when
+/// cancelled.
+fn read_head(
+    mut stream: GitStream,
+    bytes: usize,
+    cancel: &CancelToken,
+) -> Result<Option<Vec<u8>>, GitError> {
+    let mut output = Vec::with_capacity(bytes);
+    let mut chunk = vec![0u8; bytes.clamp(1, 64 * 1024)];
+    while output.len() < bytes {
+        if cancel.is_cancelled() {
+            stream.kill();
+            return stream.finish().map(|()| None);
+        }
+        let n = stream
+            .read(&mut chunk)
+            .map_err(|err| GitError::new(stream.command(), GitErrorKind::Io, err.to_string()))?;
+        if n == 0 {
+            stream.finish()?;
+            return Ok(Some(output));
+        }
+        output.extend_from_slice(&chunk[..n]);
+    }
+    output.truncate(bytes);
+    stream.kill();
+    Ok(Some(output))
 }
 
 fn read_untracked(path: &Path, limit: Option<usize>) -> Result<FileDiff, GitError> {

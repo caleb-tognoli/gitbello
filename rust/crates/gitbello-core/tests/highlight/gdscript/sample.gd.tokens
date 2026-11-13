@@ -1,0 +1,88 @@
+| class_name Player
+  ^^^^^^^^^^ keyword
+             ^^^^^^ type
+| extends CharacterBody2D
+  ^^^^^^^ keyword
+          ^^^^^^^^^^^^^^^ type
+| ## Doc comment for the class.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+|
+| signal health_changed(value: int)
+  ^^^^^^ keyword
+         ^^^^^^^^^^^^^^ function
+                               ^^^ type
+|
+| enum State { IDLE, RUN }
+  ^^^^ keyword
+       ^^^^^ type
+               ^^^^ constant
+                     ^^^ constant
+|
+| const SPEED := 200.0
+  ^^^^^ keyword
+        ^^^^^ constant
+                 ^^^^^ number
+| @export var max_health: int = 100
+  ^^^^^^^ annotation
+          ^^^ keyword
+                          ^^^ type
+                                ^^^ number
+| @onready var label: Label = %NameLabel
+  ^^^^^^^^ annotation
+           ^^^ keyword
+                      ^^^^^ type
+                              ^^^^^^^^^^ variable
+| @onready var sprite := $Sprite2D
+  ^^^^^^^^ annotation
+           ^^^ keyword
+                         ^^^^^^^^^ variable
+|
+| var _state: State = State.IDLE
+  ^^^ keyword
+              ^^^^^ type
+                      ^^^^^ type
+                            ^^^^ constant
+|
+|
+| func _ready() -> void:
+  ^^^^ keyword
+       ^^^^^^ function
+                   ^^^^ type
+|     label.text = "Hello %s" % name  # format
+                   ^^^^^^^^^^ string
+                                      ^^^^^^^^ comment
+|     var path := ^"Node/Path"
+      ^^^ keyword
+                  ^^^^^^^^^^^^ string
+|     var key := &"StringName"
+      ^^^ keyword
+                 ^^^^^^^^^^^^^ string
+|     if max_health > 0 and not is_dead():
+      ^^ keyword.control
+                      ^ number
+                        ^^^ keyword
+                            ^^^ keyword
+                                ^^^^^^^ function
+|         health_changed.emit(0x10)
+                         ^^^^ function
+                              ^^^^ number
+|     elif _state == State.RUN:
+      ^^^^ keyword.control
+                     ^^^^^ type
+                           ^^^ constant
+|         pass
+          ^^^^ keyword.control
+|     await get_tree().create_timer(1.5).timeout
+      ^^^^^ keyword
+            ^^^^^^^^ function
+                       ^^^^^^^^^^^^ function
+                                    ^^^ number
+|
+|
+| func is_dead() -> bool:
+  ^^^^ keyword
+       ^^^^^^^ function
+                    ^^^^ type
+|     return false
+      ^^^^^^ keyword.control
+             ^^^^^ constant

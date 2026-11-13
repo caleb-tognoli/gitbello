@@ -18,6 +18,8 @@ commands:
   run [--release] [-- <godot args>]
                           build, then launch the Godot project
   test [<cargo args>]     cargo test for the whole workspace
+  bless-highlight         rewrite the expected syntax tokens of the samples in
+                          gitbello-core/tests/highlight (review the diff)
   check                   fmt --check + clippy -D warnings + test
   smoke [--only <text>]   build, import, then run headless Godot smoke tests
                           (only those whose file name contains <text>)
@@ -50,6 +52,7 @@ fn main() -> Result<()> {
         "build" => build(Profile::from_args(rest)?),
         "run" => run(rest),
         "test" => cargo_test(rest),
+        "bless-highlight" => bless_highlight(),
         "check" => check(),
         "smoke" => smoke(rest),
         "bench-graph" => bench_graph(rest),
@@ -179,6 +182,15 @@ fn run(args: &[String]) -> Result<()> {
     run_status(cmd)
 }
 
+/// Reruns the syntax golden test with `GITBELLO_BLESS` set, which writes
+/// each sample's `.tokens` file instead of comparing it.
+fn bless_highlight() -> Result<()> {
+    let mut cmd = cargo();
+    cmd.args(["test", "-p", "gitbello-core", "--test", "highlight"])
+        .env("GITBELLO_BLESS", "1");
+    run_status(cmd)
+}
+
 fn cargo_test(args: &[String]) -> Result<()> {
     let mut cmd = cargo();
     cmd.args(["test", "--workspace"]).args(args);
@@ -253,10 +265,14 @@ fn smoke(args: &[String]) -> Result<()> {
     let mut fixture = Command::new(cli);
     // repo-1..5 for the shell test, repo-6 for the commit cycle, repo-7 for
     // lines, repo-8 for sync, repo-9 for branches and tags, repo-10 for worktrees.
-    fixture
-        .arg("fixture")
-        .arg(&fixtures)
-        .args(["--repos", "16", "--images", "--eol", "--history"]);
+    fixture.arg("fixture").arg(&fixtures).args([
+        "--repos",
+        "16",
+        "--images",
+        "--eol",
+        "--syntax",
+        "--history",
+    ]);
     run_status(fixture)?;
     // No auto-fetch moving badges mid-test, and a terminal command that
     // cannot start anything.

@@ -1,0 +1,121 @@
+| @echo off
+   ^^^^ keyword
+        ^^^ keyword
+| REM Build the project.
+  ^^^^^^^^^^^^^^^^^^^^^^ comment
+| :: A label-style comment
+  ^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| setlocal enabledelayedexpansion
+  ^^^^^^^^ keyword
+           ^^^^^^^^^^^^^^^^^^^^^^ keyword
+| set "ROOT=%~dp0"
+  ^^^ keyword
+      ^ string
+       ^^^^ variable
+           ^ operator
+            ^^^^^ variable
+                 ^ string
+| set /a COUNT=0
+  ^^^ keyword
+      ^^ attribute
+         ^^^^^ variable
+              ^ operator
+| set NAME=gitbello %VERSION%
+  ^^^ keyword
+      ^^^^ variable
+          ^ operator
+                    ^^^^^^^^^ variable
+|
+| if not exist "%ROOT%build" mkdir "%ROOT%build"
+  ^^ keyword.control
+     ^^^ keyword
+         ^^^^^ keyword
+               ^ string
+                ^^^^^^ variable
+                      ^^^^^^ string
+                             ^^^^^ keyword
+                                   ^ string
+                                    ^^^^^^ variable
+                                          ^^^^^^ string
+| if "%1"=="" (
+  ^^ keyword.control
+     ^ string
+      ^^ variable
+        ^ string
+           ^^ string
+|     echo Usage: %~nx0 ^<target^>
+      ^^^^ keyword
+                  ^^^^^ variable
+                        ^^ string.escape
+                                ^^ string.escape
+|     goto :eof
+      ^^^^ keyword.control
+           ^^^^ function
+| ) else if /i "%1" equ "clean" (
+    ^^^^ keyword.control
+         ^^ keyword.control
+            ^^ attribute
+               ^ string
+                ^^ variable
+                  ^ string
+                    ^^^ keyword
+                        ^^^^^^^ string
+|     rd /s /q "%ROOT%build" 2>nul
+      ^^ keyword
+         ^^ attribute
+            ^^ attribute
+               ^ string
+                ^^^^^^ variable
+                      ^^^^^^ string
+                             ^ number
+                               ^^^ keyword
+| )
+|
+| for %%f in (*.txt) do (
+  ^^^ keyword.control
+      ^^^ variable
+          ^^ keyword
+                     ^^ keyword
+|     set /a COUNT+=1
+      ^^^ keyword
+          ^^ attribute
+             ^^^^^ variable
+                  ^^ operator
+|     echo Found %%~nxf, count !COUNT!
+      ^^^^ keyword
+                 ^^^^^^ variable
+                               ^^^^^^^ variable
+| )
+|
+| call :build %*
+  ^^^^ keyword.control
+       ^^^^^^ function
+              ^^ variable
+| if errorlevel 1 exit /b 1
+  ^^ keyword.control
+     ^^^^^^^^^^ keyword
+                ^ number
+                  ^^^^ keyword.control
+                       ^^ attribute
+                          ^ number
+| title Done.
+  ^^^^^ keyword
+| echo.
+  ^^^^ keyword
+| endlocal
+  ^^^^^^^^ keyword
+| goto :eof
+  ^^^^ keyword.control
+       ^^^^ function
+|
+| :build
+  ^^^^^^ function
+| echo Building %NAME:~0,8% in "%CD%" & rem trailing comment
+  ^^^^ keyword
+                ^^^^^^^^^^^ variable
+                                ^^^^ variable
+                                        ^^^^^^^^^^^^^^^^^^^^ comment
+| exit /b 0
+  ^^^^ keyword.control
+       ^^ attribute
+          ^ number

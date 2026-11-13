@@ -1,0 +1,25 @@
+| # Build output
+  ^^^^^^^^^^^^^^ comment
+| /target/
+  ^ punctuation
+         ^ punctuation
+| *.log
+  ^ string.escape
+| **/node_modules/
+  ^^ string.escape
+    ^ punctuation
+                 ^ punctuation
+| build-?.tmp
+        ^ string.escape
+| *.[oa]
+  ^ string.escape
+    ^^^^ string.escape
+| !keep.log
+  ^ keyword
+| \#not-a-comment
+  ^^ string.escape
+| docs/**/*.pdf
+      ^ punctuation
+       ^^ string.escape
+         ^ punctuation
+          ^ string.escape

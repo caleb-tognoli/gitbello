@@ -1,0 +1,35 @@
+/* Layout */
+@import url(theme.css);
+@import "print.css" print;
+
+:root {
+  --accent: #3366ff;
+  --gap: 0.5rem;
+}
+
+body, html {
+  margin: 0;
+  font: 14px/1.5 "Segoe UI", sans-serif;
+}
+
+a:hover,
+nav > ul li.active::before {
+  color: var(--accent) !important;
+  background: rgba(0, 0, 0, .5) url("bg.png") no-repeat;
+  transition: opacity 0.2s ease-in,
+    transform -1.5s;
+}
+
+input[type="text"]:not(:focus) { border: 1px solid #ccc; }
+
+@media screen and (max-width: 600px) {
+  .grid { grid-template-columns: repeat(2, 1fr); width: calc(100% - 2 * var(--gap)); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  50% { opacity: 0.5; }
+}
+/* a comment
+   over two lines */
+.after { color: red; }

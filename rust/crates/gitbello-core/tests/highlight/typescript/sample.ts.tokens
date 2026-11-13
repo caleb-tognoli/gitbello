@@ -1,0 +1,135 @@
+| // Line comment
+  ^^^^^^^^^^^^^^^ comment
+| import type { Readable } from "node:stream";
+  ^^^^^^ keyword
+         ^^^^ keyword
+                ^^^^^^^^ type
+                           ^^^^ keyword
+                                ^^^^^^^^^^^^^ string
+| import { readFile } from 'node:fs/promises';
+  ^^^^^^ keyword
+                      ^^^^ keyword
+                           ^^^^^^^^^^^^^^^^^^ string
+|
+| /** A bag of items. */
+  ^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| export interface Item {
+  ^^^^^^ keyword
+         ^^^^^^^^^ keyword
+                   ^^^^ type
+|   readonly name: string;
+    ^^^^^^^^ keyword
+                   ^^^^^^ type
+|   count?: number;
+            ^^^^^^ type
+| }
+|
+| type Id = string | number;
+  ^^^^ keyword
+       ^^ type
+            ^^^^^^ type
+                     ^^^^^^ type
+| enum Color { Red, Green }
+  ^^^^ keyword
+       ^^^^^ type
+               ^^^ type
+                    ^^^^^ type
+|
+| @sealed
+  ^^^^^^^ annotation
+| export abstract class Bag<T extends Item> implements Iterable<T> {
+  ^^^^^^ keyword
+         ^^^^^^^^ keyword
+                  ^^^^^ keyword
+                        ^^^ type
+                            ^ type
+                              ^^^^^^^ keyword
+                                      ^^^^ type
+                                            ^^^^^^^^^^ keyword
+                                                       ^^^^^^^^ type
+                                                                ^ type
+|   private items: T[] = [];
+    ^^^^^^^ keyword
+                   ^ type
+|   static readonly MAX_ITEMS = 64;
+    ^^^^^^ keyword
+           ^^^^^^^^ keyword
+                    ^^^^^^^^^ constant
+                                ^^ number
+|
+|   async load(path: string): Promise<number> {
+    ^^^^^ keyword
+          ^^^^ function
+                     ^^^^^^ type
+                              ^^^^^^^ type
+                                      ^^^^^^ type
+|     const text = await readFile(path, "utf8");
+      ^^^^^ keyword
+                   ^^^^^ keyword
+                         ^^^^^^^^ function
+                                        ^^^^^^ string
+|     const data = JSON.parse(text) as { items: T[] } satisfies object;
+      ^^^^^ keyword
+                   ^^^^ constant
+                        ^^^^^ function
+                                    ^^ keyword
+                                                ^ type
+                                                      ^^^^^^^^^ keyword
+                                                                ^^^^^^ type
+|     this.items = data.items ?? [];
+      ^^^^ keyword
+|     return this.items.length;
+      ^^^^^^ keyword.control
+             ^^^^ keyword
+|   }
+|
+|   describe(item: T): string {
+    ^^^^^^^^ function
+                   ^ type
+                       ^^^^^^ type
+|     const pattern = /^[a-z]+\d*$/i;
+      ^^^^^ keyword
+                      ^^^^^^^^^^^^^^ regex
+|     return `${item.name}: ${item.count ?? 0} of ${Bag.MAX_ITEMS}`; /* block */
+      ^^^^^^ keyword.control
+             ^ string
+              ^^ string.interpolation
+                         ^ string.interpolation
+                          ^^ string
+                            ^^ string.interpolation
+                                            ^ number
+                                             ^ string.interpolation
+                                              ^^^^ string
+                                                  ^^ string.interpolation
+                                                    ^^^ type
+                                                        ^^^^^^^^^ constant
+                                                                 ^ string.interpolation
+                                                                  ^ string
+                                                                     ^^^^^^^^^^^ comment
+|   }
+| }
+|
+| function isItem(value: unknown): value is Item {
+  ^^^^^^^^ keyword
+           ^^^^^^ function
+                         ^^^^^^^ type
+                                         ^^ keyword
+                                            ^^^^ type
+|   return typeof value === "object" && value !== null && 0x1f > 1.5e3;
+    ^^^^^^ keyword.control
+           ^^^^^^ keyword
+                            ^^^^^^^^ string
+                                                  ^^^^ constant
+                                                          ^^^^ number
+                                                                 ^^^^^ number
+| }
+| const query: string = `
+  ^^^^^ keyword
+               ^^^^^^ type
+                        ^ string
+|   select ${table}
+  ^^^^^^^^^ string
+           ^^ string.interpolation
+                  ^ string.interpolation
+| `;
+  ^ string

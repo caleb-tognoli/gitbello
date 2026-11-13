@@ -1,0 +1,75 @@
+| # syntax=docker/dockerfile:1
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ annotation
+| # Comment
+  ^^^^^^^^^ comment
+| ARG RUST_VERSION=1.85
+  ^^^ keyword
+      ^^^^^^^^^^^^ variable
+| FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-slim AS build
+  ^^^^ keyword
+       ^^^^^^^^^^ attribute
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^ type
+                                                           ^^ keyword
+                                                              ^^^^^ type
+|
+| WORKDIR /src
+  ^^^^^^^ keyword
+| ENV CARGO_HOME=/cargo PATH="/cargo/bin:$PATH"
+  ^^^ keyword
+      ^^^^^^^^^^ variable
+                        ^^^^ variable
+                             ^^^^^^^^^^^^ string
+                                         ^^^^^ variable
+                                              ^ string
+| ENV LEGACY value with spaces
+  ^^^ keyword
+      ^^^^^^ variable
+| LABEL org.opencontainers.image.title="gitbello" version="1.1.0"
+  ^^^^^ keyword
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ key
+                                       ^^^^^^^^^^ string
+                                                  ^^^^^^^ key
+                                                          ^^^^^^^ string
+| COPY --from=deps --chown=app:app Cargo.toml Cargo.lock ./
+  ^^^^ keyword
+       ^^^^^^ attribute
+                   ^^^^^^^ attribute
+| RUN --mount=type=cache,target=/cargo \
+  ^^^ keyword
+      ^^^^^^^ attribute
+|     apt-get update && apt-get install -y git \
+                                        ^^ attribute
+|     && cargo build --release # trailing
+                     ^^^^^^^^^ attribute
+                               ^^^^^^^^^^ comment
+| EXPOSE 8080/tcp 9000
+  ^^^^^^ keyword
+         ^^^^ number
+                  ^^^^ number
+|
+| FROM debian:bookworm-slim
+  ^^^^ keyword
+       ^^^^^^^^^^^^^^^^^^^^ type
+| USER app
+  ^^^^ keyword
+| HEALTHCHECK --interval=30s CMD curl -f http://localhost:8080/ || exit 1
+  ^^^^^^^^^^^ keyword
+              ^^^^^^^^^^ attribute
+                             ^^^ keyword
+                                      ^^ attribute
+                                                          ^^^^ number
+                                                                   ^^^^ keyword.control
+                                                                        ^ number
+| ENTRYPOINT ["/usr/bin/gitbello", "--serve"]
+  ^^^^^^^^^^ keyword
+              ^^^^^^^^^^^^^^^^^^^ string
+                                   ^^^^^^^^^ string
+| CMD echo "started $HOME"
+  ^^^ keyword
+      ^^^^ function
+           ^^^^^^^^^ string
+                    ^^^^^ variable
+                         ^ string
+| onbuild run make
+  ^^^^^^^ keyword
+          ^^^ keyword

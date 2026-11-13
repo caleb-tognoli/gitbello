@@ -1,0 +1,12 @@
+{
+  "name": "gitbello",
+  "version": "1.1.0",
+  "private": true,
+  "count": -12.5e3,
+  "escape": "a \"quoted\" \ value",
+  "empty": null,
+  unquoted: 'json5',
+  // comment (jsonc)
+  "list": [1, 2, false, {"nested": "value"}],
+  "unclosed": "no end
+}

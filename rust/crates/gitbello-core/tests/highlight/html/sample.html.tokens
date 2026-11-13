@@ -1,0 +1,275 @@
+| <!DOCTYPE html>
+  ^^ punctuation
+    ^^^^^^^ keyword
+            ^^^^ attribute
+                ^ punctuation
+| <html lang="en">
+  ^ punctuation
+   ^^^^ tag
+        ^^^^ attribute
+            ^ operator
+             ^^^^ string
+                 ^ punctuation
+| <head>
+  ^ punctuation
+   ^^^^ tag
+       ^ punctuation
+|   <meta charset="utf-8">
+    ^ punctuation
+     ^^^^ tag
+          ^^^^^^^ attribute
+                 ^ operator
+                  ^^^^^^^ string
+                         ^ punctuation
+|   <title>Sample &amp; test &#169; &#x2014;</title>
+    ^ punctuation
+     ^^^^^ tag
+          ^ punctuation
+                  ^^^^^ string.escape
+                             ^^^^^^ string.escape
+                                    ^^^^^^^^ string.escape
+                                            ^^ punctuation
+                                              ^^^^^ tag
+                                                   ^ punctuation
+|   <!-- A comment with <tags> inside -->
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+|   <link rel="stylesheet" href="style.css">
+    ^ punctuation
+     ^^^^ tag
+          ^^^ attribute
+             ^ operator
+              ^^^^^^^^^^^^ string
+                           ^^^^ attribute
+                               ^ operator
+                                ^^^^^^^^^^^ string
+                                           ^ punctuation
+|   <style>body { margin: 0; color: #333; }</style>
+    ^ punctuation
+     ^^^^^ tag
+          ^ punctuation
+           ^^^^ tag
+                ^ punctuation
+                  ^^^^^^ key
+                        ^ punctuation
+                          ^ number
+                           ^ punctuation
+                             ^^^^^ key
+                                  ^ punctuation
+                                    ^^^^ constant
+                                        ^ punctuation
+                                          ^ punctuation
+                                           ^^ punctuation
+                                             ^^^^^ tag
+                                                  ^ punctuation
+| </head>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation
+| <body class=main>
+  ^ punctuation
+   ^^^^ tag
+        ^^^^^ attribute
+             ^ operator
+              ^^^^ string
+                  ^ punctuation
+|   <h1 id="top" style="color: red; font-size: 2em">Hello</h1>
+    ^ punctuation
+     ^^ tag
+        ^^ attribute
+          ^ operator
+           ^^^^^ string
+                 ^^^^^ attribute
+                      ^ operator
+                       ^ string
+                        ^^^^^ key
+                             ^ punctuation
+                                  ^ punctuation
+                                    ^^^^^^^^^ key
+                                             ^ punctuation
+                                               ^^^ number
+                                                  ^ string
+                                                   ^ punctuation
+                                                         ^^ punctuation
+                                                           ^^ tag
+                                                             ^ punctuation
+|   <button type="button" onclick="save(event, 'now')" disabled>Save</button>
+    ^ punctuation
+     ^^^^^^ tag
+            ^^^^ attribute
+                ^ operator
+                 ^^^^^^^^ string
+                          ^^^^^^^ attribute
+                                 ^ operator
+                                  ^ string
+                                   ^^^^ function
+                                               ^^^^^ string
+                                                     ^ string
+                                                       ^^^^^^^^ attribute
+                                                               ^ punctuation
+                                                                    ^^ punctuation
+                                                                      ^^^^^^ tag
+                                                                            ^ punctuation
+|   <img src="a.png"
+    ^ punctuation
+     ^^^ tag
+         ^^^ attribute
+            ^ operator
+             ^^^^^^^ string
+|        alt="An image" />
+         ^^^ attribute
+            ^ operator
+             ^^^^^^^^^^ string
+                        ^^ punctuation
+|   <svg:path d="M0 0"/>
+    ^ punctuation
+     ^^^^^^^^ tag
+              ^ attribute
+               ^ operator
+                ^^^^^^ string
+                      ^^ punctuation
+|   <div v-on:click="go()" :class="{ active: on }" @keyup.enter="send">2 < 3</div>
+    ^ punctuation
+     ^^^ tag
+         ^^^^^^^^^^ attribute
+                   ^ operator
+                    ^^^^^^ string
+                           ^^^^^^ attribute
+                                 ^ operator
+                                  ^^^^^^^^^^^^^^^^ string
+                                                   ^^^^^^^^^^^^ attribute
+                                                               ^ operator
+                                                                ^^^^^^ string
+                                                                      ^ punctuation
+                                                                            ^^ punctuation
+                                                                              ^^^ tag
+                                                                                 ^ punctuation
+|   <script>const items = [1, 2]; if (items.length > 1) { show("many"); }</script>
+    ^ punctuation
+     ^^^^^^ tag
+           ^ punctuation
+            ^^^^^ keyword
+                           ^ number
+                              ^ number
+                                  ^^ keyword.control
+                                                     ^ number
+                                                          ^^^^ function
+                                                               ^^^^^^ string
+                                                                         ^^ punctuation
+                                                                           ^^^^^^ tag
+                                                                                 ^ punctuation
+|   <script src="app.js"></script>
+    ^ punctuation
+     ^^^^^^ tag
+            ^^^ attribute
+               ^ operator
+                ^^^^^^^^ string
+                        ^ punctuation
+                         ^^ punctuation
+                           ^^^^^^ tag
+                                 ^ punctuation
+| </body>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation
+| </html>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation
+| <!-- a comment
+  ^^^^^^^^^^^^^^ comment
+| over two lines -->
+  ^^^^^^^^^^^^^^^^^^ comment
+| <a href="x"
+  ^ punctuation
+   ^ tag
+     ^^^^ attribute
+         ^ operator
+          ^^^ string
+|    title='a title
+     ^^^^^ attribute
+          ^ operator
+           ^^^^^^^^ string
+| that wraps'>link</a>
+  ^^^^^^^^^^^ string
+             ^ punctuation
+                  ^^ punctuation
+                    ^ tag
+                     ^ punctuation
+| <script type="module">
+  ^ punctuation
+   ^^^^^^ tag
+          ^^^^ attribute
+              ^ operator
+               ^^^^^^^^ string
+                       ^ punctuation
+|   const page = `a
+    ^^^^^ keyword
+                 ^^ string
+|   ${b}`; /* open
+  ^^ string
+    ^^ string.interpolation
+       ^ string.interpolation
+        ^ string
+           ^^^^^^^ comment
+|   */ go();
+  ^^^^ comment
+       ^^ function
+| </script>
+  ^^ punctuation
+    ^^^^^^ tag
+          ^ punctuation
+| <script type="application/ld+json">
+  ^ punctuation
+   ^^^^^^ tag
+          ^^^^ attribute
+              ^ operator
+               ^^^^^^^^^^^^^^^^^^^^^ string
+                                    ^ punctuation
+| {"name": "x", "n": 1}
+   ^^^^^^ key
+                ^^^ key
+                     ^ number
+| </script>
+  ^^ punctuation
+    ^^^^^^ tag
+          ^ punctuation
+| <script type="text/template"><p>{{x}}</p></script>
+  ^ punctuation
+   ^^^^^^ tag
+          ^^^^ attribute
+              ^ operator
+               ^^^^^^^^^^^^^^^ string
+                              ^ punctuation
+                                           ^^ punctuation
+                                             ^^^^^^ tag
+                                                   ^ punctuation
+| <style>
+  ^ punctuation
+   ^^^^^ tag
+        ^ punctuation
+|   /* a
+    ^^^^ comment
+|   */ body { color: red; }
+  ^^^^ comment
+       ^^^^ tag
+            ^ punctuation
+              ^^^^^ key
+                   ^ punctuation
+                        ^ punctuation
+                          ^ punctuation
+| </style>
+  ^^ punctuation
+    ^^^^^ tag
+         ^ punctuation
+| <script
+  ^ punctuation
+   ^^^^^^ tag
+|   src="a.js">
+    ^^^ attribute
+       ^ operator
+        ^^^^^^ string
+              ^ punctuation
+| </script>
+  ^^ punctuation
+    ^^^^^^ tag
+          ^ punctuation

@@ -1,0 +1,183 @@
+| [gd_scene load_steps=3 format=3 uid="uid://b6x3k2m1n0p9q"]
+  ^^^^^^^^^ type
+            ^^^^^^^^^^ attribute
+                      ^ operator
+                       ^ number
+                         ^^^^^^ attribute
+                               ^ operator
+                                ^ number
+                                  ^^^ attribute
+                                     ^ operator
+                                                           ^ type
+|
+| [ext_resource type="Script" path="res://player.gd" id="1_abc"]
+  ^^^^^^^^^^^^^ type
+                ^^^^ attribute
+                    ^ operator
+                              ^^^^ attribute
+                                  ^ operator
+                                                     ^^ attribute
+                                                       ^ operator
+                                                               ^ type
+| [ext_resource type="Texture2D" uid="uid://c4d5e6f7" path="res://icon.svg" id="2_def"]
+  ^^^^^^^^^^^^^ type
+                ^^^^ attribute
+                    ^ operator
+                                 ^^^ attribute
+                                    ^ operator
+                                                      ^^^^ attribute
+                                                          ^ operator
+                                                                            ^^ attribute
+                                                                              ^ operator
+                                                                                      ^ type
+|
+| [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+  ^^^^^^^^^^^^^ type
+                ^^^^ attribute
+                    ^ operator
+                                        ^^ attribute
+                                          ^ operator
+                                                               ^ type
+| size = Vector2(32, 48.5)
+  ^^^^ key
+       ^ operator
+         ^^^^^^^ function
+                 ^^ number
+                     ^^^^ number
+|
+| [node name="Player" type="CharacterBody2D"]
+  ^^^^^ type
+        ^^^^ attribute
+            ^ operator
+                      ^^^^ attribute
+                          ^ operator
+                                            ^ type
+| script = ExtResource("1_abc")
+  ^^^^^^ key
+         ^ operator
+           ^^^^^^^^^^^ function
+| speed = 200.0
+  ^^^^^ key
+        ^ operator
+          ^^^^^ number
+| max_health = -1
+  ^^^^^^^^^^ key
+             ^ operator
+               ^^ number
+| visible = true
+  ^^^^^^^ key
+          ^ operator
+            ^^^^ constant
+| modulate = Color(1, 0.5, 0.25, 1)
+  ^^^^^^^^ key
+           ^ operator
+             ^^^^^ function
+                   ^ number
+                      ^^^ number
+                           ^^^^ number
+                                 ^ number
+| metadata/_edit_group_ = true
+  ^^^^^^^^^^^^^^^^^^^^^ key
+                        ^ operator
+                          ^^^^ constant
+| input_action = &"jump"
+  ^^^^^^^^^^^^ key
+               ^ operator
+| target = NodePath("../Enemy")
+  ^^^^^^ key
+         ^ operator
+           ^^^^^^^^ function
+| path = ^"Sprite2D:modulate"
+  ^^^^ key
+       ^ operator
+| tags = PackedStringArray("hero", "player")
+  ^^^^ key
+       ^ operator
+         ^^^^^^^^^^^^^^^^^ function
+| data = {
+  ^^^^ key
+       ^ operator
+| "key": 1e-05,
+  ^^^^^ key
+         ^^^^^ number
+| "other": null
+  ^^^^^^^ key
+           ^^^^ constant
+| }
+|
+| [node name="Sprite" type="Sprite2D" parent="."]
+  ^^^^^ type
+        ^^^^ attribute
+            ^ operator
+                      ^^^^ attribute
+                          ^ operator
+                                      ^^^^^^ attribute
+                                            ^ operator
+                                                ^ type
+| texture = ExtResource("2_def")
+  ^^^^^^^ key
+          ^ operator
+            ^^^^^^^^^^^ function
+| ; comment
+  ^^^^^^^^^ comment
+|
+| [sub_resource type="GDScript" id="3_src"]
+  ^^^^^^^^^^^^^ type
+                ^^^^ attribute
+                    ^ operator
+                                ^^ attribute
+                                  ^ operator
+                                          ^ type
+| script/source = "extends Node
+  ^^^^^^^^^^^^^ key
+                ^ operator
+                   ^^^^^^^ keyword
+                           ^^^^ type
+| func _ready():
+  ^^^^ keyword
+       ^^^^^^ function
+|     print(\"hi\")
+      ^^^^^ function
+            ^^^^^^ string
+| "
+|
+| [sub_resource type="GDScript" id="4_src"]
+  ^^^^^^^^^^^^^ type
+                ^^^^ attribute
+                    ^ operator
+                                ^^ attribute
+                                  ^ operator
+                                          ^ type
+| script/source = "extends Node
+  ^^^^^^^^^^^^^ key
+                ^ operator
+                   ^^^^^^^ keyword
+                           ^^^^ type
+| \"\"\"A doc
+  ^^^^^^^^^^^ string
+| with \\\"quotes\\\" inside\"\"\"
+  ^^^^^ string
+       ^^^^ string.escape
+           ^^^^^^ string
+                 ^^^^ string.escape
+                     ^^^^^^^^^^^^^ string
+| var path := \"res://a\\b\" # a \"comment\"
+  ^^^ keyword
+              ^^^^^^^^^ string
+                       ^^^ string.escape
+                          ^^ string
+                             ^^^^^^^^^^^^^^^ comment
+| func _ready() -> void:
+  ^^^^ keyword
+       ^^^^^^ function
+                   ^^^^ type
+|     print(\"done\\n\")
+      ^^^^^ function
+            ^^^^^^ string
+                  ^^^ string.escape
+                     ^^ string
+| "
+| next = 1
+  ^^^^ key
+       ^ operator
+         ^ number

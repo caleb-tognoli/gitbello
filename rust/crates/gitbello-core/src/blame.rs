@@ -22,7 +22,8 @@ use crate::backend::GitBackend;
 use crate::diff::looks_binary;
 use crate::diff::minimap::{Mark, MiniLine, MiniRow, MinimapSource};
 use crate::git::{CancelToken, GitError, GitErrorKind};
-use crate::highlight::Language;
+use crate::highlight::hints::HINT_LINES;
+use crate::highlight::{detect, line_text, LineState, LineStates, Syntax};
 use crate::jobs::{JobId, JobOutput, JobScheduler, JobSpec};
 use crate::repo::{git_path, ParseError};
 
@@ -353,6 +354,9 @@ pub struct BlameTable {
     blamed: usize,
     /// Author times of the oldest and newest commit seen (committed ones).
     times: Option<(i64, i64)>,
+    /// How the text is coloured, and the state each line starts in.
+    syntax: Syntax,
+    states: LineStates,
 }
 
 impl BlameTable {
@@ -371,6 +375,22 @@ impl BlameTable {
         self.line_block = vec![NONE; lines.len()];
         self.lines = lines;
         self.text = text;
+    }
+
+    fn set_syntax(&mut self, syntax: Syntax, states: LineStates) {
+        self.syntax = syntax;
+        self.states = states;
+    }
+
+    /// How the text is coloured: its language by the file's name, else by
+    /// its first line's shebang, with the hints its lines give.
+    pub fn syntax(&self) -> Syntax {
+        self.syntax
+    }
+
+    /// The state line `line` (0-based) starts in.
+    pub fn line_state(&self, line: usize) -> LineState {
+        self.states.before(line)
     }
 
     fn apply(&mut self, block: BlameBlock) {
@@ -531,15 +551,13 @@ pub struct BlameMinimap<'a> {
     table: &'a BlameTable,
     /// The focused commit's index among the table's commits.
     focus: Option<u32>,
-    language: Option<Language>,
 }
 
 impl<'a> BlameMinimap<'a> {
-    pub fn new(table: &'a BlameTable, focus: Option<&str>, language: Option<Language>) -> Self {
+    pub fn new(table: &'a BlameTable, focus: Option<&str>) -> Self {
         Self {
             table,
             focus: focus.and_then(|oid| table.by_oid.get(oid).copied()),
-            language,
         }
     }
 }
@@ -560,6 +578,7 @@ impl MinimapSource for BlameMinimap<'_> {
                 },
                 text: self.table.line_text(row),
                 left_out: false,
+                state: self.table.line_state(row),
             }),
             right: None,
             divider: false,
@@ -570,8 +589,8 @@ impl MinimapSource for BlameMinimap<'_> {
         false
     }
 
-    fn language(&self) -> Option<Language> {
-        self.language
+    fn syntax(&self) -> Syntax {
+        self.table.syntax()
     }
 }
 
@@ -739,6 +758,16 @@ fn run(backend: &dyn GitBackend, toplevel: &Path, request: &BlameRequest, shared
     shared.bump();
 }
 
+/// How the blamed text is coloured (see [`BlameTable::syntax`]).
+fn text_syntax(path: &Path, text: &[u8]) -> Syntax {
+    let lines: Vec<String> = text
+        .split(|&b| b == b'\n')
+        .take(HINT_LINES)
+        .map(line_text)
+        .collect();
+    Syntax::new(detect(path, lines.first().map(String::as_str)), &lines)
+}
+
 fn load(
     backend: &dyn GitBackend,
     toplevel: &Path,
@@ -760,7 +789,16 @@ fn load(
     if looks_binary(&text) {
         return Ok(BlameLoad::Binary);
     }
-    shared.table_mut().set_text(text);
+    // Coloured from the start: the states of 4,000 lines take a few
+    // milliseconds, here on the loader's thread.
+    let syntax = text_syntax(&request.path, &text);
+    let states =
+        LineStates::of_text(&syntax, &text, || shared.cancel.is_cancelled()).unwrap_or_default();
+    {
+        let mut table = shared.table_mut();
+        table.set_text(text);
+        table.set_syntax(syntax, states);
+    }
     shared.status().text = Some(shared.started.elapsed());
     shared.bump();
     if shared.table.read().map_or(true, |t| t.line_count() == 0) {

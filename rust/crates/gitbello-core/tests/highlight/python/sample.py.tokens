@@ -1,0 +1,140 @@
+| #!/usr/bin/env python3
+  ^^^^^^^^^^^^^^^^^^^^^^ comment
+| """Module docstring on one line."""
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ string
+| from __future__ import annotations
+  ^^^^ keyword
+                  ^^^^^^ keyword
+|
+| import os
+  ^^^^^^ keyword
+| from dataclasses import dataclass
+  ^^^^ keyword
+                   ^^^^^^ keyword
+|
+| MAX_SIZE = 1_000
+  ^^^^^^^^ constant
+             ^^^^^ number
+|
+|
+| @dataclass(frozen=True)
+  ^^^^^^^^^^ annotation
+                    ^^^^ constant
+| class Item:
+  ^^^^^ keyword
+        ^^^^ type
+|     name: str
+            ^^^ type
+|     count: int = 0
+             ^^^ type
+                   ^ number
+|
+|     def total(self, price: float) -> float:
+      ^^^ keyword
+          ^^^^^ function
+                ^^^^ variable
+                             ^^^^^ type
+                                       ^^^^^ type
+|         return self.count * price  # multiply
+          ^^^^^^ keyword.control
+                 ^^^^ variable
+                                     ^^^^^^^^^^ comment
+|
+|
+| async def main(items: list[Item]) -> None:
+  ^^^^^ keyword
+        ^^^ keyword
+            ^^^^ function
+                        ^^^^ type
+                             ^^^^ type
+                                       ^^^^ constant
+|     path = os.path.join("a", 'b')
+                     ^^^^ function
+                          ^^^ string
+                               ^^^ string
+|     raw = r"C:\temp"; data = b"\x00\xff"
+            ^^^^^^^^^^ string
+                               ^^ string
+                                 ^^^^ string.escape
+                                     ^^^^ string.escape
+                                         ^ string
+|     label = f"{len(items)} items, {MAX_SIZE=}"
+              ^^ string
+                ^ string.interpolation
+                 ^^^ function
+                           ^ string.interpolation
+                            ^^^^^^^^ string
+                                    ^ string.interpolation
+                                     ^^^^^^^^ constant
+                                              ^ string.interpolation
+                                               ^ string
+|     both = rf"\d{{2}} {path!r:>10}" + B'\x00'
+             ^^^^^ string
+                  ^^ string.escape
+                    ^ string
+                     ^^ string.escape
+                       ^ string
+                        ^ string.interpolation
+                                 ^^ number
+                                   ^ string.interpolation
+                                    ^ string
+                                        ^^ string
+                                          ^^^^ string.escape
+                                              ^ string
+|     for item in items:
+      ^^^ keyword.control
+               ^^ keyword
+|         if item.count > 0 and not item.name.startswith("_"):
+          ^^ keyword.control
+                          ^ number
+                            ^^^ keyword
+                                ^^^ keyword
+                                              ^^^^^^^^^^ function
+                                                         ^^^ string
+|             print(item.total(1.5e-3))
+              ^^^^^ function
+                         ^^^^^ function
+                               ^^^^^^ number
+|         elif item is None:
+          ^^^^ keyword.control
+                    ^^ keyword
+                       ^^^^ constant
+|             continue
+              ^^^^^^^^ keyword.control
+|     try:
+      ^^^ keyword.control
+|         await run()
+          ^^^^^ keyword
+                ^^^ function
+|     except (ValueError, KeyError) as err:
+      ^^^^^^ keyword.control
+              ^^^^^^^^^^ type
+                          ^^^^^^^^ type
+                                    ^^ keyword
+|         raise RuntimeError("failed") from err
+          ^^^^^ keyword.control
+                ^^^^^^^^^^^^ function
+                             ^^^^^^^^ string
+                                       ^^^^ keyword
+|     lambda x: x ** 2
+      ^^^^^^ keyword
+                     ^ number
+| doc = """A docstring that
+        ^^^^^^^^^^^^^^^^^^^ string
+| goes on, with "quotes" inside
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ string
+| """
+  ^^^ string
+| raw = rb'''raw \d
+        ^^^^^^^^^^^ string
+| bytes'''
+  ^^^^^^^^ string
+| after = f"""{doc} and
+          ^^^^ string
+              ^ string.interpolation
+                  ^ string.interpolation
+                   ^^^^ string
+| {raw}"""
+  ^ string.interpolation
+      ^ string.interpolation
+       ^^^ string

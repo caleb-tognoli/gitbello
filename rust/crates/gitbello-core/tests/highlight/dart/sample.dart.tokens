@@ -1,0 +1,163 @@
+| /// A counter widget.
+  ^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| library counter;
+  ^^^^^^^ keyword
+|
+| import 'package:flutter/material.dart';
+  ^^^^^^ keyword
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ string
+|
+| /* Block comment. */
+  ^^^^^^^^^^^^^^^^^^^^ comment
+| /** Doc block. */
+  ^^^^^^^^^^^^^^^^^ comment.doc
+| const int maxCount = 0x10;
+  ^^^^^ keyword
+        ^^^ type
+                       ^^^^ number
+|
+| enum Mode { light, dark }
+  ^^^^ keyword
+       ^^^^ type
+|
+| @immutable
+  ^^^^^^^^^^ annotation
+| class Counter extends StatelessWidget with Diagnosticable {
+  ^^^^^ keyword
+        ^^^^^^^ type
+                ^^^^^^^ keyword
+                        ^^^^^^^^^^^^^^^ type
+                                        ^^^^ keyword
+                                             ^^^^^^^^^^^^^^ type
+|   final String label;
+    ^^^^^ keyword
+          ^^^^^^ type
+|   final int count;
+    ^^^^^ keyword
+          ^^^ type
+|   late final double ratio = count / 1.5e2;
+    ^^^^ keyword
+         ^^^^^ keyword
+               ^^^^^^ type
+                                      ^^^^^ number
+|
+|   const Counter({super.key, required this.label, this.count = 0});
+    ^^^^^ keyword
+          ^^^^^^^ type
+                   ^^^^^ keyword
+                              ^^^^^^^^ keyword
+                                       ^^^^ keyword
+                                                   ^^^^ keyword
+                                                                ^ number
+|
+|   @override
+    ^^^^^^^^^ annotation
+|   Widget build(BuildContext context) {
+    ^^^^^^ type
+           ^^^^^ function
+                 ^^^^^^^^^^^^ type
+|     final text = 'Count: $count of ${count * 2}\n';
+      ^^^^^ keyword
+                   ^^^^^^^^ string
+                           ^^^^^^ variable
+                                 ^^^^ string
+                                     ^^ string.interpolation
+                                               ^ number
+                                                ^ string.interpolation
+                                                 ^^ string.escape
+                                                   ^ string
+|     final raw = r'no $interp \n';
+      ^^^^^ keyword
+                  ^^^^^^^^^^^^^^^^ string
+|     final multi = """three "quotes" $label""";
+      ^^^^^ keyword
+                    ^^^^^^^^^^^^^^^^^^ string
+                                      ^^^^^^ variable
+                                            ^^^ string
+|     if (count > maxCount) {
+      ^^ keyword.control
+|       return Text(text, style: TextStyle(fontSize: 12));
+        ^^^^^^ keyword.control
+               ^^^^ type
+                                 ^^^^^^^^^ type
+                                                     ^^ number
+|     } else if (count == 0) {
+        ^^^^ keyword.control
+             ^^ keyword.control
+                          ^ number
+|       throw ArgumentError.value(count);
+        ^^^^^ keyword.control
+              ^^^^^^^^^^^^^ type
+                            ^^^^^ function
+|     }
+|     for (var i = 0; i < count; i++) {
+      ^^^ keyword.control
+           ^^^ keyword
+                   ^ number
+|       continue;
+        ^^^^^^^^ keyword.control
+|     }
+|     switch (Mode.light) {
+      ^^^^^^ keyword.control
+              ^^^^ type
+|       case Mode.light:
+        ^^^^ keyword.control
+             ^^^^ type
+|         break;
+          ^^^^^ keyword.control
+|       default:
+        ^^^^^^^ keyword.control
+|         assert(false, raw);
+          ^^^^^^ keyword.control
+                 ^^^^^ constant
+|     }
+|     return Column(children: [Text(multi), const SizedBox(height: 8)]);
+      ^^^^^^ keyword.control
+             ^^^^^^ type
+                               ^^^^ type
+                                            ^^^^^ keyword
+                                                  ^^^^^^^^ type
+                                                                   ^ number
+|   }
+|
+|   Future<void> load() async {
+    ^^^^^^ type
+           ^^^^ type
+                 ^^^^ function
+                        ^^^^^ keyword
+|     final dynamic data = await fetch(null);
+      ^^^^^ keyword
+            ^^^^^^^ type
+                           ^^^^^ keyword
+                                 ^^^^^ function
+                                       ^^^^ constant
+|     print(data is bool ? true : data);
+      ^^^^^ function
+                 ^^ keyword
+                    ^^^^ type
+                           ^^^^ constant
+|   }
+| }
+|
+| typedef Callback = void Function(num value);
+  ^^^^^^^ keyword
+          ^^^^^^^^ type
+                     ^^^^ type
+                          ^^^^^^^^ type
+                                   ^^^ type
+| mixin Logger on Object {}
+  ^^^^^ keyword
+        ^^^^^^ type
+               ^^ keyword
+                  ^^^^^^ type
+| extension Twice on int {
+  ^^^^^^^^^ keyword
+            ^^^^^ type
+                  ^^ keyword
+                     ^^^ type
+|   int get twice => this * 2;
+    ^^^ type
+        ^^^ keyword
+                     ^^^^ keyword
+                            ^ number
+| }

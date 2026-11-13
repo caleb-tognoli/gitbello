@@ -1,0 +1,98 @@
+| import Foundation
+  ^^^^^^ keyword
+         ^^^^^^^^^^ type
+|
+| /// A bag of items.
+  ^^^^^^^^^^^^^^^^^^^ comment.doc
+| @MainActor
+  ^^^^^^^^^^ annotation
+| public struct Bag<Element: Hashable> {
+  ^^^^^^ keyword
+         ^^^^^^ keyword
+                ^^^ type
+                    ^^^^^^^ type
+                             ^^^^^^^^ type
+|     private var items: [Element] = []
+      ^^^^^^^ keyword
+              ^^^ keyword
+                          ^^^^^^^ type
+|     static let maxItems = 64
+      ^^^^^^ keyword
+             ^^^ keyword
+                            ^^ number
+|
+|     public mutating func add(_ item: Element) throws -> Bool {
+      ^^^^^^ keyword
+             ^^^^^^^^ keyword
+                      ^^^^ keyword
+                           ^^^ function
+                                       ^^^^^^^ type
+                                                ^^^^^^ keyword
+                                                          ^^^^ type
+|         guard items.count < Self.maxItems else { throw BagError.full }
+          ^^^^^ keyword.control
+                              ^^^^ keyword
+                                            ^^^^ keyword.control
+                                                   ^^^^^ keyword.control
+                                                         ^^^^^^^^ type
+|         items.append(item)
+                ^^^^^^ function
+|         let label = "Added \(item) (\(items.count) of \(Self.maxItems))"
+          ^^^ keyword
+                      ^^^^^^^ string
+                             ^^ string.interpolation
+                                   ^ string.interpolation
+                                    ^^ string
+                                      ^^ string.interpolation
+                                                   ^ string.interpolation
+                                                    ^^^^ string
+                                                        ^^ string.interpolation
+                                                          ^^^^ keyword
+                                                                       ^ string.interpolation
+                                                                        ^^ string
+|         let raw = #"C:\no\escapes "here""#
+          ^^^ keyword
+                    ^^^^^^^^^^^^^^^^^^^^^^^^ string
+|         let hex = 0xFF; let d = 1.5e3 // trailing
+          ^^^ keyword
+                    ^^^^ number
+                          ^^^ keyword
+                                  ^^^^^ number
+                                        ^^^^^^^^^^^ comment
+|         defer { print(label, raw) }
+          ^^^^^ keyword.control
+                  ^^^^^ function
+|         return items.contains(item) && item != nil
+          ^^^^^^ keyword.control
+                       ^^^^^^^^ function
+                                                 ^^^ constant
+|     }
+| }
+|
+| enum BagError: Error { case full }
+  ^^^^ keyword
+       ^^^^^^^^ type
+                 ^^^^^ type
+                         ^^^^ keyword.control
+| protocol Container { associatedtype Item }
+  ^^^^^^^^ keyword
+           ^^^^^^^^^ type
+                       ^^^^^^^^^^^^^^ keyword
+                                      ^^^^ type
+| extension Bag: Container { typealias Item = Element }
+  ^^^^^^^^^ keyword
+            ^^^ type
+                 ^^^^^^^^^ type
+                             ^^^^^^^^^ keyword
+                                       ^^^^ type
+                                              ^^^^^^^ type
+|
+| #if DEBUG
+  ^^^ macro
+      ^^^^^ constant
+| let debug = true /* block */
+  ^^^ keyword
+              ^^^^ constant
+                   ^^^^^^^^^^^ comment
+| #endif
+  ^^^^^^ macro

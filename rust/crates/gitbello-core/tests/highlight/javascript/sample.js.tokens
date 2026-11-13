@@ -1,0 +1,103 @@
+| // Line comment
+  ^^^^^^^^^^^^^^^ comment
+| import { readFile } from "node:fs/promises";
+  ^^^^^^ keyword
+                      ^^^^ keyword
+                           ^^^^^^^^^^^^^^^^^^ string
+| export default class Store extends EventTarget {
+  ^^^^^^ keyword
+         ^^^^^^^ keyword.control
+                 ^^^^^ keyword
+                       ^^^^^ type
+                             ^^^^^^^ keyword
+                                     ^^^^^^^^^^^ type
+|   static #count = 0;
+    ^^^^^^ keyword
+                    ^ number
+|   constructor(name = 'store') {
+    ^^^^^^^^^^^ function
+                       ^^^^^^^ string
+|     super();
+      ^^^^^ keyword
+|     this.name = name; /* block */ this.items = [];
+      ^^^^ keyword
+                        ^^^^^^^^^^^ comment
+                                    ^^^^ keyword
+|   }
+|
+|   async load(path) {
+    ^^^^^ keyword
+          ^^^^ function
+|     const text = await readFile(path, "utf8");
+      ^^^^^ keyword
+                   ^^^^^ keyword
+                         ^^^^^^^^ function
+                                        ^^^^^^ string
+|     const data = JSON.parse(text);
+      ^^^^^ keyword
+                   ^^^^ constant
+                        ^^^^^ function
+|     return data.items?.length ?? 0;
+      ^^^^^^ keyword.control
+                                   ^ number
+|   }
+| }
+|
+| /** JSDoc comment */
+  ^^^^^^^^^^^^^^^^^^^^ comment.doc
+| function greet(user) {
+  ^^^^^^^^ keyword
+           ^^^^^ function
+|   const message = `Hello ${user.name}, you have ${user.count} items`;
+    ^^^^^ keyword
+                    ^^^^^^^ string
+                           ^^ string.interpolation
+                                      ^ string.interpolation
+                                       ^^^^^^^^^^^ string
+                                                  ^^ string.interpolation
+                                                              ^ string.interpolation
+                                                               ^^^^^^^ string
+|   let re = /ab+c/gi;
+    ^^^ keyword
+             ^^^^^^^^ regex
+|   if (typeof user === "undefined" || user == null) {
+    ^^ keyword.control
+        ^^^^^^ keyword
+                        ^^^^^^^^^^^ string
+                                               ^^^^ constant
+|     throw new Error("no user");
+      ^^^^^ keyword.control
+            ^^^ keyword
+                ^^^^^ type
+                      ^^^^^^^^^ string
+|   }
+|   for (const [key, value] of Object.entries(user)) console.log(key, value);
+    ^^^ keyword.control
+         ^^^^^ keyword
+                            ^^ keyword
+                               ^^^^^^ type
+                                      ^^^^^^^ function
+                                                             ^^^ function
+|   return 0x1f + 1.5e3 + 10n;
+    ^^^^^^ keyword.control
+           ^^^^ number
+                  ^^^^^ number
+                          ^^^ number
+| }
+| const page = `<p>${user.name}</p>
+  ^^^^^ keyword
+               ^^^^ string
+                   ^^ string.interpolation
+                              ^ string.interpolation
+                               ^^^^ string
+| <p>${user.age}</p>`;
+  ^^^ string
+     ^^ string.interpolation
+               ^ string.interpolation
+                ^^^^^ string
+| /* a block comment
+  ^^^^^^^^^^^^^^^^^^ comment
+|    on two lines */ const after = 1;
+  ^^^^^^^^^^^^^^^^^^ comment
+                     ^^^^^ keyword
+                                   ^ number

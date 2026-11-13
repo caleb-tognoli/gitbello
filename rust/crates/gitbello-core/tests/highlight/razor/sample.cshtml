@@ -1,0 +1,35 @@
+@model IndexModel
+@{
+    ViewData["Title"] = "Home";
+    var x = @"verbatim
+string }";
+}
+<Counter
+    IncrementAmount="5"
+    @ref="counter" />
+<div>
+@switch (Model.Kind)
+{
+    case 1:
+        <b>one</b>
+        break;
+    default:
+        <text>other @Model.Kind</text>
+        break;
+}
+</div>
+@try { Do(); } catch (Exception e) { <p>@e.Message</p> } finally { Done(); }
+@do { i++; } while (i < 3);
+@if (a) {
+    <section>
+        @if (b)
+        {
+            <em>deep</em>
+        }
+        <input value="@x" />
+    </section>
+} else if (c) { <i>c</i> }
+<p>after</p>
+@section Scripts {
+    <script src="~/x.js"></script>
+}

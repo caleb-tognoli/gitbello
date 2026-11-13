@@ -4,19 +4,22 @@ extends Node
 ## themes. Each intensity is saved as `<theme>-<percent>.png` (the top of the
 ## diff with the top of its minimap column beside it, `ZOOM` times larger),
 ## and a sheet per theme stacks
-## them top to bottom in `PERCENTS` order. Pass --repo=<throwaway repo with
+## them top to bottom in `PERCENTS` order; `<theme>-selection.png` adds the
+## kept tint with rows from the context through the changes selected. Pass --repo=<throwaway repo with
 ## word-level changes to `--file`> --file=<its path> --out=<directory>, with
 ## GITBELLO_CONFIG set to a scratch config, and launch windowed (read-only).
 
 const MAIN: PackedScene = preload("res://app/main/main.tscn")
 const WAIT_MS: int = 30_000
-const PERCENTS: Array[int] = [38, 50, 60, 70]
+const PERCENTS: Array[int] = [30, 40, 50, 60]
 ## Height of the diff shown for each intensity, in UI pixels.
 const CROP_HEIGHT: float = 260.0
 ## Width of the diff text kept left of the minimap column, in UI pixels.
 const TEXT_WIDTH: float = 640.0
 ## How much the minimap column is enlarged.
 const ZOOM: int = 3
+## The rows selected for the selection shot.
+const SELECTED: Vector2i = Vector2i(3, 9)
 
 var _out: String = ""
 
@@ -79,6 +82,15 @@ func _ready() -> void:
 		var path: String = _out.path_join("sheet-%s.png" % theme_name)
 		sheet.save_png(path)
 		print("SHOT ", path)
+		AppTheme.word_tint_percent = kept
+		ThemeManager.apply(main)
+		diff.select_lines(SELECTED.x, SELECTED.y)
+		for frame: int in 30:
+			await get_tree().process_frame
+		path = _out.path_join("%s-selection.png" % theme_name)
+		_crop(diff).save_png(path)
+		print("SHOT ", path)
+		diff.clear_selection()
 	AppTheme.word_tint_percent = kept
 	ThemeManager.apply(main)
 	Actions.run_action(&"view.theme_dark")

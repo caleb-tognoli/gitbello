@@ -1,0 +1,39 @@
+| # Normalize line endings
+  ^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| * text=auto eol=lf
+  ^ string.escape
+    ^^^^ attribute
+        ^ operator
+         ^^^^ string
+              ^^^ attribute
+                 ^ operator
+                  ^^ string
+| *.bat text eol=crlf
+  ^ string.escape
+        ^^^^ attribute
+             ^^^ attribute
+                ^ operator
+                 ^^^^ string
+| *.png binary
+  ^ string.escape
+        ^^^^^^ macro
+| *.min.js -diff linguist-generated
+  ^ string.escape
+           ^ operator
+            ^^^^ attribute
+                 ^^^^^^^^^^^^^^^^^^ attribute
+| docs/** export-ignore !text
+      ^ punctuation
+       ^^ string.escape
+          ^^^^^^^^^^^^^ attribute
+                        ^ operator
+                         ^^^^ attribute
+| "with space.txt" text
+  ^^^^^^^^^^^^^^^^ string
+                   ^^^^ attribute
+| [attr]lockable -text lockable
+  ^^^^^^ keyword
+        ^^^^^^^^ macro
+                 ^ operator
+                  ^^^^ attribute
+                       ^^^^^^^^ attribute

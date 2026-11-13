@@ -3,9 +3,11 @@
 mod busy_bench;
 mod eol_fixture;
 mod fixture;
+mod highlight_cmds;
 mod history_fixture;
 mod image_fixture;
 mod repo_cmds;
+mod syntax_fixture;
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -41,13 +43,18 @@ commands:
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
-  fixture <dir> [--repos N] [--images] [--eol] [--history]
+  fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history]
                                    create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
   busy-bench <source> --work <empty dir> [--worktrees N] [--rounds N]
                                    time changes, diffs and history while files
                                    keep changing (clones <source> into <work>)
+  highlight <file> [--language <id>]
+                                   a file's syntax tokens, under each line
+  highlight-bench [<dir>] [--rounds N]
+                                   lexing speed per language over the syntax
+                                   samples (default: core's tests/highlight)
   in-use <dir>                     programs running files from a folder
                                    (Windows; what blocks deleting it)
   avatar <email> [--repo <path>] [--github <owner/repo> --commit <oid>] [--gitlab <url>] [--out <file>]
@@ -83,6 +90,8 @@ fn main() -> Result<()> {
         Some("home-bench") => repo_cmds::home_bench(rest),
         Some("busy-bench") => busy_bench::run(rest),
         Some("in-use") => in_use(rest),
+        Some("highlight") => highlight_cmds::highlight(rest),
+        Some("highlight-bench") => highlight_cmds::bench(rest),
         Some("avatar") => avatar(rest),
         Some("help" | "--help" | "-h") | None => {
             println!("{USAGE}");

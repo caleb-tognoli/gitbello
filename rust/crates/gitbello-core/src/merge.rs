@@ -625,6 +625,53 @@ impl ConflictFile {
         Some(line.strip_suffix(b"\r").unwrap_or(line))
     }
 
+    /// The state each line starts in, lexed with `syntax`: ours, the base
+    /// and theirs each go on from the state before their block, and the
+    /// lines after a block from the end of ours; marker lines keep the
+    /// state before the block. `None` when `stop` returns true.
+    pub fn line_states(
+        &self,
+        syntax: &crate::highlight::Syntax,
+        stop: impl Fn() -> bool,
+    ) -> Option<crate::highlight::LineStates> {
+        use crate::highlight::{LineState, LineStates};
+        let mut out = LineStates::default();
+        let mut state = LineState::default();
+        let lex = |out: &mut LineStates, range: std::ops::Range<usize>, from: LineState| {
+            let mut state = from;
+            for i in range {
+                out.push(state);
+                state = syntax.next_state(self.line(i).unwrap_or_default(), state);
+            }
+            state
+        };
+        let mut i = 0;
+        for block in &self.blocks {
+            if stop() {
+                return None;
+            }
+            state = lex(&mut out, i..block.start, state);
+            let before = state;
+            out.push(before);
+            let ours = lex(&mut out, block.ours(), before);
+            if let (Some(base), Some(lines)) = (block.base, block.base_lines()) {
+                debug_assert_eq!(out.line_count(), base);
+                out.push(before);
+                lex(&mut out, lines, before);
+            }
+            out.push(before);
+            lex(&mut out, block.theirs(), before);
+            out.push(before);
+            state = ours;
+            i = block.end + 1;
+        }
+        if stop() {
+            return None;
+        }
+        lex(&mut out, i..self.line_count(), state);
+        Some(out)
+    }
+
     /// Whether every block has the base between its markers.
     pub fn has_base(&self) -> bool {
         !self.blocks.is_empty() && self.blocks.iter().all(|b| b.base.is_some())
@@ -973,6 +1020,30 @@ mod tests {
         let with_base = ConflictLayout::build(&file, true);
         assert_eq!(with_base.unified.len(), 7);
         assert_eq!(file.line(9), Some(&b"c"[..]));
+    }
+
+    #[test]
+    fn sides_go_on_from_the_state_before_their_block() {
+        let text = b"/* open
+<<<<<<< ours
+still */ a
+||||||| base
+b
+=======
+c
+>>>>>>> theirs
+after
+";
+        let file = ConflictFile::new("f.rs".into(), ConflictKind::Content, Some(text.to_vec()));
+        let rust = crate::highlight::Syntax::new(crate::highlight::Language::by_id("rust"), &[]);
+        let states = file.line_states(&rust, || false).expect("not stopped");
+        assert_eq!(states.line_count(), file.line_count());
+        let inside = |i: usize| !states.before(i).is_start();
+        // Ours (2), the base (4) and theirs (6) start inside the comment.
+        assert!(inside(2) && inside(4) && inside(6));
+        // Ours closed it: the line after the block starts outside.
+        assert!(!inside(8));
+        assert!(file.line_states(&rust, || true).is_none());
     }
 
     #[test]

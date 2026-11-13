@@ -1,0 +1,117 @@
+| #!/usr/bin/env lua
+  ^^^^^^^^^^^^^^^^^^ comment
+| --- A small inventory module.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.doc
+| -- Line comment with no doc.
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| --[[ A long comment on one line ]]
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| --[==[ with a level ]==]
+  ^^^^^^^^^^^^^^^^^^^^^^^^ comment
+| local M = {}
+  ^^^^^ keyword
+|
+| local MAX <const> = 0x10
+  ^^^^^ keyword
+            ^^^^^^^ annotation
+                      ^^^^ number
+| local path = [[C:\no\escapes]]
+  ^^^^^ keyword
+               ^^^^^^^^^^^^^^^^^ string
+| local level = [=[it's [[nested]] ]=]
+  ^^^^^ keyword
+                ^^^^^^^^^^^^^^^^^^^^^^ string
+|
+| function M.new(name, count)
+  ^^^^^^^^ keyword
+             ^^^ function
+|   local self = setmetatable({}, { __index = M })
+    ^^^^^ keyword
+          ^^^^ variable
+                 ^^^^^^^^^^^^ function
+|   self.name = name or "item\n"
+    ^^^^ variable
+                     ^^ keyword
+                        ^^^^^ string
+                             ^^ string.escape
+                               ^ string
+|   self.count = count or 1.5e3
+    ^^^^ variable
+                       ^^ keyword
+                          ^^^^^ number
+|   return self
+    ^^^^^^ keyword.control
+           ^^^^ variable
+| end
+  ^^^ keyword
+|
+| local function total(items)
+  ^^^^^ keyword
+        ^^^^^^^^ keyword
+                 ^^^^^ function
+|   local sum = 0
+    ^^^^^ keyword
+                ^ number
+|   for _, item in ipairs(items) do
+    ^^^ keyword.control
+                ^^ keyword
+                   ^^^^^^ function
+                                 ^^ keyword
+|     if item.count > 0 and not item.hidden then
+      ^^ keyword.control
+                      ^ number
+                        ^^^ keyword
+                            ^^^ keyword
+                                            ^^^^ keyword
+|       sum = sum + item.count
+|     elseif item.count == nil then
+      ^^^^^^ keyword.control
+                           ^^^ constant
+                               ^^^^ keyword
+|       goto continue
+        ^^^^ keyword.control
+|     end
+      ^^^ keyword
+|     ::continue::
+      ^^^^^^^^^^^^ annotation
+|   end
+    ^^^ keyword
+|   repeat sum = sum - 1 until sum < 10
+    ^^^^^^ keyword.control
+                       ^ number
+                         ^^^^^ keyword.control
+                                     ^^ number
+|   while false do break end
+    ^^^^^ keyword.control
+          ^^^^^ constant
+                ^^ keyword
+                   ^^^^^ keyword.control
+                         ^^^ keyword
+|   return sum, #items, 'done'
+    ^^^^^^ keyword.control
+                        ^^^^^^ string
+| end
+  ^^^ keyword
+|
+| print(total({ M.new("a", 2) }), _G, true)
+  ^^^^^ function
+        ^^^^^ function
+                  ^^^ function
+                      ^^^ string
+                           ^ number
+                                  ^^ variable
+                                      ^^^^ constant
+| return M
+  ^^^^^^ keyword.control
+| local text = [==[
+  ^^^^^ keyword
+               ^^^^ string
+| a long string ]] still
+  ^^^^^^^^^^^^^^^^^^^^^^ string
+| ]==]
+  ^^^^ string
+| --[[ a long
+  ^^^^^^^^^^^ comment
+| comment ]] print(text)
+  ^^^^^^^^^^ comment
+             ^^^^^ function

@@ -182,6 +182,300 @@ paging, frame time             p50 43.4 ms with the minimap, 43.3 ms without
 Word ranges cost about 0.2 to 0.3 ms a tile. They are computed only for
 tiles: computing them for every row of the overview took it to 66 ms.
 
+## M7.13 P7 — quieter colours
+
+Share of a file's visible characters drawn in a colour (not plain text),
+release `gitbello-cli highlight` over this repository's files (samples
+excluded), before (P6 HEAD, old palette) and after. "Red/green" counts the
+kinds drawn in a red or green hue; after P7 only a patch's added and
+removed lines are.
+
+```text
+                     files   coloured        red/green
+                             before  after   before  after
+toml                    10     96%    37%      59%     0%
+godot_resource          61     94%    54%      37%     0%
+xml (svg)               75     90%    29%      67%     0%
+yaml                     2     78%    21%      56%     0%
+rust                   159     64%    47%       9%     0%
+gdscript               153     67%    47%      15%     0%
+python                   2     64%    53%      32%     0%
+shell                    2     72%    70%      37%     0%
+powershell               1     81%    75%      19%     0%
+markdown                10     24%    24%      18%     0%
+csv                      1     97%    97%      30%     0%
+```
+
+On the samples (`gitbello-core/tests/highlight`), red fell from 12–31% to
+0 in Batch, Makefile, PHP, PowerShell, HTML, XML, LESS, SCSS and shell;
+JSON went from 85% to 57% coloured, TOML 87% to 58%, YAML 77% to 52%, XML
+85% to 59%, Godot resources 91% to 51%, code 2–12 points less (the function
+names). Lexing time is unchanged: the data lexers push fewer tokens.
+
+## M7.13 P6 — readable colours per background
+
+Tables (`AppTheme.syntax_color_tables`, headless, debug gdext): the first
+build of a background's table, made readable for the 39 kinds plus plain
+and hunk text, took 2.7 ms (dark) and 4.8 ms (light) with 18 lightness and
+14 chroma halvings, built while drawing. Now 12 and 10 halvings (lightness
+within 1/4096), each distinct colour once per table, and the tables shared
+by every view: 0.7 and 1.1 ms the first time, 13 µs after.
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on
+the P1 setup: the P5b commit's GDScript (`git archive`, the same DLL) as
+before and this branch as after, alternating, four runs each. Paging
+redraws every row: drawing picks the row's table once per line and looks
+another up only for pieces under the changed words or the selection
+(looking one up per piece cost about 8 ms at p99).
+
+```text
+                               before                     after
+unified fetch 300 rows, p50    1716 / 1706 / 1735 / 1709  1710 / 1695 / 1710 / 1713 us
+paging frame p99               48.5 / 47.2 / 48.5 / 49.8  50.1 / 49.2 / 50.2 / 49.4 ms
+```
+
+## M7.13 P5b — mixed-language files
+
+Lexing, release `gitbello-cli highlight-bench` as in P1. On the P5a
+samples, this branch and the P5a commit (built from `git archive`) timed
+alternately, three runs each: 31.2 to 31.5 µs per 100 lines against 29.3
+to 29.8, about 6% slower across languages (every line now starts from a
+whole `LineState` and leaves one with its embedded frames, about 20 ns).
+HTML, PHP and Godot resources do more per line (37.5 to 42.5 µs against
+29.1 to 33.0): script and style bodies and `.tscn` scripts are lexed in
+their languages. The new samples:
+
+```text
+language      lines      lines/s   us/100 lines     us/long line   states us/100
+html             42      2525025           39.6              156            46.2
+php (HTML)       31      1991456           50.2              159            46.1
+php              45      2623524           38.1              120            41.9
+razor            36      2008536           49.8               58            67.5
+razor (cshtml)   34      2385630           41.9                9            52.1
+all (45)                 3283719           30.5
+```
+
+A PHP island is lexed up to each `?>` in turn until one is outside strings
+and comments; lexing every island to the line's end first gave 3.5 ms on
+the HTML sample's long line (many `<?= … ?>`), now 159 µs. Budget: 1 ms
+per 100 lines, 5 ms per long line.
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on
+the P1 setup: the P5a commit built from `git archive` (before) and this
+branch (after), alternating, two runs each. Fetches, tiles and frames
+within noise. Load read 10 to 17 ms slower in four pairs, but the two
+DLLs swapped in the same project folder gave the opposite (base 116 to
+133 ms, branch 105 to 110 ms, three pairs): the difference is the
+folder, not the code. Lexing the 5,143-line bench file in a debug build
+takes 2.6 ms either way.
+
+```text
+                               before            after
+unified fetch 300 rows, p50    1711 / 1727 us    1688 / 1696 us
+side by side fetch, p50        3967 / 3817 us    3831 / 3925 us
+minimap tile unified, p50       533 /  544 us     542 /  559 us
+minimap tile split, p50         751 /  747 us     760 /  794 us
+paging frame p99               60.8 / 49.8 ms    51.6 / 51.0 ms
+```
+
+## M7.13 P5a — line states
+
+Lexing, release `gitbello-cli highlight-bench` as in P1: 30.3 µs per 100
+lines over the 42 samples, which grew multi-line cases (P4: 28.8). The new
+`states us/100` column times `LineStates::of_text`, the whole-file pass the
+states job makes: 13.7 to 63.8 µs per 100 lines, about what lexing costs.
+A 10,027-line Rust file (the sample repeated) takes 3.5 ms. Budget: states
+ready within 100 ms of the diff for files up to 10,000 lines.
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on
+the P1 setup: the P5 plan commit built from `git archive` (before) and this
+branch (after), alternating, two runs each. `states_ms` is new: from the
+selection to the states landing (a `git cat-file` of the old side, the
+working file and both passes, debug build), about 40 ms after the diff.
+
+```text
+                               before            after
+load                            91.0 / 105.8 ms   106.0 / 104.8 ms
+states ready                       -              144.7 / 145.8 ms
+unified fetch 300 rows, p50    1837 / 1692 us    1692 / 1690 us
+side by side fetch, p50        3865 / 3819 us    3828 / 3816 us
+minimap tile unified, p50       533 /  535 us     524 /  530 us
+minimap tile split, p50         743 /  715 us     756 /  745 us
+paging frame p99               47.2 / 47.3 ms    46.3 / 47.8 ms
+```
+
+## M7.13 P4 — more scripting languages
+
+Lexing, release `gitbello-cli highlight-bench` as in P1. The six new
+samples:
+
+```text
+language      lines      lines/s   us/100 lines     us/long line
+batch            32      2533149           39.5               51
+dart             53      3962321           25.2                7
+lua              36      3912193           25.6                8
+php              43      3314321           30.2               53
+ruby             56      4189578           23.9               71
+zig              53      4049666           24.7                6
+all (42)                 3476774           28.8
+```
+
+The machine ran slower than in P3: the P3 build, timed the same day on its
+36 samples, gave 29.2 µs per 100 lines (26.4 in P3's run); this branch
+gave 28.8, 29.2 and 29.9 over three runs. Budget: 1 ms per 100 lines,
+5 ms per long line.
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on
+the P1 setup: the P3 commit built from `git archive` (before) and this
+branch (after), alternating, two runs each. Within noise.
+
+```text
+                               before            after
+unified fetch 300 rows, p50    1694 / 1769 us    1692 / 1740 us
+side by side fetch, p50        3776 / 3769 us    3718 / 3777 us
+minimap tile unified, p50       527 /  525 us     517 /  539 us
+minimap tile split, p50         728 /  733 us     733 /  724 us
+paging frame p99               48.3 / 48.1 ms    48.2 / 48.3 ms
+```
+
+## M7.13 P3 — web and data languages
+
+Lexing, release `gitbello-cli highlight-bench` as in P1: 26.4 µs per 100
+lines over the 36 samples (P2: 27.0 over 24). Budget: 1 ms per 100 lines,
+5 ms per long line.
+
+```text
+language      lines      lines/s   us/100 lines     us/long line
+css              33      3771644           26.5               98
+csv               6      4321210           23.1               46
+diff             19      6779661           14.8                7
+dotenv           10      5056890           19.8               41
+gitattributes     9      4302103           23.2               91
+html             21      2529968           39.5               83
+ignore           10      8074283           12.4               25
+less             25      4208754           23.8               62
+scss             35      4507405           22.2               91
+sql              23      2637312           37.9               63
+tsv               5      7905138           12.7               12
+xml              17      3415712           29.3               26
+all (36)                 3783370           26.4
+```
+
+Lines are now lexed raw, with their tabs (TSV delimiters, Makefile
+recipes), and tokens mapped to the displayed columns. Diff view,
+`res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on the P1 setup
+(5,142-line Rust file, 5,878 rows): the P2 commit built from `git archive`
+(before) and this branch (after), alternating, two runs each.
+
+```text
+                               before            after
+unified fetch 300 rows, p50    1668 / 1652 us    1657 / 1633 us
+side by side fetch, p50        3810 / 3761 us    3770 / 3748 us
+minimap tile unified, p50       511 /  500 us     528 /  527 us
+minimap tile split, p50         718 /  678 us     714 /  723 us
+paging frame p99               49.2 / 48.0 ms    49.9 / 47.8 ms
+```
+
+A first version copied each line into a new `String` before lexing; the
+fetches were 5% and the tiles 4 to 7% slower. Lexing the borrowed text
+brought the fetches back level; the tiles stay 1 to 5% slower (they also
+validate each line's UTF-8 twice).
+
+## M7.13 P2 — more languages
+
+Lexing, release `gitbello-cli highlight-bench` as in P1. The Spec lexer looks
+words up in tables built once per language (an FNV hash map, and which ASCII
+characters can open a comment, string or attribute), which more than pays
+for the new rules: 27.0 µs per 100 lines over all samples (P1: 27.9 over 11
+languages). Budget: 1 ms per 100 lines, 5 ms per long line.
+
+```text
+language      lines      lines/s   us/100 lines     us/long line
+c                27      3864319           25.9               67
+cpp              32      3664682           27.3               15
+csharp           28      2934857           34.1               16
+dockerfile       22      3278933           30.5               14
+gdscript         30      3905487           25.6                6
+glsl             31      3938759           25.4               73
+go               31      5132025           19.5               64
+godot_resource   28      4683057           21.4               41
+godot_shader     25      2243158           44.6               98
+ini              19      4706465           21.2               10
+java             29      3636820           27.5               32
+javascript       27      3463315           28.9               56
+json             13      3335899           30.0              110
+kotlin           35      3946775           25.3               58
+makefile         27      4528302           22.1               23
+markdown         25      8080155           12.4                9
+powershell       29      3123990           32.0               44
+python           35      2916545           34.3               79
+rust             33      2875817           34.8                6
+shell            29      3888703           25.7               86
+swift            27      3597841           27.8                6
+toml             18      5902607           16.9                5
+typescript       35      3478261           28.7               55
+yaml             26      4994237           20.0               41
+all                      3706144           27.0
+```
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on the
+P1 setup (a 5,142-line Rust file, every seventh line edited, 5,878 rows):
+the P1 commit built from `git archive` (before) and this branch (after),
+alternating, two runs each. Budget: no regression over 10%.
+
+```text
+                               before            after
+unified fetch 300 rows, p50    1694 / 1643 us    1647 / 1662 us
+side by side fetch, p50        3754 / 3778 us    3746 / 3876 us
+minimap tile unified, p50       528 /  518 us     500 /  509 us
+minimap tile split, p50         736 /  730 us     703 /  682 us
+overview (800 buckets)          0.1 ms            0.1 ms
+paging frame, p50 / p99        6.96 / 43 ms      7.00 / 48 ms
+```
+
+Before the tables, with the word lists scanned and a `String` allocated per
+word, the tiles were 8% (unified) and 11% (split) slower than P1.
+
+## M7.13 P1 — syntax highlighting
+
+Lexing, release `gitbello-cli highlight-bench` over the core samples
+(200 rounds; the long line is the sample's code lines joined up to the
+10,000-character lexing limit). Budget: 1 ms per 100 lines, 5 ms per long line.
+
+```text
+language      lines      lines/s   us/100 lines     us/long line
+c                27      2617928           38.2              139
+gdscript         30      3497726           28.6              109
+go               31      3822441           26.2              124
+javascript       27      2743624           36.4              148
+json             12      5692600           17.6               66
+markdown         23     10233593            9.8                6
+python           34      3077202           32.5              123
+rust             32      2403485           41.6               94
+shell            29      4421743           22.6               99
+toml             18      5164252           19.4                7
+yaml             26      5183930           19.3               78
+all                      3584741           27.9
+```
+
+Diff view, `res://tests/perf/diff_bench.tscn` (windowed, debug gdext) on a
+temp repo with a 5,142-line Rust file, every seventh line edited (5,569
+rows), two runs each of `main` (before) and this branch (after). Budget: no
+regression over 10%.
+
+```text
+                               before            after
+unified fetch 300 rows, p50    1713 / 1914 us    1718 / 1764 us
+side by side fetch, p50        3820 / 3987 us    4031 / 3812 us
+minimap tile unified, p50       537 /  575 us     589 /  561 us
+minimap tile split, p50         763 /  778 us     819 /  794 us
+overview (800 buckets)          0.2 ms            0.2 ms
+paging frame, p50 / p99        6.97 / 47 ms      6.97 / 46 ms
+```
+
+The differences are within run-to-run noise (tiles +3 to 5%, fetches
+either way).
+
 ## M7.8 P2 — image diffs
 
 `res://tests/perf/image_bench.tscn -- --repo=<root> --file=big.png,photo.jpg`

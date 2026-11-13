@@ -1,0 +1,43 @@
+[gd_scene load_steps=3 format=3 uid="uid://b6x3k2m1n0p9q"]
+
+[ext_resource type="Script" path="res://player.gd" id="1_abc"]
+[ext_resource type="Texture2D" uid="uid://c4d5e6f7" path="res://icon.svg" id="2_def"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+size = Vector2(32, 48.5)
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_abc")
+speed = 200.0
+max_health = -1
+visible = true
+modulate = Color(1, 0.5, 0.25, 1)
+metadata/_edit_group_ = true
+input_action = &"jump"
+target = NodePath("../Enemy")
+path = ^"Sprite2D:modulate"
+tags = PackedStringArray("hero", "player")
+data = {
+"key": 1e-05,
+"other": null
+}
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture = ExtResource("2_def")
+; comment
+
+[sub_resource type="GDScript" id="3_src"]
+script/source = "extends Node
+func _ready():
+	print(\"hi\")
+"
+
+[sub_resource type="GDScript" id="4_src"]
+script/source = "extends Node
+\"\"\"A doc
+with \\\"quotes\\\" inside\"\"\"
+var path := \"res://a\\b\" # a \"comment\"
+func _ready() -> void:
+	print(\"done\\n\")
+"
+next = 1

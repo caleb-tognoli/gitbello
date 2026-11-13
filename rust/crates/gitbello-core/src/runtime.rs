@@ -19,13 +19,17 @@ use crate::config::{Config, ConfigError};
 use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
 use crate::diff::version::{self, VersionSide};
 use crate::diff::{
-    build_patch, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand, Expansion,
-    FileDiff, OldFile, PatchMode, LARGE_DIFF_BYTES,
+    build_patch, display_text, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand,
+    Expansion, FileDiff, LineKind, OldFile, PatchMode, LARGE_DIFF_BYTES,
 };
 use crate::git::{
     CancelToken, CommandLog, GitError, GitErrorKind, GitRunner, GitVersion, Progress,
 };
 use crate::graph::{CommitSearch, GraphLoader, LoadState, GRAPH_JOB_LABEL, SEARCH_JOB_LABEL};
+use crate::highlight::hints::HINT_LINES;
+use crate::highlight::{
+    detect, line_text, DiffStates, LineState, LineStates, StatesStatus, Syntax,
+};
 use crate::in_use::{processes_using, ProcessUse};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobPriority, JobScheduler, JobSpec, RefreshKind, RefreshSet,
@@ -113,6 +117,9 @@ pub const COMMIT_DIFF_JOB_LABEL: &str = "load commit diff";
 pub const OLD_FILE_JOB_LABEL: &str = "read old file";
 /// Open: writes the version of a file to open (see [`Runtime::open_version`]).
 pub const VERSION_JOB_LABEL: &str = "open file";
+/// Finds the state each line of a diff's sides (or of the conflicted file)
+/// starts in, after the diff loaded (see [`DiffState::line_states`]).
+pub const LINE_STATES_JOB_LABEL: &str = "read line states";
 /// Old files larger than this are not read: their gaps stay closed.
 pub const OLD_FILE_LIMIT: usize = 16 * 1024 * 1024;
 pub const COMMIT_DETAILS_JOB_LABEL: &str = "read commit";
@@ -226,6 +233,7 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | IGNORE_PREVIEW_JOB_LABEL => (Interactive, true),
         OPEN_JOB_LABEL
         | OLD_FILE_JOB_LABEL
+        | LINE_STATES_JOB_LABEL
         | CONFLICT_JOB_LABEL
         | VERSION_JOB_LABEL
         | HEAD_MESSAGE_JOB_LABEL
@@ -463,6 +471,15 @@ pub struct ConflictState {
     resolved_for: Option<u64>,
     /// Ours and theirs of a conflicted image.
     images: Option<ImageSides>,
+    /// How the file's text is coloured.
+    syntax: Syntax,
+    /// Hash of the file's content (see [`content_hash`]).
+    content: Option<u64>,
+    /// The state each line of the file starts in, and the content hash it
+    /// was found for.
+    states: Option<(u64, Arc<LineStates>)>,
+    /// The content hash the running states job is for.
+    states_job: Option<(JobId, u64)>,
 }
 
 impl ConflictState {
@@ -479,11 +496,49 @@ impl ConflictState {
             resolved_before: Vec::new(),
             resolved_for: None,
             images: None,
+            syntax: Syntax::plain(),
+            content: None,
+            states: None,
+            states_job: None,
         }
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// How the file's text is coloured (plain until it is read).
+    pub fn syntax(&self) -> Syntax {
+        self.syntax
+    }
+
+    /// The line states of the file shown, when they were found for it.
+    fn current_states(&self) -> Option<&LineStates> {
+        let (hash, states) = self.states.as_ref()?;
+        (Some(*hash) == self.content).then_some(states.as_ref())
+    }
+
+    /// The line states of the file, once found for its current content.
+    pub fn line_states(&self) -> Option<&LineStates> {
+        self.current_states()
+    }
+
+    /// Whether the line states of the file shown are known yet.
+    pub fn states_status(&self) -> StatesStatus {
+        if self.syntax.language.is_none() || self.content.is_none() {
+            StatesStatus::None
+        } else if self.current_states().is_some() {
+            StatesStatus::Ready
+        } else {
+            StatesStatus::Loading
+        }
+    }
+
+    /// The state line `index` of the file starts in (the start until the
+    /// states are known).
+    pub fn state_before(&self, index: usize) -> LineState {
+        self.current_states()
+            .map_or_else(LineState::default, |s| s.before(index))
     }
 
     /// Ours (`old`) and theirs (`new`) of a conflicted image, once read.
@@ -533,6 +588,15 @@ impl ConflictState {
             .as_ref()
             .map(|f| ConflictLayout::build(f, show_base))
             .unwrap_or_default();
+        self.syntax = self
+            .file
+            .as_ref()
+            .map_or_else(Syntax::plain, |f| conflict_syntax(&self.path, f));
+        self.content = self
+            .file
+            .as_ref()
+            .filter(|f| f.kind.is_text())
+            .map(|f| content_hash(&f.content));
     }
 }
 
@@ -1440,6 +1504,16 @@ pub struct DiffState {
     layout: DiffLayout,
     /// Both sides, when the image viewer shows the diff.
     images: Option<ImageSides>,
+    /// How the diff's text is coloured, found by the load job.
+    syntax: Syntax,
+    /// The state each line of either side starts in (kept while a reload
+    /// computes them again).
+    states: DiffStates,
+    states_status: StatesStatus,
+    /// The states job and the diff generation it is for.
+    states_job: Option<(JobId, u64)>,
+    /// The states job reads the old file: it is not read apart meanwhile.
+    states_read_old: bool,
 }
 
 impl DiffState {
@@ -1460,11 +1534,43 @@ impl DiffState {
             old_failed: None,
             layout: DiffLayout::default(),
             images: None,
+            syntax: Syntax::plain(),
+            states: DiffStates::default(),
+            states_status: StatesStatus::None,
+            states_job: None,
+            states_read_old: false,
         }
     }
 
     pub fn target(&self) -> &DiffTarget {
         &self.target
+    }
+
+    /// How the diff's text is coloured (plain until it loaded).
+    pub fn syntax(&self) -> Syntax {
+        self.syntax
+    }
+
+    /// The line states of the diff's sides, once found (see
+    /// [`DiffState::states_status`]).
+    pub fn line_states(&self) -> &DiffStates {
+        &self.states
+    }
+
+    /// Whether the line states are known yet.
+    pub fn states_status(&self) -> StatesStatus {
+        self.states_status
+    }
+
+    /// The state a diff line starts in (the start until the states are
+    /// known).
+    pub fn state_before(
+        &self,
+        removed: bool,
+        old_line: Option<u32>,
+        new_line: Option<u32>,
+    ) -> LineState {
+        self.states.before(removed, old_line, new_line)
     }
 
     /// Both sides of an image diff, once read (see [`image::read_sides`]).
@@ -1507,6 +1613,7 @@ impl DiffState {
         (!self.expansion.is_empty() || !self.layout.end_known())
             && self.old.is_none()
             && !self.old_loading
+            && !self.states_read_old
             && self.old_failed.as_deref() != Some(oid)
     }
 
@@ -2955,6 +3062,7 @@ impl Runtime {
         (next.ours_size, next.theirs_size) = sizes;
         conflict.file = Some(next);
         conflict.relayout(show_base);
+        submit_conflict_states(&self.scheduler, state);
         self.pending.push(RuntimeEvent::DiffChanged {
             repo: key.to_path_buf(),
             slot: DiffSlot::Changes,
@@ -3491,6 +3599,7 @@ impl Runtime {
             let landed = matches!(kind, EventKind::Finished(_) | EventKind::Cancelled);
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
             refresh_diff_picks(state);
+            submit_diff_states(&self.scheduler, state, DiffSlot::Changes);
             submit_old_file(&self.scheduler, state, DiffSlot::Changes);
             if landed {
                 let rerun = state.diff.as_mut().is_some_and(|d| {
@@ -3511,11 +3620,13 @@ impl Runtime {
         }
         if label == COMMIT_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Commit, kind, &repo, out);
+            submit_diff_states(&self.scheduler, state, DiffSlot::Commit);
             submit_old_file(&self.scheduler, state, DiffSlot::Commit);
             return;
         }
         if label == COMPARE_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Compare, kind, &repo, out);
+            submit_diff_states(&self.scheduler, state, DiffSlot::Compare);
             submit_old_file(&self.scheduler, state, DiffSlot::Compare);
             return;
         }
@@ -3542,6 +3653,13 @@ impl Runtime {
         }
         if label == COMPARE_JOB_LABEL || label == COMPARE_COMMIT_JOB_LABEL {
             apply_compare(state, &label, kind, &repo, out);
+            return;
+        }
+        if label == LINE_STATES_JOB_LABEL {
+            apply_line_states(state, job, kind, &repo, out);
+            for slot in [DiffSlot::Changes, DiffSlot::Commit, DiffSlot::Compare] {
+                submit_old_file(&self.scheduler, state, slot);
+            }
             return;
         }
         if label == OLD_FILE_JOB_LABEL {
@@ -4220,6 +4338,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Version(_)
         | JobOutput::Diff { .. }
         | JobOutput::OldFile { .. }
+        | JobOutput::LineStates(_)
         | JobOutput::HeadMessage(_)
         | JobOutput::Amend(_)
         | JobOutput::AmendChanges { .. }
@@ -4528,6 +4647,7 @@ fn apply_conflict(
         }
         _ => return,
     }
+    submit_conflict_states(scheduler, state);
     if let Some(path) = resolved.filter(|p| state.is_unmerged(p)) {
         submit_mark_resolved(scheduler, state, vec![path]);
     }
@@ -4864,14 +4984,109 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
             } else {
                 None
             };
+            let syntax = diff_syntax(backend, &toplevel, &target, &diff, cancel);
             Ok(JobOutput::Diff {
                 generation,
                 diff: Box::new(diff),
                 staged,
                 images: images.map(Box::new),
+                syntax,
             })
         })),
     );
+}
+
+/// Bytes of a file read to find its first line (for its shebang).
+const FIRST_LINE_BYTES: usize = 256;
+
+/// How a loaded diff is coloured: its language by name, else by the
+/// shebang of the file's first line, with the hints its lines give.
+fn diff_syntax(
+    backend: &dyn GitBackend,
+    toplevel: &Path,
+    target: &DiffTarget,
+    diff: &FileDiff,
+    cancel: &CancelToken,
+) -> Syntax {
+    if diff.content != DiffContent::Text {
+        return Syntax::plain();
+    }
+    let lines: Vec<String> = diff
+        .lines(0, diff.line_count())
+        .filter(|l| l.kind != LineKind::Hunk)
+        .take(HINT_LINES)
+        .map(|l| line_text(l.text))
+        .collect();
+    let language = detect::by_name(&target.path).or_else(|| {
+        first_line(backend, toplevel, target, diff, cancel).and_then(|l| detect::by_shebang(&l))
+    });
+    Syntax::new(language, &lines)
+}
+
+/// The first line of the file a diff shows (its new side, or the old one
+/// when it was deleted): from the diff when it holds line 1, else read from
+/// the working tree or the blob.
+fn first_line(
+    backend: &dyn GitBackend,
+    toplevel: &Path,
+    target: &DiffTarget,
+    diff: &FileDiff,
+    cancel: &CancelToken,
+) -> Option<String> {
+    let lines = || diff.lines(0, diff.line_count());
+    if let Some(line) = lines()
+        .find(|l| l.new_line == Some(1))
+        .or_else(|| lines().find(|l| l.old_line == Some(1)))
+    {
+        return Some(display_text(line.text));
+    }
+    let working = matches!(
+        target.kind,
+        DiffKind::Unstaged
+            | DiffKind::Untracked
+            | DiffKind::Head
+            | DiffKind::Amend
+            | DiffKind::Working
+    );
+    let head = if working {
+        read_head(&toplevel.join(&target.path), FIRST_LINE_BYTES)
+    } else {
+        None
+    };
+    let head = head.or_else(|| {
+        let blob = |oid: &Option<String>| {
+            oid.as_deref()
+                .filter(|o| !o.is_empty() && !o.bytes().all(|b| b == b'0'))
+                .map(str::to_owned)
+        };
+        let oid = blob(&diff.header.new_oid).or_else(|| blob(&diff.header.old_oid))?;
+        backend
+            .blob_head(toplevel, &oid, FIRST_LINE_BYTES, cancel)
+            .ok()
+            .flatten()
+    })?;
+    let line = head.split(|&b| b == b'\n').next().unwrap_or_default();
+    Some(display_text(line))
+}
+
+/// The first `bytes` bytes of the file at `path`.
+fn read_head(path: &Path, bytes: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = fs::File::open(path).ok()?;
+    let mut head = Vec::with_capacity(bytes);
+    file.take(u64::try_from(bytes).ok()?)
+        .read_to_end(&mut head)
+        .ok()?;
+    Some(head)
+}
+
+/// How a conflicted file is coloured: by its name, else by its first line.
+fn conflict_syntax(path: &Path, file: &ConflictFile) -> Syntax {
+    let lines: Vec<String> = (0..file.line_count().min(HINT_LINES))
+        .filter_map(|i| file.line(i))
+        .map(line_text)
+        .collect();
+    Syntax::new(detect(path, lines.first().map(String::as_str)), &lines)
 }
 
 /// What a Changes diff reads, cheap to compare: HEAD, the file's status entry
@@ -4950,6 +5165,292 @@ fn reload_slot_diff(
     }
     *generation += 1;
     submit_diff(scheduler, state, slot, *generation);
+}
+
+/// What a [`LINE_STATES_JOB_LABEL`] job found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatesOutput {
+    pub target: StatesTarget,
+    pub old: Option<Arc<LineStates>>,
+    pub new: Option<Arc<LineStates>>,
+    /// A side was too large to read.
+    pub skipped: bool,
+    /// The old file the job read, by blob id: `None` when too large.
+    pub old_file: Option<(String, Option<Arc<OldFile>>)>,
+}
+
+/// What a states job is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatesTarget {
+    /// The diff in a slot, at a generation.
+    Diff(DiffSlot, u64),
+    /// The conflicted file, by content hash.
+    Conflict(u64),
+}
+
+/// Where a states job reads a diff's side from.
+enum StatesSource {
+    None,
+    /// Read already.
+    Old(Arc<OldFile>),
+    Blob(String),
+    File(PathBuf),
+    /// Past the size limit.
+    TooLarge,
+}
+
+fn cancelled_states() -> GitError {
+    GitError::new(LINE_STATES_JOB_LABEL, GitErrorKind::Cancelled, "")
+}
+
+/// The text of a side, `None` when it is past [`OLD_FILE_LIMIT`] (and for
+/// a file that cannot be read: it is lexed alone).
+fn read_side(
+    backend: &dyn GitBackend,
+    repo: &Path,
+    source: &StatesSource,
+    cancel: &CancelToken,
+) -> Result<Option<Vec<u8>>, GitError> {
+    match source {
+        StatesSource::Blob(oid) => backend.blob(repo, oid, OLD_FILE_LIMIT, cancel),
+        StatesSource::File(path) => {
+            let fits = fs::metadata(path).is_ok_and(|m| m.len() <= OLD_FILE_LIMIT as u64);
+            Ok(fits.then(|| fs::read(path).ok()).flatten())
+        }
+        StatesSource::None | StatesSource::Old(_) | StatesSource::TooLarge => Ok(None),
+    }
+}
+
+/// Starts finding the line states of the diff in `slot` when it loaded a
+/// generation they were not found for. The old file, when not read yet,
+/// is read here (and kept for the gaps).
+fn submit_diff_states(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot) {
+    let key = state.key.clone();
+    let Some(toplevel) = state.toplevel.clone() else {
+        return;
+    };
+    let Some(diff) = state.slot_mut(slot).as_mut() else {
+        return;
+    };
+    let generation = diff.generation;
+    let wanted = diff.states_status == StatesStatus::Loading && !diff.loading;
+    if !wanted || diff.states_job.is_some_and(|(_, g)| g == generation) {
+        return;
+    }
+    let Some(file) = diff.diff.as_ref() else {
+        return;
+    };
+    if let Some((job, _)) = diff.states_job.take() {
+        scheduler.cancel(job);
+    }
+    let old = match diff.old_oid() {
+        None => StatesSource::None,
+        Some(oid) if diff.old_failed.as_deref() == Some(oid) => StatesSource::TooLarge,
+        Some(oid) => match &diff.old {
+            Some(old) if old.oid() == oid => StatesSource::Old(Arc::clone(old)),
+            _ => StatesSource::Blob(oid.to_owned()),
+        },
+    };
+    let new = if file.header.deleted_file {
+        StatesSource::None
+    } else if is_working_kind(diff.target.kind) {
+        StatesSource::File(toplevel.join(&diff.target.path))
+    } else {
+        file.header
+            .new_oid
+            .as_deref()
+            .filter(|o| !o.is_empty() && !o.bytes().all(|b| b == b'0'))
+            .map_or(StatesSource::None, |oid| StatesSource::Blob(oid.to_owned()))
+    };
+    let read_old = matches!(old, StatesSource::Blob(_)) && !diff.old_loading;
+    diff.states_read_old = read_old;
+    let syntax = diff.syntax;
+    let job = scheduler.submit(JobSpec::read(&key, LINE_STATES_JOB_LABEL, move |ctx| {
+        let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+        let stop = || cancel.is_cancelled();
+        let mut skipped = matches!(old, StatesSource::TooLarge);
+        let mut old_file = None;
+        let old_text = match &old {
+            StatesSource::Old(file) => Some(Arc::clone(file)),
+            StatesSource::Blob(oid) => {
+                let file = read_side(backend, ctx.repo(), &old, cancel)?
+                    .map(|text| Arc::new(OldFile::new(oid.clone(), text)));
+                skipped |= file.is_none();
+                if read_old {
+                    old_file = Some((oid.clone(), file.clone()));
+                }
+                file
+            }
+            _ => None,
+        };
+        let old_states = match old_text {
+            Some(file) => {
+                let lines = (1..=file.line_count()).map(|n| file.line(n).unwrap_or_default());
+                Some(Arc::new(
+                    LineStates::compute(&syntax, lines, stop).ok_or_else(cancelled_states)?,
+                ))
+            }
+            None => None,
+        };
+        let new_text = read_side(backend, ctx.repo(), &new, cancel)?;
+        skipped |= new_text.is_none() && matches!(new, StatesSource::Blob(_));
+        let new_states = match new_text {
+            Some(text) => Some(Arc::new(
+                LineStates::of_text(&syntax, &text, stop).ok_or_else(cancelled_states)?,
+            )),
+            None => None,
+        };
+        Ok(JobOutput::LineStates(Box::new(StatesOutput {
+            target: StatesTarget::Diff(slot, generation),
+            old: old_states,
+            new: new_states,
+            skipped,
+            old_file,
+        })))
+    }));
+    diff.states_job = Some((job, generation));
+}
+
+/// Diff kinds whose new side is the file in the working tree.
+fn is_working_kind(kind: DiffKind) -> bool {
+    matches!(
+        kind,
+        DiffKind::Unstaged
+            | DiffKind::Untracked
+            | DiffKind::Head
+            | DiffKind::Amend
+            | DiffKind::Working
+    )
+}
+
+/// Starts finding the line states of the conflicted file shown when its
+/// content has none yet.
+fn submit_conflict_states(scheduler: &JobScheduler, state: &mut RepoState) {
+    let key = state.key.clone();
+    let Some(conflict) = state.conflict.as_mut() else {
+        return;
+    };
+    let Some(hash) = conflict.content else {
+        return;
+    };
+    let current = conflict.states.as_ref().is_some_and(|(h, _)| *h == hash);
+    let running = conflict.states_job.is_some_and(|(_, h)| h == hash);
+    if conflict.syntax.language.is_none() || current || running {
+        return;
+    }
+    let Some(file) = conflict.file.clone() else {
+        return;
+    };
+    if let Some((job, _)) = conflict.states_job.take() {
+        scheduler.cancel(job);
+    }
+    let syntax = conflict.syntax;
+    let job = scheduler.submit(JobSpec::read(&key, LINE_STATES_JOB_LABEL, move |ctx| {
+        let cancel = ctx.cancel_token();
+        let states = file
+            .line_states(&syntax, || cancel.is_cancelled())
+            .ok_or_else(cancelled_states)?;
+        Ok(JobOutput::LineStates(Box::new(StatesOutput {
+            target: StatesTarget::Conflict(hash),
+            old: None,
+            new: Some(Arc::new(states)),
+            skipped: false,
+            old_file: None,
+        })))
+    }));
+    conflict.states_job = Some((job, hash));
+}
+
+/// Stores the line states a job found, and the old file it read, when
+/// they still belong to what is shown.
+fn apply_line_states(
+    state: &mut RepoState,
+    job: JobId,
+    kind: EventKind,
+    repo: &Path,
+    out: &mut Vec<RuntimeEvent>,
+) {
+    let output = match kind {
+        EventKind::Finished(Ok(JobOutput::LineStates(output))) => Some(*output),
+        EventKind::Finished(_) | EventKind::Cancelled => None,
+        EventKind::Started | EventKind::Progress(_) => return,
+    };
+    let mut changed = None;
+    for slot in [DiffSlot::Changes, DiffSlot::Commit, DiffSlot::Compare] {
+        let Some(diff) = state.slot_mut(slot).as_mut() else {
+            continue;
+        };
+        let Some((_, generation)) = diff.states_job.filter(|(j, _)| *j == job) else {
+            continue;
+        };
+        diff.states_job = None;
+        let read_old = std::mem::take(&mut diff.states_read_old);
+        changed = Some(slot);
+        let Some(output) = output.as_ref() else {
+            if diff.states_status == StatesStatus::Loading && generation == diff.generation {
+                diff.states_status = StatesStatus::Skipped;
+            }
+            break;
+        };
+        if let Some((oid, file)) = output.old_file.as_ref().filter(|_| read_old) {
+            if diff.old.is_none() && diff.old_oid() == Some(oid.as_str()) {
+                match file {
+                    Some(file) => diff.old = Some(Arc::clone(file)),
+                    None => {
+                        diff.old_failed = Some(oid.clone());
+                        diff.expansion = Expansion::default();
+                    }
+                }
+                diff.relayout();
+            }
+        }
+        if output.target == StatesTarget::Diff(slot, diff.generation) {
+            let new = output.new.clone().filter(|new| fits_new_side(diff, new));
+            diff.states = DiffStates {
+                old: output.old.clone(),
+                new,
+            };
+            diff.states_status = if output.skipped {
+                StatesStatus::Skipped
+            } else {
+                StatesStatus::Ready
+            };
+        }
+        break;
+    }
+    if changed.is_none() {
+        if let Some(conflict) = state.conflict.as_mut() {
+            if conflict.states_job.is_some_and(|(j, _)| j == job) {
+                conflict.states_job = None;
+                if let Some(output) = &output {
+                    if let (StatesTarget::Conflict(hash), Some(new)) = (output.target, &output.new)
+                    {
+                        conflict.states = Some((hash, Arc::clone(new)));
+                    }
+                }
+                changed = Some(DiffSlot::Changes);
+            }
+        }
+    }
+    if let Some(slot) = changed {
+        out.push(RuntimeEvent::DiffChanged {
+            repo: repo.to_path_buf(),
+            slot,
+        });
+    }
+}
+
+/// The new side read for the states has every line the diff shows of it
+/// (a filter or a later edit can make the file on disk another text).
+fn fits_new_side(diff: &DiffState, new: &LineStates) -> bool {
+    let last = diff
+        .diff
+        .as_ref()
+        .and_then(|d| d.hunks.last())
+        .map_or(0, |h| {
+            h.new_start.saturating_add(h.new_count).saturating_sub(1)
+        });
+    usize::try_from(last).is_ok_and(|last| last <= new.line_count())
 }
 
 /// Reads the old side of the diff in `slot` when its open gaps need it.
@@ -5060,10 +5561,23 @@ fn apply_diff(
             diff,
             staged,
             images,
+            syntax,
         })) if generation == current.generation => {
             current.loading = false;
+            let colour = syntax.language.is_some()
+                && diff.content == DiffContent::Text
+                && diff.line_count() > 0;
+            if !colour || current.syntax != syntax {
+                current.states = DiffStates::default();
+            }
+            current.states_status = if colour {
+                StatesStatus::Loading
+            } else {
+                StatesStatus::None
+            };
             current.diff = Some(*diff);
             current.images = images.map(|i| *i);
+            current.syntax = syntax;
             current.error = None;
             current.relayout();
             resolve = staged;

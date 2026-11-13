@@ -1,0 +1,132 @@
+use super::super::generic::{Escape, Interp, Spec, SpecLexer, Str, BACKSLASH};
+use super::super::kind::TokenKind;
+use super::{no_hints, LanguageDef};
+
+static INTERP: &[Interp] = &[Interp {
+    open: "\\(",
+    close: ')',
+    language: "swift",
+}];
+
+static SPEC: Spec = Spec {
+    line_comments: &["//"],
+    doc_comments: &["///"],
+    block_comment: Some(("/*", "*/")),
+    doc_blocks: true,
+    strings: &[
+        Str {
+            hashed: true,
+            ..Str::new("", "", Escape::None)
+        },
+        Str {
+            interps: INTERP,
+            ..Str::lines("\"\"\"", "\"\"\"", BACKSLASH)
+        },
+        Str {
+            interps: INTERP,
+            ..Str::new("\"", "\"", BACKSLASH)
+        },
+    ],
+    keywords: &[
+        "actor",
+        "any",
+        "as",
+        "associatedtype",
+        "async",
+        "await",
+        "class",
+        "convenience",
+        "deinit",
+        "didSet",
+        "dynamic",
+        "enum",
+        "extension",
+        "fileprivate",
+        "final",
+        "func",
+        "get",
+        "import",
+        "indirect",
+        "init",
+        "inout",
+        "internal",
+        "is",
+        "lazy",
+        "let",
+        "mutating",
+        "nonisolated",
+        "open",
+        "operator",
+        "override",
+        "private",
+        "protocol",
+        "public",
+        "required",
+        "rethrows",
+        "self",
+        "Self",
+        "set",
+        "some",
+        "static",
+        "struct",
+        "subscript",
+        "super",
+        "throws",
+        "typealias",
+        "unowned",
+        "var",
+        "weak",
+        "where",
+        "willSet",
+    ],
+    control_keywords: &[
+        "break",
+        "case",
+        "catch",
+        "continue",
+        "default",
+        "defer",
+        "do",
+        "else",
+        "fallthrough",
+        "for",
+        "guard",
+        "if",
+        "in",
+        "repeat",
+        "return",
+        "switch",
+        "throw",
+        "try",
+        "while",
+    ],
+    constants: &["true", "false", "nil"],
+    caps_constants: true,
+    capitalized_types: true,
+    calls: true,
+    definitions: &[
+        ("func", TokenKind::Function),
+        ("class", TokenKind::Type),
+        ("struct", TokenKind::Type),
+        ("enum", TokenKind::Type),
+        ("protocol", TokenKind::Type),
+        ("extension", TokenKind::Type),
+        ("typealias", TokenKind::Type),
+        ("actor", TokenKind::Type),
+    ],
+    annotation_sigils: &['@'],
+    hash_words: true,
+    ..Spec::EMPTY
+};
+
+static LEXER: SpecLexer = SpecLexer::new(&SPEC);
+
+pub static SWIFT: LanguageDef = LanguageDef {
+    id: "swift",
+    name: "Swift",
+    extensions: &["swift"],
+    file_names: &[],
+    shebangs: &["swift"],
+    lexer: &LEXER,
+    hints: no_hints,
+};

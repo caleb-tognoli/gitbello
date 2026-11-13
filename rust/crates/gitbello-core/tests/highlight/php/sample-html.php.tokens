@@ -1,0 +1,148 @@
+| <!DOCTYPE html>
+  ^^ punctuation
+    ^^^^^^^ keyword
+            ^^^^ attribute
+                ^ punctuation
+| <html lang="<?= $lang ?>">
+  ^ punctuation
+   ^^^^ tag
+        ^^^^ attribute
+            ^ operator
+             ^ string
+              ^^^ tag
+                  ^^^^^ variable
+                        ^^ tag
+                          ^ string
+                           ^ punctuation
+| <head>
+  ^ punctuation
+   ^^^^ tag
+       ^ punctuation
+|   <title><?php echo htmlspecialchars($title); ?></title>
+    ^ punctuation
+     ^^^^^ tag
+          ^ punctuation
+           ^^^^^ tag
+                 ^^^^ keyword
+                      ^^^^^^^^^^^^^^^^ function
+                                       ^^^^^^ variable
+                                                ^^ tag
+                                                  ^^ punctuation
+                                                    ^^^^^ tag
+                                                         ^ punctuation
+|   <style>
+    ^ punctuation
+     ^^^^^ tag
+          ^ punctuation
+|     /* across
+      ^^^^^^^^^ comment
+|        lines */
+  ^^^^^^^^^^^^^^^ comment
+|     .item { color: red; }
+      ^^^^^ attribute
+            ^ punctuation
+              ^^^^^ key
+                   ^ punctuation
+                        ^ punctuation
+                          ^ punctuation
+|   </style>
+    ^^ punctuation
+      ^^^^^ tag
+           ^ punctuation
+| </head>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation
+| <body>
+  ^ punctuation
+   ^^^^ tag
+       ^ punctuation
+| <?php
+  ^^^^^ tag
+| /* A comment with ?> inside
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment
+|    stays a comment */
+  ^^^^^^^^^^^^^^^^^^^^^ comment
+| foreach ($items as $item): // done ?>
+  ^^^^^^^ keyword.control
+           ^^^^^^ variable
+                  ^^ keyword
+                     ^^^^^ variable
+                             ^^^^^^^^ comment
+                                     ^^ tag
+|   <a class="item <?= $item->cls ?>" href="<?= url($item) ?>"><?= $item->name ?></a>
+    ^ punctuation
+     ^ tag
+       ^^^^^ attribute
+            ^ operator
+             ^^^^^^ string
+                   ^^^ tag
+                       ^^^^^ variable
+                                  ^^ tag
+                                    ^ string
+                                      ^^^^ attribute
+                                          ^ operator
+                                           ^ string
+                                            ^^^ tag
+                                                ^^^ function
+                                                    ^^^^^ variable
+                                                           ^^ tag
+                                                             ^ string
+                                                              ^ punctuation
+                                                               ^^^ tag
+                                                                   ^^^^^ variable
+                                                                               ^^ tag
+                                                                                 ^^ punctuation
+                                                                                   ^ tag
+                                                                                    ^ punctuation
+| <?php endforeach; ?>
+  ^^^^^ tag
+        ^^^^^^^^^^ keyword.control
+                    ^^ tag
+| <script>
+  ^ punctuation
+   ^^^^^^ tag
+         ^ punctuation
+|   const total = <?= count($items) ?>;
+    ^^^^^ keyword
+                  ^^^ tag
+                      ^^^^^ function
+                            ^^^^^^ variable
+                                    ^^ tag
+|   const label = `a ${total}
+    ^^^^^ keyword
+                  ^^^ string
+                     ^^ string.interpolation
+                            ^ string.interpolation
+|   items`;
+  ^^^^^^^^ string
+| </script>
+  ^^ punctuation
+    ^^^^^^ tag
+          ^ punctuation
+| <?xml-stylesheet href="x"?>
+  ^^ punctuation
+    ^^^^^^^^^^^^^^ keyword
+                   ^^^^ attribute
+                       ^ operator
+                        ^^^ string
+                           ^^ punctuation
+| <?php
+  ^^^^^ tag
+| $sql = <<<SQL
+  ^^^^ variable
+         ^^^^^^ string
+|   SELECT 1 ?> 2
+  ^^^^^^^^^^^^^^^ string
+|   SQL;
+    ^^^ string
+| ?>
+  ^^ tag
+| </body>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation
+| </html>
+  ^^ punctuation
+    ^^^^ tag
+        ^ punctuation

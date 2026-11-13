@@ -1,0 +1,50 @@
+| ; Comment
+  ^^^^^^^^^ comment
+| # Another comment
+  ^^^^^^^^^^^^^^^^^ comment
+| [core]
+  ^^^^^^ type
+|     editor = code --wait
+      ^^^^^^ key
+             ^ operator
+|     autocrlf = false
+      ^^^^^^^^ key
+               ^ operator
+                 ^^^^^ constant
+|     pager = less -R ; inline comment
+      ^^^^^ key
+            ^ operator
+                      ^^^^^^^^^^^^^^^^ comment
+|
+| [remote "origin"]
+  ^^^^^^^^^^^^^^^^^ type
+|     url = https://github.com/example/repo.git
+      ^^^ key
+          ^ operator
+|     fetch = +refs/heads/*:refs/remotes/origin/*
+      ^^^^^ key
+            ^ operator
+|
+| [settings]
+  ^^^^^^^^^^ type
+| timeout = 30
+  ^^^^^^^ key
+          ^ operator
+            ^^ number
+| ratio = -0.5
+  ^^^^^ key
+        ^ operator
+          ^^^^ number
+| name = "quoted value"
+  ^^^^ key
+       ^ operator
+| enabled = yes
+  ^^^^^^^ key
+          ^ operator
+            ^^^ constant
+| empty =
+  ^^^^^ key
+        ^ operator
+| key.with.dots = value
+  ^^^^^^^^^^^^^ key
+                ^ operator

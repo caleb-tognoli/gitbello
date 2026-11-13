@@ -16,7 +16,7 @@ use gitbello_core::diff::{
 };
 use gitbello_core::file_history::FileVersion;
 use gitbello_core::git::{GitError, GitErrorKind};
-use gitbello_core::highlight::{highlight, language_for, Language};
+use gitbello_core::highlight::{DiffStates, LineState, Syntax, TokenKind};
 use gitbello_core::ignore::{
     IgnoreLine, IgnorePreview, IgnoreRule, IgnoreRules, IgnoreTarget, Suggestion,
 };
@@ -716,6 +716,7 @@ pub fn conflict_info(state: &ConflictState, show_base: bool) -> VarDictionary {
         "as_staged" => false,
         "can_expand" => false,
         "whole" => false,
+        "states" => state.states_status().id(),
     };
     let size = |s: Option<u64>| s.map_or(-1, |s| i64::try_from(s).unwrap_or(i64::MAX));
     match (state.file(), state.error()) {
@@ -798,14 +799,12 @@ fn conflict_side(kind: ConflictKind) -> &'static str {
 fn conflict_line(
     file: &ConflictFile,
     row: &ConflictRow,
-    language: Option<Language>,
+    syntax: &Syntax,
+    state: LineState,
 ) -> VarDictionary {
     let number = row.line.map_or(0, |l| to_i64(l + 1));
-    let text = row
-        .line
-        .and_then(|l| file.line(l))
-        .map(display_text)
-        .unwrap_or_default();
+    let raw: &[u8] = row.line.and_then(|l| file.line(l)).unwrap_or_default();
+    let text = display_text(raw);
     let (kind, old, new): (i64, i64, i64) = match row.kind {
         ConflictRowKind::Context => (1, number, number),
         ConflictRowKind::Header => (0, 0, 0),
@@ -822,7 +821,7 @@ fn conflict_line(
     let syntax = if row.kind == ConflictRowKind::Header {
         PackedInt32Array::new()
     } else {
-        syntax_of(language, &text)
+        syntax_of(syntax, raw, state)
     };
     vdict! {
         "index" => -1,
@@ -851,20 +850,22 @@ pub fn conflict_rows(
     let Some(file) = state.file() else {
         return out;
     };
-    let language = diff_language(state.path());
+    let syntax = state.syntax();
     let layout = state.layout();
+    let line = |row: &ConflictRow| {
+        let before = row
+            .line
+            .map_or_else(LineState::default, |l| state.state_before(l));
+        conflict_line(file, row, &syntax, before)
+    };
     if split {
         for (left, right) in layout.split.iter().skip(start).take(count) {
-            let side = |row: &Option<ConflictRow>| {
-                row.as_ref()
-                    .map(|r| conflict_line(file, r, language))
-                    .unwrap_or_default()
-            };
+            let side = |row: &Option<ConflictRow>| row.as_ref().map(line).unwrap_or_default();
             out.push(&vdict! { "left" => &side(left), "right" => &side(right) });
         }
     } else {
         for row in layout.unified.iter().skip(start).take(count) {
-            out.push(&conflict_line(file, row, language));
+            out.push(&line(row));
         }
     }
     out
@@ -984,6 +985,8 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
     let mut info = vdict! {
         "path" => &path_str(&target.path),
         "kind" => kind,
+        "language" => state.syntax().language.map_or("", |l| l.id()),
+        "states" => state.states_status().id(),
     };
     let size = |s: Option<u64>| s.map_or(-1, |s| i64::try_from(s).unwrap_or(i64::MAX));
     match (state.diff(), state.error()) {
@@ -1104,7 +1107,7 @@ fn set_endings(info: &mut VarDictionary, summary: &EndingSummary) {
 /// A marker row (`index` -1, `kind` 5): `marker` is `no_newline` or
 /// `line_endings` (with `from`, `to` and `lines`).
 fn marker_line(marker: &Marker) -> VarDictionary {
-    let mut line = plain_line(5, 0, 0, "", None);
+    let mut line = plain_line(5, 0, 0, b"", &Syntax::plain(), LineState::default());
     match marker {
         Marker::NoNewline { .. } => line.set("marker", "no_newline"),
         Marker::LineEndings { from, to, lines } => {
@@ -1124,17 +1127,17 @@ fn set_offered(info: &mut VarDictionary, offered: &Offered) {
     info.set("modes", &modes);
 }
 
-/// The language used to color a diff of `path`.
-pub fn diff_language(path: &Path) -> Option<Language> {
-    language_for(path)
-}
-
 /// One diff line: `{index, kind, old, new, text, no_newline, hl, syntax}`.
 /// `kind` 0 = hunk header, 1 = context, 2 = added, 3 = removed; line numbers
 /// are 0 when absent; `hl` is the changed `[start, end)` character range
 /// against the paired line (empty when none); `syntax` holds
 /// `start, end, token kind` triples (see `highlight::TokenKind::id`).
-pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> VarDictionary {
+pub fn diff_line(
+    diff: &FileDiff,
+    index: usize,
+    syntax: &Syntax,
+    states: &DiffStates,
+) -> VarDictionary {
     let Some(line) = diff.line(index) else {
         return VarDictionary::new();
     };
@@ -1163,7 +1166,9 @@ pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> V
     let syntax = if line.kind == LineKind::Hunk {
         PackedInt32Array::new()
     } else {
-        syntax_of(language, &text)
+        let removed = line.kind == LineKind::Removed;
+        let before = states.before(removed, line.old_line, line.new_line);
+        syntax_of(syntax, line.text, before)
     };
     vdict! {
         "index" => to_i64(index),
@@ -1177,17 +1182,30 @@ pub fn diff_line(diff: &FileDiff, index: usize, language: Option<Language>) -> V
     }
 }
 
-/// `start, end, token kind` triples of `text`'s syntax tokens.
-fn syntax_of(language: Option<Language>, text: &str) -> PackedInt32Array {
-    let mut syntax = PackedInt32Array::new();
-    if let Some(language) = language {
-        for token in highlight(language, text) {
-            syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
-            syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
-            syntax.push(token.kind.id());
-        }
+/// `start, end, token kind` triples of the syntax tokens of a raw line, in
+/// columns of its displayed text, lexed from `state`.
+fn syntax_of(syntax: &Syntax, raw: &[u8], state: LineState) -> PackedInt32Array {
+    let mut out = PackedInt32Array::new();
+    for token in syntax.highlight_line_from(raw, state) {
+        out.push(i32::try_from(token.start).unwrap_or(i32::MAX));
+        out.push(i32::try_from(token.end).unwrap_or(i32::MAX));
+        out.push(token.kind.id());
     }
-    syntax
+    out
+}
+
+/// The syntax token kinds in id order: `{name, parent}` (`parent` empty
+/// when the kind has none; see `highlight::TokenKind`).
+pub fn syntax_kinds() -> Array<VarDictionary> {
+    TokenKind::ALL
+        .iter()
+        .map(|kind| {
+            vdict! {
+                "name" => kind.name(),
+                "parent" => kind.parent().map_or("", TokenKind::name),
+            }
+        })
+        .collect()
 }
 
 /// A line without a place in the diff (`index` -1): an unchanged line
@@ -1196,18 +1214,20 @@ fn plain_line(
     kind: i64,
     old: u32,
     new: u32,
-    text: &str,
-    language: Option<Language>,
+    raw: &[u8],
+    syntax: &Syntax,
+    state: LineState,
 ) -> VarDictionary {
+    let text = display_text(raw);
     vdict! {
         "index" => -1,
         "kind" => kind,
         "old" => i64::from(old),
         "new" => i64::from(new),
-        "text" => &gstr(text),
+        "text" => &gstr(&text),
         "no_newline" => false,
         "hl" => &PackedInt32Array::new(),
-        "syntax" => &syntax_of(language, text),
+        "syntax" => &syntax_of(syntax, raw, state),
     }
 }
 
@@ -1228,7 +1248,8 @@ pub fn diff_rows(
     let Some(diff) = state.diff() else {
         return out;
     };
-    let language = diff_language(&state.target().path);
+    let syntax = state.syntax();
+    let states = state.line_states();
     let layout = state.layout();
     let with_expanders = |mut line: VarDictionary, gap: usize| {
         line.set("gap", to_i64(gap));
@@ -1241,7 +1262,7 @@ pub fn diff_rows(
             LayoutRow::Diff(row) if split => {
                 let (left, right) = diff.split_row(row).unwrap_or((None, None));
                 let side = |line: Option<usize>| {
-                    line.map(|l| diff_line(diff, l, language))
+                    line.map(|l| diff_line(diff, l, &syntax, states))
                         .unwrap_or_default()
                 };
                 out.push(&vdict! {
@@ -1250,10 +1271,10 @@ pub fn diff_rows(
                 });
                 continue;
             }
-            LayoutRow::Diff(index) => diff_line(diff, index, language),
+            LayoutRow::Diff(index) => diff_line(diff, index, &syntax, states),
             LayoutRow::Header(header) => {
                 let index = diff.hunks.get(header.hunk).map_or(0, |h| h.line);
-                let mut line = diff_line(diff, index, None);
+                let mut line = diff_line(diff, index, &Syntax::plain(), states);
                 line.set("text", &gstr(&header.text(diff)));
                 with_expanders(line, header.hunk)
             }
@@ -1262,10 +1283,11 @@ pub fn diff_rows(
                     .old_file()
                     .and_then(|f| f.line(old))
                     .unwrap_or_default();
-                plain_line(1, old, new, &display_text(text), language)
+                let before = states.before(false, Some(old), Some(new));
+                plain_line(1, old, new, text, &syntax, before)
             }
             LayoutRow::End => with_expanders(
-                plain_line(0, 0, 0, "", None),
+                plain_line(0, 0, 0, b"", &Syntax::plain(), LineState::default()),
                 layout.gap_count().saturating_sub(1),
             ),
             // Side by side, a no-newline marker shows on its side only.
@@ -1502,9 +1524,9 @@ pub fn blame_info(blame: Option<&BlameState>) -> VarDictionary {
 /// commit of the file, 1 for the newest), `working` (not committed yet)
 /// and `focus` (the line is the focused commit's).
 pub fn blame_rows(blame: &BlameState, start: usize, count: usize) -> Array<VarDictionary> {
-    let language = diff_language(&blame.request().path);
     let focus = blame.focus();
     let table = blame.table();
+    let syntax = table.syntax();
     let end = start.saturating_add(count).min(table.line_count());
     let mut out = Array::new();
     for line in start.min(end)..end {
@@ -1513,8 +1535,9 @@ pub fn blame_rows(blame: &BlameState, start: usize, count: usize) -> Array<VarDi
             1,
             number,
             number,
-            &display_text(table.line_text(line)),
-            language,
+            table.line_text(line),
+            &syntax,
+            table.line_state(line),
         );
         match table.commit_of(line) {
             Some(commit) => {
