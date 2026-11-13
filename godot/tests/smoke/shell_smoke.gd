@@ -112,11 +112,11 @@ func run() -> void:
 	page.active_view()._on_job_ended(-7)
 	expect(not page.active_view().overlay().visible, "the overlay goes when the job ends")
 
-	# The left column's width is saved per repository.
+	# The left column's width is saved once for the app.
 	var history: HistoryView = page.history()
 	history.split_offset = 520
 	history.drag_ended.emit()
-	expect_eq(int(Core.repo_ui_state(page.key()).get("sidebar_width", 0)), 520, "the shared sidebar width is saved")
+	expect_eq(int(Core.repo_ui_state(WorktreeView.PANES_KEY).get("sidebar_width", 0)), 520, "the shared sidebar width is saved")
 	for which: WorktreeView.View in [WorktreeView.View.CHANGES, WorktreeView.View.SHELVES, WorktreeView.View.HISTORY]:
 		page.show_view(which)
 		for frame: int in 3:
@@ -132,6 +132,7 @@ func run() -> void:
 	expect_eq(roundi(page.history().left_pane().size.x), 400, "resizing Changes also resizes History")
 	page.active_view()._restore_widths()
 	expect_eq(page.history().split_offset, 400, "the common width is restored")
+	await _check_shared_widths(main, page)
 	var original_size: Vector2i = get_window().size
 	get_window().size = Vector2i(960, 680)
 	for which: WorktreeView.View in [WorktreeView.View.SHELVES, WorktreeView.View.CHANGES, WorktreeView.View.HISTORY]:
@@ -276,6 +277,38 @@ func _check_home_recent() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## Other worktrees and tabs follow a resize at once, and the first app-wide
+## sizes start from the ones a repository saved before.
+func _check_shared_widths(main: Main, page: RepoTab) -> void:
+	var other: WorktreeView = page.views()[1] if page.views()[0] == page.active_view() else page.views()[0]
+	expect_eq(other.history().split_offset, 400, "the other worktree follows the resize")
+	expect_eq(main.page_at(1).history().split_offset, 400, "another tab follows the resize")
+	page.active_view().history().details().split_offset = 230
+	page.active_view().history().details().drag_ended.emit()
+	expect_eq(main.page_at(2).history().details().split_offset, 230, "another tab's details follow too")
+	expect(Actions.run_action(&"worktree.select_2"), "the other worktree shows")
+	for frame: int in 3:
+		await get_tree().process_frame
+	expect_eq(roundi(page.history().left_pane().size.x), 400, "switching worktrees keeps the sidebar width")
+	expect(Actions.run_action(&"worktree.select_1"), "and back")
+	main.tab_bar().current_tab = 1
+	for frame: int in 3:
+		await get_tree().process_frame
+	expect_eq(roundi(main.current_page().history().left_pane().size.x), 400, "switching tabs keeps the sidebar width")
+	main.tab_bar().current_tab = 0
+
+	var key: String = "gitbello:panes-smoke"
+	var repo: String = page.key()
+	Core.set_repo_ui_state(repo, "changes_width", 333)
+	Core.set_repo_ui_state(repo, "details_height", 210)
+	var migrated: Dictionary = WorktreeView.pane_sizes(repo, key)
+	expect_eq(int(migrated.get("sidebar_width", 0)), 333, "an old per-view width starts the app-wide one")
+	expect_eq(int(migrated.get("details_height", 0)), 210, "so does an old details height")
+	expect_eq(int(Core.repo_ui_state(key).get("sidebar_width", 0)), 333, "and it is saved")
+	Core.set_repo_ui_state(repo, "changes_width", 350)
+	expect_eq(int(WorktreeView.pane_sizes(repo, key).get("sidebar_width", 0)), 333, "it is read only once")
 
 
 func _check_recent_labels() -> void:

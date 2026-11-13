@@ -76,6 +76,13 @@ const SYNC_ICONS: Dictionary[String, StringName] = {
 ## The view last chosen in the shown worktree: every worktree and tab shows it
 ## when it is selected.
 static var shared_view: View = View.HISTORY
+## Where the pane sizes are saved: one set for every tab and worktree.
+const PANES_KEY: String = "gitbello:panes"
+## Every worktree view, so a resized pane resizes them all.
+const GROUP: StringName = &"worktree_views"
+## Sizes once saved per repository, read once to start the app-wide ones.
+const PANE_NAMES: Array[String] = ["sidebar_width", "shelves_files_width", "details_height", "details_files_width"]
+const OLD_SIDEBAR_NAMES: Array[String] = ["history_width", "changes_width", "shelves_width"]
 
 var session: RepoSession = null
 var view: View = View.HISTORY
@@ -153,6 +160,7 @@ var _resolver_button: Button = Button.new()
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	_build_banner_text()
 	_switch.theme_type_variation = &"ViewSwitch"
 	var group: ButtonGroup = ButtonGroup.new()
@@ -911,18 +919,12 @@ func focus_view() -> void:
 		_history.commit_list().grab_focus()
 
 
-## The shared left-pane width, and the commit details' height and
-## files width, are saved per repository.
+## The shared left-pane width, the shelf files' width and the commit
+## details' height and files width are saved once for the app, and every tab
+## and worktree follows a resize at once.
 func _on_split_dragged(pane: SplitContainer) -> void:
-	if pane in _sidebar_panes():
-		_set_sidebar_width(pane.split_offset)
-	# Compare's and File history's details and files keep History's sizes.
-	for pair: Array in [[_history.details(), _compare.details_split(), _file_view.details_split()],
-			[_history.details().files_split(), _compare.files_diff_split()]]:
-		if pane in pair:
-			for other: Variant in pair:
-				(other as SplitContainer).split_offset = pane.split_offset
-	Core.set_repo_ui_state(_repo_key(), _split_key(pane), pane.split_offset)
+	Core.set_repo_ui_state(PANES_KEY, _split_key(pane), pane.split_offset)
+	get_tree().call_group(GROUP, &"_restore_widths")
 
 
 func _set_sidebar_width(width: int) -> void:
@@ -949,11 +951,8 @@ func _split_key(pane: SplitContainer) -> String:
 ## Saved sizes, else the theme's defaults (a split's offset is the size of
 ## its first part).
 func _restore_widths() -> void:
-	var saved: Dictionary = Core.repo_ui_state(_repo_key())
-	var default: int = get_theme_constant(&"default_left_width", &"Panes")
-	# Reuse an existing width when migrating from separate per-view settings.
-	_set_sidebar_width(int(saved.get("sidebar_width", saved.get("history_width",
-			saved.get("changes_width", saved.get("shelves_width", default))))))
+	var saved: Dictionary = pane_sizes(_repo_key())
+	_set_sidebar_width(int(saved.get("sidebar_width", get_theme_constant(&"default_left_width", &"Panes"))))
 	_changes.shelf_files_split().split_offset = int(saved.get("shelves_files_width", get_theme_constant(&"files_width", &"ShelfView")))
 	var details: CommitDetails = _history.details()
 	details.split_offset = int(saved.get("details_height",
@@ -963,6 +962,37 @@ func _restore_widths() -> void:
 	_compare.details_split().split_offset = details.split_offset
 	_file_view.details_split().split_offset = details.split_offset
 	_compare.files_diff_split().split_offset = details.files_split().split_offset
+
+
+## The app-wide pane sizes. Before any are saved, they start from the sizes
+## once saved for the most recently opened repository that has some (else
+## `repo`'s), including the per-view widths of earlier versions. `key` is
+## where they are saved (tests use another).
+static func pane_sizes(repo: String, key: String = PANES_KEY) -> Dictionary:
+	var saved: Dictionary = Core.repo_ui_state(key)
+	if not saved.is_empty():
+		return saved
+	var candidates: Array[String] = []
+	for path: String in Core.recent_repos(20):
+		candidates.append(path)
+	if not repo.is_empty():
+		candidates.append(repo)
+	for path: String in candidates:
+		var old: Dictionary = Core.repo_ui_state(path)
+		if not old.has("sidebar_width"):
+			for name: String in OLD_SIDEBAR_NAMES:
+				if old.has(name):
+					old["sidebar_width"] = old[name]
+					break
+		var found: bool = false
+		for name: String in PANE_NAMES:
+			if old.has(name):
+				saved[name] = int(old[name])
+				Core.set_repo_ui_state(key, name, int(old[name]))
+				found = true
+		if found:
+			return saved
+	return saved
 
 
 ## Per-repository state is saved under the main worktree's path.

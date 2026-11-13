@@ -82,12 +82,12 @@ func run() -> void:
 	unified.pressed.emit()
 	expect(not diff.side_by_side, "pressing the chosen layout again keeps it")
 
-	# The details' height and the files' width are saved per repository.
+	# The details' height and the files' width are saved once for the app.
 	details.split_offset = 240
 	details.drag_ended.emit()
 	details.files_split().split_offset = 260
 	details.files_split().drag_ended.emit()
-	var saved: Dictionary = Core.repo_ui_state(page.key())
+	var saved: Dictionary = Core.repo_ui_state(WorktreeView.PANES_KEY)
 	expect_eq(int(saved.get("details_height", 0)), 240, "the details height is saved")
 	expect_eq(int(saved.get("details_files_width", 0)), 260, "the files width is saved")
 

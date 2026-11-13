@@ -51,6 +51,10 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
   Ctrl+PageUp).
 - Ctrl+F focuses the filter in Compare.
 - Compare commits is the shorter name of Compare these commits.
+- Pane sizes (the left column, the shelf files, the commit details' height and files
+  width) are the same in every tab and worktree, so switching does not move a divider;
+  a resize applies everywhere at once. The first sizes come from the most recently opened
+  repository's.
 
 ## 1.1.0
 
