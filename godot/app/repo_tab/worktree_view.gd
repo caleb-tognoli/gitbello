@@ -71,6 +71,7 @@ const OVERLAY_DELAY: float = 0.3
 ## What the Sync button says and shows per `RepoOps.sync_state()`.
 const SYNC_ICONS: Dictionary[String, StringName] = {
 	"publish": &"GitPush", "push": &"GitPush", "pull": &"GitPull", "sync": &"Reload", "fetch": &"GitFetch",
+	"force_push": &"StatusWarning",
 }
 
 ## The view last chosen in the shown worktree: every worktree and tab shows it
@@ -291,6 +292,8 @@ func setup(value: RepoSession) -> void:
 	# resolver hides while a conflict is shown.
 	session.selection_changed.connect(_update_banner)
 	session.diff_changed.connect(_update_banner)
+	# Whether a diverged branch was rewritten (Force push) arrives with HEAD's info.
+	session.head_changed.connect(_update_header)
 	session.open_failed.connect(_on_open_failed)
 	session.missing.connect(_on_missing)
 	session.job_started.connect(_on_job_started)
@@ -1060,16 +1063,19 @@ func _update_header() -> void:
 		"push": tr("Push"),
 		"pull": tr("Pull"),
 		"sync": tr("Sync"),
+		"force_push": tr("Force push"),
 		"fetch": tr("Fetch"),
 	}[state]
 	_sync_button.show_state(caption, AppTheme.icon(SYNC_ICONS[state]), session.is_ready() and session.can_fetch())
-	var counted: bool = state in ["publish", "push", "pull", "sync"]
+	var counted: bool = state in ["publish", "push", "pull", "sync", "force_push"]
 	_sync_button.set_counts(ahead if counted else 0, behind if counted else 0)
 	var tooltip: String = {
 		"publish": tr("Push %s and set its upstream") % session.current_branch(),
 		"push": tr("Push your commits to %s") % session.default_remote(),
 		"pull": tr("Pull the new commits from %s") % session.default_remote(),
 		"sync": tr("Pull the new commits, then push yours"),
+		"force_push": tr("You rewrote 1 pushed commit. Replace it on %s.") % _ops.upstream_name() if behind == 1
+				else tr("You rewrote %d pushed commits. Replace them on %s.") % [behind, _ops.upstream_name()],
 		"fetch": tr("Fetch from %s") % session.default_remote(),
 	}[state]
 	if state == "publish" and ahead > 0:

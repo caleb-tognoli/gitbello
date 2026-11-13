@@ -43,8 +43,8 @@ use crate::merge::{
 };
 use crate::new_repo::{self, CloneOptions, CreateOptions, FIRST_COMMIT_MESSAGE};
 use crate::ops::{
-    CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, WorktreeOp,
-    AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
+    CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, UpstreamRewrite,
+    WorktreeOp, AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
     NEW_TASK_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
 };
 use crate::repo::{
@@ -1409,6 +1409,57 @@ impl RepoState {
                 .is_some_and(|r| r.upstream.is_some() && !r.tracking.gone)
     }
 
+    /// The commit a force push of the current branch expects on the remote:
+    /// where the last fetch saw the branch it pushes to, empty when there was
+    /// none.
+    pub fn push_lease(&self) -> Option<String> {
+        let branch = self.current_branch()?;
+        let tracking = match self.upstream_of(branch) {
+            Some((remote, upstream)) => format!("refs/remotes/{remote}/{upstream}"),
+            None => format!("refs/remotes/{}/{branch}", self.default_remote()?),
+        };
+        Some(
+            self.refs
+                .as_ref()?
+                .iter()
+                .find(|r| r.name == tracking)
+                .map_or_else(String::new, |r| r.commit().to_owned()),
+        )
+    }
+
+    /// Whether the current branch diverged from its upstream only because
+    /// you rewrote commits you had pushed, so a force push (not a merge or
+    /// rebase) is what Sync should offer. `None` while that is unknown or
+    /// stale.
+    pub fn upstream_rewrite(&self) -> Option<UpstreamRewrite> {
+        let name = self.current_branch()?;
+        let branch = self.branch(name)?;
+        let upstream = branch.upstream.as_deref()?;
+        let info = self.history_tracking()?;
+        let target = self.refs.as_ref()?.iter().find(|r| r.name == upstream)?;
+        let diverged = branch.tracking.ahead > 0 && branch.tracking.behind > 0;
+        (self.operation.is_none()
+            && diverged
+            && info.rewritten
+            && info.upstream_oid.as_deref() == Some(target.commit()))
+        .then(|| UpstreamRewrite {
+            shared: self.is_shared_branch(name),
+        })
+    }
+
+    /// The remote's default branch, or a name like `main` or `release/x`.
+    fn is_shared_branch(&self, name: &str) -> bool {
+        if crate::ops::is_shared_branch_name(name) {
+            return true;
+        }
+        let (Some(refs), Some((remote, upstream))) = (self.refs.as_ref(), self.upstream_of(name))
+        else {
+            return false;
+        };
+        crate::worktrees::default_base(refs, Some(&remote))
+            .is_some_and(|base| base == format!("{remote}/{upstream}"))
+    }
+
     /// Pushing needs a checked-out branch with commits and a remote.
     pub fn can_push(&self) -> bool {
         self.operation.is_none()
@@ -2611,15 +2662,15 @@ impl Runtime {
     }
 
     /// Pushes the current branch to its upstream, or (setting the upstream)
-    /// to the same name on the default remote.
-    pub fn push(&self, key: &Path, force_with_lease: bool) -> Option<JobId> {
+    /// to the same name on the default remote. With `lease` it force
+    /// pushes, refused unless the remote branch is still at that commit
+    /// (empty: it must not exist; see [`RepoState::push_lease`]).
+    pub fn push(&self, key: &Path, lease: Option<&str>) -> Option<JobId> {
         let state = self.repos.get(key).filter(|s| s.can_push())?;
         let branch = state.current_branch()?;
         let spec = match state.upstream_of(branch) {
-            Some((remote, upstream)) => {
-                PushSpec::branch(&remote, branch, Some(&upstream), force_with_lease)
-            }
-            None => PushSpec::branch(&state.default_remote()?, branch, None, force_with_lease),
+            Some((remote, upstream)) => PushSpec::branch(&remote, branch, Some(&upstream), lease),
+            None => PushSpec::branch(&state.default_remote()?, branch, None, lease),
         };
         let refresh = RefreshSet::EMPTY
             .with(RefreshKind::Refs)

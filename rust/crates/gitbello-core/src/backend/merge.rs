@@ -21,6 +21,13 @@ const MERGE_MESSAGE_FILE: &str = "gitbello-merge-msg";
 /// Commits outside HEAD read for the graph's `in_head`; more are not read.
 const NOT_IN_HEAD_LIMIT: usize = 200_000;
 
+/// Upstream commits HEAD lacks that the rewrite check reads; with more it
+/// treats the branches as diverged.
+const REWRITE_CHECK_LIMIT: usize = 100;
+
+/// Reflog entries of the branch searched for the upstream's commit.
+const REFLOG_CHECK_LIMIT: usize = 1000;
+
 fn io_error(what: impl std::fmt::Display, err: std::io::Error) -> GitError {
     GitError::new(what.to_string(), GitErrorKind::Io, err.to_string())
 }
@@ -473,6 +480,12 @@ impl CliBackend {
         } else {
             Default::default()
         };
+        let rewritten = match (branch, upstream_ref) {
+            (Some(branch), Some(remote)) if !outgoing.is_empty() => {
+                self.rewrote_upstream(repo, &branch.name, remote.commit(), &head, cancel)?
+            }
+            _ => false,
+        };
         let unpushed = self.read(
             repo,
             &["rev-list", "-n1", &head, "--not", "--remotes"],
@@ -518,8 +531,50 @@ impl CliBackend {
             oid: Some(head),
             upstream,
             upstream_gone,
+            upstream_oid: upstream_ref.map(|r| r.commit().to_owned()),
             outgoing,
+            rewritten,
         })
+    }
+
+    /// See [`HeadInfo::rewritten`]. `branch` is the full ref name.
+    fn rewrote_upstream(
+        &self,
+        repo: &Path,
+        branch: &str,
+        upstream: &str,
+        head: &str,
+        cancel: &CancelToken,
+    ) -> Result<bool, GitError> {
+        let limit = format!("-n{}", REWRITE_CHECK_LIMIT + 1);
+        let incoming = self.read(
+            repo,
+            &["log", "--format=%ae", &limit, upstream, "--not", head, "--"],
+            cancel,
+        )?;
+        let authors: Vec<String> = incoming.stdout_text().lines().map(str::to_owned).collect();
+        if authors.is_empty() || authors.len() > REWRITE_CHECK_LIMIT {
+            return Ok(false);
+        }
+        // Who commits here (`user.email` or `GIT_AUTHOR_EMAIL`); unknown: not yours.
+        let Ok(ident) = self.read(repo, &["var", "GIT_AUTHOR_IDENT"], cancel) else {
+            return Ok(false);
+        };
+        let ident = ident.stdout_text();
+        let email = ident
+            .split_once('<')
+            .and_then(|(_, rest)| rest.split_once('>'))
+            .map_or("", |(email, _)| email.trim());
+        if email.is_empty() || !authors.iter().all(|a| a.eq_ignore_ascii_case(email)) {
+            return Ok(false);
+        }
+        let reflog_limit = format!("-n{REFLOG_CHECK_LIMIT}");
+        let reflog = self.read(
+            repo,
+            &["log", "-g", "--format=%H", &reflog_limit, branch, "--"],
+            cancel,
+        )?;
+        Ok(reflog.stdout_text().lines().any(|oid| oid == upstream))
     }
 
     pub(super) fn undo_commit_impl(

@@ -1614,8 +1614,8 @@ impl GitBackend for CliBackend {
                 if spec.set_upstream {
                     cmd = cmd.arg("--set-upstream");
                 }
-                if spec.force_with_lease {
-                    cmd = cmd.arg("--force-with-lease");
+                if let Some(lease) = spec.lease_arg() {
+                    cmd = cmd.arg(lease);
                 }
                 cmd.arg(&spec.remote).args(&spec.refspecs)
             }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gitbello_core::config::Config;
 use gitbello_core::git::GitErrorKind;
-use gitbello_core::ops::{PullMode, AUTO_FETCH_JOB_LABEL};
+use gitbello_core::ops::{PullMode, UpstreamRewrite, AUTO_FETCH_JOB_LABEL};
 use gitbello_core::runtime::{JobState, Runtime, RuntimeEvent};
 use support::rt::{finish, open, poll_until, settle, succeed};
 use support::TestRepo;
@@ -98,7 +98,7 @@ fn push_updates_the_upstream_and_sets_one_for_new_branches() {
     let (mut rt, key) = open(&repo);
     assert_eq!(tracking(&rt, &key), (1, 0));
     assert!(rt.repo(&key).unwrap().can_push());
-    let job = rt.push(&key, false);
+    let job = rt.push(&key, None);
     succeed(&mut rt, &key, job);
     assert_eq!(tracking(&rt, &key), (0, 0));
     assert_eq!(
@@ -111,7 +111,7 @@ fn push_updates_the_upstream_and_sets_one_for_new_branches() {
     repo.commit("t.txt", "t\n", "topic work");
     settle(&mut rt, &key);
     assert_eq!(rt.repo(&key).unwrap().upstream_of("topic"), None);
-    let job = rt.push(&key, false);
+    let job = rt.push(&key, None);
     succeed(&mut rt, &key, job);
     assert_eq!(
         rt.repo(&key).unwrap().upstream_of("topic"),
@@ -123,9 +123,148 @@ fn push_updates_the_upstream_and_sets_one_for_new_branches() {
     repo.push_from(&other, "x.txt", "x\n", "theirs");
     repo.commit("y.txt", "y\n", "ours");
     settle(&mut rt, &key);
-    let job = rt.push(&key, false);
+    let job = rt.push(&key, None);
     let err = finish(&mut rt, &key, job).expect("rejected");
     assert_eq!(err.kind, GitErrorKind::NonFastForward, "{err}");
+}
+
+/// Waits until HEAD's info (which says whether the branch was rewritten)
+/// matches HEAD again, then returns the rewrite state.
+fn rewrite_after_settle(
+    rt: &mut Runtime,
+    key: &std::path::Path,
+    want: Option<UpstreamRewrite>,
+) -> Option<UpstreamRewrite> {
+    settle(rt, key);
+    poll_until(rt, |rt, _| {
+        rt.repo(key)
+            .expect("open repo")
+            .history_tracking()
+            .is_some()
+            && rt.repo(key).expect("open repo").upstream_rewrite() == want
+    });
+    rt.repo(key).expect("open repo").upstream_rewrite()
+}
+
+/// Commits `file` in checkout `dir` on branch `branch` as `email` and pushes it.
+fn push_as(repo: &TestRepo, dir: &std::path::Path, branch: &str, email: &str, file: &str) {
+    let run = |args: &[&str]| {
+        repo.command_in(dir)
+            .env("GIT_AUTHOR_EMAIL", email)
+            .args(args)
+            .run()
+            .unwrap_or_else(|err| panic!("git {args:?}: {err}"))
+    };
+    run(&["fetch", "--quiet", "origin"]);
+    run(&["switch", "--quiet", branch]);
+    run(&["pull", "--quiet", "--ff-only"]);
+    fs::write(dir.join(file), "theirs\n").expect("write file");
+    run(&["add", "--", file]);
+    run(&["commit", "--quiet", "-m", "teammate"]);
+    run(&["push", "--quiet", "origin", branch]);
+}
+
+#[test]
+fn amending_a_pushed_commit_is_a_rewrite_and_force_pushes_with_a_pinned_lease() {
+    let (repo, other) = shared();
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.commit("t.txt", "t\n", "topic work");
+    let (mut rt, key) = open(&repo);
+    let job = rt.push(&key, None);
+    succeed(&mut rt, &key, job);
+    assert_eq!(rt.repo(&key).unwrap().upstream_rewrite(), None);
+
+    repo.git(&["commit", "--amend", "--quiet", "-m", "topic work, amended"]);
+    let own = Some(UpstreamRewrite { shared: false });
+    assert_eq!(rewrite_after_settle(&mut rt, &key, own), own);
+    assert_eq!(tracking(&rt, &key), (1, 1));
+    let pushed = repo.git(&["rev-parse", "refs/remotes/origin/topic"]);
+    let lease = rt.repo(&key).unwrap().push_lease().expect("a lease");
+    assert_eq!(lease, pushed);
+    let job = rt.push(&key, Some(&lease));
+    succeed(&mut rt, &key, job);
+    assert_eq!(tracking(&rt, &key), (0, 0));
+    assert_eq!(
+        repo.git(&["rev-parse", "refs/remotes/origin/topic"]),
+        repo.head()
+    );
+
+    // Rewritten again, but a teammate pushed on top before our (background)
+    // fetch: no longer a rewrite of ours, and the lease read before the
+    // fetch refuses the push although origin/topic is now current.
+    repo.git(&[
+        "commit",
+        "--amend",
+        "--quiet",
+        "-m",
+        "topic work, amended twice",
+    ]);
+    assert_eq!(rewrite_after_settle(&mut rt, &key, own), own);
+    let lease = rt.repo(&key).unwrap().push_lease().expect("a lease");
+    push_as(&repo, &other, "topic", "bob@example.com", "b.txt");
+    let job = rt.fetch(&key);
+    succeed(&mut rt, &key, job);
+    assert_eq!(rewrite_after_settle(&mut rt, &key, None), None);
+    let theirs = repo.git(&["rev-parse", "refs/remotes/origin/topic"]);
+    assert_ne!(theirs, lease);
+    let job = rt.push(&key, Some(&lease));
+    assert!(
+        finish(&mut rt, &key, job).is_some(),
+        "the stale lease refuses"
+    );
+    let job = rt.fetch(&key);
+    succeed(&mut rt, &key, job);
+    assert_eq!(
+        repo.git(&["rev-parse", "refs/remotes/origin/topic"]),
+        theirs
+    );
+}
+
+#[test]
+fn a_teammates_commit_dropped_locally_is_not_a_rewrite() {
+    let (repo, other) = shared();
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.commit("t.txt", "t\n", "topic work");
+    let (mut rt, key) = open(&repo);
+    let job = rt.push(&key, None);
+    succeed(&mut rt, &key, job);
+    push_as(&repo, &other, "topic", "bob@example.com", "b.txt");
+    let job = rt.pull(&key, None);
+    succeed(&mut rt, &key, job);
+    // Their commit was on this branch (its reflog) but is not ours.
+    repo.git(&["reset", "--quiet", "--hard", "HEAD~1"]);
+    repo.commit("c.txt", "c\n", "ours instead");
+    assert_eq!(rewrite_after_settle(&mut rt, &key, None), None);
+    assert_eq!(tracking(&rt, &key), (1, 1));
+}
+
+#[test]
+fn your_own_push_from_another_clone_is_not_a_rewrite() {
+    let (repo, other) = shared();
+    repo.git(&["switch", "--quiet", "-c", "topic"]);
+    repo.commit("t.txt", "t\n", "topic work");
+    let (mut rt, key) = open(&repo);
+    let job = rt.push(&key, None);
+    succeed(&mut rt, &key, job);
+    // Yours, but this branch never pointed at it: a real divergence.
+    push_as(&repo, &other, "topic", "ada@example.com", "b.txt");
+    repo.commit("c.txt", "c\n", "here");
+    let job = rt.fetch(&key);
+    succeed(&mut rt, &key, job);
+    assert_eq!(tracking(&rt, &key), (1, 1));
+    assert_eq!(rewrite_after_settle(&mut rt, &key, None), None);
+}
+
+#[test]
+fn rewriting_the_default_branch_is_a_shared_rewrite() {
+    let (repo, _other) = shared();
+    repo.commit("b.txt", "b\n", "second");
+    let (mut rt, key) = open(&repo);
+    let job = rt.push(&key, None);
+    succeed(&mut rt, &key, job);
+    repo.git(&["commit", "--amend", "--quiet", "-m", "second, amended"]);
+    let shared = Some(UpstreamRewrite { shared: true });
+    assert_eq!(rewrite_after_settle(&mut rt, &key, shared), shared);
 }
 
 #[test]
@@ -138,7 +277,7 @@ fn nothing_to_sync_without_remotes_or_upstream() {
     assert_eq!(state.default_remote(), None);
     assert_eq!(rt.fetch(&key), None);
     assert_eq!(rt.pull(&key, None), None);
-    assert_eq!(rt.push(&key, false), None);
+    assert_eq!(rt.push(&key, None), None);
 }
 
 #[test]

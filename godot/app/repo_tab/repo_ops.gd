@@ -239,7 +239,8 @@ func handles_error(error: Dictionary) -> bool:
 # --- Sync ---------------------------------------------------------------------
 
 ## What the Sync button does now (PLAN §4): `publish`, `pull`, `push`, `sync`
-## (pull then push), or `fetch`.
+## (pull then push), `force_push` (you rewrote pushed commits of a branch of
+## your own: amend, rebase), or `fetch`.
 func sync_state() -> String:
 	if session == null or not session.is_ready() or session.current_branch().is_empty():
 		return "fetch"
@@ -249,7 +250,8 @@ func sync_state() -> String:
 	var ahead: int = int(head.get("ahead", 0))
 	var behind: int = int(head.get("behind", 0))
 	if ahead > 0 and behind > 0:
-		return "sync"
+		var rewrite: Dictionary = session.upstream_rewrite()
+		return "force_push" if not rewrite.is_empty() and not bool(rewrite["shared"]) else "sync"
 	if behind > 0:
 		return "pull"
 	if ahead > 0:
@@ -264,9 +266,11 @@ func upstream_name() -> String:
 	return String(_branch_ref("branch", session.current_branch()).get("upstream", ""))
 
 
-## The Sync button: publish, pull, push, pull then push, or fetch. With the
-## pull mode `ff-only`, diverged branches cannot fast-forward, so it offers
-## merge or rebase (then the push) instead of failing.
+## The Sync button: publish, pull, push, pull then push, force push, or
+## fetch. With the pull mode `ff-only`, diverged branches cannot fast-forward,
+## so it offers merge or rebase (then the push) instead of failing. A shared
+## branch (such as `main`) whose pushed commits you rewrote always asks, with
+## Force push as a third choice: pulling would bring the old commits back.
 func sync() -> void:
 	match sync_state():
 		"publish", "push":
@@ -275,20 +279,28 @@ func sync() -> void:
 			pull()
 		"fetch":
 			fetch()
+		"force_push":
+			force_push()
 		"sync":
 			var origin: Control = Actions.origin()
+			var rewritten: bool = not session.upstream_rewrite().is_empty()
 			var mode: String = Core.pull_mode()
-			if mode != "ff-only":
+			if mode != "ff-only" and not rewritten:
 				_pull_then_push(mode, origin)
 				return
 			var fixes: Array[Dictionary] = [
 				{"label": "Pull and merge", "run": func() -> void: _pull_then_push("merge", origin)},
 				{"label": "Pull and rebase", "run": func() -> void: _pull_then_push("rebase", origin)},
 			]
+			var branch: String = session.current_branch()
+			var title: String = tr("%s has diverged from its upstream") % branch
+			var text: String = tr("Both sides have new commits, so a fast-forward is not possible. Merge or rebase, then push.")
+			if rewritten:
+				fixes.append({"label": "Force push…", "run": force_push})
+				title = tr("You rewrote pushed commits on %s") % branch
+				text = tr("Force push replaces them on %s, and others who pulled them must reset. Merging or rebasing brings the old ones back.") % upstream_name()
 			if feedback != null and feedback.toasts != null:
-				feedback.toasts.show_toast(tr("%s has diverged from its upstream") % session.current_branch(),
-						tr("Both sides have new commits, so a fast-forward is not possible. Merge or rebase, then push."),
-						"", fixes)
+				feedback.toasts.show_toast(title, text, "", fixes)
 
 
 func _pull_then_push(mode: String, origin: Control) -> void:
@@ -319,12 +331,18 @@ func push() -> int:
 			"Publishing" if publishing else "Pushing")
 
 
+## Asks first. The push is refused unless the remote branch is still where
+## the last fetch saw it when asked (a fetch meanwhile does not widen it).
 func force_push() -> void:
 	var branch: String = session.current_branch()
 	var origin: Control = Actions.origin()
-	_ask("Force push", tr("Replace %s on %s with your local branch?\nThis is refused if the remote branch has commits you have not fetched.") % [
-		branch, session.default_remote()], "Force push", func() -> void:
-			_track(session.push(true), tr("Force pushing %s") % branch, "", Callable(), origin, Callable(),
+	var lease: String = session.push_lease()
+	var text: String = tr("Replace %s on %s with your local branch?\nThis is refused if the remote branch has commits you have not fetched.") % [
+		branch, session.default_remote()]
+	if not session.upstream_rewrite().is_empty():
+		text = tr("Replace the old versions of your commits on %s with the rewritten ones?\nThis is refused if it has commits you have not fetched.") % upstream_name()
+	_ask("Force push", text, "Force push", func() -> void:
+			_track(session.force_push(lease), tr("Force pushing %s") % branch, "", Callable(), origin, Callable(),
 					"Force pushing"))
 
 

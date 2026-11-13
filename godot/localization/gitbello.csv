@@ -1229,3 +1229,8 @@ keys,en,it
 "No earlier version in this file's history.","No earlier version in this file's history.","Nessuna versione precedente nella cronologia di questo file."
 "That commit is not among the versions listed.","That commit is not among the versions listed.","Quel commit non è tra le versioni elencate."
 "Selected file","Selected file","File selezionato"
+"You rewrote 1 pushed commit. Replace it on %s.","You rewrote 1 pushed commit. Replace it on %s.","Hai riscritto 1 commit già inviato. Sostituiscilo su %s."
+"You rewrote %d pushed commits. Replace them on %s.","You rewrote %d pushed commits. Replace them on %s.","Hai riscritto %d commit già inviati. Sostituiscili su %s."
+"You rewrote pushed commits on %s","You rewrote pushed commits on %s","Hai riscritto commit già inviati su %s"
+"Force push replaces them on %s, and others who pulled them must reset. Merging or rebasing brings the old ones back.","Force push replaces them on %s, and others who pulled them must reset. Merging or rebasing brings the old ones back.","Il push forzato li sostituisce su %s, e chi li ha già scaricati dovrà fare un reset. Merge o rebase riportano quelli vecchi."
+"Replace the old versions of your commits on %s with the rewritten ones?\nThis is refused if it has commits you have not fetched.","Replace the old versions of your commits on %s with the rewritten ones?\nThis is refused if it has commits you have not fetched.","Sostituire le vecchie versioni dei tuoi commit su %s con quelle riscritte?\nViene rifiutato se contiene commit che non hai ancora scaricato."

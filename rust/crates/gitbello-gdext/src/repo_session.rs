@@ -433,10 +433,49 @@ impl RepoSession {
     }
 
     /// Pushes the current branch (setting its upstream if it has none).
-    /// Label `push`.
+    /// `force_with_lease` force pushes against where the last fetch saw the
+    /// remote branch (see `force_push`). Label `push`.
     #[func]
     fn push(&self, force_with_lease: bool) -> i64 {
-        job_id(runtime_cell::with(|rt| rt.push(&self.key, force_with_lease)).flatten())
+        let lease = if force_with_lease {
+            match self.read(RepoState::push_lease).flatten() {
+                Some(lease) => Some(lease),
+                None => return -1,
+            }
+        } else {
+            None
+        };
+        job_id(runtime_cell::with(|rt| rt.push(&self.key, lease.as_deref())).flatten())
+    }
+
+    /// Force pushes the current branch, refused unless the remote branch is
+    /// still at `expected` (a `push_lease()` read when the user was asked).
+    /// Label `push`.
+    #[func]
+    fn force_push(&self, expected: GString) -> i64 {
+        let expected = expected.to_string();
+        job_id(runtime_cell::with(|rt| rt.push(&self.key, Some(&expected))).flatten())
+    }
+
+    /// The commit a force push expects on the remote: where the last fetch
+    /// saw the branch it pushes to, empty when there was none.
+    #[func]
+    fn push_lease(&self) -> GString {
+        self.read(RepoState::push_lease)
+            .flatten()
+            .map(|l| gstr(&l))
+            .unwrap_or_default()
+    }
+
+    /// `{shared}` when the current branch diverged from its upstream only
+    /// because you rewrote pushed commits (amend, rebase, reset), else `{}`.
+    /// `shared`: the remote's default branch or a name like `main`.
+    #[func]
+    fn upstream_rewrite(&self) -> VarDictionary {
+        self.read(RepoState::upstream_rewrite)
+            .flatten()
+            .map(|r| vdict! { "shared" => r.shared })
+            .unwrap_or_default()
     }
 
     /// Pushes a tag to the default remote. Label `push tag`.

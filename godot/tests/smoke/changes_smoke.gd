@@ -360,7 +360,11 @@ func run() -> void:
 		elif label == "push":
 			pushed[0] = ok)
 	expect(session.fetch() >= 0, "fetch starts against the fixture's local-only remote")
-	expect(await wait_until(func() -> bool: return fetched[0]), "the local remote is fetched before the lease-protected fixture push")
+	# The lease is where the refs last saw the remote branch: wait for the
+	# refs the fetch brought too (an older origin/main is refused as stale).
+	var lease_before: String = session.push_lease()
+	expect(await wait_until(func() -> bool: return fetched[0] and session.push_lease() != lease_before),
+			"the local remote is fetched before the lease-protected fixture push")
 	expect(session.push(true) >= 0, "push starts against the throwaway local remote")
 	expect(await wait_until(func() -> bool: return pushed[0] and session.amend_requires_force_push()), "the fixture HEAD is known to be pushed")
 	session.pick_all(false)

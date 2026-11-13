@@ -417,7 +417,7 @@ fn push_delete(
         remote: remote.to_owned(),
         refspecs: vec![refspec.to_owned()],
         set_upstream: false,
-        force_with_lease: false,
+        force_with_lease: None,
     });
     match backend.sync(toplevel, &push, progress, cancel) {
         Ok(()) => Ok(true),
@@ -459,7 +459,7 @@ fn undo_job(
             remote: target.remote.clone(),
             refspecs: vec![format!("{oid}:refs/heads/{}", target.branch)],
             set_upstream: false,
-            force_with_lease: false,
+            force_with_lease: None,
         });
         backend.sync(toplevel, &push, progress, cancel)?;
     }

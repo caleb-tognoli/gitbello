@@ -817,7 +817,15 @@ pub struct HeadInfo {
     pub oid: Option<String>,
     pub upstream: Option<String>,
     pub upstream_gone: bool,
+    /// The upstream's commit when this was read.
+    pub upstream_oid: Option<String>,
     pub outgoing: HashSet<String>,
+    /// HEAD and its upstream diverged because you rewrote pushed commits
+    /// (amend, rebase, reset): the branch once pointed at the upstream's
+    /// commit (its reflog) and every commit HEAD lacks is yours
+    /// (author email of `git var GIT_AUTHOR_IDENT`). A force push is then
+    /// what Sync should offer.
+    pub rewritten: bool,
     /// Commits of branches, remote branches and tags that HEAD lacks (what
     /// "Merge into current" can be offered on).
     pub not_in_head: HashSet<String>,

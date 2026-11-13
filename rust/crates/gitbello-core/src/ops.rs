@@ -59,7 +59,10 @@ pub struct PushSpec {
     pub refspecs: Vec<String>,
     /// `-u`: make the pushed branch track its remote counterpart.
     pub set_upstream: bool,
-    pub force_with_lease: bool,
+    /// Force push, refused unless the remote branch is still at this commit
+    /// (empty: it must not exist). Pinned to what the user saw, so a
+    /// background fetch cannot widen it as plain `--force-with-lease` would.
+    pub force_with_lease: Option<String>,
 }
 
 impl PushSpec {
@@ -70,14 +73,14 @@ impl PushSpec {
         remote: &str,
         branch: &str,
         upstream_branch: Option<&str>,
-        force_with_lease: bool,
+        force_with_lease: Option<&str>,
     ) -> Self {
         let target = upstream_branch.unwrap_or(branch);
         Self {
             remote: remote.to_owned(),
             refspecs: vec![format!("refs/heads/{branch}:refs/heads/{target}")],
             set_upstream: upstream_branch.is_none(),
-            force_with_lease,
+            force_with_lease: force_with_lease.map(str::to_owned),
         }
     }
 
@@ -86,9 +89,35 @@ impl PushSpec {
             remote: remote.to_owned(),
             refspecs: vec![format!("refs/tags/{tag}")],
             set_upstream: false,
-            force_with_lease: false,
+            force_with_lease: None,
         }
     }
+
+    /// `--force-with-lease=<remote ref>:<expected>` for the first refspec's
+    /// destination.
+    pub fn lease_arg(&self) -> Option<String> {
+        let expected = self.force_with_lease.as_deref()?;
+        let destination = self.refspecs.first()?.rsplit(':').next()?;
+        Some(format!("--force-with-lease={destination}:{expected}"))
+    }
+}
+
+/// Branch names others usually build on; Sync never makes a force push of
+/// these its main action.
+pub fn is_shared_branch_name(name: &str) -> bool {
+    matches!(
+        name,
+        "main" | "master" | "develop" | "development" | "trunk"
+    ) || name.starts_with("release/")
+}
+
+/// The current branch diverged from its upstream only because you rewrote
+/// commits you had pushed (see [`crate::merge::HeadInfo::rewritten`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpstreamRewrite {
+    /// The branch is the remote's default branch or a shared-looking one
+    /// ([`is_shared_branch_name`]).
+    pub shared: bool,
 }
 
 /// What to check out.
@@ -406,16 +435,36 @@ mod tests {
 
     #[test]
     fn push_specs_for_branches_and_tags() {
-        let new = PushSpec::branch("origin", "topic", None, false);
+        let new = PushSpec::branch("origin", "topic", None, None);
         assert_eq!(new.refspecs, ["refs/heads/topic:refs/heads/topic"]);
         assert!(new.set_upstream);
-        let tracked = PushSpec::branch("up", "local", Some("remote-name"), true);
+        assert_eq!(new.lease_arg(), None);
+        let tracked = PushSpec::branch("up", "local", Some("remote-name"), Some("abc"));
         assert_eq!(
             tracked.refspecs,
             ["refs/heads/local:refs/heads/remote-name"]
         );
-        assert!(!tracked.set_upstream && tracked.force_with_lease);
+        assert!(!tracked.set_upstream);
+        assert_eq!(
+            tracked.lease_arg().as_deref(),
+            Some("--force-with-lease=refs/heads/remote-name:abc")
+        );
+        let absent = PushSpec::branch("origin", "topic", None, Some(""));
+        assert_eq!(
+            absent.lease_arg().as_deref(),
+            Some("--force-with-lease=refs/heads/topic:")
+        );
         assert_eq!(PushSpec::tag("origin", "v1").refspecs, ["refs/tags/v1"]);
+    }
+
+    #[test]
+    fn shared_branch_names() {
+        for name in ["main", "master", "develop", "trunk", "release/2.0"] {
+            assert!(is_shared_branch_name(name), "{name}");
+        }
+        for name in ["feature/main", "mainline", "releases", "topic"] {
+            assert!(!is_shared_branch_name(name), "{name}");
+        }
     }
 
     #[test]

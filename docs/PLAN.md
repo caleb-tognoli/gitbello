@@ -324,11 +324,14 @@ Not in scope for M7.5: custom groups or tags (pin and folder groups only), listi
 | Behind | Pull ↓N | pull with the configured mode |
 | Ahead | Push ↑N | push |
 | Diverged | Sync ↑M ↓N | pull with the configured mode, then push if the pull succeeded |
+| Rewritten (diverged only by your own amend/rebase/reset) | Force push ↑M ↓N (warning icon) | the Force push confirmation, worded for the rewrite |
 | Up to date | Fetch | fetch (tooltip: "fetched 3 min ago") |
 
 - The counts are pills (an arrow icon and the number): commits to push in the accent, commits to pull in amber. The same pills show ahead/behind everywhere: worktree chips and their tooltips, the branch list, Home and the "No local changes" suggestion.
 - While a job runs the button keeps its width and says one short verb ("Pushing…") with a progress line; what runs and git's progress text are in its tooltip. The ▾ part then offers Cancel.
 - With the default pull mode `ff-only`, a diverged pull cannot succeed, so a click shows the existing fix toast (Pull and merge / Pull and rebase) straight away and the push follows the chosen pull.
+- **Rewritten** (Q&A 2026-11-13): the branch once pointed at its upstream's commit (its reflog) and every upstream commit HEAD lacks is yours (`git var GIT_AUTHOR_IDENT`), so merging or rebasing would bring the old versions back. On the remote's default branch or a shared-looking name (`main`, `master`, `develop`, `development`, `trunk`, `release/*`) the button stays Sync and its toast (shown whatever the pull mode) adds Force push… to Merge and Rebase. Anyone else's commit up there, or one the branch never pointed at, keeps it Diverged.
+- Force pushes pin the lease to where the last fetch saw the remote branch when the user was asked (`--force-with-lease=<ref>:<oid>`), so a background fetch meanwhile cannot let it overwrite commits nobody looked at.
 - The ▾ part offers Fetch, Pull and merge, Pull and rebase, Push, and Force push… (with lease, confirmed), each with its own icon and shortcut; the tooltip says what it does to which branch ("Merge the new commits from origin/main into main.").
 - Fetch is repo-wide, so it refreshes the ahead/behind of every chip.
 
