@@ -25,8 +25,9 @@ const COMPACT_ID: int = 2
 const GRAPH_ID: int = 3
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
 signal commit_menu_requested(at_position: Vector2)
-## Right-click on a ref label: `{name, short, kind, is_head}`, screen position.
-signal label_menu_requested(label: Dictionary, at_position: Vector2)
+## Right-click on a ref label: `{name, short, kind, is_head}`, screen
+## position, and the popup the menu opens over (or null).
+signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 signal notice(title: String, message: String)
 
 var _graph_loading: bool = true
@@ -86,19 +87,16 @@ func _ready() -> void:
 		if label.is_empty():
 			commit_menu_requested.emit(_commit_list.get_screen_position() + at)
 		else:
-			label_menu_requested.emit(label, _commit_list.get_screen_position() + at))
+			label_menu_requested.emit(label, _commit_list.get_screen_position() + at, null))
 	# Made here, not with the view, so a view freed outside the tree frees it too.
 	_refs_popover = RefsPopover.new()
 	add_child(_refs_popover)
-	_commit_list.refs_requested.connect(func(row: int, at: Vector2) -> void:
-		_refs_popover.open_at(_commit_list.row_data(row).get("refs", []),
-				_commit_list.get_screen_transform() * at))
-	_refs_popover.menu_requested.connect(func(ref: Dictionary, at: Vector2) -> void:
-		label_menu_requested.emit(ref, at))
+	_commit_list.refs_requested.connect(func(_row: int, at: Vector2, labels: Array) -> void:
+		_refs_popover.open_at(labels, _commit_list.get_screen_transform() * at))
+	_refs_popover.menu_requested.connect(label_menu_requested.emit)
 	_details.file_list().gui_input.connect(_on_files_key)
 	_details.parent_requested.connect(_on_parent_requested)
-	_details.label_menu_requested.connect(func(label: Dictionary, at: Vector2) -> void:
-		label_menu_requested.emit(label, at))
+	_details.label_menu_requested.connect(label_menu_requested.emit)
 	for entry: Array in [[&"ChevronUp", "Previous match (Shift+Enter)", false], [&"ChevronDown", "Next match (Enter)", true]]:
 		var button: Button = _search.add_button(entry[0], entry[1])
 		button.pressed.connect(step_match.bind(entry[2]))

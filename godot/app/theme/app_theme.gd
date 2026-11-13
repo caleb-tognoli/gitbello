@@ -769,20 +769,17 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 
 
 ## Ref chips (`RefChip`, M7.10): branches square-cornered, tags round pills,
-## each with its icon; a remote branch's "origin/" in a lighter ink; "+N"
-## an outline in the muted text colour.
+## each with its icon; a remote branch's "origin/" in a lighter ink.
 static func _add_ref_chips(theme: Theme, p: Palette) -> void:
 	theme.set_font_size(&"font_size", &"RefChip", 12)
 	theme.set_color(&"text_color", &"RefChip", DARK_TEXT)
 	theme.set_color(&"prefix_color", &"RefChip", Color(DARK_TEXT, 0.65))
-	theme.set_color(&"more_color", &"RefChip", p.text_muted)
 	theme.set_constant(&"icon_size", &"RefChip", 12)
 	theme.set_constant(&"icon_gap", &"RefChip", 3)
 	theme.set_constant(&"max_width", &"RefChip", 160)
 	for entry: Array in [[&"head", p.label_head], [&"branch", p.label_branch], [&"remote", p.label_remote]]:
 		theme.set_stylebox(StringName("chip_%s" % entry[0]), &"RefChip", _box(entry[1], 3, Vector4(5, 1, 6, 1)))
 	theme.set_stylebox(&"chip_tag", &"RefChip", _box(p.label_tag, 9, Vector4(6, 1, 8, 1)))
-	theme.set_stylebox(&"chip_more", &"RefChip", _box(Color.TRANSPARENT, 9, Vector4(6, 0, 6, 0), p.border, 1))
 
 
 ## Avatars without a picture: initials on one of these colours, chosen

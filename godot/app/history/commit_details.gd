@@ -23,8 +23,8 @@ var date_format: Callable = Callable():
 
 signal parent_requested(source: String, oid: String, origin: LinkButton)
 ## A ref chip was clicked: show the menu of `label` (`RefChip.ref_target`)
-## at `at_position` (screen).
-signal label_menu_requested(label: Dictionary, at_position: Vector2)
+## at `at_position` (screen), over the popup `over` (or null).
+signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 
 var _menu: PopupMenu = PopupMenu.new()
 var _file_menu: PopupMenu = PopupMenu.new()
@@ -47,8 +47,7 @@ func _ready() -> void:
 	_files.add_child(_loading)
 	_header.date_format = date_format
 	_header.body_shown.connect(func(shown: bool) -> void: collapsed = not shown)
-	_header.label_menu_requested.connect(func(label: Dictionary, at_position: Vector2) -> void:
-		label_menu_requested.emit(label, at_position))
+	_header.label_menu_requested.connect(label_menu_requested.emit)
 	_header.parent_requested.connect(func(source: String, oid: String, origin: LinkButton) -> void:
 		if _shown_oid == source and _requested_oid == source:
 			parent_requested.emit(source, oid, origin))

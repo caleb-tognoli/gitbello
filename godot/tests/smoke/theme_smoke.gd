@@ -43,7 +43,6 @@ func run() -> void:
 		for label: StringName in [&"chip_head", &"chip_branch", &"chip_remote", &"chip_tag"]:
 			var box: StyleBoxFlat = theme.get_stylebox(label, &"RefChip") as StyleBoxFlat
 			_expect_readable(label_text, box.bg_color, "%s: ref chip %s" % [theme_name, label])
-		_expect_readable(theme.get_color(&"more_color", &"RefChip"), p.background, "%s: +N chip" % theme_name)
 		var close: DPITexture = AppTheme.CLOSE as DPITexture
 		expect(close != null, "icons are DPITextures")
 		if close != null:

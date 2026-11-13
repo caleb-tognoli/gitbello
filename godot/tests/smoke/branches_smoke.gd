@@ -234,7 +234,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return _has_tag(session, "v2.0")), "tagged v2.0")
 	# The tag's label in the graph has its own menu.
 	history.label_menu_requested.emit({"name": "refs/tags/v2.0", "short": "v2.0", "kind": "tag", "is_head": false},
-			Vector2.ZERO)
+			Vector2.ZERO, null)
 	expect("Push tag" in page.menu_labels(), "the tag menu offers push: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete tag…"), "delete tag chosen")
 	expect(await wait_until(func() -> bool: return form.visible), "tag delete asks first")

@@ -5,8 +5,9 @@ extends VirtualList
 ## Compare's commits, M7.12c). Only a window around the visible rows is
 ## fetched. Rows have two lines (M7.10): the subject, then
 ## the author's avatar with the co-authors' after it, "Author +N · 3 h ago"
-## and the ref chips on the right: the first branch and the first tag, each
-## with "+N" for the others (`RefChip.summarize`), which emits
+## and the ref chips on the right: the current branch by name, and the
+## other refs of each kind by name when alone or as one chip with their
+## kind's icon and count (`RefChip.summarize`), which emits
 ## `refs_requested`. `compact` keeps one line: the graph, the subject, and
 ## on the right an icon-only chip per kind of ref (`RefChip.shape_icons`)
 ## and the author's avatar. `show_graph` off leaves the graph out: the
@@ -27,9 +28,9 @@ const FETCH_MARGIN: int = 64
 ## ascent leaves empty space above the subject.
 const INK_ASCENT: float = 0.75
 
-## A "+N" chip of `row` (or a compact row's ref icons) was clicked: show all
-## its refs at `at_position` (local), under the chip.
-signal refs_requested(row: int, at_position: Vector2)
+## A counted chip of `row` (or a compact row's ref icons) was clicked: show
+## its refs, `labels`, at `at_position` (local), under the chip.
+signal refs_requested(row: int, at_position: Vector2, labels: Array)
 
 var session: RepoSession = null:
 	set = set_session
@@ -253,11 +254,6 @@ func _get_tooltip(at_position: Vector2) -> String:
 		return RefChip.tooltip(item["label"])
 	if item.has("labels"):
 		return RefChip.group_tooltip(item["labels"])
-	if item.has("more"):
-		var names: PackedStringArray = PackedStringArray()
-		for ref_label: Dictionary in item["more"]:
-			names.append(String(ref_label["name"]))
-		return "\n".join(names)
 	if not bool(data.get("outgoing", false)):
 		return ""
 	return CommitList.outgoing_text(session.history_info())
@@ -312,10 +308,9 @@ func label_at(row: int, at: Vector2) -> Dictionary:
 
 
 ## Whether `at` (local coordinates) is on a chip that opens the popover of
-## `row`'s refs: a "+N", or a compact row's ref icons.
+## `row`'s refs: a counted chip, or a compact row's ref icons.
 func more_at(row: int, at: Vector2) -> bool:
-	var item: Dictionary = _chip_item_at(row, at)
-	return item.has("more") or item.has("labels")
+	return _chip_item_at(row, at).has("labels")
 
 
 ## Where `row`'s chips were drawn last frame: `[[Rect2, summarize entry]]`.
@@ -337,13 +332,13 @@ func _gui_input(event: InputEvent) -> void:
 		for hit: Array in _label_rects.get(row, []):
 			var rect: Rect2 = hit[0]
 			var item: Dictionary = hit[1]
-			# A click on +N or the icons lists the refs; a right-click on an
-			# icon of one ref is that ref's menu (`label_at`).
-			var lists: bool = item.has("more") or (item.has("labels") and (mouse.button_index == MOUSE_BUTTON_LEFT
-					or (item["labels"] as Array).size() > 1))
+			# A click on a counted chip or the icons lists the refs; a
+			# right-click on an icon of one ref is that ref's menu (`label_at`).
+			var lists: bool = item.has("labels") and (mouse.button_index == MOUSE_BUTTON_LEFT
+					or (item["labels"] as Array).size() > 1)
 			if rect.has_point(mouse.position) and lists:
 				accept_event()
-				refs_requested.emit(row, Vector2(rect.position.x, rect.end.y))
+				refs_requested.emit(row, Vector2(rect.position.x, rect.end.y), item["labels"])
 				return
 	super(event)
 
@@ -588,10 +583,8 @@ func _shape_row(data: Dictionary, subject_width: float, line_width: float) -> Ro
 		var chip: RefChip.Shaped
 		if item.has("labels"):
 			chip = RefChip.shape_icons(self, item["labels"])
-		elif item.has("label"):
-			chip = RefChip.shape(self, item["label"])
 		else:
-			chip = RefChip.shape_more(self, (item["more"] as Array).size())
+			chip = RefChip.shape(self, item["label"])
 		text.chips.append(chip)
 		text.chip_items.append(item)
 		text.labels_width += chip.size.x + _label_gap

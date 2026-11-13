@@ -21,8 +21,9 @@ extends VBoxContainer
 ## The user closed the view.
 signal closed()
 ## A ref chip of the details was clicked: show the menu of `label`
-## (`RefChip.ref_target`) at `at_position` (screen).
-signal label_menu_requested(label: Dictionary, at_position: Vector2)
+## (`RefChip.ref_target`) at `at_position` (screen), over the popup `over`
+## (or null).
+signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 ## Compare `left` with `right` (commits, the older first), filtered to `path`.
 signal compare_requested(left: String, right: String, path: String)
 ## Show commit `oid` in History; `in_head` when the current branch has it.
@@ -163,8 +164,7 @@ func _ready() -> void:
 	_details_header.hide()
 	_details.add_child(_details_header)
 	_details_header.body_shown.connect(func(_shown: bool) -> void: _update_details_split())
-	_details_header.label_menu_requested.connect(func(label: Dictionary, at: Vector2) -> void:
-		label_menu_requested.emit(label, at))
+	_details_header.label_menu_requested.connect(label_menu_requested.emit)
 	_lower.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_lower.theme_type_variation = &"PaneColumn"
 	_details.add_child(_lower)

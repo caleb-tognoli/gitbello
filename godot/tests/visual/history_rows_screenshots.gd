@@ -1,7 +1,8 @@
 extends Node
 ## Read-only capture of the M7.10 history rows: two-line rows in the dark and
 ## light themes, a selected row with co-authors, the details of the commit with the most
-## refs, a row's refs popover,
+## refs (and the popover of a counted chip there when they fold), a row's
+## refs popover, that popover with a ref's menu open over it,
 ## compact rows in both themes, and two-line
 ## rows at the minimum window width. Pass --repo=<throwaway repo with
 ## co-authored commits, branches and tags> --out=<directory> and set
@@ -83,20 +84,38 @@ func _ready() -> void:
 		return
 	await _shot(out, "%02d-details-refs" % step)
 	step += 1
-	# The first row with a "+N" chip, its popover open.
-	for row: int in list.row_count():
-		var opened: bool = false
-		for hit: Array in list.chip_rects(row):
-			if (hit[1] as Dictionary).has("more"):
-				var chip: Rect2 = hit[0]
-				list.refs_requested.emit(row, Vector2(chip.position.x, chip.end.y))
-				opened = true
-				break
-		if opened:
+	var header: CommitHeader = history.details().header()
+	for chip: RefChip in header.ref_chips():
+		if not chip.labels.is_empty():
+			var press: InputEventMouseButton = InputEventMouseButton.new()
+			press.button_index = MOUSE_BUTTON_LEFT
+			press.pressed = true
+			chip.gui_input.emit(press)
+			await _shot(out, "%02d-details-refs-popover" % step, [header.refs_popover()])
+			step += 1
+			header.refs_popover().hide()
 			break
-	await _shot(out, "%02d-refs-popover" % step, history.refs_popover())
-	step += 1
-	history.refs_popover().hide()
+	# The first two rows with a counted chip, each with its popover open; the
+	# first also with a ref's menu over it.
+	var counted: Array = []
+	for row: int in list.row_count():
+		for hit: Array in list.chip_rects(row):
+			if (hit[1] as Dictionary).has("labels") and counted.size() < 2:
+				counted.append([row, hit])
+				break
+	for index: int in counted.size():
+		var row: int = counted[index][0]
+		var hit: Array = counted[index][1]
+		var chip: Rect2 = hit[0]
+		list.refs_requested.emit(row, Vector2(chip.position.x, chip.end.y), (hit[1] as Dictionary)["labels"])
+		await _shot(out, "%02d-refs-popover-row-%d" % [step, row], [history.refs_popover()])
+		step += 1
+		if index == 0 and history.refs_popover().visible:
+			history.refs_popover().choose(0)
+			await _shot(out, "%02d-refs-popover-menu" % step, [history.refs_popover(), page.context_menu()])
+			step += 1
+			page.close_menu()
+		history.refs_popover().hide()
 	Actions.run_action(&"history.toggle_compact")
 	await _shot(out, "%02d-compact" % step)
 	step += 1
@@ -123,14 +142,16 @@ func _wait(predicate: Callable) -> bool:
 	return true
 
 
-## Saves the window, with `popup` (a native window) drawn over it where it
-## is on screen.
-func _shot(out: String, file_name: String, popup: Window = null) -> void:
+## Saves the window, with `popups` (native windows) drawn over it in order
+## where they are on screen.
+func _shot(out: String, file_name: String, popups: Array[Window] = []) -> void:
 	for frame: int in 30:
 		await get_tree().process_frame
 	var path: String = out.path_join(file_name + ".png")
 	var image: Image = get_viewport().get_texture().get_image()
-	if popup != null and popup.visible:
+	for popup: Window in popups:
+		if not popup.visible:
+			continue
 		var over: Image = popup.get_texture().get_image()
 		over.convert(image.get_format())
 		image.blit_rect(over, Rect2i(Vector2i.ZERO, over.get_size()), popup.position - get_window().position)

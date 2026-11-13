@@ -11,12 +11,14 @@ const THEME_TYPE: StringName = &"CommitDetails"
 ## Characters shown of the commit's and its parents' hashes.
 const HASH_LENGTH: int = 10
 const PARENT_LENGTH: int = 7
+## Refs shown by name; more fold into counted chips (`_show_refs`).
+const MAX_REF_CHIPS: int = 6
 
 ## A merge's parent link was clicked: show commit `oid` (from `source`).
 signal parent_requested(source: String, oid: String, origin: LinkButton)
 ## A ref chip was clicked: show the menu of `label` (`RefChip.ref_target`)
-## at `at_position` (screen).
-signal label_menu_requested(label: Dictionary, at_position: Vector2)
+## at `at_position` (screen), over the popup `over` (or null).
+signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 ## The message body appeared or went (the owner can collapse its split).
 signal body_shown(shown: bool)
 
@@ -44,9 +46,15 @@ var _shown_oid: String = ""
 @onready var _body: RichTextLabel = %Body
 ## Above the summary while two commits are selected (PLAN M7.12).
 var _pair_button: Button = Button.new()
+## The refs of a counted chip; made in `_ready` so a header never in the
+## tree does not leak it.
+var _refs_popover: RefsPopover = null
 
 
 func _ready() -> void:
+	_refs_popover = RefsPopover.new()
+	add_child(_refs_popover)
+	_refs_popover.menu_requested.connect(label_menu_requested.emit)
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(copy_action, _copy_hash))
 	_copy_hash.tooltip_text = tr("Copy the full hash")
 	_pair_button.text = "Compare commits"
@@ -228,23 +236,42 @@ func _card_label(text: String, variation: StringName) -> Label:
 
 
 ## A chip per ref of the commit, after its hashes; a click opens its menu.
+## Past `MAX_REF_CHIPS` refs they fold as in History's rows
+## (`RefChip.summarize`): a counted chip opens the popover of its refs.
 func _show_refs(refs: Array) -> void:
 	for chip: Node in _refs.get_children():
 		_refs.remove_child(chip)
 		chip.queue_free()
-	for ref_label: Dictionary in refs:
+	var items: Array[Dictionary] = []
+	if refs.size() > MAX_REF_CHIPS:
+		items = RefChip.summarize(refs)
+	else:
+		for ref_label: Dictionary in refs:
+			items.append({"label": ref_label})
+	for item: Dictionary in items:
 		var chip: RefChip = RefChip.new()
-		chip.label = ref_label
+		if item.has("labels"):
+			chip.labels = item["labels"]
+		else:
+			chip.label = item["label"]
 		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		chip.gui_input.connect(func(event: InputEvent) -> void:
 			var mouse: InputEventMouseButton = event as InputEventMouseButton
 			if mouse != null and mouse.pressed and mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
 				chip.accept_event()
-				label_menu_requested.emit(RefChip.ref_target(ref_label),
-						chip.get_screen_transform() * Vector2(0.0, chip.size.y)))
+				var under: Vector2 = chip.get_screen_transform() * Vector2(0.0, chip.size.y)
+				if item.has("labels"):
+					_refs_popover.open_at(item["labels"], under)
+				else:
+					label_menu_requested.emit(RefChip.ref_target(item["label"]), under, null))
 		_refs.add_child(chip)
 	_refs.visible = not refs.is_empty()
+
+
+## The popover of a counted ref chip's refs.
+func refs_popover() -> RefsPopover:
+	return _refs_popover
 
 
 func _clear_parents() -> void:

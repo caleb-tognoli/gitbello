@@ -16,8 +16,8 @@ extends VBoxContainer
 ## The user closed the comparison.
 signal closed()
 ## A ref chip was clicked: show the menu of `label` (`RefChip.ref_target`)
-## at `at_position` (screen).
-signal label_menu_requested(label: Dictionary, at_position: Vector2)
+## at `at_position` (screen), over the popup `over` (or null).
+signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 
 const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.tscn")
 const LIST_HEADER: PackedScene = preload("res://ui/list_header/list_header.tscn")
@@ -103,11 +103,10 @@ func _ready() -> void:
 	_left.add_child(_commits)
 	_commits.focus_changed.connect(focus_commit)
 	_commits.context_menu_requested.connect(_on_commit_context)
-	_commits.refs_requested.connect(func(row: int, at: Vector2) -> void:
-		_refs_popover.open_at(_commits.row_data(row).get("refs", []), _commits.get_screen_transform() * at))
+	_commits.refs_requested.connect(func(_row: int, at: Vector2, labels: Array) -> void:
+		_refs_popover.open_at(labels, _commits.get_screen_transform() * at))
 	add_child(_refs_popover)
-	_refs_popover.menu_requested.connect(func(ref: Dictionary, at: Vector2) -> void:
-		label_menu_requested.emit(ref, at))
+	_refs_popover.menu_requested.connect(label_menu_requested.emit)
 	_details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_details.dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
 	_split.add_child(_details)
@@ -116,8 +115,7 @@ func _ready() -> void:
 	_details_header.hide()
 	_details.add_child(_details_header)
 	_details_header.body_shown.connect(func(_shown: bool) -> void: _update_details_split())
-	_details_header.label_menu_requested.connect(func(label: Dictionary, at: Vector2) -> void:
-		label_menu_requested.emit(label, at))
+	_details_header.label_menu_requested.connect(label_menu_requested.emit)
 	_files_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_details.add_child(_files_split)
 	_build_files()
@@ -676,7 +674,7 @@ func cherry_pick() -> void:
 func _on_commit_context(row: int, at_position: Vector2) -> void:
 	var label: Dictionary = _commits.label_at(row, at_position)
 	if not label.is_empty():
-		label_menu_requested.emit(label, _commits.get_screen_position() + at_position)
+		label_menu_requested.emit(label, _commits.get_screen_position() + at_position, null)
 		return
 	if _commits.kind_at(row) != "commit":
 		return

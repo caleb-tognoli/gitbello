@@ -628,10 +628,11 @@ func show_ref_menu(ref: Dictionary, at_position: Vector2, menus: Dictionary = RE
 
 ## Shows `ref`'s menu over `host`, a popup list (such as the worktree list)
 ## that closes when one of its entries runs.
-func show_ref_menu_over(host: Window, ref: Dictionary, at_position: Vector2) -> void:
+func show_ref_menu_over(host: Window, ref: Dictionary, at_position: Vector2,
+		menus: Dictionary = REF_MENUS) -> void:
 	_menu.reparent(host)
 	_menu_host = host
-	show_ref_menu.call_deferred(ref, at_position)
+	show_ref_menu.call_deferred(ref, at_position, menus)
 
 
 ## Shows a context menu of the enabled actions among `ids` at a screen position.
@@ -703,7 +704,8 @@ func _on_commit_menu(at_position: Vector2) -> void:
 	show_menu(COMMIT_MENU, at_position)
 
 
-func _on_label_menu(label: Dictionary, at_position: Vector2) -> void:
+## A ref chip's menu, over the popup `over` (a refs popover) when given.
+func _on_label_menu(label: Dictionary, at_position: Vector2, over: Window) -> void:
 	var kind: String = String(label["kind"])
 	var ref: Dictionary = {}
 	for candidate: Dictionary in session.branch_refs():
@@ -718,9 +720,14 @@ func _on_label_menu(label: Dictionary, at_position: Vector2) -> void:
 				ref = {"type": "tag", "name": String(label["name"]), "short": String(tag["name"]),
 					"commit": String(tag["commit"]), "is_head": false, "upstream": ""}
 	if ref.is_empty():
+		if over != null:
+			over.hide()
 		_on_commit_menu(at_position)
 		return
-	show_ref_menu(ref, at_position, LABEL_MENUS)
+	if over != null:
+		show_ref_menu_over(over, ref, at_position, LABEL_MENUS)
+	else:
+		show_ref_menu(ref, at_position, LABEL_MENUS)
 
 
 ## A branch from the list: switch to it, or show the worktree that has it.
@@ -980,15 +987,15 @@ static func pane_sizes(repo: String, key: String = PANES_KEY) -> Dictionary:
 	for path: String in candidates:
 		var old: Dictionary = Core.repo_ui_state(path)
 		if not old.has("sidebar_width"):
-			for name: String in OLD_SIDEBAR_NAMES:
-				if old.has(name):
-					old["sidebar_width"] = old[name]
+			for old_name: String in OLD_SIDEBAR_NAMES:
+				if old.has(old_name):
+					old["sidebar_width"] = old[old_name]
 					break
 		var found: bool = false
-		for name: String in PANE_NAMES:
-			if old.has(name):
-				saved[name] = int(old[name])
-				Core.set_repo_ui_state(key, name, int(old[name]))
+		for pane: String in PANE_NAMES:
+			if old.has(pane):
+				saved[pane] = int(old[pane])
+				Core.set_repo_ui_state(key, pane, int(old[pane]))
 				found = true
 		if found:
 			return saved
