@@ -112,6 +112,8 @@ var _options_menu: PopupMenu = PopupMenu.new()
 var _list: FileHistoryList = FileHistoryList.new()
 var _loading: LoadingIndicator = LoadingIndicator.new()
 var _message: Label = Label.new()
+## Instead of versions: no commit changed the file, or the filter hides them.
+var _empty: EmptyState = EmptyState.create_compact()
 ## The selected version's commit over its diff (as History's).
 var _details: VSplitContainer = VSplitContainer.new()
 var _details_header: CommitHeader = COMMIT_HEADER.instantiate() as CommitHeader
@@ -130,6 +132,8 @@ var _blame_area: Control = Control.new()
 var _blame_view: BlameView = BlameView.new()
 var _blame_loading: LoadingIndicator = LoadingIndicator.new()
 var _blame_message: Label = Label.new()
+## Instead of the blame: no version selected, or an empty file.
+var _blame_empty: EmptyState = EmptyState.create_compact()
 var _blame_menu: PopupMenu = PopupMenu.new()
 
 
@@ -146,7 +150,6 @@ func _ready() -> void:
 	_list.version_changed.connect(_on_version_changed)
 	_list.context_menu_requested.connect(_show_version_menu)
 	_list.gui_input.connect(_on_list_key)
-	_loading.area = "history"
 	_list.add_child(_loading)
 	_message.theme_type_variation = &"DimLabel"
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -156,6 +159,7 @@ func _ready() -> void:
 	_message.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_message.hide()
 	_list.add_child(_message)
+	_list.add_child(_empty)
 	_details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_details.dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
 	_split.add_child(_details)
@@ -285,7 +289,7 @@ func _wire_diff() -> void:
 	_diff_panel.open_side_requested.connect(func(side: String) -> void:
 		if session != null:
 			session.open_version(SLOT, side))
-	_diff_panel.clear("Select a version to see its changes.")
+	_diff_panel.clear("No version selected", &"FileHistory")
 
 
 ## The blame: a strip (the version, the counts, the options) over the lines.
@@ -341,7 +345,6 @@ func _build_blame() -> void:
 	_blame_view.gui_input.connect(_on_blame_key)
 	_blame_view.context_menu_requested.connect(func(_row: int, at_position: Vector2) -> void:
 		_show_actions(_blame_menu, BLAME_MENU_ACTIONS, _blame_view.get_screen_position() + at_position))
-	_blame_loading.area = "diff"
 	_blame_area.add_child(_blame_loading)
 	_blame_message.theme_type_variation = &"DimLabel"
 	_blame_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -351,11 +354,15 @@ func _build_blame() -> void:
 	_blame_message.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_blame_message.hide()
 	_blame_area.add_child(_blame_message)
+	_blame_area.add_child(_blame_empty)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
 		_loading.free()
+		_empty.free()
+	if what == NOTIFICATION_PREDELETE and _blame_empty.get_parent() == null:
+		_blame_empty.free()
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -419,7 +426,7 @@ func open(path: String, start: String = "", start_name: String = "", blame: bool
 	_list.set_scroll_offset(0.0)
 	_details_header.hide()
 	_update_details_split()
-	_diff_panel.clear("Select a version to see its changes.")
+	_diff_panel.clear("No version selected", &"FileHistory")
 	session.open_file_history(path, start, start_name)
 	_apply_mode()
 	_on_history_changed()
@@ -466,6 +473,7 @@ func _on_history_changed() -> void:
 	var loading: bool = bool(_info.get("loading", false))
 	var rows: int = _list.row_count()
 	_message.hide()
+	_empty.hide()
 	if not error.is_empty():
 		_loading.hide_loading()
 		_message.text = tr("Could not read the history: %s") % String(error.get("stderr", error.get("message", "")))
@@ -476,9 +484,12 @@ func _on_history_changed() -> void:
 		_loading.show_loading(false, tr("Loading…"))
 	else:
 		_loading.hide_loading()
-		if rows == 0:
-			_message.text = tr("No commits match the filter.") if is_filtered() else tr("No commit changed this file.")
-			_message.show()
+		if rows == 0 and is_filtered():
+			_empty.show_no_match(func() -> void: _filter.clear_filters())
+			_empty.show()
+		elif rows == 0:
+			_empty.show_compact(&"FileHistory", "No commits for this file")
+			_empty.show()
 	var reveal: bool = _filter_pending
 	_filter_pending = false
 	if not _pending_version.is_empty():
@@ -503,6 +514,9 @@ func _on_history_changed() -> void:
 			_diff_panel.clear("")
 			if is_blame():
 				_blame_selected()
+		if rows == 0 and not loading:
+			# The list says why there is nothing to pick.
+			_diff_panel.blank()
 	elif reveal:
 		_list.scroll_to_row(_list.cursor)
 	_show_details()
@@ -784,6 +798,7 @@ func _reset_blame() -> void:
 	_before_line = -1
 	_blame_view.hide()
 	_blame_message.hide()
+	_blame_empty.hide()
 	_blame_loading.hide_loading()
 
 
@@ -816,11 +831,13 @@ func _on_blame_changed() -> void:
 	var lines: int = int(info.get("lines", 0))
 	var key: String = "%s\n%s" % [String(info.get("oid", "")), String(info.get("path", ""))] if is_open else ""
 	var message: String = ""
+	# An empty state instead of the message: `[icon, title key]`.
+	var empty: Array = []
 	match state:
 		"closed":
 			var commit: Dictionary = current_version()
 			if _selected.is_empty():
-				message = tr("Select a version to blame.")
+				empty = [&"FileHistory", "No version selected"]
 			elif not commit.is_empty() and not bool(commit.get("exists", true)):
 				message = tr("This commit deleted the file.")
 			else:
@@ -836,10 +853,13 @@ func _on_blame_changed() -> void:
 			message = tr("Could not blame the file: %s") % String(error.get("stderr", error.get("message", "")))
 		"done":
 			if lines == 0:
-				message = tr("The file is empty.")
+				empty = [&"TextFile", "Empty file"]
 	_blame_message.visible = not message.is_empty()
 	_blame_message.text = message
-	if not message.is_empty():
+	_blame_empty.visible = not empty.is_empty()
+	if not empty.is_empty():
+		_blame_empty.show_compact(empty[0], empty[1])
+	if not message.is_empty() or not empty.is_empty():
 		_blame_loading.hide_loading()
 		_blame_view.hide()
 		_blame_key = ""
@@ -887,7 +907,7 @@ func _update_blame_bar() -> void:
 	var lines: int = int(_blame_info.get("lines", 0))
 	if not _blame_note.is_empty():
 		_blame_status.text = _blame_note
-	elif not bool(_blame_info.get("open", false)) or lines == 0 or _blame_message.visible:
+	elif not bool(_blame_info.get("open", false)) or lines == 0 or _blame_message.visible or _blame_empty.visible:
 		_blame_status.text = ""
 	elif bool(_blame_info.get("loading", false)):
 		_blame_status.text = tr("Blaming… %d%%") % int(100.0 * int(_blame_info.get("blamed", 0)) / lines)
@@ -1166,8 +1186,11 @@ func filter_count_text() -> String:
 	return _filter.count_text()
 
 
-## The message shown instead of versions (an error, no commits), or "".
+## The message or empty state shown instead of versions (an error, no
+## commits), or "".
 func message_text() -> String:
+	if _empty.visible:
+		return _empty.title()
 	return _message.text if _message.visible else ""
 
 
@@ -1211,6 +1234,8 @@ func blame_status_text() -> String:
 
 
 func blame_message_text() -> String:
+	if _blame_empty.visible:
+		return _blame_empty.title()
 	return _blame_message.text if _blame_message.visible else ""
 
 

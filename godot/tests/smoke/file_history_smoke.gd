@@ -164,7 +164,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "which is selected")
 	filter.set_text("no such words")
 	expect(await _filtered(session, view, 0), "nothing matches")
-	expect_eq(view.message_text(), tr("No commits match the filter."), "it says so: %s" % view.message_text())
+	expect_eq(view.message_text(), tr("No matches"), "it says so: %s" % view.message_text())
 	expect_eq(view.filter_count_text(), tr("No matches"), "and the field")
 	filter.set_text("")
 	expect(await _loaded(session, view), "without the filter every version is back")
@@ -317,7 +317,7 @@ func run() -> void:
 	# A file nobody committed: only its message.
 	worktree.open_file_history("no such file.txt")
 	expect(await _loaded(session, view), "an unknown file's history loads")
-	expect_eq(view.message_text(), tr("No commit changed this file."), "it says so: %s" % view.message_text())
+	expect_eq(view.message_text(), tr("No commits for this file"), "it says so: %s" % view.message_text())
 	expect_eq(list.row_count(), 0, "no rows")
 	expect(filter.text().is_empty(), "and no filter left from the last history")
 

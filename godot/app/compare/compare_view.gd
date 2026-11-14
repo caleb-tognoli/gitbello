@@ -79,6 +79,8 @@ var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
 var _header: ListHeader = LIST_HEADER.instantiate() as ListHeader
 var _files: CompareFileList = CompareFileList.new()
 var _message: Label = Label.new()
+## Instead of files: no differences, or the filter hides them all.
+var _empty: EmptyState = EmptyState.create_compact()
 var _diff_panel: DiffPanel = DIFF_PANEL.instantiate() as DiffPanel
 var _picker: ComparePicker = ComparePicker.new()
 ## Which side the picker is choosing: `left` or `right`.
@@ -181,7 +183,6 @@ func _build_files() -> void:
 	_files.current_changed.connect(_on_file_changed)
 	_files.gui_input.connect(_on_files_key)
 	_files.context_menu_requested.connect(_show_file_menu)
-	_loading.area = "details"
 	_files.add_child(_loading)
 	_message.theme_type_variation = &"DimLabel"
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -191,6 +192,7 @@ func _build_files() -> void:
 	_message.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_message.hide()
 	_files.add_child(_message)
+	_files.add_child(_empty)
 
 
 func _wire_diff() -> void:
@@ -225,12 +227,13 @@ func _wire_diff() -> void:
 	_diff_panel.open_side_requested.connect(func(side: String) -> void:
 		if session != null:
 			session.open_version("compare", side))
-	_diff_panel.clear("Select a file to see its changes.")
+	_diff_panel.clear("No file selected")
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
 		_loading.free()
+		_empty.free()
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -275,7 +278,7 @@ func open(left: String, right: String, working: bool, mode: String = "", filter:
 	_files.show_files(0)
 	_commits.show_commits({}, "", "", "")
 	_details_header.hide()
-	_diff_panel.clear("Select a file to see its changes.")
+	_diff_panel.clear("No file selected")
 	session.open_compare(left, right, working, mode)
 	if not filter.is_empty():
 		_filter.set_text(filter)
@@ -413,6 +416,7 @@ func _on_compare_changed() -> void:
 	_update_bar()
 	var state: String = String(_info.get("state", "none"))
 	_message.hide()
+	_empty.hide()
 	match state:
 		"loading":
 			_loading.show_loading(true, tr("Comparing…"))
@@ -484,14 +488,18 @@ func _show_files() -> void:
 	if _files.cursor < 0 and shown > 0:
 		_files.select_only(0)
 	if total == 0:
-		_message.text = tr("This commit changes no files.") if not focused_commit().is_empty() \
-				else tr("No differences: both sides have the same files.")
-		_message.show()
-		_diff_panel.clear("")
+		if focused_commit().is_empty():
+			_empty.show_compact(&"GitCompare", "No differences")
+		else:
+			_empty.show_compact(&"FileList", "No changed files")
+		_empty.show()
+		_diff_panel.blank()
 	elif shown == 0:
-		_message.text = tr("No changed files match the filter.")
-		_message.show()
-		_diff_panel.clear("")
+		_empty.show_no_match(func() -> void: _filter.clear_filters())
+		_empty.show()
+		_diff_panel.blank()
+	else:
+		_empty.hide()
 
 
 ## The focused commit's details over the files (as History shows them);
@@ -534,6 +542,7 @@ func _on_filter() -> void:
 	_info = session.compare_info()
 	if String(_info.get("state", "")) == "ready" and String(_info.get("focus_state", "none")) in ["none", "ready"]:
 		_message.hide()
+		_empty.hide()
 		_show_files()
 
 
@@ -873,8 +882,11 @@ func counts() -> SyncCounts:
 	return _counts
 
 
-## The message shown instead of files (an error, no differences), or "".
+## The message or empty state shown instead of files (an error, no
+## differences), or "".
 func message_text() -> String:
+	if _empty.visible:
+		return _empty.title()
 	return _message.text if _message.visible else ""
 
 

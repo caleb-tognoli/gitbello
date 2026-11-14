@@ -87,8 +87,9 @@ const CONFLICT_WAIT_MSEC: int = 5000
 @onready var _filter_bar: Control = %FilterBar
 @onready var _filter: FilterField = %FilterField
 @onready var _list_header: ListHeader = %ListHeader
-@onready var _no_match: Control = %NoMatch
 @onready var _list: ChangeList = %List
+## Over the list when the filter hides every file.
+var _no_match: EmptyState = EmptyState.create_compact()
 ## Over the list while the status is read: blocking until the first one
 ## arrives, over the files while a refresh runs.
 var _loading: LoadingIndicator = LoadingIndicator.new()
@@ -115,7 +116,9 @@ var _loading: LoadingIndicator = LoadingIndicator.new()
 
 
 func _ready() -> void:
-	_loading.area = "changes"
+	_list.add_child(_no_match)
+	_no_match.show_no_match(func() -> void: _filter.clear_filters())
+	_no_match.hide()
 	_list.add_child(_loading)
 	_list.pick_toggled.connect(func(paths: PackedStringArray, include: bool) -> void:
 		session.pick_files(paths, include))
@@ -173,7 +176,7 @@ func _ready() -> void:
 	_both_menu.id_pressed.connect(func(id: int) -> void:
 		resolve_block(_both_block, "ours_theirs" if id == 0 else "theirs_ours"))
 	add_child(_both_menu)
-	_diff_panel.clear("Select a file to see its changes.")
+	_diff_panel.clear("No file selected")
 	_confirm.confirmed.connect(func() -> void:
 		if _pending_discard.is_valid():
 			_pending_discard.call()
@@ -264,6 +267,11 @@ func diff_panel() -> DiffPanel:
 	return _diff_panel
 
 
+## What the list shows when the filter hides every file (smoke tests).
+func no_match_state() -> EmptyState:
+	return _no_match
+
+
 func empty_state() -> EmptyState:
 	return _empty
 
@@ -303,6 +311,7 @@ func shelf_files_split() -> HSplitContainer:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
 		_loading.free()  # Never added: freed without ever being ready.
+		_no_match.free()
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -995,6 +1004,7 @@ func _update_empty() -> void:
 		actions.append({"id": &"sync.sync", "label": label, "icon": &"GitPush", "ahead": ahead})
 	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
 	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
+	_empty.set_icon(&"StatusSuccess")
 	_empty.show_state("No local changes", "", actions)
 
 
@@ -1335,7 +1345,7 @@ func _clear_diff() -> void:
 	if session != null:
 		session.clear_diff()
 	_diff_view.pickable = false
-	_diff_panel.clear("Select a shelved file to preview its changes." if _shelves_mode else "Select a file to see its changes.")
+	_diff_panel.clear("No shelved file selected" if _shelves_mode else "No file selected", &"GitShelf" if _shelves_mode else &"TextFile")
 
 
 func retry_diff() -> void:

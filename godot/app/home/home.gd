@@ -55,7 +55,8 @@ var _all_title: Label = Label.new()
 var _sort_choice: OptionButton = OptionButton.new()
 var _group_choice: OptionButton = OptionButton.new()
 var _list: VBoxContainer = VBoxContainer.new()
-var _no_match: Label = Label.new()
+## Instead of the list when the filter matches no repository.
+var _no_match: EmptyState = EmptyState.create_compact()
 ## The context menu of rows and cards (right-click or ⋯), for `_menu_row`.
 var _menu: PopupMenu = PopupMenu.new()
 var _menu_row: Dictionary = {}
@@ -117,9 +118,9 @@ func _ready() -> void:
 	_content.add_child(all_row)
 	_list.theme_type_variation = &"HomeList"
 	_content.add_child(_list)
-	_no_match.theme_type_variation = &"DimLabel"
-	_no_match.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_no_match.custom_minimum_size.y = float(get_theme_constant(&"no_match_height", THEME_TYPE))
 	_content.add_child(_no_match)
+	_no_match.show_no_match(func() -> void: _filter.clear_filters())
 	_scroll_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll_box.add_child(_content)
 	_scroll.add_child(_scroll_box)
@@ -269,7 +270,6 @@ func rebuild() -> void:
 	_all_title.text = tr("All repositories (%d)") % rows.size() if query.is_empty() \
 			else tr("%d of %d repositories") % [matches.size(), rows.size()]
 	_no_match.visible = matches.is_empty()
-	_no_match.text = tr("No repository matches “%s”.") % _filter.text().strip_edges()
 	var pinned: Array[Dictionary] = matches.filter(func(r: Dictionary) -> bool: return bool(r["pinned"]))
 	var others: Array[Dictionary] = matches.filter(func(r: Dictionary) -> bool: return not bool(r["pinned"]))
 	for row: Dictionary in pinned:

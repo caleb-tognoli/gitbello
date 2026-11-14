@@ -84,9 +84,14 @@ func is_working_row(row: int) -> bool:
 	return _has_working and row == 0
 
 
-## The version at `row` (`file_history_rows` row), or empty.
+## The version at `row` (`file_history_rows` row), or empty. A row cached
+## before the uncommitted changes went away is still their row: not a
+## version.
 func version_at(row: int) -> Dictionary:
-	return {} if is_working_row(row) else row_data(row)
+	if is_working_row(row):
+		return {}
+	var data: Dictionary = row_data(row)
+	return data if String(data.get("kind", "")) == "commit" else {}
 
 
 ## The filter's matches have no strip: only they are listed.

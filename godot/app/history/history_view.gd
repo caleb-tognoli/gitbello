@@ -58,9 +58,10 @@ var _scope_button: Button = null
 var _refs_popover: RefsPopover = null
 ## Over the commit list while the history loads or reloads.
 var _loading: LoadingIndicator = LoadingIndicator.new()
-## Over an empty list when the load failed: its error (the details say
-## "No commits yet." for an empty repository).
+## Over an empty list when the load failed: its error.
 var _empty_label: Label = null
+## Over the list of a repository without commits: "No commits yet".
+var _empty: EmptyState = null
 @onready var _commit_list: CommitList = %CommitList
 @onready var _search: FilterField = %SearchField
 @onready var _details: CommitDetails = %Details
@@ -69,7 +70,9 @@ var _empty_label: Label = null
 
 func _ready() -> void:
 	_details.date_format = _commit_list.date_text
-	_loading.area = "history"
+	_empty = EmptyState.create_compact()
+	_commit_list.add_child(_empty)
+	_empty.show_compact(&"GitCommit", "No commits yet")
 	_commit_list.add_child(_loading)
 	_empty_label = Label.new()
 	_empty_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -342,8 +345,10 @@ func status_text() -> String:
 	return _search.count_text()
 
 
-## The load's error shown over the empty list, or "".
+## The load's error or "No commits yet" shown over the empty list, or "".
 func empty_text() -> String:
+	if _empty != null and _empty.visible:
+		return _empty.title()
 	return _empty_label.text if _empty_label != null and _empty_label.visible else ""
 
 
@@ -534,13 +539,15 @@ func _update_header() -> void:
 		_search.set_count(ListHeader.number_text(matches))
 
 
-## The load's error over the empty list, once it has failed.
+## Over the empty list once it has loaded: the load's error, or "No commits
+## yet". Nothing while it loads.
 func _update_empty() -> void:
 	if _empty_label == null:
 		return
-	_empty_label.visible = session != null and not _graph_loading and session.graph_row_count() == 0 \
-			and not _load_error.is_empty()
+	var nothing: bool = session != null and not _graph_loading and session.graph_row_count() == 0
+	_empty_label.visible = nothing and not _load_error.is_empty()
 	_empty_label.text = tr(_load_error)
+	_empty.visible = nothing and _load_error.is_empty()
 
 
 func _on_list_key(event: InputEvent) -> void:
@@ -593,7 +600,7 @@ func _on_graph_loaded(row_count: int, error: String) -> void:
 	_update_loading()
 	_select_newest_if_none()
 	if row_count == 0:
-		_details.show_placeholder(tr("No commits yet.") if error.is_empty() else "")
+		_details.show_placeholder(true)
 	_try_parent_navigation()
 	repo_loaded.emit(row_count, error)
 

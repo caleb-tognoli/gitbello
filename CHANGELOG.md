@@ -56,6 +56,17 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
   a resize applies everywhere at once. The first sizes come from the most recently opened
   repository's.
 
+### Loading and empty states
+- A panel loading for the first time shows one smooth spinner in the accent colour in the
+  middle with a short caption, with no seconds counter. One reloading shows a thin accent
+  line sliding along its top edge, in every panel.
+- Empty panels show an icon and a short title: "No file selected", "No commits yet",
+  "No differences", "No changed files". A filter that matches nothing says "No matches"
+  with a Clear filter button (Changes, Shelves, Compare, File history and Home).
+  Their buttons have icons.
+- History of a repository without commits says so in the commit list, not the details.
+- Empty states wait for the load: a panel stays blank until it knows it has nothing.
+
 ## 1.1.0
 
 ### Compare

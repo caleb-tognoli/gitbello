@@ -1,10 +1,10 @@
 extends Node
 ## Captures the loading indicators (see `LoadingIndicator`) in each state:
 ## Changes (the file list and the diff) and History (the commit list and the
-## commit's files), each while nothing is shown yet and while shown content
-## loads again, after a few seconds (the caption counts them), in the dark
-## and light themes. The indicators are forced on; the loads themselves are
-## real and fast.
+## commit's files), each while nothing is shown yet (the spinner and its
+## caption) and while shown content loads again (the line along the top), in
+## the dark and light themes. The indicators are forced on; the loads
+## themselves are real and fast.
 ##
 ## Read-only: pass --repo=<repository with uncommitted changes and some
 ## history, e.g. CLI fixture repo-1> --out=<directory>, with GITBELLO_CONFIG
@@ -64,21 +64,25 @@ func _ready() -> void:
 			var blocking: bool = state[1]
 			page.show_view(state[2])
 			var indicators: Array[LoadingIndicator] = []
+			var captions: PackedStringArray = PackedStringArray()
 			if view == "changes":
 				indicators = [changes.loading_indicator(), changes.diff_panel().loading_indicator()]
+				captions = [tr("Reading changes…"), tr("Loading diff…")]
 			else:
 				indicators = [history.loading_indicator(), history.details().loading_indicator()]
-			for indicator: LoadingIndicator in indicators:
-				indicator.show_loading(blocking, _caption(indicator.area, blocking))
+				captions = [tr("Loading history…"), tr("Loading commit…")]
+			if not blocking:
+				captions = [tr("Updating…"), tr("Updating…")]
+			for i: int in indicators.size():
+				indicators[i].show_loading(blocking, captions[i])
 			await _frames(4)
-			# Past the show delay and the seconds counter.
+			# Past the show delay.
 			await get_tree().create_timer(LoadingIndicator.SHOW_DELAY + 0.1).timeout
-			for indicator: LoadingIndicator in indicators:
+			for i: int in indicators.size():
 				# A late refresh may have hidden it: show it again.
-				if not indicator.is_loading():
-					indicator.show_loading(blocking, _caption(indicator.area, blocking))
+				if not indicators[i].is_loading():
+					indicators[i].show_loading(blocking, captions[i])
 					await get_tree().create_timer(LoadingIndicator.SHOW_DELAY + 0.1).timeout
-				indicator.pretend_elapsed(12.0)
 			await _shot(out, "%02d-%s-%s-%s" % [step, view, "empty" if blocking else "reloading", mode])
 			step += 1
 			for indicator: LoadingIndicator in indicators:
@@ -87,19 +91,6 @@ func _ready() -> void:
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	get_tree().quit(0)
-
-
-func _caption(area: String, blocking: bool) -> String:
-	if not blocking:
-		return tr("Updating…")
-	match area:
-		"changes":
-			return tr("Reading changes…")
-		"history":
-			return tr("Loading history…")
-		"details":
-			return tr("Loading commit…")
-	return tr("Loading diff…")
 
 
 func _wait(predicate: Callable) -> bool:

@@ -39,12 +39,15 @@ const PREVIEW_SIDE: int = 2048
 ## Full-size images kept (in memory, not uploaded) behind their previews.
 const FULL_IMAGES: int = 4
 const BASE_TIP: String = "Show the base: the lines both sides started from"
-## What an empty diff says, by status code.
-const EMPTY_MESSAGES: Dictionary[String, String] = {
-	"A": "New empty file.",
-	"D": "Deleted an empty file.",
-	"R": "Renamed without changes.",
-	"C": "Copied without changes.",
+## What an empty diff says, by status code, and its icon.
+const EMPTY_TITLES: Dictionary[String, String] = {
+	"A": "New empty file",
+	"D": "Deleted an empty file",
+	"R": "Renamed without changes",
+	"C": "Copied without changes",
+}
+const EMPTY_ICONS: Dictionary[String, StringName] = {
+	"A": &"FileAdded", "D": &"FileDeleted", "R": &"FileRenamed", "C": &"FileAdded",
 }
 
 ## The user asked to load a diff past the size limit.
@@ -81,7 +84,11 @@ var _loading: LoadingIndicator = LoadingIndicator.new()
 
 ## `kind:path` of the diff shown, to keep the scroll position on reloads.
 var _shown: String = ""
+## The empty state shown without a diff (`clear`): its title and icon.
 var _placeholder: String = ""
+var _placeholder_icon: StringName = &"TextFile"
+## "No file selected", "No changes": shown instead of the message.
+var _empty: EmptyState = EmptyState.create_compact()
 ## Status code of the diff shown ("A", "M", ...), or "".
 var _code: String = ""
 ## `[path, original_path, similarity]` of the header, redrawn on theme changes.
@@ -140,7 +147,7 @@ static var _eol_full: Dictionary[String, bool] = {}
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	_loading.area = "diff"
+	_message.add_sibling(_empty)
 	_message.get_parent().add_child(_loading)
 	_load_anyway.pressed.connect(func() -> void: load_full_requested.emit())
 	_retry.pressed.connect(func() -> void: Actions.run_action(&"diff.retry", _retry))
@@ -311,6 +318,7 @@ func conflict_bar_text() -> String:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
 		_loading.free()  # Never added: freed without ever being ready.
+		_empty.free()
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -320,7 +328,7 @@ func _notification(what: int) -> void:
 		if not _info.is_empty():
 			show_info(_info)
 		else:
-			show_message(tr(_placeholder))
+			_show_placeholder()
 		_show_code(_code)
 		_show_path(_path_shown[0], _path_shown[1], _path_shown[2])
 
@@ -516,10 +524,12 @@ func set_minimap_enabled(value: bool) -> void:
 	_view.set_minimap_enabled(value)
 
 
-## Clears the diff and shows `placeholder` (also used by later `clear()` calls).
-func clear(placeholder: String = "") -> void:
+## Clears the diff and shows the empty state `placeholder` (a translation
+## key) under icon `icon`; both are also used by later `clear()` calls.
+func clear(placeholder: String = "", icon: StringName = &"") -> void:
 	if not placeholder.is_empty():
 		_placeholder = placeholder
+		_placeholder_icon = icon if icon != &"" else &"TextFile"
 	_info = {}
 	_shown = ""
 	_view.show_lines(0, 0, false)
@@ -533,7 +543,20 @@ func clear(placeholder: String = "") -> void:
 	_set_offered("none", PackedStringArray())
 	_hide_images()
 	_loading.hide_loading()
-	show_message(tr(_placeholder))
+	_show_placeholder()
+
+
+## Clears the diff and shows nothing at all (no empty state).
+func blank() -> void:
+	clear()
+	_hide_message()
+
+
+func _show_placeholder() -> void:
+	if _placeholder.is_empty():
+		_hide_message()
+	else:
+		show_empty(_placeholder_icon, _placeholder)
 
 
 ## Shows a diff described by `info` (`state`, `path`, `kind`, `content`,
@@ -566,7 +589,7 @@ func show_info(info: Dictionary) -> void:
 			if key != _shown:
 				_view.show_lines(0, 0, false)
 				_hide_images()
-				_message.hide()
+				_hide_message()
 				_loading.show_loading(true, tr("Loading diff…"))
 			else:
 				_loading.show_loading(false, tr("Updating…"))
@@ -608,7 +631,7 @@ func show_info(info: Dictionary) -> void:
 					buttons.push_front(["eol_restore", tr("Restore line endings"), AppTheme.icon(&"Undo")])
 				show_card(eol_card_text(info), buttons, code)
 				return
-			_message.hide()
+			_hide_message()
 			_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep,
 					int(info.get("split_count", info["line_count"])))
 		"binary":
@@ -621,7 +644,10 @@ func show_info(info: Dictionary) -> void:
 			show_message(tr(large) % _size_text(int(info["bytes"])), true)
 		"empty":
 			_view.show_lines(0, 0, false)
-			show_message("\n".join(translated_notes) if not notes.is_empty() else tr(EMPTY_MESSAGES.get(code, "No changes to show.")))
+			if notes.is_empty():
+				show_empty(EMPTY_ICONS.get(code, &"TextFile"), EMPTY_TITLES.get(code, "No changes"))
+			else:
+				show_message("\n".join(translated_notes))
 
 
 ## A conflicted file: its blocks (scrolled to the first one when it first
@@ -632,7 +658,7 @@ func _show_conflict(info: Dictionary, keep: bool) -> void:
 	var blocks: int = int(conflict.get("blocks", 0))
 	var side: String = "we" if String(conflict.get("side", "")) == "ours" else "they"
 	if kind in ["content", "add_add"] and blocks > 0:
-		_message.hide()
+		_hide_message()
 		_card.hide()
 		_base_button.visible = true
 		_base_button.disabled = not bool(conflict.get("has_base", false))
@@ -700,7 +726,7 @@ func _show_images(image: Dictionary, keep: bool, notes: PackedStringArray) -> vo
 		var largest: int = maxi(int((image["old"] as Dictionary).get("size", -1)), int((image["new"] as Dictionary).get("size", -1)))
 		show_message(tr("This image is large (%s).") % _size_text(largest), true)
 		return
-	_message.hide()
+	_hide_message()
 	if not keep:
 		_image_view.clear()
 	_image_view.mode = _mode
@@ -1044,6 +1070,7 @@ func _show_whole_button(shown: bool, pressed: bool) -> void:
 
 
 func show_message(text: String, offer_full: bool = false) -> void:
+	_empty.hide()
 	_message_label.text = text
 	_load_anyway.visible = offer_full
 	_retry.hide()
@@ -1054,13 +1081,33 @@ func show_message(text: String, offer_full: bool = false) -> void:
 	_message.show()
 
 
+## Shows the compact empty state `heading` (a translation key) under icon
+## `icon_name`, in place of the message.
+func show_empty(icon_name: StringName, heading: String) -> void:
+	_message.hide()
+	_empty.show_compact(icon_name, heading)
+	_empty.show()
+
+
+func _hide_message() -> void:
+	_message.hide()
+	_empty.hide()
+
+
 ## The diff's loading indicator (smoke tests and screenshots).
 func loading_indicator() -> LoadingIndicator:
 	return _loading
 
 
 func message_text() -> String:
+	if _empty.visible:
+		return _empty.title()
 	return _message_label.text if _message.visible else ""
+
+
+## The empty state shown without a diff (smoke tests).
+func empty_state() -> EmptyState:
+	return _empty
 
 
 ## The status icon of `code` ("A", "M", ...), tinted like the file lists'.

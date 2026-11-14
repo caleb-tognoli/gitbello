@@ -27,10 +27,14 @@ var _checks: Dictionary[String, CheckBox] = {}
 
 @onready var _filter: FilterField = %ShelfFilter
 @onready var _names: ItemList = %ShelfNames
-@onready var _empty: Label = %NoShelvesMatch
+## Over the list when it shows no shelf: no branch chosen, the filter hides
+## every shelf, or there is none.
+var _empty: EmptyState = null
 
 
 func _ready() -> void:
+	_empty = EmptyState.create_compact()
+	_names.add_child(_empty)
 	_filter.changed.connect(_rebuild)
 	_filter.done.connect(focus_list)
 	_filter.submitted.connect(func(_backwards: bool) -> void: focus_list())
@@ -253,6 +257,27 @@ func _sync_checks() -> void:
 		_checks[branch].set_pressed_no_signal(_all_branches or branch in _branches)
 
 
+## What the list says without shelves to show, with a way out when there is
+## one.
+func _update_empty(query: String) -> void:
+	_empty.visible = _shown.is_empty()
+	if not _empty.visible:
+		return
+	if not _all_branches and _branches.is_empty():
+		_empty.show_compact(&"GitBranch", "No branches selected", "All branches", set_scope.bind(true), &"GitBranch")
+	elif not query.is_empty():
+		_empty.show_no_match(func() -> void: _filter.clear_filters())
+	elif _all_branches or _shelves.is_empty():
+		_empty.show_compact(&"GitShelf", "No shelves")
+	else:
+		_empty.show_compact(&"GitShelf", "No shelves on these branches", "All branches", set_scope.bind(true), &"GitBranch")
+
+
+## The list's empty state (smoke tests).
+func empty_state() -> EmptyState:
+	return _empty
+
+
 func _rebuild() -> void:
 	if not _replacement_oid.is_empty():
 		for shelf: Dictionary in _shelves:
@@ -296,8 +321,7 @@ func _rebuild() -> void:
 			_rows.append(shelf)
 			_names.set_item_tooltip(index, "%s\n%s" % [shelf["name"], shelf["branch"]])
 	_apply_group_colors()
-	_empty.visible = _shown.is_empty()
-	_empty.text = tr("No branches selected.") if not _all_branches and _branches.is_empty() else tr("No shelves match the filter.")
+	_update_empty(query)
 	_branch_button.text = tr("All") if _all_branches else (tr("Branch") if _branches.size() == 1 else tr("Branches"))
 	_branch_button.tooltip_text = tr("All branches") if _all_branches else tr("Branches: %s") % ", ".join(_branches)
 	_branch_badge.count = selected_branches().size()

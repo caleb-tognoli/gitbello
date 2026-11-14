@@ -66,6 +66,8 @@ static var _spinners: Dictionary[Vector2i, DPITexture] = {}
 static var _dots: Dictionary[Color, DPITexture] = {}
 ## White copies of icons, by name (see `tintable_icon`).
 static var _tintable: Dictionary[StringName, DPITexture] = {}
+## Icons drawn large, by `name:side:colours` (see `large_icon`).
+static var _large: Dictionary[String, DPITexture] = {}
 ## How strongly the changed words of paired lines are tinted, in percent of
 ## the added or removed colour: the diff's word background, and the
 ## minimap's word blocks over its row tint. A variable so that
@@ -1631,6 +1633,22 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"h_separation", &"SuggestionButton", 10)
 	theme.set_constant(&"button_width", &"EmptyState", 340)
 	theme.set_constant(&"logo_size", &"EmptyState", 96)
+	theme.set_constant(&"icon_size", &"EmptyState", 48)
+	theme.set_constant(&"compact_icon_size", &"EmptyState", 36)
+	theme.set_color(&"icon_tint", &"EmptyState", Color(1.0, 1.0, 1.0, 0.45))
+	# The compact form: a muted icon over a short title, one small button.
+	_variation(theme, &"EmptyStateCompactBox", &"VBoxContainer")
+	theme.set_constant(&"separation", &"EmptyStateCompactBox", 8)
+	_variation(theme, &"EmptyStateCompactTitle", &"Label")
+	theme.set_font_size(&"font_size", &"EmptyStateCompactTitle", 15)
+	theme.set_color(&"font_color", &"EmptyStateCompactTitle", p.text_muted)
+	_variation(theme, &"EmptyStateButton", &"Button")
+	var small: Vector4 = Vector4(10, 4, 10, 4)
+	theme.set_stylebox(&"normal", &"EmptyStateButton", _box(p.raised, 4, small, p.border, 1))
+	theme.set_stylebox(&"hover", &"EmptyStateButton", _box(p.hover, 4, small, p.border, 1))
+	theme.set_stylebox(&"pressed", &"EmptyStateButton", _box(Color(p.accent, 0.35), 4, small, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"EmptyStateButton", _box(Color(p.accent, 0.35), 4, small, p.accent, 1))
+	theme.set_stylebox(&"focus", &"EmptyStateButton", _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1))
 	_variation(theme, &"AboutRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"AboutRow", 18)
 	theme.set_constant(&"logo_size", &"AboutDialog", 72)
@@ -1814,25 +1832,24 @@ static func _add_home(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"max_width", &"Home", 1040)
 	theme.set_constant(&"margin", &"Home", 24)
 	theme.set_constant(&"icon_size", &"Home", 16)
+	theme.set_constant(&"no_match_height", &"Home", 180)
 	theme.set_constant(&"clone_text_width", &"Home", 220)
 	theme.set_constant(&"width", &"ScanDialog", 760)
 	_add_loading(theme, p)
 
 
-## `LoadingIndicator`: captions, the spinner, the sliding bar and the corner
-## pill over content that is loading again.
+## `LoadingIndicator`: the caption, the spinner and the corner pill over
+## content that is loading again.
 static func _add_loading(theme: Theme, p: Palette) -> void:
 	const T: StringName = &"LoadingIndicator"
 	theme.set_color(&"caption_color", T, p.text_muted)
 	theme.set_color(&"backdrop", T, p.background)
-	theme.set_color(&"bar_color", T, p.accent)
-	theme.set_color(&"bar_track", T, Color(p.accent, 0.15))
-	theme.set_stylebox(&"pill", T, _box(p.surface, 10, Vector4.ZERO, p.border, 1))
-	theme.set_constant(&"bar_height", T, 3)
-	theme.set_constant(&"spinner_size", T, 24)
-	theme.set_constant(&"gap", T, 10)
-	theme.set_constant(&"pill_padding", T, 8)
-	theme.set_constant(&"pill_margin", T, 6)
+	theme.set_color(&"spinner_color", T, p.accent)
+	theme.set_color(&"spinner_track", T, Color(p.accent, 0.18))
+	theme.set_constant(&"spinner_size", T, 26)
+	theme.set_constant(&"gap", T, 12)
+	theme.set_constant(&"line_height", T, 3)
+
 
 ## Frame `frame` of the busy spinner, in the icon grey of the light or dark
 ## theme.
@@ -1909,6 +1926,21 @@ static func logo() -> Texture2D:
 ## The icon `name` (an SVG in `ICON_DIR` without its extension).
 static func icon(name: StringName) -> Texture2D:
 	return load(ICON_DIR.path_join("%s.svg" % name)) as Texture2D
+
+
+## The icon `name` drawn `side` pixels wide (empty states): the SVG
+## rasterised at that size rather than the 16 px icon stretched, in the
+## current theme's colours (call again after a theme change).
+static func large_icon(name: StringName, side: int) -> Texture2D:
+	var source: DPITexture = icon(name) as DPITexture
+	if source == null or source.get_width() <= 0 or side <= 0:
+		return icon(name)
+	var key: String = "%s:%d:%s" % [name, side, str(source.color_map.hash())]
+	if not _large.has(key):
+		var copy: DPITexture = source.duplicate() as DPITexture
+		copy.base_scale = source.base_scale * float(side) / float(source.get_width())
+		_large[key] = copy
+	return _large[key]
 
 
 ## The icon `name` in white, for a colour given by `modulate`: the shared

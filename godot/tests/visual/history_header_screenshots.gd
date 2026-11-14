@@ -3,7 +3,7 @@ extends Node
 ## field, the field's match count while searching ("Searching…", "2/2",
 ## "No matches"), the options menu with Compact rows and Show graph, compact
 ## rows, rows without the graph, the light theme and an empty repository
-## (only the details say "No commits yet."). Each step also saves a 2x crop
+## (the list says "No commits yet"). Each step also saves a 2x crop
 ## of the search field. Read-only on the repositories; it saves the row and
 ## graph settings, so run it with `GITBELLO_CONFIG` set to a scratch file.
 ##

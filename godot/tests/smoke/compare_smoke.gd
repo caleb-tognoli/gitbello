@@ -104,9 +104,9 @@ func run() -> void:
 	compare.filter_field().set_text("\"notes.txt\"")
 	expect_eq(compare.file_list().row_count(), 1, "a path in quotes keeps that file")
 	compare.filter_field().set_text("\"notes\"")
-	expect_eq(compare.message_text(), tr("No changed files match the filter."), "and only that path, whole")
+	expect_eq(compare.message_text(), tr("No matches"), "and only that path, whole")
 	compare.filter_field().set_text("zzz")
-	expect_eq(compare.message_text(), tr("No changed files match the filter."), "says nothing matches")
+	expect_eq(compare.message_text(), tr("No matches"), "says nothing matches")
 	compare.filter_field().set_text("")
 	expect_eq(compare.file_list().row_count(), 2, "both files again")
 

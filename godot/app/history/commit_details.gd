@@ -40,10 +40,14 @@ var _requested_oid: String = ""
 @onready var _diff_panel: DiffPanel = %CommitDiffPanel
 ## Over the file list while the selected commit loads.
 var _loading: LoadingIndicator = LoadingIndicator.new()
+## Over the file list of a commit without changed files (a merge, an empty
+## commit).
+var _files_empty: EmptyState = EmptyState.create_compact()
 
 
 func _ready() -> void:
-	_loading.area = "details"
+	_files.add_child(_files_empty)
+	_files_empty.show_compact(&"FileList", "No changed files")
 	_files.add_child(_loading)
 	_header.date_format = date_format
 	_header.body_shown.connect(func(shown: bool) -> void: collapsed = not shown)
@@ -97,6 +101,7 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _loading.get_parent() == null:
 		_loading.free()  # Never added: freed without ever being ready.
+		_files_empty.free()
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_THEME_CHANGED:
@@ -170,22 +175,28 @@ func show_commit(oid: String) -> void:
 	elif _shown_oid != oid:
 		# The files of the previous commit would mislead: show the load.
 		_files.show_files(0)
+		_files_empty.hide()
 		_files_header.set_text("")
 		_files_header.show_counts(0, 0)
 		_loading.show_loading(true, tr("Loading commit…"))
 
 
-## Shows `text` instead of a commit (while the history loads, or when it
-## has none).
-func show_placeholder(text: String = "") -> void:
+## Shows no commit (while the history loads): "No file selected" in the
+## diff, or nothing at all when `blank` (a history without commits, whose
+## list says so).
+func show_placeholder(blank: bool = false) -> void:
 	_loading.hide_loading()
 	_requested_oid = ""
 	_shown_oid = ""
-	_header.show_text(text)
+	_header.show_text("")
 	_files_header.set_text("")
 	_files_header.show_counts(0, 0)
 	_files.show_files(0)
-	_diff_panel.clear("Select a file to see its changes.")
+	_files_empty.hide()
+	if blank:
+		_diff_panel.blank()
+	else:
+		_diff_panel.clear("No file selected")
 
 
 ## Shows "Compare commits" while two commits are selected.
@@ -222,10 +233,11 @@ func _on_commit_loaded() -> void:
 	_files_header.set_text(ListHeader.count_text(count, "changed file"))
 	_files_header.show_counts(int(info.get("additions", 0)), int(info.get("deletions", 0)))
 	_files.show_files(count)
+	_files_empty.visible = count == 0
 	if count > 0:
 		_files.select_only(0)
 	else:
-		_diff_panel.clear()
+		_diff_panel.blank()
 
 
 ## The people's cards (`CommitHeader.people`), for tests.

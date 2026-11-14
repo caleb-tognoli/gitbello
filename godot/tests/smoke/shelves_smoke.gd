@@ -132,7 +132,7 @@ func run() -> void:
 	expect_eq(shelves.row_texts(), PackedStringArray(["topic work"]), "one branch can be excluded")
 	topic_check.pressed.emit()
 	expect(shelves.row_texts().is_empty(), "no selected branches produces an empty list")
-	expect_eq((shelves.get_node("%NoShelvesMatch") as Label).text, "No branches selected.", "the reason appears in the list")
+	expect_eq(shelves.empty_state().title(), "No branches selected", "the reason appears in the list")
 	expect(not view.shelf_files_split().is_visible_in_tree(), "no duplicate message or split panes on the right")
 	main_check.pressed.emit()
 	topic_check.pressed.emit()

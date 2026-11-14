@@ -2,39 +2,28 @@ class_name LoadingIndicator
 extends Control
 ## Shows that a panel is loading, drawn over it without taking clicks.
 ##
-## Two cases: nothing to show yet (`blocking`: an empty list or diff) and old
-## content kept while it loads again (an overlay that leaves it usable). Each
-## area has its style (`STYLES`):
-##
-## - `bar` (the Changes list, History): a thin sliding bar along the top edge,
-##   with the caption in the middle while nothing is shown.
-## - `spinner` (diffs): a turning spinner and the caption; over old content, a
-##   small pill with a spinner in a corner.
-## - `quiet` (a commit's files): the caption only; over old content, a small
-##   pill in a corner.
+## Two cases: nothing to show yet (`blocking`: an empty list or diff), where a
+## spinner in the accent colour turns in the middle with the caption below
+## it, and old content kept while it loads again, where a thin line slides
+## along the top edge and the content stays usable.
 ##
 ## Nothing appears for the first `SHOW_DELAY` seconds (fast loads never
-## flash), and after `ELAPSED_AFTER` seconds the caption counts the seconds,
-## so a slow load still shows it is alive. Animations tick at a few frames a
-## second and only while shown.
+## flash). The animation redraws at `FPS` frames a second, only while shown.
 
-const STYLES: Dictionary[String, String] = {
-	"changes": "bar", "diff": "spinner", "history": "bar", "details": "quiet",
-}
 const SHOW_DELAY: float = 0.2
-const ELAPSED_AFTER: float = 2.0
-## Seconds per animation frame, by style.
-const TICK: Dictionary[String, float] = {"quiet": 1.0, "spinner": 0.1, "bar": 0.05}
+const FPS: float = 30.0
+## Seconds per turn of the spinner.
+const TURN: float = 0.9
+## How much of the circle the spinner's arc covers.
+const ARC: float = 0.3
+## Seconds per sweep of the loading line.
+const SWEEP: float = 1.6
 const THEME_TYPE: StringName = &"LoadingIndicator"
-
-## The area shown loading: one of `STYLES`' keys.
-@export var area: String = "diff"
 
 var _active: bool = false
 var _blocking: bool = false
 var _caption: String = ""
 var _started_msec: int = 0
-var _frame: int = 0
 var _tick: Timer = Timer.new()
 
 
@@ -55,11 +44,8 @@ func show_loading(blocking: bool, caption: String = "") -> void:
 	if not _active:
 		_active = true
 		_started_msec = Time.get_ticks_msec()
-		_frame = 0
 		visible = false
 		_tick.start(SHOW_DELAY)
-	elif visible:
-		_restart_tick()
 	queue_redraw()
 
 
@@ -77,32 +63,14 @@ func is_blocking() -> bool:
 	return _active and _blocking
 
 
-## The area's style.
-func current_style() -> String:
-	return STYLES.get(area, "quiet")
+## Whether the indicator is drawn (past the show delay).
+func is_shown() -> bool:
+	return _active and visible
 
 
-## The caption with the seconds so far, once the load takes a while.
+## The caption under the spinner while nothing is shown.
 func caption_text() -> String:
-	var text: String = _caption if not _caption.is_empty() else tr("Loading…")
-	var seconds: int = int(_elapsed())
-	if _elapsed() >= ELAPSED_AFTER:
-		text = "%s · %s" % [text, tr("%d s") % seconds]
-	return text
-
-
-## Pretends the load started `seconds` ago (screenshots of a slow load).
-func pretend_elapsed(seconds: float) -> void:
-	_started_msec = Time.get_ticks_msec() - int(seconds * 1000.0)
-	queue_redraw()
-
-
-func _elapsed() -> float:
-	return float(Time.get_ticks_msec() - _started_msec) / 1000.0
-
-
-func _restart_tick() -> void:
-	_tick.start(TICK.get(current_style(), 1.0))
+	return _caption if not _caption.is_empty() else tr("Loading…")
 
 
 func _on_tick() -> void:
@@ -111,94 +79,60 @@ func _on_tick() -> void:
 		return
 	if not visible:
 		visible = true
-		_restart_tick()
-	_frame += 1
+		_tick.start(1.0 / FPS)
 	queue_redraw()
 
 
 func _draw() -> void:
 	if not _active:
 		return
-	var style: String = current_style()
 	if _blocking:
 		# Nothing below is worth showing (stale rows of another file).
 		draw_rect(Rect2(Vector2.ZERO, size), get_theme_color(&"backdrop", THEME_TYPE))
-		if style == "spinner":
-			_draw_spinner_center()
-			return
-		if style == "bar":
-			_draw_bar()
-		_draw_caption_center(0.0)
+		_draw_center()
 		return
-	match style:
-		"spinner":
-			_draw_pill(true)
-		"bar":
-			_draw_bar()
-		_:
-			_draw_pill(false)
+	_draw_line()
 
 
-func _font() -> Font:
-	return get_theme_default_font()
-
-
-func _font_size() -> int:
-	return get_theme_default_font_size()
-
-
-func _draw_caption_center(offset_y: float) -> void:
-	var font: Font = _font()
-	var font_size: int = _font_size()
-	var text: String = caption_text()
-	var width: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	var at: Vector2 = Vector2((size.x - width) * 0.5, size.y * 0.5 + offset_y + font.get_ascent(font_size) * 0.5)
-	draw_string(font, at.round(), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size,
-			get_theme_color(&"caption_color", THEME_TYPE))
-
-
-func _draw_spinner_center() -> void:
+## The spinner in the middle, with the caption under it.
+func _draw_center() -> void:
 	var side: float = float(get_theme_constant(&"spinner_size", THEME_TYPE))
-	var texture: Texture2D = AppTheme.spinner(_frame, ThemeManager.light)
 	var gap: float = float(get_theme_constant(&"gap", THEME_TYPE))
-	var top: float = size.y * 0.5 - side - gap * 0.5
-	draw_texture_rect(texture, Rect2(Vector2((size.x - side) * 0.5, top).round(), Vector2(side, side)), false)
-	_draw_caption_center(gap + float(_font_size()) * 0.5)
-
-
-## A small rounded label in the top right corner, with a spinner when asked.
-func _draw_pill(spin: bool) -> void:
-	var font: Font = _font()
-	var font_size: int = _font_size() - 1
+	var font: Font = get_theme_default_font()
+	var font_size: int = get_theme_default_font_size()
 	var text: String = caption_text()
-	var pad: float = float(get_theme_constant(&"pill_padding", THEME_TYPE))
-	var margin: float = float(get_theme_constant(&"pill_margin", THEME_TYPE))
-	var icon: float = float(font_size) if spin else 0.0
-	var text_width: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	var width: float = text_width + pad * 2.0 + (icon + pad * 0.5 if spin else 0.0)
-	var height: float = float(font_size) + pad * 1.4
-	var rect: Rect2 = Rect2(Vector2(size.x - width - margin, margin).round(), Vector2(width, height)).abs()
-	var box: StyleBox = get_theme_stylebox(&"pill", THEME_TYPE)
-	draw_style_box(box, rect)
-	var x: float = rect.position.x + pad
-	if spin:
-		var texture: Texture2D = AppTheme.spinner(_frame, ThemeManager.light)
-		draw_texture_rect(texture, Rect2(Vector2(x, rect.position.y + (height - icon) * 0.5).round(), Vector2(icon, icon)), false)
-		x += icon + pad * 0.5
-	var baseline: float = rect.position.y + (height + font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
-	draw_string(font, Vector2(x, baseline).round(), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size,
+	var text_height: float = font.get_height(font_size)
+	var top: float = (size.y - side - gap - text_height) * 0.5
+	_draw_spinner(Vector2(size.x * 0.5, top + side * 0.5), side)
+	var width: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var baseline: Vector2 = Vector2((size.x - width) * 0.5, top + side + gap + font.get_ascent(font_size))
+	draw_string(font, baseline.round(), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size,
 			get_theme_color(&"caption_color", THEME_TYPE))
 
 
-## An indeterminate bar along the top edge: a segment sliding across.
-func _draw_bar() -> void:
-	var height: float = float(get_theme_constant(&"bar_height", THEME_TYPE))
-	draw_rect(Rect2(0.0, 0.0, size.x, height), get_theme_color(&"bar_track", THEME_TYPE))
-	var period: int = 40  # frames per sweep (2 s at the bar's tick)
-	var t: float = float(_frame % period) / float(period)
+## A faint ring with an arc turning around it, `side` pixels across.
+func _draw_spinner(center: Vector2, side: float) -> void:
+	var width: float = maxf(side * 0.12, 1.5)
+	var radius: float = (side - width) * 0.5
+	draw_arc(center, radius, 0.0, TAU, 48, get_theme_color(&"spinner_track", THEME_TYPE), width, true)
+	var turn: float = fmod(_elapsed() / TURN, 1.0)
+	var start: float = turn * TAU - PI * 0.5
+	draw_arc(center, radius, start, start + ARC * TAU, 24, get_theme_color(&"spinner_color", THEME_TYPE), width, true)
+
+
+## An indeterminate line along the top edge: a segment sliding across a
+## faint track, easing in and out.
+func _draw_line() -> void:
+	var height: float = float(get_theme_constant(&"line_height", THEME_TYPE))
+	draw_rect(Rect2(0.0, 0.0, size.x, height), get_theme_color(&"spinner_track", THEME_TYPE))
+	var t: float = ease(fmod(_elapsed() / SWEEP, 1.0), -1.6)
 	var segment: float = maxf(size.x * 0.3, 40.0)
 	var x: float = -segment + t * (size.x + segment)
 	var start: float = clampf(x, 0.0, size.x)
 	var end: float = clampf(x + segment, 0.0, size.x)
 	if end > start:
-		draw_rect(Rect2(start, 0.0, end - start, height), get_theme_color(&"bar_color", THEME_TYPE))
+		draw_rect(Rect2(start, 0.0, end - start, height), get_theme_color(&"spinner_color", THEME_TYPE))
+
+
+func _elapsed() -> float:
+	return float(Time.get_ticks_msec() - _started_msec) / 1000.0
