@@ -2,7 +2,7 @@
 //! opening, summaries, location checks, folder scans, and the Create,
 //! Initialize folder and Clone flows.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

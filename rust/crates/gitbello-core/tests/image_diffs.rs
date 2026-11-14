@@ -2,7 +2,7 @@
 //! kind of diff, the size limit, files that are not what their name says,
 //! SVG text, and the ours/theirs of a conflicted image.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

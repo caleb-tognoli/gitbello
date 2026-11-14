@@ -32,12 +32,18 @@ func _ready() -> void:
 			continue
 		add_child(test)
 		ran += 1
-		# Every test starts like a fresh launch.
+		# Every test starts like a fresh launch, with an empty library (Home
+		# would load a summary of every repository the tests before added).
 		WorktreeView.shared_view = WorktreeView.View.HISTORY
+		Engine.time_scale = 1.0
+		for row: Dictionary in Core.library_rows():
+			Core.library_remove(str(row.path))
+		var started: int = Time.get_ticks_msec()
 		await test.run()
 		for failure: String in test.failures:
 			failures.append("%s: %s" % [path.get_file(), failure])
-		print("%s %s" % ["ok  " if test.failures.is_empty() else "FAIL", path.get_file()])
+		print("%s %s (%d ms)" % ["ok  " if test.failures.is_empty() else "FAIL", path.get_file(),
+				Time.get_ticks_msec() - started])
 		test.queue_free()
 
 	if ran == 0:

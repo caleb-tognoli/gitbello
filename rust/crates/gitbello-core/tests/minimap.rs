@@ -1,7 +1,7 @@
 //! The diff minimap (M7.6) over runtime state on temporary repositories: a
 //! partly picked diff and a conflicted file in the resolver.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 

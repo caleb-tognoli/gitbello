@@ -2,7 +2,7 @@
 //! previews, merges, the conflict resolver, finishing operations and the
 //! undo strip.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

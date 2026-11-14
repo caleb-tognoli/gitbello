@@ -2,7 +2,7 @@
 //! new-task flow with its rollback, the cleanup flow, missing folders and
 //! badges across open worktrees.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

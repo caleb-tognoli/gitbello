@@ -9,6 +9,9 @@ publish = false
 
 [lib]
 crate-type = ["cdylib"]
+# No Rust tests: the bindings are covered by the Godot smoke tests.
+test = false
+doctest = false
 
 [dependencies]
 gitbello-core.workspace = true

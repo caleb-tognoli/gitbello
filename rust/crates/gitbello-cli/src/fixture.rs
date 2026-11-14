@@ -49,48 +49,66 @@ pub fn run(args: &[String]) -> Result<()> {
     let runner = GitRunner::discover()?;
     let global_config = dir.join("global.gitconfig");
     fs::write(&global_config, "")?;
-    for n in 1..=repos {
-        let repo = dir.join(format!("repo-{n}"));
-        build_repo(&runner, &repo, &global_config, n)
-            .with_context(|| format!("building {}", repo.display()))?;
-        println!("{}", repo.display());
-    }
-    if images {
-        let git = Git {
-            runner: &runner,
-            global_config: &global_config,
-            clock: std::cell::Cell::new(1_700_000_000),
-        };
-        crate::image_fixture::build(&git, &dir).context("building the image repositories")?;
-        println!("{}", dir.join("images").display());
-    }
-    if eol {
-        let git = Git {
-            runner: &runner,
-            global_config: &global_config,
-            clock: std::cell::Cell::new(1_700_000_000),
-        };
-        crate::eol_fixture::build(&git, &dir).context("building the line-endings repository")?;
-        println!("{}", dir.join("eol").display());
-    }
-    if syntax {
-        let git = Git {
-            runner: &runner,
-            global_config: &global_config,
-            clock: std::cell::Cell::new(1_700_000_000),
-        };
-        crate::syntax_fixture::build(&git, &dir).context("building the syntax repository")?;
-        println!("{}", dir.join("syntax").display());
-    }
-    if history {
-        let git = Git {
-            runner: &runner,
-            global_config: &global_config,
-            clock: std::cell::Cell::new(1_700_000_000),
-        };
-        crate::history_fixture::build(&git, &dir)
-            .context("building the file-history repository")?;
-        println!("{}", dir.join("history").display());
+    // The repositories are independent: build them all at once.
+    type Build = fn(&Git<'_>, &Path) -> Result<()>;
+    let extras: [(bool, &str, Build, &str); 4] = [
+        (
+            images,
+            "images",
+            crate::image_fixture::build,
+            "the image repositories",
+        ),
+        (
+            eol,
+            "eol",
+            crate::eol_fixture::build,
+            "the line-endings repository",
+        ),
+        (
+            syntax,
+            "syntax",
+            crate::syntax_fixture::build,
+            "the syntax repository",
+        ),
+        (
+            history,
+            "history",
+            crate::history_fixture::build,
+            "the file-history repository",
+        ),
+    ];
+    let (runner, global_config, dir) = (&runner, global_config.as_path(), dir.as_path());
+    let built: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
+        let repos = (1..=repos).map(|n| {
+            scope.spawn(move || {
+                let repo = dir.join(format!("repo-{n}"));
+                build_repo(runner, &repo, global_config, n)
+                    .with_context(|| format!("building {}", repo.display()))?;
+                Ok(repo)
+            })
+        });
+        let extras = extras
+            .into_iter()
+            .filter(|extra| extra.0)
+            .map(|(_, name, build, what)| {
+                scope.spawn(move || {
+                    let git = Git::new(runner, global_config);
+                    build(&git, dir).with_context(|| format!("building {what}"))?;
+                    Ok(dir.join(name))
+                })
+            });
+        let handles: Vec<_> = repos.chain(extras).collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("a fixture thread panicked")))
+            })
+            .collect()
+    });
+    for path in built {
+        println!("{}", path?.display());
     }
     Ok(())
 }
@@ -101,7 +119,15 @@ pub(crate) struct Git<'a> {
     pub(crate) clock: std::cell::Cell<i64>,
 }
 
-impl Git<'_> {
+impl<'a> Git<'a> {
+    pub(crate) fn new(runner: &'a GitRunner, global_config: &'a Path) -> Self {
+        Self {
+            runner,
+            global_config,
+            clock: std::cell::Cell::new(1_700_000_000),
+        }
+    }
+
     pub(crate) fn run(&self, dir: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
         let time = self.clock.get();
         self.clock.set(time + 60);
@@ -117,7 +143,9 @@ impl Git<'_> {
             .env("GIT_COMMITTER_NAME", "Fixture")
             .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
             .env("GIT_COMMITTER_DATE", &date)
+            // No `git maintenance run --auto` after every commit.
             .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+            .args(["-c", "maintenance.auto=false"])
             .args(args);
         if let Some(input) = stdin {
             cmd = cmd.stdin(input);
@@ -175,11 +203,7 @@ fn remove_tree(dir: &Path) -> std::io::Result<()> {
 
 fn build_repo(runner: &GitRunner, repo: &Path, global_config: &Path, n: usize) -> Result<()> {
     fs::create_dir_all(repo)?;
-    let git = Git {
-        runner,
-        global_config,
-        clock: std::cell::Cell::new(1_700_000_000),
-    };
+    let git = Git::new(runner, global_config);
     git.run(repo, &["init", "--quiet", "--initial-branch=main"], None)?;
     git.commit(
         repo,

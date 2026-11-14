@@ -1,7 +1,7 @@
 //! Branches, tags, checkout (with the dirty-tree stash flow) and
 //! cherry-pick (M5) through the runtime, on temporary repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

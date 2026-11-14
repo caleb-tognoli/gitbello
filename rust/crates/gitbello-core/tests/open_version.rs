@@ -2,7 +2,7 @@
 //! shows, from a commit, its parent (a deleted file), the index, HEAD or the
 //! working tree, and the runtime's job and event.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

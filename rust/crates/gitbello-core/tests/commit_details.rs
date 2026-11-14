@@ -1,6 +1,6 @@
 //! Commit details and per-file commit diffs on real repositories.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

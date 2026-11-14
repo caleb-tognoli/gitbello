@@ -2,7 +2,7 @@
 //! `.gitignore` and `info/exclude`, untracking and undo, on real temporary
 //! repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

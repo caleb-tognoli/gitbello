@@ -2,7 +2,7 @@
 //! index, partly included files, renames, deletions, untracked files, amend,
 //! hooks and discards, through the runtime on real temporary repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

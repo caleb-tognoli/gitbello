@@ -1,6 +1,6 @@
 //! Per-file shelf edits on real throwaway repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -169,89 +169,111 @@ fn last_file_discard_removes_the_shelf_and_undo_recovers_it() {
 }
 
 #[test]
-fn restore_and_discard_support_added_deleted_renamed_and_binary_files() {
-    for kind in ["added", "deleted", "renamed", "binary"] {
-        for restore in [true, false] {
-            let repo = TestRepo::init();
-            repo.commit("original.txt", "original content\n", "base");
-            repo.commit("keep.txt", "keep base\n", "base keep");
-            let path = match kind {
-                "added" => {
-                    repo.write("new ü file.txt", "added\n");
-                    repo.git(&["add", "new ü file.txt"]);
-                    "new ü file.txt"
-                }
-                "deleted" => {
-                    fs::remove_file(repo.path().join("original.txt")).unwrap();
-                    "original.txt"
-                }
+fn restore_and_discard_an_added_file() {
+    restore_and_discard("added");
+}
+
+#[test]
+fn restore_and_discard_a_deleted_file() {
+    restore_and_discard("deleted");
+}
+
+#[test]
+fn restore_and_discard_a_renamed_file() {
+    restore_and_discard("renamed");
+}
+
+#[test]
+fn restore_and_discard_a_binary_file() {
+    restore_and_discard("binary");
+}
+
+/// Restores, then (on a fresh repository) discards and undoes, one shelved
+/// file of `kind`. One test per kind, so they run in parallel.
+fn restore_and_discard(kind: &str) {
+    for restore in [true, false] {
+        let repo = TestRepo::init();
+        repo.commit("original.txt", "original content\n", "base");
+        repo.commit("keep.txt", "keep base\n", "base keep");
+        let path = match kind {
+            "added" => {
+                repo.write("new ü file.txt", "added\n");
+                repo.git(&["add", "new ü file.txt"]);
+                "new ü file.txt"
+            }
+            "deleted" => {
+                fs::remove_file(repo.path().join("original.txt")).expect("delete");
+                "original.txt"
+            }
+            "renamed" => {
+                repo.git(&["mv", "original.txt", "renamed ü file.txt"]);
+                "renamed ü file.txt"
+            }
+            "binary" => {
+                fs::write(repo.path().join("original.txt"), [0, 255, 1, 0]).expect("write");
+                "original.txt"
+            }
+            _ => unreachable!(),
+        };
+        repo.write("keep.txt", "keep saved\n");
+        // The source of a staged rename no longer matches an explicit
+        // stash pathspec, so build this fixture using git's all-files mode.
+        repo.git(&[
+            "stash",
+            "push",
+            "--include-untracked",
+            "-q",
+            "-m",
+            "mixed work",
+        ]);
+        let (mut rt, key) = open(&repo);
+        let original = shelf(&rt, &key);
+        assert!(
+            repo.git(&["status", "--porcelain"]).is_empty(),
+            "{kind}: shelving left local changes: {}",
+            repo.git(&["status", "--porcelain"])
+        );
+        let job = if restore {
+            rt.restore_shelf_file(&key, &original.oid, Path::new(path))
+        } else {
+            rt.discard_shelf_file(&key, &original.oid, Path::new(path))
+        };
+        succeed(&mut rt, &key, job);
+        let remainder = shelf(&rt, &key);
+        let list = files(&mut rt, &key, &remainder.oid);
+        assert_eq!(list.len(), 1, "{kind}, restore={restore}: {list:?}");
+        assert_eq!(list[0].path, Path::new("keep.txt"));
+        assert_eq!(
+            fs::read_to_string(repo.path().join("keep.txt")).expect("read"),
+            "keep base\n"
+        );
+        if restore {
+            match kind {
+                "added" => assert_eq!(
+                    fs::read_to_string(repo.path().join(path)).expect("read"),
+                    "added\n"
+                ),
+                "deleted" => assert!(!repo.path().join(path).exists()),
                 "renamed" => {
-                    repo.git(&["mv", "original.txt", "renamed ü file.txt"]);
-                    "renamed ü file.txt"
+                    assert!(!repo.path().join("original.txt").exists());
+                    assert_eq!(
+                        fs::read_to_string(repo.path().join(path)).expect("read"),
+                        "original content\n"
+                    );
                 }
                 "binary" => {
-                    fs::write(repo.path().join("original.txt"), [0, 255, 1, 0]).unwrap();
-                    "original.txt"
+                    assert_eq!(
+                        fs::read(repo.path().join(path)).expect("read"),
+                        [0, 255, 1, 0]
+                    )
                 }
                 _ => unreachable!(),
-            };
-            repo.write("keep.txt", "keep saved\n");
-            // The source of a staged rename no longer matches an explicit
-            // stash pathspec, so build this fixture using git's all-files mode.
-            repo.git(&[
-                "stash",
-                "push",
-                "--include-untracked",
-                "-q",
-                "-m",
-                "mixed work",
-            ]);
-            let (mut rt, key) = open(&repo);
-            let original = shelf(&rt, &key);
-            assert!(
-                repo.git(&["status", "--porcelain"]).is_empty(),
-                "{kind}: shelving left local changes: {}",
-                repo.git(&["status", "--porcelain"])
-            );
-            let job = if restore {
-                rt.restore_shelf_file(&key, &original.oid, Path::new(path))
-            } else {
-                rt.discard_shelf_file(&key, &original.oid, Path::new(path))
-            };
-            succeed(&mut rt, &key, job);
-            let remainder = shelf(&rt, &key);
-            let list = files(&mut rt, &key, &remainder.oid);
-            assert_eq!(list.len(), 1, "{kind}, restore={restore}: {list:?}");
-            assert_eq!(list[0].path, Path::new("keep.txt"));
-            assert_eq!(
-                fs::read_to_string(repo.path().join("keep.txt")).unwrap(),
-                "keep base\n"
-            );
-            if restore {
-                match kind {
-                    "added" => assert_eq!(
-                        fs::read_to_string(repo.path().join(path)).unwrap(),
-                        "added\n"
-                    ),
-                    "deleted" => assert!(!repo.path().join(path).exists()),
-                    "renamed" => {
-                        assert!(!repo.path().join("original.txt").exists());
-                        assert_eq!(
-                            fs::read_to_string(repo.path().join(path)).unwrap(),
-                            "original content\n"
-                        );
-                    }
-                    "binary" => {
-                        assert_eq!(fs::read(repo.path().join(path)).unwrap(), [0, 255, 1, 0])
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                assert!(repo.git(&["status", "--porcelain"]).is_empty());
-                let job = rt.undo_shelf_discard(&key);
-                succeed(&mut rt, &key, job);
-                assert_eq!(shelf(&rt, &key).oid, original.oid);
             }
+        } else {
+            assert!(repo.git(&["status", "--porcelain"]).is_empty());
+            let job = rt.undo_shelf_discard(&key);
+            succeed(&mut rt, &key, job);
+            assert_eq!(shelf(&rt, &key).oid, original.oid);
         }
     }
 }

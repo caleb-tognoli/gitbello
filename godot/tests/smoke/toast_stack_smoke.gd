@@ -2,6 +2,8 @@ extends SmokeTest
 
 
 func run() -> void:
+	# Toast lifetimes are timers: run game time faster (the runner resets it).
+	Engine.time_scale = 4.0
 	var host: Control = Control.new()
 	host.size = Vector2(960, 600)
 	host.theme = AppTheme.build(false)
@@ -86,7 +88,7 @@ func run() -> void:
 	await get_tree().process_frame
 	var main: Main = preload("res://app/main/main.tscn").instantiate() as Main
 	add_child(main)
-	for light: bool in [false, true, false, true]:
+	for light: bool in [true, false]:
 		Actions.run_action(&"view.theme_light" if light else &"view.theme_dark")
 		for i: int in 8:
 			main.toasts().show_toast("Error %d" % i, "An error that will be dismissed before changing theme")

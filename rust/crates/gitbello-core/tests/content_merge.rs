@@ -3,7 +3,7 @@
 //! keeping a detached worktree's commits as a branch, on temporary
 //! repositories.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

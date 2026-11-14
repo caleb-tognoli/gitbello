@@ -1,7 +1,7 @@
 //! Watcher behaviour on real temporary repositories. Timing-based: positive
 //! cases wait up to a few seconds, negative cases a short quiet period.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};

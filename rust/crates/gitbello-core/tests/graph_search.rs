@@ -1,7 +1,7 @@
 //! History search (PLAN M6.5 P5) over real graph loads: following a load in
 //! progress, cancelling, and through the runtime (new queries, graph reloads).
 
-mod support;
+use crate::support;
 
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};

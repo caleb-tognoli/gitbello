@@ -2,7 +2,7 @@
 //! Changes, its diff, commit, discard with undo and shelve, on real
 //! temporary repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

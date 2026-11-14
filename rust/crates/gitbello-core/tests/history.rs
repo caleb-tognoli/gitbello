@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use gitbello_core::backend::{CliBackend, GitBackend};
 use gitbello_core::git::CancelToken;

@@ -1,6 +1,6 @@
 //! Runtime: opening, refreshing, watching and graph reloads on real repos.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

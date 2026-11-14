@@ -1,7 +1,7 @@
 //! Blame (PLAN M8b) on real repositories: the blocks git reports, the
 //! loader's table, and the runtime's blame of a file history's versions.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 

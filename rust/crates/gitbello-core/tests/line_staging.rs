@@ -1,7 +1,7 @@
 //! Line and hunk staging, unstaging and discarding (M4b acceptance), applied
 //! with real `git apply` on temporary repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -324,11 +324,26 @@ fn expected_stage(old: &[u8], diff: &FileDiff, selected: &[usize]) -> Vec<u8> {
     out
 }
 
+// Thirty random rounds in all, in three tests so they run in parallel.
 #[test]
 fn random_selections_stage_exactly_what_was_picked() {
+    random_selections(0x5eed);
+}
+
+#[test]
+fn random_selections_stage_exactly_what_was_picked_2() {
+    random_selections(0x5eed + 1);
+}
+
+#[test]
+fn random_selections_stage_exactly_what_was_picked_3() {
+    random_selections(0x5eed + 2);
+}
+
+fn random_selections(seed: u64) {
     let repo = TestRepo::init();
-    let mut rng = Lcg(0x5eed);
-    for round in 0..30 {
+    let mut rng = Lcg(seed);
+    for round in 0..10 {
         let count = 5 + rng.below(40) as usize;
         let base: Vec<String> = (0..count).map(|i| format!("line {round}.{i}")).collect();
         let old: String = base.iter().map(|l| format!("{l}\n")).collect();

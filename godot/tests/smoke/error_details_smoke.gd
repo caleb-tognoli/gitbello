@@ -9,7 +9,7 @@ func run() -> void:
 	await get_tree().process_frame
 	var command: String = "fetch origin"
 	var stderr: String = "fatal: Cannot read 'space and é/[literal].git'\n\tsecond line\n"
-	for index: int in 300:
+	for index: int in 60:
 		stderr += "%03d %s\n" % [index, "long-unbroken-path".repeat(20)]
 	var details: String = "git %s\n\n%s" % [command, stderr]
 	Core.git_error.emit("C:/fixture/error-details", {

@@ -3,7 +3,7 @@
 //! where `.gitattributes` normalizes endings, Restore line endings with its
 //! undo, and the scan that finds the files whose only changes are endings.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

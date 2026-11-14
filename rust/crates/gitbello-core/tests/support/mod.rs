@@ -118,11 +118,15 @@ impl TestRepo {
             .clone()
             .with_env("GIT_CONFIG_GLOBAL", &self.global_config)
             .with_env("GIT_CONFIG_NOSYSTEM", "1")
-            .with_env("GIT_CONFIG_COUNT", "2")
+            .with_env("GIT_CONFIG_COUNT", "3")
             .with_env("GIT_CONFIG_KEY_0", "commit.gpgsign")
             .with_env("GIT_CONFIG_VALUE_0", "false")
             .with_env("GIT_CONFIG_KEY_1", "core.autocrlf")
             .with_env("GIT_CONFIG_VALUE_1", "false")
+            // No `git maintenance run --auto` after every commit: a process
+            // per commit for nothing on repositories this small.
+            .with_env("GIT_CONFIG_KEY_2", "maintenance.auto")
+            .with_env("GIT_CONFIG_VALUE_2", "false")
             .with_env("GIT_AUTHOR_NAME", "Ada Lövelace")
             .with_env("GIT_AUTHOR_EMAIL", "ada@example.com")
             .with_env("GIT_COMMITTER_NAME", "Ada Lövelace")
@@ -156,7 +160,14 @@ impl TestRepo {
             .env("GIT_COMMITTER_NAME", "Ada Lövelace")
             .env("GIT_COMMITTER_EMAIL", "ada@example.com")
             .env("GIT_COMMITTER_DATE", &date)
-            .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "maintenance.auto=false",
+            ])
     }
 
     pub fn try_git(&self, args: &[&str]) -> Result<GitOutput, GitError> {

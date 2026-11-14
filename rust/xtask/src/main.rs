@@ -39,7 +39,7 @@ const SMOKE_PASS_MARKER: &str = "SMOKE PASSED";
 /// Output fragments that fail a smoke run even when Godot exits with 0.
 const SMOKE_FAIL_MARKERS: &[&str] = &["SCRIPT ERROR", "Parse Error", "ERROR:"];
 
-/// The whole suite: about 160 s on a Windows CI runner.
+/// The whole suite: about 145 s locally on Windows (import, fixtures, tests).
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn main() -> Result<()> {
@@ -186,8 +186,15 @@ fn run(args: &[String]) -> Result<()> {
 /// each sample's `.tokens` file instead of comparing it.
 fn bless_highlight() -> Result<()> {
     let mut cmd = cargo();
-    cmd.args(["test", "-p", "gitbello-core", "--test", "highlight"])
-        .env("GITBELLO_BLESS", "1");
+    cmd.args([
+        "test",
+        "-p",
+        "gitbello-core",
+        "--test",
+        "core",
+        "highlight::",
+    ])
+    .env("GITBELLO_BLESS", "1");
     run_status(cmd)
 }
 
@@ -282,6 +289,17 @@ fn smoke(args: &[String]) -> Result<()> {
          terminal_command = \"gitbello-smoke-missing-terminal\"\n",
     )?;
 
+    // No network: every avatar source at a local server that hangs up at
+    // once. (A port nothing listens on fails too, but Windows retries a
+    // refused connection for about two seconds, which backs lookups up.)
+    let avatars = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let avatar_endpoint = format!("http://{}", avatars.local_addr()?);
+    thread::spawn(move || {
+        for stream in avatars.incoming() {
+            drop(stream);
+        }
+    });
+
     // Commits made by the app get a fixed identity and none of the user's
     // (or CI's) git config.
     let mut cmd = Command::new(&godot);
@@ -295,8 +313,7 @@ fn smoke(args: &[String]) -> Result<()> {
         .env("GITBELLO_CONFIG", fixtures.join("config.toml"))
         // Versions written for Open go with the fixtures.
         .env("GITBELLO_CACHE_DIR", fixtures.join("cache"))
-        // No network: every avatar source at a port nothing listens on.
-        .env("GITBELLO_AVATAR_ENDPOINT", "http://127.0.0.1:9")
+        .env("GITBELLO_AVATAR_ENDPOINT", &avatar_endpoint)
         .env("GIT_CONFIG_GLOBAL", fixtures.join("global.gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_COUNT", "1")

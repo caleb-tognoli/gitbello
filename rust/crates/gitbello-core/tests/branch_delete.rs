@@ -3,7 +3,7 @@
 //! remote, and cleanup with remote branches, on temporary repositories with
 //! a local bare remote.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

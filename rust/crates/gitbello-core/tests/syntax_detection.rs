@@ -4,7 +4,7 @@
 //! the blob in History; a known extension needs no read, and a binary file
 //! stays plain.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

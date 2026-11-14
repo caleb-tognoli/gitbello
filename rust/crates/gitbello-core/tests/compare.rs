@@ -1,7 +1,7 @@
 //! Compare (PLAN M7.12) on real repositories: sides, modes, counts, files
 //! and their diffs, through the backend and the runtime.
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 

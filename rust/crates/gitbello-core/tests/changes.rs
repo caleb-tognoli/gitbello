@@ -1,7 +1,7 @@
 //! Diffs, staging and commits through the backend and the runtime, on real
 //! temporary repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

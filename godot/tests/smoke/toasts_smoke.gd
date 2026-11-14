@@ -6,6 +6,8 @@ var _root: Control
 
 
 func run() -> void:
+	# Toast lifetimes are timers: run game time faster (the runner resets it).
+	Engine.time_scale = 4.0
 	_root = Control.new()
 	_root.size = Vector2(900, 700)
 	_root.theme = AppTheme.build(false)

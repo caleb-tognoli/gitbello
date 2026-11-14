@@ -3,7 +3,7 @@
 //! ignoring, the global excludes file and templates, on real temporary
 //! repositories.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

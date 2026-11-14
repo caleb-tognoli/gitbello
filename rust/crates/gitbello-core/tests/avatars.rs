@@ -1,6 +1,6 @@
 //! Avatar sources against a local HTTP stub (never the network).
 
-mod support;
+use crate::support;
 
 use std::net::TcpListener;
 use std::time::Duration;
@@ -417,11 +417,16 @@ fn a_server_error_is_asked_again_later() {
 
 #[test]
 fn without_an_answer_lookups_wait_a_while() {
-    // A port nothing listens on.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .expect("free port");
+    // A server that hangs up without answering. (A port nothing listens on
+    // fails the same way, but Windows retries a refused connection for
+    // about two seconds, once per source.)
+    let listener = TcpListener::bind("127.0.0.1:0").expect("free port");
+    let port = listener.local_addr().expect("port").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            drop(stream);
+        }
+    });
     let sources = AvatarSources::new(
         Some(curl()),
         Endpoints::under(&format!("http://127.0.0.1:{port}")),

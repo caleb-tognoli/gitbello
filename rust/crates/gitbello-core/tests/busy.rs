@@ -2,7 +2,7 @@
 //! UI work, the shown diff loads again only when its file changed, and a
 //! hidden history waits until it is shown, then reloads behind the shown rows.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

@@ -1,6 +1,6 @@
 //! Creating and cloning repositories before a RepoState exists.
 
-mod support;
+use crate::support;
 
 use gitbello_core::config::Config;
 use gitbello_core::git::GitErrorKind;

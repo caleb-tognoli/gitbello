@@ -5,7 +5,7 @@
 //! of the working file; in the resolver, theirs goes on from the state
 //! before the block and the lines after it from the end of ours.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 
