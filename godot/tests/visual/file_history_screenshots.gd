@@ -3,7 +3,7 @@ extends Node
 ## uncommitted changes, a commit with its details, the rename (its chip and
 ## the old → new diff), a version's menu, the filter (its matches, then no
 ## match), two versions selected, those versions in Compare (filtered to the
-## file), the field's options menu, compact rows, a history read from
+## file), the field's options popover, compact rows, a history read from
 ## another branch ("as of …"), a deleted file's history, the files' menu in
 ## Changes; then, dark only, the diff's menu, Open in History
 ## with that file's menu, Restore version with its toast and what it
@@ -111,8 +111,8 @@ func _ready() -> void:
 		Actions.run_action(&"compare.close")
 		# The field's options, then compact rows.
 		view.options_button().pressed.emit()
-		await _shot("options-menu-" + mode, view.options_menu())
-		view.options_menu().hide()
+		await _shot("options-menu-" + mode, view.options_popover())
+		view.options_popover().hide()
 		Actions.run_action(&"history.toggle_compact")
 		list.select_only(2)
 		if not await _diff_shown(view):

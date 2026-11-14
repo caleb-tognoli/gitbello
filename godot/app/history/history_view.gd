@@ -10,8 +10,9 @@ extends HSplitContainer
 ## ("3/41"). When a search finishes, the first match from the selected
 ## commit down is selected; Enter and Shift+Enter (or F3, Shift+F3 and the
 ## field's arrows, shown while searching) step through the matches. The
-## field's options menu picks the scope, compact rows and the graph; there is no row
-## between the field and the list.
+## field's options (`OptionsPopover`) pick the branches (Current | All), the
+## rows (Compact | Detailed) and the graph; there is no row between the
+## field and the list.
 
 signal repo_loaded(row_count: int, error: String)
 
@@ -20,9 +21,11 @@ const GROUP: StringName = &"history_views"
 ## How long a commit to reveal may take to show up in a list that is not
 ## loading before the newest commit is selected instead.
 const REVEAL_WAIT: float = 1.0
-## The options menu's Compact rows and Show graph items.
-const COMPACT_ID: int = 2
-const GRAPH_ID: int = 3
+## The rows choice of History's and File history's options.
+const ROWS_CHOICES: Array[Dictionary] = [
+	{"id": "compact", "icon": "RowsOneLine", "label": "Compact", "tooltip": "Compact rows", "action": "history.compact_rows"},
+	{"id": "detailed", "icon": "RowsTwoLine", "label": "Detailed", "tooltip": "Detailed rows", "action": "history.detailed_rows"},
+]
 ## Right-click or the menu key on a commit; `at_position` is in screen coordinates.
 signal commit_menu_requested(at_position: Vector2)
 ## Right-click on a ref label: `{name, short, kind, is_head}`, screen
@@ -53,8 +56,8 @@ var _restore_oid: String = ""
 var _head_pending: bool = false
 var _follow_head: bool = false
 
-var _scope_menu: PopupMenu = null
-var _scope_button: Button = null
+## The search field's options: branches, rows and graph.
+var _options: OptionsPopover = null
 var _refs_popover: RefsPopover = null
 ## Over the commit list while the history loads or reloads.
 var _loading: LoadingIndicator = LoadingIndicator.new()
@@ -108,22 +111,20 @@ func _ready() -> void:
 	_search.changed.connect(_on_search_text)
 	_search.submitted.connect(func(backwards: bool) -> void: step_match(not backwards))
 	_search.done.connect(func() -> void: _commit_list.grab_focus())
-	_scope_button = _search.add_button(&"Filter", "Filter options")
-	_scope_button.toggle_mode = true
-	_scope_button.pressed.connect(_show_scope_menu)
-	_scope_menu = PopupMenu.new()
-	_scope_menu.add_radio_check_item(tr("Current branch"), 0)
-	_scope_menu.add_radio_check_item(tr("All branches"), 1)
-	_scope_menu.add_separator()
-	_scope_menu.add_check_item(tr("Compact rows"), COMPACT_ID)
-	_scope_menu.add_check_item(tr("Show graph"), GRAPH_ID)
-	_scope_menu.id_pressed.connect(func(id: int) -> void:
-		if id == COMPACT_ID or id == GRAPH_ID:
-			Actions.run_action(&"history.toggle_compact" if id == COMPACT_ID else &"history.toggle_graph", _scope_button)
-			return
-		Actions.run_action(&"history.all_branches" if id == 1 else &"history.current_branch", _scope_button))
-	_scope_menu.about_to_popup.connect(_update_scope)
-	add_child(_scope_menu)
+	_options = _search.add_options()
+	_options.add_section("Filter", &"", &"Filter")
+	_options.add_segmented("scope", "Branches", [
+		{"id": "current", "icon": "GitBranch", "label": "Current", "tooltip": "Show current branch history",
+			"action": "history.current_branch"},
+		{"id": "all", "icon": "GitBranches", "label": "All", "tooltip": "Show all branches history",
+			"action": "history.all_branches"},
+	], "current")
+	_options.add_section("View", &"", &"RowsTwoLine")
+	_options.add_segmented("rows", "Rows", ROWS_CHOICES, "detailed")
+	_options.add_chips("", [{"id": "graph", "icon": "GitGraph", "label": "Show graph", "tooltip": "Show history graph",
+		"action": "history.toggle_graph", "value": true, "default": true, "counted": false}])
+	_options.about_to_popup.connect(_update_scope)
+	_search.option_changed.connect(_on_option)
 	add_to_group(GROUP)
 	set_compact(Core.history_compact())
 	set_show_graph(Core.history_graph())
@@ -142,30 +143,27 @@ func set_show_graph(value: bool) -> void:
 	_update_compact_item()
 
 
-## Checks Compact rows and Show graph in the options menu and shows their
-## shortcuts.
+## Shows the rows and graph settings in the options.
 func _update_compact_item() -> void:
-	if _scope_menu == null:
+	if _options == null:
 		return
-	show_check_action(_scope_menu, COMPACT_ID, "Compact rows", &"history.toggle_compact", _commit_list.compact)
-	show_check_action(_scope_menu, GRAPH_ID, "Show graph", &"history.toggle_graph", _commit_list.show_graph)
+	_options.set_value("rows", "compact" if _commit_list.compact else "detailed")
+	_options.set_value("graph", _commit_list.show_graph)
 
 
-## Sets check item `id` of `menu` to `label` (translated here), `checked`,
-## with `action`'s shortcut shown beside it.
-static func show_check_action(menu: PopupMenu, id: int, label: String, action: StringName, checked: bool) -> void:
-	var index: int = menu.get_item_index(id)
-	menu.set_item_text(index, TranslationServer.translate(label))
-	menu.set_item_checked(index, checked)
-	var shortcuts: PackedStringArray = Actions.shortcuts(action)
-	var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
-	var shortcut: Shortcut = null
-	if event != null:
-		shortcut = Shortcut.new()
-		shortcut.events = [event]
-	menu.set_item_shortcut(index, shortcut)
-	# Shown only: the registry handles the keys.
-	menu.set_item_shortcut_disabled(index, true)
+## The user changed an option: each runs its action, which saves it and
+## updates every view.
+func _on_option(id: String, value: Variant) -> void:
+	var source: Button = _search.options_button()
+	match id:
+		"scope":
+			Actions.run_action(&"history.all_branches" if value == "all" else &"history.current_branch", source)
+		"rows":
+			Actions.run_action(&"history.compact_rows" if value == "compact" else &"history.detailed_rows", source)
+		"graph":
+			if bool(value) != _commit_list.show_graph:
+				Actions.run_action(&"history.toggle_graph", source)
+	_update_scope()
 
 
 func _notification(what: int) -> void:
@@ -281,19 +279,14 @@ func reveal_commit(oid: String, in_head: bool) -> void:
 			_select_newest_if_none())
 
 
-func scope_menu() -> PopupMenu:
-	return _scope_menu
+## The search field's options popover.
+func options_popover() -> OptionsPopover:
+	return _options
 
 
+## The button that opens the options.
 func scope_button() -> Button:
-	return _scope_button
-
-
-func _show_scope_menu() -> void:
-	_update_scope()
-	_scope_menu.position = Vector2i(_scope_button.get_screen_position() + Vector2(0.0, _scope_button.size.y))
-	_scope_menu.reset_size()
-	_scope_menu.popup()
+	return _search.options_button()
 
 
 func _on_history_state() -> void:
@@ -310,14 +303,12 @@ func _update_scope() -> void:
 	if branch.is_empty():
 		current = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("Current branch")
 	var all: bool = bool(info.get("all_branches", false))
-	_scope_menu.set_item_text(0, tr("Current branch"))
-	_scope_menu.set_item_text(1, tr("All branches"))
-	_scope_menu.set_item_checked(0, not all)
-	_scope_menu.set_item_checked(1, all)
-	_scope_menu.set_item_tooltip(0, current)
-	_scope_button.set_pressed_no_signal(all)
-	_scope_button.disabled = session == null or not session.is_ready()
-	_scope_button.tooltip_text = (tr("All branches") if all else current) + "\n" + tr("Filter options")
+	if _options == null:
+		return
+	_options.set_value("scope", "all" if all else "current")
+	var button: Button = _search.options_button()
+	button.disabled = session == null or not session.is_ready()
+	button.tooltip_text = (tr("All branches") if all else current) + "\n" + tr("Options")
 	_update_compact_item()
 
 

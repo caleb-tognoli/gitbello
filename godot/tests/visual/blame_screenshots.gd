@@ -71,8 +71,8 @@ func _ready() -> void:
 	await _shot("menu", view.blame_menu())
 	view.blame_menu().hide()
 	view.blame_options_button().pressed.emit()
-	await _shot("options", view.blame_options_menu())
-	view.blame_options_menu().hide()
+	await _shot("options", view.blame_options_popover())
+	view.blame_options_popover().hide()
 	# Before the commit that moved the file: the version under its old name.
 	blame.go_to_line(0)
 	Actions.run_action(&"blame.before")

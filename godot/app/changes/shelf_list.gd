@@ -6,6 +6,9 @@ extends VBoxContainer
 signal shelf_selected(shelf: Dictionary)
 signal menu_requested(shelf: Dictionary, at: Vector2)
 
+const ALL_ID: String = "all"
+const BRANCH_PREFIX: String = "branch:"
+
 var _shelves: Array[Dictionary] = []
 var _shown: Array[Dictionary] = []
 ## Native rows, including a `group` dictionary for each branch heading.
@@ -20,10 +23,8 @@ var _branches: PackedStringArray = PackedStringArray()
 var _pending_branch: String = ""
 var _branch_button: Button = null
 var _branch_badge: CountBadge = CountBadge.new()
-var _picker: PopupPanel = PopupPanel.new()
-var _choices: VBoxContainer = VBoxContainer.new()
-var _all_check: CheckBox = null
-var _checks: Dictionary[String, CheckBox] = {}
+## Rebuilt each time it opens: the branches come and go with the shelves.
+var _picker: OptionsPopover = OptionsPopover.new()
 
 @onready var _filter: FilterField = %ShelfFilter
 @onready var _names: ItemList = %ShelfNames
@@ -44,15 +45,7 @@ func _ready() -> void:
 	_branch_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.filter_branches", _branch_button))
 	_names.item_selected.connect(_on_selected)
 	_names.item_clicked.connect(_on_clicked)
-	_picker.theme_type_variation = &"ShelfBranchPicker"
 	add_child(_picker)
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	AutoScroll.enable(scroll)
-	_picker.add_child(scroll)
-	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_choices.theme_type_variation = &"PaneColumn"
-	scroll.add_child(_choices)
 	_rebuild()
 
 
@@ -143,12 +136,12 @@ func branch_badge() -> CountBadge:
 	return _branch_badge
 
 
-func branch_picker() -> PopupPanel:
+func branch_picker() -> OptionsPopover:
 	return _picker
 
 
 func branch_check(branch: String) -> CheckBox:
-	return _checks.get(branch)
+	return _picker.control(BRANCH_PREFIX + branch) as CheckBox
 
 
 func focus_filter() -> void:
@@ -198,15 +191,20 @@ func toggle_pending_branch() -> void:
 	set_branches(selected)
 
 
+## Opens the branch filter: All branches, then a check row per branch with
+## its shelf count, in the shared options popover.
 func open_branches() -> void:
-	for child: Node in _choices.get_children():
-		_choices.remove_child(child)
-		child.queue_free()
-	_checks.clear()
-	_all_check = _choice("All branches", _shelves.size())
-	_all_check.toggled.connect(func(on: bool) -> void:
-		Actions.run_action(&"shelf.scope_all" if on else &"shelf.scope_none", _all_check))
-	_choices.add_child(HSeparator.new())
+	_picker.hide()
+	remove_child(_picker)
+	_picker.queue_free()
+	_picker = OptionsPopover.new()
+	_picker.return_focus = _branch_button
+	add_child(_picker)
+	_picker.add_section("Branches", &"", &"GitBranch")
+	var rows: Array[Dictionary] = [
+		{"id": ALL_ID, "label": "All branches", "count": _shelves.size(), "counted": false},
+		{"separator": true},
+	]
 	for branch: String in _available_branches():
 		var count: int = 0
 		for shelf: Dictionary in _shelves:
@@ -215,29 +213,21 @@ func open_branches() -> void:
 		var label: String = branch if not branch.is_empty() else tr("No branch")
 		if branch == _branch and not branch.is_empty():
 			label += tr(" (current)")
-		var check: CheckBox = _choice(label, count)
-		_checks[branch] = check
-		check.pressed.connect(func() -> void:
-			_pending_branch = branch
-			Actions.run_action(&"shelf.toggle_filter_branch", check))
+		rows.append({"id": BRANCH_PREFIX + branch, "label": label, "translate": false,
+				"count": count, "counted": false})
+	_picker.add_checks(rows)
+	_picker.changed.connect(_on_picked)
 	_sync_checks()
-	var width: int = get_theme_constant(&"width", &"ShelfBranchPicker")
-	var height: int = mini(get_theme_constant(&"max_height", &"ShelfBranchPicker"),
-			int(_choices.get_combined_minimum_size().y) + get_theme_constant(&"padding", &"ShelfBranchPicker"))
-	_picker.size = Vector2i(width, height)
-	_picker.position = Vector2i(_branch_button.get_screen_position() + Vector2(0, _branch_button.size.y))
-	_picker.popup()
+	_picker.open_below(_branch_button)
 
 
-func _choice(label: String, count: int) -> CheckBox:
-	var check: CheckBox = CheckBox.new()
-	check.text = label
-	check.tooltip_text = label
-	_choices.add_child(check)
-	var badge: CountBadge = CountBadge.new()
-	check.add_child(badge)
-	badge.count = count
-	return check
+func _on_picked(id: String, on: Variant) -> void:
+	var source: Control = _picker.control(id)
+	if id == ALL_ID:
+		Actions.run_action(&"shelf.scope_all" if bool(on) else &"shelf.scope_none", source)
+	else:
+		_pending_branch = id.trim_prefix(BRANCH_PREFIX)
+		Actions.run_action(&"shelf.toggle_filter_branch", source)
 
 
 func _available_branches() -> PackedStringArray:
@@ -251,10 +241,11 @@ func _available_branches() -> PackedStringArray:
 
 
 func _sync_checks() -> void:
-	if is_instance_valid(_all_check):
-		_all_check.set_pressed_no_signal(_all_branches)
-	for branch: String in _checks:
-		_checks[branch].set_pressed_no_signal(_all_branches or branch in _branches)
+	for id: String in _picker.ids():
+		if id == ALL_ID:
+			_picker.set_value(id, _all_branches)
+		else:
+			_picker.set_value(id, _all_branches or id.trim_prefix(BRANCH_PREFIX) in _branches)
 
 
 ## What the list says without shelves to show, with a way out when there is

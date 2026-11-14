@@ -1,7 +1,7 @@
 extends Node
 ## Numbered shots of History without a header row: the list under the search
 ## field, the field's match count while searching ("Searching…", "2/2",
-## "No matches"), the options menu with Compact rows and Show graph, compact
+## "No matches"), the options popover (Branches, Rows, Show graph), compact
 ## rows, rows without the graph, the light theme and an empty repository
 ## (the list says "No commits yet"). Each step also saves a 2x crop
 ## of the search field. Read-only on the repositories; it saves the row and
@@ -66,20 +66,20 @@ func _ready() -> void:
 	await get_tree().process_frame
 
 	history.scope_button().pressed.emit()
-	await _menu_shot(history.scope_menu(), "options-menu")
-	history.scope_menu().id_pressed.emit(HistoryView.COMPACT_ID)
-	history.scope_menu().hide()
+	await _menu_shot(history.options_popover(), "options-menu")
+	(history.options_popover().control("rows") as SegmentedControl).choice_button("compact").pressed.emit()
+	history.options_popover().hide()
 	await _shot(history, "compact-rows")
 	history.scope_button().pressed.emit()
-	await _menu_shot(history.scope_menu(), "options-menu-compact-on")
-	history.scope_menu().id_pressed.emit(HistoryView.GRAPH_ID)
-	history.scope_menu().hide()
+	await _menu_shot(history.options_popover(), "options-menu-compact-on")
+	(history.options_popover().control("graph") as ToggleChip).button_pressed = false
+	history.options_popover().hide()
 	await _shot(history, "compact-no-graph")
 	Actions.run_action(&"history.toggle_compact")
 	await _shot(history, "two-line-no-graph")
 	history.scope_button().pressed.emit()
-	await _menu_shot(history.scope_menu(), "options-menu-graph-off")
-	history.scope_menu().hide()
+	await _menu_shot(history.options_popover(), "options-menu-graph-off")
+	history.options_popover().hide()
 	Actions.run_action(&"view.theme_light")
 	await _shot(history, "light-no-graph")
 	Actions.run_action(&"view.theme_dark")
@@ -95,8 +95,8 @@ func _ready() -> void:
 		return
 	await _shot(history, "light-no-matches")
 	history.scope_button().pressed.emit()
-	await _menu_shot(history.scope_menu(), "light-options-menu")
-	history.scope_menu().hide()
+	await _menu_shot(history.options_popover(), "light-options-menu")
+	history.options_popover().hide()
 	field.set_text("")
 	Actions.run_action(&"view.theme_dark")
 
@@ -147,7 +147,7 @@ func _shot(history: HistoryView, shot_name: String) -> void:
 	print("SHOT %s count='%s' empty='%s'" % [path, history.status_text(), history.empty_text()])
 
 
-func _menu_shot(menu: PopupMenu, shot_name: String) -> void:
+func _menu_shot(menu: Window, shot_name: String) -> void:
 	await _settle()
 	_step += 1
 	var path: String = _out.path_join("%02d-%s.png" % [_step, shot_name])

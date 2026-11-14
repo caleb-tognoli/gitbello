@@ -50,30 +50,35 @@ func run() -> void:
 	await _check_chips(list, history, page)
 	await _check_details(list, history, page)
 
-	# Compact rows in the search field's options menu, and the View menu action.
-	var menu: PopupMenu = history.scope_menu()
-	var compact_index: int = menu.get_item_index(HistoryView.COMPACT_ID)
-	expect(compact_index >= 0 and menu.is_item_checkable(compact_index), "the options menu has Compact rows")
-	expect(not menu.is_item_checked(compact_index), "it is off for two-line rows")
+	# Rows (Compact | Detailed) in the search field's options, and the View menu's radios.
+	var options: OptionsPopover = history.options_popover()
+	var rows: SegmentedControl = options.control("rows") as SegmentedControl
+	expect(rows != null, "the options have the rows choice")
+	expect_eq(options.value("rows"), "detailed", "it shows Detailed for two-line rows")
+	expect_eq(rows.choice_button("compact").icon, AppTheme.tintable_icon(&"RowsOneLine"), "Compact has the one-line icon")
+	expect(rows.choice_button("detailed").tooltip_text.begins_with("Detailed rows"), "the tooltip names the rows")
+	expect(not Actions.get_action(&"history.compact_rows").hidden and not Actions.get_action(&"history.detailed_rows").hidden,
+			"Compact rows and Detailed rows are actions")
 	history.scope_button().pressed.emit()
-	menu.id_pressed.emit(HistoryView.COMPACT_ID)
-	menu.hide()
-	expect(list.compact and Core.history_compact(), "Compact rows switches and saves")
-	expect(menu.is_item_checked(compact_index), "the item follows")
-	expect(not history.scope_button().button_pressed, "compact rows do not light the filter button")
-	# Show graph, next to it: off moves the text to the left edge, saved.
-	var graph_index: int = menu.get_item_index(HistoryView.GRAPH_ID)
-	expect(graph_index >= 0 and menu.is_item_checked(graph_index), "Show graph is on by default")
+	rows.choice_button("compact").pressed.emit()
+	expect(options.visible, "the popover stays open")
+	options.hide()
+	expect(list.compact and Core.history_compact(), "Compact switches and saves")
+	expect_eq(options.value("rows"), "compact", "the choice follows")
+	expect(not history.scope_button().button_pressed, "compact rows do not light the options button")
+	expect_eq(history.search_field().options_badge().count, 0, "and are not counted as a filter")
+	# Show graph, beside it: off moves the text to the left edge, saved.
+	var graph: ToggleChip = options.control("graph") as ToggleChip
+	expect(graph.button_pressed, "Show graph is on by default")
 	var with_graph: float = list.text_left()
 	history.scope_button().pressed.emit()
-	menu.id_pressed.emit(HistoryView.GRAPH_ID)
-	menu.hide()
+	graph.button_pressed = false
+	options.hide()
 	expect(not list.show_graph and not Core.history_graph(), "Show graph off hides the graph and saves")
-	expect(not menu.is_item_checked(graph_index), "the item follows")
 	expect(list.text_left() < with_graph, "the text starts further left (%s < %s)" % [list.text_left(), with_graph])
 	Actions.run_action(&"history.toggle_graph")
 	expect(list.show_graph and Core.history_graph(), "the action brings the graph back")
-	expect(menu.is_item_checked(graph_index), "and the item follows")
+	expect(bool(options.value("graph")), "and the chip follows")
 	expect(list.row_height() < tall, "compact rows are shorter")
 	# Compact rows: the ref icons and the author's avatar on the right.
 	await get_tree().process_frame
@@ -91,9 +96,13 @@ func run() -> void:
 	var other: RepoTab = main.open_repo(fixtures.path_join("repo-1"))
 	other.show_view(WorktreeView.View.HISTORY)
 	expect(other.history().commit_list().compact, "a new tab opens compact")
-	Actions.run_action(&"history.toggle_compact")
+	Actions.run_action(&"history.detailed_rows")
 	expect(not list.compact and not other.history().commit_list().compact,
-			"the action switches every History view back")
+			"Detailed rows switches every History view back")
+	expect_eq(options.value("rows"), "detailed", "and the choice follows")
+	Actions.run_action(&"history.toggle_compact")
+	expect(list.compact, "the toggle still flips the rows")
+	Actions.run_action(&"history.toggle_compact")
 	expect(not Core.history_compact(), "and saves it")
 
 	if was_compact:

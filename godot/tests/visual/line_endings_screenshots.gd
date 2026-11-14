@@ -68,8 +68,8 @@ func _ready() -> void:
 		var filter: FilterField = changes.filter_field()
 		filter.set_option("endings_only", true)
 		filter.options_button().pressed.emit()
-		await _shot("%s-filter-endings-only" % theme, null, filter.menu())
-		filter.menu().hide()
+		await _shot("%s-filter-endings-only" % theme, null, filter.options_popover())
+		filter.options_popover().hide()
 		filter.set_option("endings_only", false)
 		if not await _select(changes, session, "crlf.txt"):
 			return

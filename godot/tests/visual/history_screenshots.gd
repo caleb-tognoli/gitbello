@@ -39,12 +39,11 @@ func _ready() -> void:
 				return
 			Actions.run_action(&"history.go_to_current_commit")
 			await _shot(out, "current_" + mode)
-			if history.has_method("scope_menu"):
-				history.scope_button().pressed.emit()
-				for frame: int in 30:
-					await get_tree().process_frame
-				history.scope_menu().get_texture().get_image().save_png(out.path_join("scope_menu_" + mode + ".png"))
-				history.scope_menu().hide()
+			history.scope_button().pressed.emit()
+			for frame: int in 30:
+				await get_tree().process_frame
+			history.options_popover().get_texture().get_image().save_png(out.path_join("scope_menu_" + mode + ".png"))
+			history.options_popover().hide()
 			history.call("set_all_branches", true)
 			if not await _wait(func() -> bool: return history.commit_list().row_count() == 4):
 				return

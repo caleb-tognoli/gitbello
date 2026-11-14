@@ -101,7 +101,8 @@ func _ready() -> void:
 		&"view.compare": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.COMPARE,
 		&"view.file_history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.FILE,
 		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
-		&"history.toggle_compact": func() -> bool: return Core.history_compact(),
+		&"history.compact_rows": func() -> bool: return Core.history_compact(),
+		&"history.detailed_rows": func() -> bool: return not Core.history_compact(),
 		&"history.toggle_graph": func() -> bool: return Core.history_graph(),
 		&"diff.toggle_whole_file": func() -> bool:
 			var panel: DiffPanel = _shown_diff_panel()
@@ -616,6 +617,15 @@ func _register_actions() -> void:
 			func() -> bool: return _shown_diff_panel() != null)
 	Actions.register(&"diff.toggle_minimap", "Diff minimap", "View", _toggle_minimap)
 	Actions.register(&"history.toggle_compact", "Compact history rows", "View", _toggle_history_compact)
+	Actions.register(&"history.compact_rows", "Compact rows", "View", _set_history_compact.bind(true))
+	Actions.register(&"history.detailed_rows", "Detailed rows", "View", _set_history_compact.bind(false))
+	# Alt+Down in a filter field: its options (filters and view settings).
+	Actions.register(&"view.options", "Filter and view options", "View",
+			func() -> void: _focused_filter_field().open_options(), PackedStringArray(["Alt+Down"]),
+			func() -> bool:
+				var field: FilterField = _focused_filter_field()
+				return field != null and field.options_popover() != null,
+			_says("Focus a filter or search field first."))
 	Actions.register(&"history.toggle_graph", "Show history graph", "View", _toggle_history_graph)
 	Actions.register(&"diff.next_change", "Next change", "View",
 			func() -> void: _navigable_diff().jump_to_change(true), PackedStringArray(["F7"]),
@@ -680,6 +690,9 @@ func _register_change_actions() -> void:
 	Actions.register(&"changes.clear_filters", "Clear all filters", "Changes",
 			func() -> void: changes.call().filter_field().clear_filters(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().filter_field().is_active())
+	Actions.register(&"changes.clear_filter_options", "Clear filter options", "Changes",
+			func() -> void: changes.call().filter_field().clear_options(), PackedStringArray(),
+			func() -> bool: return in_changes.call() and not changes.call().filter_field().options().is_empty())
 	Actions.register(&"changes.toggle_selected", "Include or leave out the selection", "Changes",
 			func() -> void: changes.call().toggle_selected(), PackedStringArray(), in_changes)
 	Actions.register(&"changes.include_all", "Include all changes", "Changes",
@@ -1328,9 +1341,22 @@ func _toggle_minimap() -> void:
 
 
 func _toggle_history_compact() -> void:
-	var value: bool = not Core.history_compact()
+	_set_history_compact(not Core.history_compact())
+
+
+## Compact (one-line) or detailed (two-line) rows in History and File
+## history, saved.
+func _set_history_compact(value: bool) -> void:
 	Core.set_history_compact(value)
 	get_tree().call_group(HistoryView.GROUP, &"set_compact", value)
+
+
+## The filter field holding the focus, or null.
+func _focused_filter_field() -> FilterField:
+	var node: Node = get_viewport().gui_get_focus_owner()
+	while node != null and not node is FilterField:
+		node = node.get_parent()
+	return node as FilterField
 
 
 func _toggle_history_graph() -> void:

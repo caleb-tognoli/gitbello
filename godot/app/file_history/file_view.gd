@@ -50,13 +50,14 @@ const BLAME_SLOT: String = "blame"
 const BLAME_MENU_ACTIONS: Array[StringName] = [&"blame.before", &"blame.show_changes", &"",
 	&"file_history.show_in_history", &"file_history.copy_hash", &"", &"diff.copy", &"diff.select_all", &"",
 	&"file_history.open_version", &"", &"diff.toggle_minimap"]
-## The blame options menu's items and their actions.
-const BLAME_OPTIONS: Array[Array] = [["Ignore whitespace", &"blame.toggle_ignore_whitespace"],
-	["Detect moved lines", &"blame.toggle_detect_moves"]]
+## The blame options' chips: id, icon, label and action.
+const BLAME_OPTIONS: Array[Dictionary] = [
+	{"id": "ignore_whitespace", "icon": "TextFile", "label": "Ignore whitespace",
+		"action": "blame.toggle_ignore_whitespace"},
+	{"id": "detect_moves", "icon": "GitRebase", "label": "Detect moved lines", "action": "blame.toggle_detect_moves"},
+]
 ## Characters of the start's name on its chip (the tooltip has all of it).
 const MAX_START_CHARS: int = 40
-## The options menu's Compact rows item.
-const COMPACT_ID: int = 0
 
 var session: RepoSession = null:
 	set = set_session
@@ -107,8 +108,8 @@ var _blame_button: Button = Button.new()
 var _split: HSplitContainer = HSplitContainer.new()
 var _left: VBoxContainer = VBoxContainer.new()
 var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
-var _options_button: Button = null
-var _options_menu: PopupMenu = PopupMenu.new()
+## The filter's options: the rows.
+var _options: OptionsPopover = null
 var _list: FileHistoryList = FileHistoryList.new()
 var _loading: LoadingIndicator = LoadingIndicator.new()
 var _message: Label = Label.new()
@@ -127,7 +128,8 @@ var _blame_bar: PanelContainer = PanelContainer.new()
 var _blame_version: Label = Label.new()
 var _blame_status: Label = Label.new()
 var _blame_options: Button = Button.new()
-var _blame_options_menu: PopupMenu = PopupMenu.new()
+var _blame_popover: OptionsPopover = OptionsPopover.new()
+var _blame_badge: CountBadge = CountBadge.new()
 var _blame_area: Control = Control.new()
 var _blame_view: BlameView = BlameView.new()
 var _blame_loading: LoadingIndicator = LoadingIndicator.new()
@@ -189,6 +191,7 @@ func _ready() -> void:
 	add_to_group(DiffPanel.GROUP)
 	set_compact(Core.history_compact())
 	set_minimap_enabled(Core.diff_minimap())
+	_update_blame_options()
 	_apply_theme()
 	_update_bar()
 	_apply_mode()
@@ -197,6 +200,8 @@ func _ready() -> void:
 ## One-line rows, as History's Compact rows.
 func set_compact(value: bool) -> void:
 	_list.compact = value
+	if _options != null:
+		_options.set_value("rows", "compact" if value else "detailed")
 
 
 ## History's graph setting does not apply: the versions have no graph.
@@ -238,24 +243,14 @@ func _build_filter() -> void:
 	_filter.changed.connect(_on_filter)
 	_filter.done.connect(func() -> void: _list.grab_focus())
 	_filter.submitted.connect(func(_backwards: bool) -> void: _list.grab_focus())
-	_options_button = _filter.add_button(&"Filter", "Filter options")
-	_options_button.pressed.connect(_show_options)
-	_options_menu.add_check_item(tr("Compact rows"), COMPACT_ID)
-	_options_menu.id_pressed.connect(func(_id: int) -> void:
-		Actions.run_action(&"history.toggle_compact", _options_button))
-	_options_menu.about_to_popup.connect(_update_options)
-	add_child(_options_menu)
-
-
-func _show_options() -> void:
-	_options_menu.position = Vector2i(_options_button.get_screen_position()
-			+ Vector2(0.0, _options_button.size.y))
-	_options_menu.reset_size()
-	_options_menu.popup()
-
-
-func _update_options() -> void:
-	HistoryView.show_check_action(_options_menu, COMPACT_ID, "Compact rows", &"history.toggle_compact", _list.compact)
+	_options = _filter.add_options()
+	_options.add_section("View", &"", &"RowsTwoLine")
+	_options.add_segmented("rows", "Rows", HistoryView.ROWS_CHOICES, "compact" if _list.compact else "detailed")
+	_options.about_to_popup.connect(func() -> void:
+		_options.set_value("rows", "compact" if _list.compact else "detailed"))
+	_filter.option_changed.connect(func(_id: String, value: Variant) -> void:
+		Actions.run_action(&"history.compact_rows" if value == "compact" else &"history.detailed_rows",
+				_filter.options_button()))
 
 
 func _wire_diff() -> void:
@@ -308,17 +303,23 @@ func _build_blame() -> void:
 	row.add_child(_blame_version)
 	_blame_status.theme_type_variation = &"DimLabel"
 	row.add_child(_blame_status)
-	_blame_options.icon = AppTheme.icon(&"Tools")
+	_blame_options.icon = AppTheme.icon(&"Sliders")
 	_blame_options.focus_mode = Control.FOCUS_NONE
 	_blame_options.theme_type_variation = &"DetailsIconButton"
-	_blame_options.pressed.connect(_show_blame_options)
+	_blame_options.pressed.connect(func() -> void:
+		_update_blame_options()
+		_blame_popover.open_below(_blame_options))
 	row.add_child(_blame_options)
-	for i: int in BLAME_OPTIONS.size():
-		_blame_options_menu.add_check_item(tr(BLAME_OPTIONS[i][0]), i)
-	_blame_options_menu.id_pressed.connect(func(id: int) -> void:
-		Actions.run_action(BLAME_OPTIONS[id][1], _blame_options))
-	_blame_options_menu.about_to_popup.connect(_update_blame_options)
-	add_child(_blame_options_menu)
+	_blame_options.add_child(_blame_badge)
+	_blame_popover.add_section("Blame", &"", &"User")
+	var chips: Array[Dictionary] = []
+	chips.assign(BLAME_OPTIONS)
+	_blame_popover.add_chips("", chips)
+	_blame_popover.changed.connect(func(id: String, on: bool) -> void:
+		for option: Dictionary in BLAME_OPTIONS:
+			if option["id"] == id and on != _blame_option(id):
+				Actions.run_action(StringName(option["action"]), _blame_options))
+	add_child(_blame_popover)
 	_blame_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_blame_area.clip_contents = true
 	_blame_box.add_child(_blame_area)
@@ -369,7 +370,6 @@ func _notification(what: int) -> void:
 		_apply_theme()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
 		_filter.placeholder = tr("Filter commits")
-		_options_button.tooltip_text = tr("Filter options")
 		_update_bar()
 		_apply_mode()
 		if session != null:
@@ -817,6 +817,7 @@ func _blame_selected() -> void:
 
 ## A blame option changed: blame again with it.
 func refresh_blame_options() -> void:
+	_update_blame_options()
 	if is_blame():
 		_blame_selected()
 
@@ -1042,17 +1043,16 @@ func show_blame_changes() -> void:
 	_list.scroll_to_row(row)
 
 
-func _show_blame_options() -> void:
-	_blame_options_menu.position = Vector2i(_blame_options.get_screen_position()
-			+ Vector2(0.0, _blame_options.size.y))
-	_blame_options_menu.reset_size()
-	_blame_options_menu.popup()
-
-
+## Shows the saved blame options in the popover and counts those on.
 func _update_blame_options() -> void:
-	var checked: Array[bool] = [Core.blame_ignore_whitespace(), Core.blame_detect_moves()]
-	for i: int in BLAME_OPTIONS.size():
-		HistoryView.show_check_action(_blame_options_menu, i, BLAME_OPTIONS[i][0], BLAME_OPTIONS[i][1], checked[i])
+	for option: Dictionary in BLAME_OPTIONS:
+		_blame_popover.set_value(String(option["id"]), _blame_option(String(option["id"])))
+	_blame_badge.count = _blame_popover.count()
+
+
+## Whether blame option `id` is on (saved in the config).
+static func _blame_option(id: String) -> bool:
+	return Core.blame_ignore_whitespace() if id == "ignore_whitespace" else Core.blame_detect_moves()
 
 
 ## The blame's minimap follows the diffs' (`DiffPanel.GROUP`).
@@ -1208,11 +1208,11 @@ func filter_field() -> FilterField:
 
 
 func options_button() -> Button:
-	return _options_button
+	return _filter.options_button()
 
 
-func options_menu() -> PopupMenu:
-	return _options_menu
+func options_popover() -> OptionsPopover:
+	return _options
 
 
 func diff_menu() -> PopupMenu:
@@ -1247,8 +1247,12 @@ func blame_options_button() -> Button:
 	return _blame_options
 
 
-func blame_options_menu() -> PopupMenu:
-	return _blame_options_menu
+func blame_options_popover() -> OptionsPopover:
+	return _blame_popover
+
+
+func blame_options_badge() -> CountBadge:
+	return _blame_badge
 
 
 func blame_button() -> Button:

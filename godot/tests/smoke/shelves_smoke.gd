@@ -128,14 +128,16 @@ func run() -> void:
 	var main_check: CheckBox = shelves.branch_check("main")
 	var topic_check: CheckBox = shelves.branch_check("topic")
 	expect(main_check != null and topic_check != null, "picker lists both branches")
-	main_check.pressed.emit()
+	expect(shelves.branch_picker() is OptionsPopover, "the branch filter is the shared options popover")
+	expect_eq(main_check.theme_type_variation, &"OptionsCheck", "branches are check rows in the options style")
+	_flip(main_check)
 	expect_eq(shelves.row_texts(), PackedStringArray(["topic work"]), "one branch can be excluded")
-	topic_check.pressed.emit()
+	_flip(topic_check)
 	expect(shelves.row_texts().is_empty(), "no selected branches produces an empty list")
 	expect_eq(shelves.empty_state().title(), "No branches selected", "the reason appears in the list")
 	expect(not view.shelf_files_split().is_visible_in_tree(), "no duplicate message or split panes on the right")
-	main_check.pressed.emit()
-	topic_check.pressed.emit()
+	_flip(main_check)
+	_flip(topic_check)
 	expect_eq(shelves.selected_branches().size(), 2, "several branches can be selected together")
 	expect_eq(shelves.branch_groups(), PackedStringArray(["topic", "main"]), "current branch first, with separate branch groups")
 	expect(view.shelf_files_split().visible, "the right-hand panes return with a selection")
@@ -369,3 +371,8 @@ func _job_ok(session: RepoSession, job: int) -> bool:
 	var finished: bool = await wait_until(func() -> bool: return done[0])
 	session.job_finished.disconnect(on_finished)
 	return finished and done[1]
+
+
+## Clicks a check row: it flips and sends `toggled`, as the mouse would.
+func _flip(check: CheckBox) -> void:
+	check.button_pressed = not check.button_pressed

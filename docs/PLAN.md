@@ -1231,6 +1231,44 @@ Q&A 2026-11-14; the design is in §4 Merge with preview.
 - [x] `merge_smoke.gd` covers the dialog and a conflicting and a clean rebase with Undo; `merge_screenshots.tscn` with `tests/visual/merge_prep.sh`
 - [x] Review stop: screenshots in both themes
 
+### M7.15 — Options popovers (≈2 weeks)
+
+Scope settled in the Q&A of 2026-11-14. The filter fields' Filter button opens a plain `PopupMenu` of check items that mixes filters (History's branch scope) with view settings (Compact rows, Show graph) under a funnel icon. It becomes one themed popover per field, with controls that show what each option is.
+
+```
+[🔍 src/…                ✕ │ ⚟2]      ⚟ = sliders icon, 2 = CountBadge
+          ┌───────────────────────────────────────┐
+          │ Filter                         Clear  │
+          │ Show    (+ New) (~ Modified) (− Deleted)│
+          │ Commit  (✓ Included) (✗ Excluded)     │
+          │ Also    (↵ Line endings only) (⊘ Ignored)│
+          │ View                                  │
+          │ Rows    [≡ Compact | ☰ Detailed]      │
+          │ Graph   (⌇ Show graph)                │
+          └───────────────────────────────────────┘
+```
+
+**Settled.**
+- **One popover, two sections:** Filter (what is listed) and View (how it looks). One button per field, the new **sliders** icon everywhere, tooltip "Options".
+- **Either/or choices** are segmented controls with an icon and a short label, the chosen side filled with the accent: Rows `Compact | Detailed` (`RowsOneLine` / `RowsTwoLine`), Branches `Current | All`.
+- **On/off options** are toggle chips with icons that fill with the accent when on, wrapping in a flow row: Changes' Included / Excluded, New / Modified / Deleted, Line endings only, Show ignored files; History's Show graph.
+- **Active state:** with the popover closed, the button is accent-filled with a `CountBadge` of the options that differ from their default (Show ignored files counts). History's branch scope does not count: it stays in the button's tooltip, so History never shows a badge.
+- **Clear:** a small "Clear" link at the right of the Filter section header, shown while a counted filter is on (`changes.clear_filters`). It resets counted filters only: not the text, view settings or the branch scope.
+- **Shortcuts** show in each segment's and chip's tooltip, from the action registry.
+- **Behaviour:** clicks change options live and keep the popover open; Tab / Shift+Tab move between controls, Left / Right within a segmented control, Space / Enter toggle, Escape closes and returns focus to the field. Alt+Down in the field opens it (a registered action).
+- **Row names:** Compact and Detailed. View gets two radio items, Compact rows / Detailed rows (two actions); `history.toggle_compact` keeps flipping between them.
+- **Blame** keeps its own options button (the shared popover with its two chips, Ignore whitespace and Detect moved lines) and gets the same `CountBadge` while either is on. File history's sliders popover holds Rows only.
+- **Shelf branch filter** keeps its GitBranch button and badge; its list becomes the shared popover panel with check rows in the new check style (dynamic lists stay rows: chips are for small fixed sets).
+- **Checks app-wide:** new checked / unchecked / indeterminate and radio SVGs, recoloured per theme and accent, on the `CheckBox`, `CheckButton` and `PopupMenu` theme types in `AppTheme`, so Settings, dialogs, menus and the shelf list match.
+- **Icons:** from the Godot editor set (MIT) where one fits, drawn in the same 16 px `#e0e0e0` style otherwise; `LICENSES.md` updated.
+- Out of scope: the diff header's options (Minimap, the mode picker) and the main menu bar's layout (its check icons change with the theme only).
+
+**Pieces.** `OptionsPopover` (`godot/ui/options_popover/`): a themed `PopupPanel` with `add_section(title, clear_action)`, `add_segmented(id, label, choices)`, `add_chips(id, label, chips)`, `add_check_rows(…)`, a `changed(id, value)` signal and `count()` of non-default options. `SegmentedControl` and `ToggleChip` controls beside it. Theme types `OptionsPopover`, `OptionsSection`, `Segmented`, `SegmentedButton`, `ToggleChip`. `FilterField.set_options` takes the popover's description instead of `[id, label]` pairs (GDScript only, no core or gdext change).
+
+- [x] P1: icons (sliders, check/radio boxes, chip icons), the check theme in `AppTheme`, `OptionsPopover`, `SegmentedControl`, `ToggleChip` with keyboard handling (`options_popover_smoke`); review stop. *Built 2026-11-14:* icons `Sliders`, `GitGraph`, `GitBranches`, `LineEndings`, `CommitIncluded`, `CommitExcluded`; check, radio, partial and switch icons generated from the palette in `AppTheme._add_checks` (the pick box's look, cached by SVG); `OptionsPopover.add_checks` for check rows; one label column across sections; `tests/visual/options_popover_screenshots.tscn`. Changed at the review (approved 2026-11-14): each section is a card sunk into the background with an optional accent icon and a bold title as written (not in capitals), and Clear is an accent-tinted pill with a cross.
+- [x] P2: Changes, History, File history and Blame on the popover, `CountBadge` on the button, Clear, Alt+Down, the View menu radios and Detailed rows action (smokes updated: `history_scope_smoke`, `history_rows_smoke`, `file_history_smoke`, `blame_smoke`, Changes' filter); review stop. *Built 2026-11-14, approved 2026-11-14:* `FilterField.add_options()` returns the popover behind a sliders button with a `CountBadge` (counted options only; the button reads pressed while any is on) and `option_changed`; Changes' Filter section has three chip rows (status, commit, line endings and ignored) with Clear (`changes.clear_filter_options`); History's Filter section has Branches Current | All (its scope stays in the button's tooltip, not counted) and its View section Rows Compact | Detailed plus a Show graph chip; File history's View section has Rows; Blame keeps its own sliders button with a Blame section of two chips and a badge; `history.compact_rows` / `history.detailed_rows` replace the compact toggle (View menu radios); `view.options` opens the focused field's popover (Alt+Down); the popover is 400 px wide at most; `tests/visual/options_app_screenshots.tscn` captures them in the app. Changed at the review: the sections lose their cards (no card inside the popover's card); a full-width divider line splits them.
+- [x] P3: the shelf branch list, the Italian strings, `tests/visual/options_popover_screenshots.tscn` (each popover, active badges, hovered tooltips, keyboard focus, light theme, minimum window width); review stop. *Built 2026-11-14, approved 2026-11-14:* the shelves' branch filter is an `OptionsPopover` (a Branches section of check rows: All branches with the shelf count, a line, then each branch with its count; rebuilt on each open); `add_checks` rows take a `count` badge and `{separator}`, and untranslated names show in full in their tooltip; the `ShelfBranchPicker` theme type is gone; every popover string has its Italian; the in-app shots live in `tests/visual/options_app_screenshots.tscn` (with `options_app_prep.sh` for the shelves), the controls in `options_popover_screenshots.tscn`.
+
 ### M8 — History tools and editing (a ≈1.5 weeks; b–d estimated when planned)
 
 Split on 2026-11-10 into four phases, each planned in its own Q&A and ending in a review stop (the four together had been estimated at 2 weeks): **a** file history, **b** blame, **c** the editable working copy, **d** the graph filter. File history comes first and is built so that b–d reuse its pieces (see **Shared with b–d**).

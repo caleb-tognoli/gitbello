@@ -64,6 +64,8 @@ static var _swatches: Dictionary[Color, DPITexture] = {}
 ## Spinner frames by `(frame, light)` and dots by colour (see `spinner`, `dot`).
 static var _spinners: Dictionary[Vector2i, DPITexture] = {}
 static var _dots: Dictionary[Color, DPITexture] = {}
+## Check, radio and switch icons by their SVG (see `_add_checks`).
+static var _checks: Dictionary[String, DPITexture] = {}
 ## White copies of icons, by name (see `tintable_icon`).
 static var _tintable: Dictionary[StringName, DPITexture] = {}
 ## Icons drawn large, by `name:side:colours` (see `large_icon`).
@@ -482,6 +484,8 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT,
 	_add_changes_p3(theme, p)
 	_add_home(theme, p)
 	_add_shortcuts(theme, p)
+	_add_checks(theme, p)
+	_add_options(theme, p)
 	return theme
 
 
@@ -572,10 +576,7 @@ static func _add_buttons(theme: Theme, p: Palette, focus: StyleBox) -> void:
 	for type: StringName in [&"CheckBox", &"CheckButton"]:
 		theme.set_stylebox(&"pressed", type, flat)
 		theme.set_stylebox(&"hover_pressed", type, hover)
-	theme.set_color(&"checkbox_checked_color", &"CheckBox", p.accent)
-	theme.set_color(&"checkbox_unchecked_color", &"CheckBox", p.text_muted)
-	theme.set_color(&"button_checked_color", &"CheckButton", p.accent)
-	theme.set_color(&"button_unchecked_color", &"CheckButton", p.text_muted)
+	# Their check icons and colours: `_add_checks`.
 	theme.set_icon(&"arrow", &"OptionButton", ARROW_DOWN)
 	# Flat until hovered or pressed, like Godot's toolbar buttons
 	_variation(theme, &"ToolbarButton", &"Button")
@@ -1688,11 +1689,6 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	# Match ToolbarButton's normal padding so hovering cannot clip the label.
 	for state: StringName in [&"hover", &"pressed", &"hover_pressed"]:
 		theme.set_stylebox(state, &"ShelfDiscardButton", _box(Color(p.error, 0.12), 4, Vector4(6, 4, 6, 4)))
-	_variation(theme, &"ShelfBranchPicker", &"PopupPanel")
-	theme.set_stylebox(&"panel", &"ShelfBranchPicker", _box(p.raised, 6, Vector4(8, 8, 8, 8), p.border, 1))
-	theme.set_constant(&"width", &"ShelfBranchPicker", 300)
-	theme.set_constant(&"max_height", &"ShelfBranchPicker", 360)
-	theme.set_constant(&"padding", &"ShelfBranchPicker", 16)
 	theme.set_constant(&"files_width", &"ShelfView", 240)
 	# The first suggestion (Open repository…) in the accent colour
 	_variation(theme, &"PrimarySuggestionButton", &"SuggestionButton")
@@ -1851,6 +1847,201 @@ static func _add_loading(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"inline_size", T, 13)
 	theme.set_constant(&"gap", T, 12)
 	theme.set_constant(&"line_height", T, 3)
+
+
+## Check boxes, radio buttons and switches everywhere (M7.15): the commit
+## pick box's look (`PickBox`), drawn as icons in the theme's colours so
+## `CheckBox`, `CheckButton`, `PopupMenu` and `Tree` match. Filled with the
+## accent and a readable tick when on, an outline in the muted text colour
+## when off; disabled ones at 40%. The icons carry their colours, so the
+## check colours that would tint them are white.
+static func _add_checks(theme: Theme, p: Palette) -> void:
+	var on: String = p.accent.to_html(false)
+	var mark: String = readable_text([p.accent], DARK_TEXT).to_html(false)
+	var off: String = p.text_muted.to_html(false)
+	for disabled: bool in [false, true]:
+		var suffix: String = "_disabled" if disabled else ""
+		var alpha: float = 0.4 if disabled else 1.0
+		var checked: DPITexture = _check_icon("check", on, mark, alpha)
+		var unchecked: DPITexture = _check_icon("box", off, mark, alpha)
+		var radio_checked: DPITexture = _check_icon("radio", on, mark, alpha)
+		var radio_unchecked: DPITexture = _check_icon("circle", off, mark, alpha)
+		for type: StringName in [&"CheckBox", &"PopupMenu"]:
+			theme.set_icon(StringName("checked" + suffix), type, checked)
+			theme.set_icon(StringName("unchecked" + suffix), type, unchecked)
+			theme.set_icon(StringName("radio_checked" + suffix), type, radio_checked)
+			theme.set_icon(StringName("radio_unchecked" + suffix), type, radio_unchecked)
+		theme.set_icon(StringName("checked" + suffix), &"Tree", checked)
+		theme.set_icon(StringName("unchecked" + suffix), &"Tree", unchecked)
+		theme.set_icon(StringName("indeterminate" + suffix), &"Tree", _check_icon("dash", on, mark, alpha))
+		var switch_on: DPITexture = _check_icon("switch_on", on, mark, alpha)
+		var switch_off: DPITexture = _check_icon("switch_off", off, mark, alpha)
+		for mirrored: String in ["", "_mirrored"]:
+			theme.set_icon(StringName("checked" + suffix + mirrored), &"CheckButton", switch_on)
+			theme.set_icon(StringName("unchecked" + suffix + mirrored), &"CheckButton", switch_off)
+	theme.set_color(&"checkbox_checked_color", &"CheckBox", Color.WHITE)
+	theme.set_color(&"checkbox_unchecked_color", &"CheckBox", Color.WHITE)
+	theme.set_color(&"button_checked_color", &"CheckButton", Color.WHITE)
+	theme.set_color(&"button_unchecked_color", &"CheckButton", Color.WHITE)
+
+
+## One check icon: `kind` is `check`, `box`, `dash`, `radio`, `circle`,
+## `switch_on` or `switch_off`; `color` fills (on) or outlines (off), `mark`
+## is the tick, dash, dot or knob on a filled one. Cached by its SVG.
+static func _check_icon(kind: String, color: String, mark: String, alpha: float) -> DPITexture:
+	var width: int = 28 if kind.begins_with("switch") else 16
+	var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="16" opacity="%.2f">' % [width, alpha]
+	match kind:
+		"check":
+			svg += '<rect x="1" y="1" width="14" height="14" rx="3" fill="#%s"/>' % color
+			svg += '<path d="M4.5 8.25l2.5 2.5 4.5-5" fill="none" stroke="#%s" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' % mark
+		"dash":
+			svg += '<rect x="1" y="1" width="14" height="14" rx="3" fill="#%s"/>' % color
+			svg += '<path d="M4.5 8h7" stroke="#%s" stroke-width="2" stroke-linecap="round"/>' % mark
+		"box":
+			svg += '<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="none" stroke="#%s"/>' % color
+		"radio":
+			svg += '<circle cx="8" cy="8" r="7" fill="#%s"/><circle cx="8" cy="8" r="2.75" fill="#%s"/>' % [color, mark]
+		"circle":
+			svg += '<circle cx="8" cy="8" r="6.5" fill="none" stroke="#%s"/>' % color
+		"switch_on":
+			svg += '<rect x="1" y="2" width="26" height="12" rx="6" fill="#%s"/><circle cx="21" cy="8" r="4" fill="#%s"/>' % [color, mark]
+		"switch_off":
+			svg += '<rect x="1.5" y="2.5" width="25" height="11" rx="5.5" fill="none" stroke="#%s"/><circle cx="7" cy="8" r="3.5" fill="#%s"/>' % [color, color]
+	svg += "</svg>"
+	if not _checks.has(svg):
+		_checks[svg] = DPITexture.create_from_string(svg)
+	return _checks[svg]
+
+
+## The options popover of filter fields and panes (M7.15,
+## `OptionsPopover`): sections with a muted title and a Clear link, rows of
+## a muted name and a control, segmented either/or choices filled with the
+## accent where chosen, and toggle chips that fill when on.
+static func _add_options(theme: Theme, p: Palette) -> void:
+	var accent_text: Color = readable_text([p.accent, p.accent.lightened(0.08)], p.text)
+	var focus: StyleBoxFlat = _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1)
+	focus.expand_margin_left = 1
+	focus.expand_margin_right = 1
+	focus.expand_margin_top = 1
+	focus.expand_margin_bottom = 1
+	_variation(theme, &"OptionsPopover", &"PopupPanel")
+	theme.set_stylebox(&"panel", &"OptionsPopover", _box(p.surface, 6, Vector4(12, 10, 12, 12), p.border, 1))
+	_variation(theme, &"OptionsSections", &"VBoxContainer")
+	theme.set_constant(&"separation", &"OptionsSections", 10)
+	# Sections are split by a full-width line, not boxed: no cards in the card.
+	_variation(theme, &"OptionsDivider", &"HSeparator")
+	var divider: StyleBoxLine = StyleBoxLine.new()
+	divider.color = p.border
+	divider.grow_begin = 11.0
+	divider.grow_end = 11.0
+	theme.set_stylebox(&"separator", &"OptionsDivider", divider)
+	theme.set_constant(&"separation", &"OptionsDivider", 1)
+	_variation(theme, &"OptionsSectionBox", &"VBoxContainer")
+	theme.set_constant(&"separation", &"OptionsSectionBox", 8)
+	_variation(theme, &"OptionsSectionHeader", &"HBoxContainer")
+	theme.set_constant(&"separation", &"OptionsSectionHeader", 6)
+	theme.set_constant(&"icon_size", &"OptionsSectionIcon", 14)
+	theme.set_color(&"icon_color", &"OptionsSectionIcon", p.accent_text)
+	_variation(theme, &"OptionsSectionTitle", &"Label")
+	theme.set_color(&"font_color", &"OptionsSectionTitle", p.text)
+	theme.set_font(&"font", &"OptionsSectionTitle", bold_font())
+	theme.set_font_size(&"font_size", &"OptionsSectionTitle", 13)
+	# Clear: a pill tinted with the accent, a cross and the word.
+	_variation(theme, &"OptionsClear", &"Button")
+	var clear: Vector4 = Vector4(6, 1, 9, 1)
+	theme.set_stylebox(&"normal", &"OptionsClear", _box(Color(p.accent, 0.16), 10, clear))
+	theme.set_stylebox(&"hover", &"OptionsClear", _box(Color(p.accent, 0.3), 10, clear))
+	theme.set_stylebox(&"pressed", &"OptionsClear", _box(Color(p.accent, 0.4), 10, clear))
+	theme.set_stylebox(&"hover_pressed", &"OptionsClear", _box(Color(p.accent, 0.4), 10, clear))
+	var clear_focus: StyleBoxFlat = focus.duplicate() as StyleBoxFlat
+	clear_focus.set_corner_radius_all(11)
+	theme.set_stylebox(&"focus", &"OptionsClear", clear_focus)
+	theme.set_font(&"font", &"OptionsClear", bold_font())
+	theme.set_font_size(&"font_size", &"OptionsClear", 11)
+	theme.set_constant(&"h_separation", &"OptionsClear", 3)
+	theme.set_constant(&"icon_max_width", &"OptionsClear", 12)
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color", &"font_pressed_color",
+			&"font_hover_pressed_color", &"icon_normal_color", &"icon_hover_color", &"icon_focus_color",
+			&"icon_pressed_color", &"icon_hover_pressed_color"]:
+		theme.set_color(color, &"OptionsClear", p.accent_text)
+	_variation(theme, &"OptionsRows", &"GridContainer")
+	theme.set_constant(&"h_separation", &"OptionsRows", 12)
+	theme.set_constant(&"v_separation", &"OptionsRows", 8)
+	_variation(theme, &"OptionsRowLabel", &"Label")
+	theme.set_color(&"font_color", &"OptionsRowLabel", p.text_muted)
+	theme.set_font_size(&"font_size", &"OptionsRowLabel", 13)
+	theme.set_constant(&"max_width", &"OptionsPopover", 400)
+	# Toggle chips wrap in a flow row.
+	_variation(theme, &"OptionsChips", &"HFlowContainer")
+	theme.set_constant(&"h_separation", &"OptionsChips", 6)
+	theme.set_constant(&"v_separation", &"OptionsChips", 6)
+	# Check rows (a dynamic list such as the shelves' branches) scroll.
+	_variation(theme, &"OptionsChecks", &"VBoxContainer")
+	theme.set_constant(&"separation", &"OptionsChecks", 0)
+	theme.set_constant(&"checks_max_height", &"OptionsPopover", 280)
+	_variation(theme, &"OptionsCheck", &"CheckBox")
+	theme.set_stylebox(&"normal", &"OptionsCheck", _box(Color.TRANSPARENT, 4, Vector4(6, 4, 8, 4)))
+	theme.set_stylebox(&"pressed", &"OptionsCheck", _box(Color.TRANSPARENT, 4, Vector4(6, 4, 8, 4)))
+	theme.set_stylebox(&"hover", &"OptionsCheck", _box(p.hover, 4, Vector4(6, 4, 8, 4)))
+	theme.set_stylebox(&"hover_pressed", &"OptionsCheck", _box(p.hover, 4, Vector4(6, 4, 8, 4)))
+	theme.set_stylebox(&"focus", &"OptionsCheck", focus)
+	theme.set_constant(&"h_separation", &"OptionsCheck", 8)
+	# A row's own icon (a branch) keeps its colour: the box shows it is on.
+	for color: StringName in [&"icon_pressed_color", &"icon_hover_pressed_color"]:
+		theme.set_color(color, &"OptionsCheck", Color.WHITE)
+	# Segmented controls: joined buttons, the chosen one in the accent.
+	_variation(theme, &"Segmented", &"HBoxContainer")
+	theme.set_constant(&"separation", &"Segmented", 0)
+	var segment: Vector4 = Vector4(9, 3, 10, 3)
+	for part: StringName in [&"SegmentedButton", &"SegmentedButtonFirst", &"SegmentedButtonLast", &"SegmentedButtonOnly"]:
+		_variation(theme, part, &"Button")
+		var left: bool = part == &"SegmentedButtonFirst" or part == &"SegmentedButtonOnly"
+		var right: bool = part == &"SegmentedButtonLast" or part == &"SegmentedButtonOnly"
+		for state: Array in [[&"normal", p.raised, p.border], [&"hover", p.hover, p.border],
+				[&"pressed", p.accent, p.accent], [&"hover_pressed", p.accent.lightened(0.08), p.accent.lightened(0.08)],
+				[&"disabled", Color(p.raised, 0.5), p.border]]:
+			var box: StyleBoxFlat = _box(state[1], 0, segment, state[2], 1)
+			# Neighbours share one line: every segment but the first drops its left border.
+			if not left:
+				box.border_width_left = 0
+			box.corner_radius_top_left = 4 if left else 0
+			box.corner_radius_bottom_left = 4 if left else 0
+			box.corner_radius_top_right = 4 if right else 0
+			box.corner_radius_bottom_right = 4 if right else 0
+			theme.set_stylebox(state[0], part, box)
+		theme.set_stylebox(&"focus", part, focus)
+		theme.set_font_size(&"font_size", part, 13)
+		theme.set_constant(&"h_separation", part, 5)
+		for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color"]:
+			theme.set_color(color, part, p.text)
+		for color: StringName in [&"icon_normal_color", &"icon_hover_color", &"icon_focus_color"]:
+			theme.set_color(color, part, p.text_muted)
+		for color: StringName in [&"font_pressed_color", &"font_hover_pressed_color", &"icon_pressed_color",
+				&"icon_hover_pressed_color"]:
+			theme.set_color(color, part, accent_text)
+	# Toggle chips: an outlined pill, filled with the accent when on.
+	_variation(theme, &"ToggleChip", &"Button")
+	var chip: Vector4 = Vector4(8, 2, 10, 2)
+	theme.set_stylebox(&"normal", &"ToggleChip", _box(Color.TRANSPARENT, 11, chip, p.border, 1))
+	theme.set_stylebox(&"hover", &"ToggleChip", _box(p.hover, 11, chip, p.border, 1))
+	theme.set_stylebox(&"pressed", &"ToggleChip", _box(p.accent, 11, chip, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"ToggleChip", _box(p.accent.lightened(0.08), 11, chip, p.accent.lightened(0.08), 1))
+	theme.set_stylebox(&"disabled", &"ToggleChip", _box(Color.TRANSPARENT, 11, chip, Color(p.border, 0.5), 1))
+	var chip_focus: StyleBoxFlat = focus.duplicate() as StyleBoxFlat
+	chip_focus.set_corner_radius_all(12)
+	theme.set_stylebox(&"focus", &"ToggleChip", chip_focus)
+	theme.set_font_size(&"font_size", &"ToggleChip", 13)
+	theme.set_constant(&"h_separation", &"ToggleChip", 5)
+	for color: StringName in [&"font_color", &"font_hover_color", &"font_focus_color"]:
+		theme.set_color(color, &"ToggleChip", p.text)
+	for color: StringName in [&"icon_normal_color", &"icon_hover_color", &"icon_focus_color"]:
+		theme.set_color(color, &"ToggleChip", p.text_muted)
+	for color: StringName in [&"font_pressed_color", &"font_hover_pressed_color", &"icon_pressed_color",
+			&"icon_hover_pressed_color"]:
+		theme.set_color(color, &"ToggleChip", accent_text)
+	theme.set_color(&"font_disabled_color", &"ToggleChip", Color(p.text_muted, 0.6))
+	theme.set_color(&"icon_disabled_color", &"ToggleChip", Color(p.text_muted, 0.4))
 
 
 ## Frame `frame` of the busy spinner, in the icon grey of the light or dark

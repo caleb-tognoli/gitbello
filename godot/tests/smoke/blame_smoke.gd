@@ -169,13 +169,23 @@ func run() -> void:
 			and await _blamed(session, view), "selecting a version blames it")
 
 	# The options run the blame again and are saved.
+	var options: OptionsPopover = view.blame_options_popover()
 	view.blame_options_button().pressed.emit()
-	expect(view.blame_options_menu().visible, "the options open")
-	expect(_menu_has(view.blame_options_menu(), tr("Ignore whitespace")) and _menu_has(view.blame_options_menu(),
-			tr("Detect moved lines")), "with both options")
-	view.blame_options_menu().hide()
+	expect(options.visible, "the options open")
+	expect_eq(options.ids(), PackedStringArray(["ignore_whitespace", "detect_moves"]), "with both options as chips")
+	expect_eq((options.control("ignore_whitespace") as ToggleChip).text, tr("Ignore whitespace"), "named")
+	expect_eq(view.blame_options_badge().count, 0, "no count while both are off")
+	(options.control("ignore_whitespace") as ToggleChip).button_pressed = true
+	expect(options.visible, "a chip keeps the popover open")
+	options.hide()
+	expect(Core.blame_ignore_whitespace(), "Ignore whitespace is saved")
+	expect_eq(view.blame_options_badge().count, 1, "the button counts it")
+	expect(await _blamed(session, view), "the blame runs again")
+	Actions.run_action(&"blame.toggle_ignore_whitespace")
+	expect(not bool(options.value("ignore_whitespace")) and view.blame_options_badge().count == 0,
+			"the action turns it off, the chip and the count follow")
+	expect(await _blamed(session, view), "and blames again")
 	expect(Actions.run_action(&"blame.toggle_ignore_whitespace"), "Ignore whitespace runs")
-	expect(Core.blame_ignore_whitespace(), "and is saved")
 	expect(await _blamed(session, view), "the blame runs again")
 	Actions.run_action(&"blame.toggle_detect_moves")
 	expect(Core.blame_detect_moves() and await _blamed(session, view), "Detect moved lines too")

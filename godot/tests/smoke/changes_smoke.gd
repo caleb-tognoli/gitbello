@@ -80,41 +80,47 @@ func run() -> void:
 	filter.set_option("included", false)
 	expect(not filter.is_active(), "no filter left")
 	expect_eq(view.list_header().text(), "2 changed files", "the header counts every file again")
-	var filter_menu: PopupMenu = filter.menu()
-	filter.options_button().pressed.emit()
-	expect_eq(_clear_filter_index(filter_menu), -1, "Clear all filters is absent without active filters")
-	var base_items: int = filter_menu.item_count
-	expect(not Actions.is_enabled(&"changes.clear_filters"), "clear action is disabled without active filters")
-	var new_option: int = -1
-	for index: int in filter_menu.item_count:
-		if filter_menu.get_item_text(index) == "New files":
-			new_option = filter_menu.get_item_id(index)
-	expect(new_option >= 0, "New files is offered")
-	if new_option >= 0:
-		filter_menu.id_pressed.emit(new_option)
-		expect(filter_menu.visible and _clear_filter_index(filter_menu) >= 0, "clear appears when a filter is checked in the open menu")
-		filter_menu.id_pressed.emit(new_option)
-		expect(filter_menu.visible and _clear_filter_index(filter_menu) == -1, "clear disappears when the last filter is unchecked")
-	filter_menu.hide()
+	# The options popover: filter chips, the count on the button, Clear.
+	var options: OptionsPopover = filter.options_popover()
+	expect_eq(filter.options_button().icon, AppTheme.icon(&"Sliders"), "the options button has the sliders icon")
+	expect_eq(options.ids(), PackedStringArray(["new", "modified", "deleted", "included", "excluded", "endings_only",
+			"ignored"]), "the filters are chips in the popover")
+	expect(options.control("new") is ToggleChip, "New files is a chip")
+	filter.open_options()
+	await get_tree().process_frame
+	expect(options.visible, "the button opens the popover")
+	expect(not options.clear_button(0).visible, "Clear is absent without active filters")
+	expect(not Actions.is_enabled(&"changes.clear_filter_options"), "clearing options is disabled without options on")
+	(options.control("new") as ToggleChip).button_pressed = true
+	expect(options.visible, "a chip changes the filter with the popover open")
+	expect_eq(list.row_count(), 1, "the chip filters the list")
+	expect(options.clear_button(0).visible, "Clear appears when a filter is on")
+	expect_eq(filter.options_badge().count, 1, "the button counts the filter on")
+	expect(filter.options_button().button_pressed, "the button looks pressed meanwhile")
+	(options.control("ignored") as ToggleChip).button_pressed = true
+	expect_eq(filter.options_badge().count, 2, "Show ignored files counts too")
+	(options.control("ignored") as ToggleChip).button_pressed = false
+	(options.control("new") as ToggleChip).button_pressed = false
+	expect(not options.clear_button(0).visible, "Clear disappears when the last filter is off")
+	expect_eq(filter.options_badge().count, 0, "no count without filters")
+	filter.set_text("notes")
+	filter.set_option("new", true)
+	options.clear_button(0).pressed.emit()
+	expect(filter.options().is_empty(), "Clear turns the filter options off")
+	expect_eq(filter.text(), "notes", "Clear leaves the text")
+	expect(not filter.options_button().button_pressed, "Clear resets the options button")
+	options.hide()
+	await get_tree().process_frame
+	filter.set_text("")
 	for mode: String in ["text", "option", "both"]:
 		if mode != "option":
 			filter.set_text("notes")
 		if mode != "text":
 			filter.set_option("new", true)
-		filter.options_button().pressed.emit()
-		var clear_index: int = _clear_filter_index(filter_menu)
-		expect(clear_index > 0, "Clear all filters appears for %s filtering" % mode)
-		expect_eq(filter_menu.item_count, base_items + 2, "one divider and one reset action are added")
-		if clear_index > 0:
-			expect(filter_menu.is_item_separator(clear_index - 1), "the reset action is visually separated")
-			expect(not filter_menu.is_item_checkable(clear_index), "the reset action is not another filter checkbox")
-			filter_menu.id_pressed.emit(filter_menu.get_item_id(clear_index))
-		expect(not filter_menu.visible, "clear closes the menu")
-		expect_eq(filter.text(), "", "clear removes the search text")
-		expect(filter.options().is_empty(), "clear removes option filters")
-		expect(not filter.options_button().button_pressed, "clear resets the options button")
-		expect_eq(_clear_filter_index(filter_menu), -1, "reset disappears after clearing")
-		expect_eq(filter_menu.item_count, base_items, "no reset divider remains after clearing")
+		expect(Actions.is_enabled(&"changes.clear_filters"), "Clear all filters is enabled for %s filtering" % mode)
+		Actions.run_action(&"changes.clear_filters")
+		expect_eq(filter.text(), "", "Clear all filters removes the search text")
+		expect(filter.options().is_empty(), "Clear all filters removes option filters")
 		expect_eq(list.row_count(), 2, "clear restores every changed file")
 		expect_eq(session.picked_count(), 2, "clear does not change the commit selection")
 	filter.set_option("new", true)
@@ -123,11 +129,17 @@ func run() -> void:
 	press("Escape")
 	expect_eq(filter.text(), "", "Escape still clears just the text")
 	expect_eq(filter.options(), PackedStringArray(["new"]), "Escape leaves option filters active")
-	expect(_clear_filter_index(filter_menu) >= 0, "clear stays available while an option remains")
+	filter.focus_text()
+	expect(Actions.is_enabled(&"view.options"), "Alt+Down is available in the field")
+	press("Alt+Down")
+	await get_tree().process_frame
+	expect(options.visible, "Alt+Down opens the options")
+	press("Escape", options)
+	await get_tree().process_frame
+	expect(not options.visible and filter.text_box().has_focus(), "Escape closes them back into the field")
 	filter.set_option("new", false)
-	expect_eq(_clear_filter_index(filter_menu), -1, "turning the last filter off removes clear")
 	filter.set_text("   ")
-	expect_eq(_clear_filter_index(filter_menu), -1, "whitespace alone is not an active filter")
+	expect(not filter.is_active(), "whitespace alone is not an active filter")
 	filter.set_text("")
 	list.grab_focus()
 	list.select_only(0)
@@ -427,13 +439,6 @@ func _click(list: ChangeList, row: int, on_pick: bool, ctrl: bool = false, shift
 	var x: float = 2.0 if on_pick else list.content_width() * 0.5
 	event.position = Vector2(x, (row + 0.5) * list.row_height() - list.scroll_offset())
 	list._gui_input(event)
-
-
-func _clear_filter_index(menu: PopupMenu) -> int:
-	for index: int in menu.item_count:
-		if menu.get_item_text(index) == "Clear all filters":
-			return index
-	return -1
 
 
 func _diff_has(diff: DiffView, needle: String) -> bool:

@@ -99,11 +99,14 @@ No shelves
 "), "branch names remain user content")
 	var filter: FilterField = preload("res://ui/filter_field/filter_field.tscn").instantiate() as FilterField
 	main.add_child(filter)
-	filter.set_options([["modified", "Modified"]], &"changes.clear_filters")
+	var options: OptionsPopover = filter.add_options()
+	options.add_section("Filter", &"changes.clear_filter_options")
+	options.add_chips("", [{"id": "modified", "icon": "FileModified", "label": "Modified files"}])
 	filter.set_text("literal user query")
 	filter.set_option("modified", true)
-	expect_eq(filter.menu().get_item_text(filter.menu().item_count - 1), "Azzera tutti i filtri",
-			"conditional clear-all entry uses the translated action label")
+	expect_eq(options.clear_button(0).text, "Azzera", "the options' Clear is translated")
+	expect_eq((options.control("modified") as ToggleChip).text, "File modificati", "the options' chips are translated")
+	expect_eq(filter.options_button().tooltip_text, "Opzioni", "the options button's tooltip is translated")
 	var stack: Node = main.toasts().get_node("Scroll/Stack")
 	var previous: Array[Node] = stack.get_children()
 	for i: int in 8:
@@ -123,8 +126,8 @@ No shelves
 	expect(chip.tooltip_text.contains("2 changed files"), "visible chip tooltip updates live")
 	expect_eq(filter.options(), PackedStringArray(["modified"]), "language changes preserve active filter options")
 	expect_eq(filter.text(), "literal user query", "language changes preserve user filter text")
-	expect_eq(filter.menu().get_item_text(filter.menu().item_count - 1), "Clear all filters",
-			"conditional clear-all entry updates live")
+	expect_eq(options.clear_button(0).text, "Clear", "the options' Clear updates live")
+	expect_eq((options.control("modified") as ToggleChip).text, "Modified files", "the options' chips update live")
 	expect(overflow.text.contains("notifications"), "visible notification overflow updates live")
 	expect_eq(palette._query.text, "…", "language changes preserve the palette query")
 	expect_eq(palette._query.placeholder_text, "Type a command, repository or tab…",

@@ -2,12 +2,13 @@ class_name FilterField
 extends PanelContainer
 ## A filter or search box, the same everywhere: one field with a search
 ## icon, the text and its clear button, then any buttons added with
-## `add_button` after a divider (shown while any of them is) (an options menu from `set_options`, or
-## steps through matches). A muted count (`set_count`, "3/41") can sit
+## `add_button` after a divider (shown while any of them is): the options
+## button from `add_options` (an `OptionsPopover` of filters and view
+## settings, with a count of the filters on), or steps through matches. A muted count (`set_count`, "3/41") can sit
 ## between the text and the divider. The whole field is outlined in the accent colour
-## while the text has focus; the options button looks pressed while any
-## option is on. Enter and Shift+Enter submit, Down leaves the field, Escape
-## clears the text (then leaves). Styles are the `FilterField*` theme types.
+## while the text has focus. Enter and Shift+Enter submit, Down leaves the
+## field, Escape clears the text (then leaves); Alt+Down opens the options
+## (the `view.options` action). Styles are the `FilterField*` theme types.
 
 ## The text or the options changed.
 signal changed()
@@ -15,6 +16,8 @@ signal changed()
 signal submitted(backwards: bool)
 ## The user left the field with Down or Escape.
 signal done()
+## Option `id` of the popover changed to `value` (filters and view settings).
+signal option_changed(id: String, value: Variant)
 
 const THEME_TYPE: StringName = &"FilterField"
 
@@ -24,11 +27,9 @@ const THEME_TYPE: StringName = &"FilterField"
 		if is_node_ready():
 			_text.placeholder_text = value
 
-## `[id, label]` of each option, in menu order; "" is a separator.
-var _options: Array[Array] = []
-var _clear_action: StringName = &""
 var _options_button: Button = null
-var _menu: PopupMenu = PopupMenu.new()
+var _popover: OptionsPopover = null
+var _badge: CountBadge = CountBadge.new()
 
 @onready var _search_icon: TextureRect = %SearchIcon
 @onready var _text: LineEdit = %Text
@@ -38,7 +39,6 @@ var _menu: PopupMenu = PopupMenu.new()
 
 
 func _ready() -> void:
-	changed.connect(_update_clear_entry)
 	_text.placeholder_text = placeholder
 	_text.text_changed.connect(func(_value: String) -> void: changed.emit())
 	_text.gui_input.connect(_on_text_key)
@@ -50,9 +50,6 @@ func _ready() -> void:
 		if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT:
 			_text.grab_focus())
 	_search_icon.texture = AppTheme.icon(&"Search")
-	_menu.hide_on_checkable_item_selection = false
-	_menu.id_pressed.connect(_on_option)
-	add_child(_menu)
 	_divider.hide()
 	_apply_theme()
 
@@ -63,12 +60,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
-		for i: int in _options.size():
-			if not String(_options[i][0]).is_empty():
-				_menu.set_item_text(_menu.get_item_index(i), tr(String(_options[i][1])))
 		if _options_button != null:
-			_options_button.tooltip_text = tr("Filter options")
-		_update_clear_entry()
+			_options_button.tooltip_text = tr("Options")
 
 
 func text() -> String:
@@ -116,44 +109,60 @@ func add_button(icon: StringName, tooltip: String) -> Button:
 	return button
 
 
-## Adds the options button with a menu of check items: `[id, label]` each,
-## "" ids for separators.
-func set_options(entries: Array[Array], clear_action: StringName = &"") -> void:
-	_options = entries
-	_clear_action = clear_action
-	_menu.clear()
-	for i: int in entries.size():
-		if String(entries[i][0]).is_empty():
-			_menu.add_separator()
-		else:
-			_menu.add_check_item(tr(String(entries[i][1])), i)
-	if _options_button == null:
-		_options_button = add_button(&"Filter", "Filter options")
-		_options_button.toggle_mode = true
-		_options_button.pressed.connect(_show_menu)
+## Adds the options button (the sliders icon) and returns its popover, to
+## fill with sections and rows (`OptionsPopover`). The popover's counted
+## options are the field's filters: `options()`, the button's badge and
+## `changed`; every change is also sent as `option_changed`.
+func add_options() -> OptionsPopover:
+	if _popover != null:
+		return _popover
+	_popover = OptionsPopover.new()
+	_popover.return_focus = _text
+	_popover.changed.connect(_on_option_changed)
+	add_child(_popover)
+	_options_button = add_button(&"Sliders", "Options")
+	_options_button.toggle_mode = true
+	_options_button.focus_mode = Control.FOCUS_NONE
+	_options_button.add_child(_badge)
+	_options_button.pressed.connect(open_options)
+	return _popover
 
 
-## Ids of the options on.
+## The options popover, or null without options.
+func options_popover() -> OptionsPopover:
+	return _popover
+
+
+## Opens the options popover under its button.
+func open_options() -> void:
+	if _popover == null:
+		return
+	_update_options_button()
+	_popover.open_below(_options_button)
+
+
+## Ids of the filter options on (counted options set to true).
 func options() -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
-	for i: int in _options.size():
-		var index: int = _menu.get_item_index(i)
-		if index >= 0 and _menu.is_item_checked(index):
-			out.append(String(_options[i][0]))
+	if _popover == null:
+		return out
+	for id: String in _popover.ids():
+		if _popover.is_counted(id) and _popover.value(id) is bool and bool(_popover.value(id)):
+			out.append(id)
 	return out
 
 
 ## Turns option `id` on or off.
 func set_option(id: String, on: bool) -> void:
-	for i: int in _options.size():
-		if String(_options[i][0]) == id:
-			_menu.set_item_checked(_menu.get_item_index(i), on)
+	if _popover == null:
+		return
+	_popover.set_value(id, on)
 	_options_changed()
 
 
-## Whether there is text or an option on.
+## Whether there is text or a filter option on.
 func is_active() -> bool:
-	return not _text.text.strip_edges().is_empty() or not options().is_empty()
+	return not _text.text.strip_edges().is_empty() or (_popover != null and _popover.count() > 0)
 
 
 ## The options button, or null without options.
@@ -161,52 +170,46 @@ func options_button() -> Button:
 	return _options_button
 
 
-## The options menu, for tests.
-func menu() -> PopupMenu:
-	return _menu
+## The count on the options button, for tests.
+func options_badge() -> CountBadge:
+	return _badge
 
 
+## Sets the filter options back to their defaults (not the text or view
+## settings).
+func clear_options() -> void:
+	if _popover != null and _popover.reset_counted():
+		_options_changed()
+
+
+## Clears the text and the filter options.
 func clear_filters() -> void:
 	_text.text = ""
-	for i: int in _options.size():
-		if not _menu.is_item_separator(i):
-			_menu.set_item_checked(i, false)
+	if _popover != null:
+		_popover.reset_counted()
 	_options_changed()
 
 
-func _show_menu() -> void:
-	_update_clear_entry()
-	_options_button.set_pressed_no_signal(not options().is_empty())
-	_menu.position = Vector2i(_options_button.get_screen_position() + Vector2(0.0, _options_button.size.y))
-	_menu.reset_size()
-	_menu.popup()
-
-
-func _on_option(id: int) -> void:
-	if id == _options.size() + 1 and _clear_action != &"":
-		_menu.hide()
-		Actions.run_action(_clear_action)
-		return
-	var index: int = _menu.get_item_index(id)
-	_menu.set_item_checked(index, not _menu.is_item_checked(index))
-	_options_changed()
+func _on_option_changed(id: String, value: Variant) -> void:
+	option_changed.emit(id, value)
+	if _popover.is_counted(id):
+		_options_changed()
+	else:
+		_update_options_button()
 
 
 func _options_changed() -> void:
-	if _options_button != null:
-		_options_button.set_pressed_no_signal(not options().is_empty())
+	_update_options_button()
 	changed.emit()
 
 
-func _update_clear_entry() -> void:
-	while _menu.item_count > _options.size():
-		_menu.remove_item(_menu.item_count - 1)
-	var action: ActionRegistry.Action = Actions.get_action(_clear_action)
-	if action != null and is_active():
-		_menu.add_separator()
-		_menu.add_icon_item(Actions.icon(_clear_action), action.label, _options.size() + 1)
-	if _menu.visible:
-		_menu.reset_size()
+## The badge counts the filters on; the button looks pressed meanwhile.
+func _update_options_button() -> void:
+	if _options_button == null:
+		return
+	var count: int = _popover.count()
+	_badge.count = count
+	_options_button.set_pressed_no_signal(count > 0)
 
 
 func _on_text_key(event: InputEvent) -> void:

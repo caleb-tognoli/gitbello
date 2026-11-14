@@ -16,17 +16,16 @@ extends HSplitContainer
 
 const THEME_TYPE: StringName = &"ChangesView"
 signal shelf_selection_changed()
-## The filter's options (`RepoSession.set_change_filter`), like GitHub Desktop's.
+## The filter's options (`RepoSession.set_change_filter`), like GitHub
+## Desktop's: rows of toggle chips in the field's options popover.
 const FILTER_OPTIONS: Array[Array] = [
-	["included", "Included in commit"],
-	["excluded", "Excluded from commit"],
-	["", ""],
-	["new", "New files"],
-	["modified", "Modified files"],
-	["deleted", "Deleted files"],
-	["", ""],
-	["endings_only", "Line endings only"],
-	["ignored", "Show ignored files"],
+	[{"id": "new", "icon": "FileAdded", "label": "New files"},
+		{"id": "modified", "icon": "FileModified", "label": "Modified files"},
+		{"id": "deleted", "icon": "FileDeleted", "label": "Deleted files"}],
+	[{"id": "included", "icon": "CommitIncluded", "label": "Included in commit"},
+		{"id": "excluded", "icon": "CommitExcluded", "label": "Excluded from commit"}],
+	[{"id": "endings_only", "icon": "LineEndings", "label": "Line endings only"},
+		{"id": "ignored", "icon": "GitIgnore", "label": "Show ignored files"}],
 ]
 ## Per-repository UI state: the hash of the folder whose ignore hint was
 ## dismissed (0: none).
@@ -127,7 +126,12 @@ func _ready() -> void:
 	_list.gui_input.connect(_on_list_key)
 	_list_header.check_toggled.connect(pick_all)
 	_list_header.context_menu_requested.connect(_show_header_menu)
-	_filter.set_options(FILTER_OPTIONS, &"changes.clear_filters")
+	var popover: OptionsPopover = _filter.add_options()
+	popover.add_section("Filter", &"changes.clear_filter_options", &"Filter")
+	for row: Array in FILTER_OPTIONS:
+		var chips: Array[Dictionary] = []
+		chips.assign(row)
+		popover.add_chips("", chips)
 	_filter.changed.connect(_apply_filter)
 	_filter.done.connect(focus_files)
 	_commit_box.feedback = feedback
