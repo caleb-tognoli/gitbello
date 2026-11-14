@@ -160,6 +160,10 @@ impl RepoSession {
     /// (`merge_preview`).
     #[signal]
     fn merge_preview_ready(target: GString);
+    /// The check requested with `load_rebase_check(target)` arrived
+    /// (`rebase_check`).
+    #[signal]
+    fn rebase_check_ready(target: GString);
     /// The preview `load_ignore_preview` returned `job` for arrived
     /// (`ignore_preview`).
     #[signal]
@@ -812,6 +816,39 @@ impl RepoSession {
         job_id(
             runtime_cell::with(|rt| rt.merge(&self.key, &target, mode, message, shelve)).flatten(),
         )
+    }
+
+    /// Works out what rebasing the current branch onto `target` would do,
+    /// commit by commit; `rebase_check_ready(target)` follows.
+    #[func]
+    fn load_rebase_check(&self, target: GString) -> i64 {
+        let target = target.to_string();
+        job_id(runtime_cell::with(|rt| rt.load_rebase_check(&self.key, &target)).flatten())
+    }
+
+    /// See `convert::rebase_check`; empty until it arrived.
+    #[func]
+    fn rebase_check(&self) -> VarDictionary {
+        self.read(|s| s.rebase_check().map(convert::rebase_check))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Rebases the current branch onto `target`. With `shelve`, local
+    /// changes are shelved first and restored after a clean rebase. Label
+    /// `rebase`; conflicts fail with the `conflict` kind and leave the
+    /// rebase in progress. A clean one can be undone (`undo_rebase`).
+    #[func]
+    fn rebase(&self, target: GString, shelve: bool) -> i64 {
+        let target = target.to_string();
+        job_id(runtime_cell::with(|rt| rt.rebase(&self.key, &target, shelve)).flatten())
+    }
+
+    /// Moves the branch back to before the rebase the undo strip offers
+    /// (`undoable_commit().rebase_onto`). Label `undo rebase`.
+    #[func]
+    fn undo_rebase(&self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.undo_rebase(&self.key)).flatten())
     }
 
     /// See `convert::operation_info`; empty with no operation in progress.

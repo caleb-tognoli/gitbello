@@ -39,7 +39,8 @@ use crate::library::{
 };
 use crate::merge::{
     self as merge, BlockChoice, ConflictFile, ConflictKind, ConflictLayout, ConflictOp, FileChoice,
-    HeadInfo, MergeMode, MergePreview, OperationDetails, UndoMode, UndoableCommit,
+    HeadInfo, MergeMode, MergePreview, OperationDetails, RebaseCheck, RebaseUndo, UndoMode,
+    UndoableCommit,
 };
 use crate::new_repo::{self, CloneOptions, CreateOptions, FIRST_COMMIT_MESSAGE};
 use crate::ops::{
@@ -151,6 +152,9 @@ pub const SHELF_FILES_JOB_LABEL: &str = "read shelf";
 /// Labels of the merge workflow jobs (PLAN §4, M7).
 pub const MERGE_PREVIEW_JOB_LABEL: &str = "preview merge";
 pub const MERGE_JOB_LABEL: &str = "merge";
+pub const REBASE_CHECK_JOB_LABEL: &str = "check rebase";
+pub const REBASE_JOB_LABEL: &str = "rebase";
+pub const UNDO_REBASE_JOB_LABEL: &str = "undo rebase";
 pub const CONTINUE_JOB_LABEL: &str = "continue";
 pub const SKIP_JOB_LABEL: &str = "skip";
 pub const CONFLICT_JOB_LABEL: &str = "load conflict";
@@ -196,6 +200,8 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     "cherry-pick",
     "abort",
     MERGE_JOB_LABEL,
+    REBASE_JOB_LABEL,
+    UNDO_REBASE_JOB_LABEL,
     CONTINUE_JOB_LABEL,
     SKIP_JOB_LABEL,
     RESOLVE_JOB_LABEL,
@@ -230,6 +236,7 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | BLAME_COMMIT_JOB_LABEL
         | COMMIT_DETAILS_JOB_LABEL
         | MERGE_PREVIEW_JOB_LABEL
+        | REBASE_CHECK_JOB_LABEL
         | IGNORE_PREVIEW_JOB_LABEL => (Interactive, true),
         OPEN_JOB_LABEL
         | OLD_FILE_JOB_LABEL
@@ -373,6 +380,11 @@ pub enum RuntimeEvent {
     },
     /// The merge preview requested with [`Runtime::load_merge_preview`].
     MergePreviewLoaded {
+        repo: PathBuf,
+        target: String,
+    },
+    /// The rebase check requested with [`Runtime::load_rebase_check`].
+    RebaseCheckLoaded {
         repo: PathBuf,
         target: String,
     },
@@ -642,6 +654,10 @@ pub struct RepoState {
     conflict_undo: Vec<ConflictUndo>,
     merge_preview: Option<MergePreview>,
     merge_preview_requested: Option<String>,
+    rebase_check: Option<RebaseCheck>,
+    rebase_check_requested: Option<String>,
+    /// The last rebase made here, for the undo strip.
+    last_rebase: Option<RebaseUndo>,
     head_info: HeadInfo,
     labels: HashMap<String, Vec<RefLabel>>,
     changes: ChangeList,
@@ -727,6 +743,9 @@ impl RepoState {
             conflict_undo: Vec::new(),
             merge_preview: None,
             merge_preview_requested: None,
+            rebase_check: None,
+            rebase_check_requested: None,
+            last_rebase: None,
             head_info: HeadInfo::default(),
             labels: HashMap::new(),
             changes: ChangeList::default(),
@@ -980,6 +999,20 @@ impl RepoState {
     /// The merge preview last loaded, once it arrived.
     pub fn merge_preview(&self) -> Option<&MergePreview> {
         self.merge_preview.as_ref()
+    }
+
+    /// The rebase check last loaded, once it arrived.
+    pub fn rebase_check(&self) -> Option<&RebaseCheck> {
+        self.rebase_check.as_ref()
+    }
+
+    /// The rebase the undo strip offers: the last one made here, while HEAD
+    /// is still its result and not pushed.
+    pub fn rebase_undo(&self) -> Option<&RebaseUndo> {
+        let undo = self.last_rebase.as_ref()?;
+        let commit = self.undoable_commit()?;
+        (commit.oid == undo.after && self.current_branch() == Some(undo.branch.as_str()))
+            .then_some(undo)
     }
 
     /// The commit the undo strip offers (HEAD, unpushed, on a branch, with
@@ -3040,6 +3073,101 @@ impl Runtime {
         )))
     }
 
+    /// Works out what rebasing HEAD onto `target` would do, commit by
+    /// commit; it arrives as [`RuntimeEvent::RebaseCheckLoaded`].
+    pub fn load_rebase_check(&mut self, key: &Path, target: &str) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        let full = state.full_ref_name(target);
+        state.rebase_check = None;
+        state.rebase_check_requested = Some(target.to_owned());
+        let target = target.to_owned();
+        Some(
+            self.scheduler
+                .submit(JobSpec::read(key, REBASE_CHECK_JOB_LABEL, move |ctx| {
+                    let mut check =
+                        ctx.backend()
+                            .rebase_check(&toplevel, &full, ctx.cancel_token())?;
+                    check.target = target;
+                    Ok(JobOutput::RebaseCheck(Box::new(check)))
+                })),
+        )
+    }
+
+    /// Rebases the current branch onto `target`. With `shelve`, local
+    /// changes are left as an automatic shelf first and restored after a
+    /// clean rebase (a conflicting rebase keeps the shelf). A clean rebase
+    /// can be undone ([`RepoState::rebase_undo`]). Label [`REBASE_JOB_LABEL`].
+    pub fn rebase(&self, key: &Path, target: &str, shelve: bool) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get(key).filter(|s| s.operation.is_none())?;
+        let branch = state.current_branch()?.to_owned();
+        let full = state.full_ref_name(target);
+        let shelf = shelf_message(&branch, &format!("Left when rebasing onto {target}"), true);
+        let name = state
+            .unique_short_name(&full)
+            .unwrap_or_else(|| full.clone());
+        // A commit is shown by its short hash.
+        let onto = if name.len() >= 40 && name.chars().all(|c| c.is_ascii_hexdigit()) {
+            name.chars().take(7).collect()
+        } else {
+            name.clone()
+        };
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            REBASE_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let before = backend.resolve(&toplevel, "HEAD", cancel)?;
+                let stashed = if shelve {
+                    backend.stash_push(&toplevel, &shelf, cancel)?
+                } else {
+                    None
+                };
+                let rebased = backend.rebase(&toplevel, &name, cancel);
+                // Putting the changes back must not be cut short by a cancel.
+                let restore = CancelToken::new();
+                match (&rebased, &stashed) {
+                    // A conflicting rebase keeps the shelf until it is finished.
+                    (Err(err), Some(_)) if err.kind == GitErrorKind::Conflict => {}
+                    (_, Some(oid)) => backend.restore_shelf(&toplevel, oid, &restore)?,
+                    (_, None) => {}
+                }
+                rebased?;
+                let after = backend.resolve(&toplevel, "HEAD", &restore)?;
+                Ok(match (before, after) {
+                    (Some(before), Some(after)) if before != after => {
+                        JobOutput::Rebased(Box::new(RebaseUndo {
+                            branch,
+                            onto,
+                            before,
+                            after,
+                        }))
+                    }
+                    _ => JobOutput::Done,
+                })
+            },
+        )))
+    }
+
+    /// Moves the branch back to before the rebase the undo strip offers.
+    /// Label [`UNDO_REBASE_JOB_LABEL`].
+    pub fn undo_rebase(&self, key: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let undo = self.repos.get(key)?.rebase_undo()?.clone();
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            UNDO_REBASE_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                ctx.backend()
+                    .undo_rebase(&toplevel, &undo.after, &undo.before, ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            },
+        )))
+    }
+
     /// Finishes the operation in progress after its conflicts were resolved:
     /// commits a merge or cherry-pick with `message` (git's when `None`),
     /// or continues a rebase. Label [`CONTINUE_JOB_LABEL`].
@@ -3842,6 +3970,23 @@ impl Runtime {
                 return;
             }
         }
+        if label == REBASE_CHECK_JOB_LABEL {
+            if let EventKind::Finished(Ok(JobOutput::RebaseCheck(check))) = kind {
+                if state.rebase_check_requested.as_deref() != Some(check.target.as_str()) {
+                    return;
+                }
+                let target = check.target.clone();
+                state.rebase_check = Some(*check);
+                out.push(RuntimeEvent::RebaseCheckLoaded { repo, target });
+                return;
+            }
+        }
+        if let EventKind::Finished(Ok(JobOutput::Rebased(undo))) = &kind {
+            state.last_rebase = Some(undo.as_ref().clone());
+        }
+        if label == UNDO_REBASE_JOB_LABEL && matches!(kind, EventKind::Finished(Ok(_))) {
+            state.last_rebase = None;
+        }
         if let EventKind::Finished(Ok(JobOutput::ConflictWritten(written))) = &kind {
             let (path, before, after, _) = written.as_ref();
             state.conflict_undo.push(ConflictUndo {
@@ -4402,6 +4547,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::ShelfFiles(..)
         | JobOutput::ShelfDropped { .. }
         | JobOutput::MergePreview(_)
+        | JobOutput::RebaseCheck(_)
+        | JobOutput::Rebased(_)
         | JobOutput::Conflict { .. }
         | JobOutput::ConflictScan { .. }
         | JobOutput::ConflictWritten(_)

@@ -22,7 +22,7 @@ use crate::git::{
 use crate::ignore::IgnoreMatch;
 use crate::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
-    UndoMode,
+    RebaseCheck, UndoMode,
 };
 use crate::new_repo::{init_folder_error, CloneOptions};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
@@ -391,6 +391,27 @@ pub trait GitBackend: Send + Sync {
         target: &str,
         mode: MergeMode,
         message: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError>;
+    /// What rebasing HEAD onto `target` would do, commit by commit, without
+    /// touching the working tree.
+    fn rebase_check(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        cancel: &CancelToken,
+    ) -> Result<RebaseCheck, GitError>;
+    /// Rebases HEAD onto `target`, the base in the conflict markers
+    /// (zdiff3). Conflicts fail with [`GitErrorKind::Conflict`] and leave
+    /// the rebase in progress.
+    fn rebase(&self, toplevel: &Path, target: &str, cancel: &CancelToken) -> Result<(), GitError>;
+    /// Moves the branch back to `before` (`reset --keep`), if HEAD is still
+    /// `after`.
+    fn undo_rebase(
+        &self,
+        toplevel: &Path,
+        after: &str,
+        before: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
     /// The operation in progress with the banner's details, if any.
@@ -2105,6 +2126,29 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
         self.merge_impl(toplevel, target, mode, message, cancel)
+    }
+
+    fn rebase_check(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        cancel: &CancelToken,
+    ) -> Result<RebaseCheck, GitError> {
+        self.rebase_check_impl(toplevel, target, cancel)
+    }
+
+    fn rebase(&self, toplevel: &Path, target: &str, cancel: &CancelToken) -> Result<(), GitError> {
+        self.rebase_impl(toplevel, target, cancel)
+    }
+
+    fn undo_rebase(
+        &self,
+        toplevel: &Path,
+        after: &str,
+        before: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.undo_rebase_impl(toplevel, after, before, cancel)
     }
 
     fn operation_details(

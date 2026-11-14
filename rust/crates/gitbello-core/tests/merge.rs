@@ -585,3 +585,141 @@ fn knows_which_commits_head_lacks() {
     poll_until(&mut rt, |rt, _| !rt.repo(&key).unwrap().in_head(&feat));
     assert!(rt.repo(&key).unwrap().in_head(&main));
 }
+
+fn rebase_check(rt: &mut Runtime, key: &Path, target: &str) -> gitbello_core::merge::RebaseCheck {
+    rt.load_rebase_check(key, target).expect("check starts");
+    poll_until(rt, |rt, _| {
+        rt.repo(key).is_some_and(|s| s.rebase_check().is_some())
+    });
+    rt.repo(key)
+        .and_then(|s| s.rebase_check())
+        .cloned()
+        .expect("check arrived")
+}
+
+#[test]
+fn previews_what_a_rebase_replays() {
+    let repo = diverged();
+    repo.add_remote();
+    repo.checkout("feat");
+    repo.git(&["push", "--quiet", "origin", "feat~1:refs/heads/feat"]);
+    repo.git(&["branch", "--quiet", "--set-upstream-to=origin/feat"]);
+    let (mut rt, key) = open(&repo);
+
+    // feat's two commits, the first already on its upstream.
+    let p = preview(&mut rt, &key, "main");
+    assert!(p.can_rebase());
+    assert_eq!(p.own_count, 2);
+    assert_eq!(p.own_commits[0].subject, "feat adds a file");
+    assert_eq!(p.own_merges, 0);
+    assert_eq!(p.own_pushed, 1);
+
+    // A merge on feat is counted apart and left out of the replayed list.
+    repo.branch("part");
+    repo.checkout("part");
+    repo.commit("part.txt", "part\n", "part of feat");
+    repo.checkout("feat");
+    repo.commit("feat2.txt", "feat2\n", "feat moves on");
+    repo.merge("part", "Merge part into feat");
+    settle(&mut rt, &key);
+    let p = preview(&mut rt, &key, "main");
+    assert!(p.can_rebase());
+    assert_eq!((p.own_count, p.own_merges), (4, 1));
+    assert!(p
+        .own_commits
+        .iter()
+        .all(|c| !c.subject.starts_with("Merge")));
+    assert_eq!(p.own_commits.len(), 4);
+
+    // A fast-forward is no rebase.
+    repo.checkout("main");
+    repo.branch("behind");
+    repo.git(&["branch", "-f", "behind", "main~1"]);
+    repo.checkout("behind");
+    settle(&mut rt, &key);
+    let p = preview(&mut rt, &key, "main");
+    assert!(p.can_ff && !p.can_rebase());
+    assert_eq!(p.own_count, 0);
+}
+
+#[test]
+fn checks_a_rebase_commit_by_commit() {
+    let repo = diverged();
+    repo.checkout("feat");
+    let (mut rt, key) = open(&repo);
+
+    // The first commit stops on f.txt; nothing after it is checked.
+    let check = rebase_check(&mut rt, &key, "main");
+    assert_eq!(check.total, 2);
+    assert_eq!(check.checked, 0);
+    assert!(!check.is_partial());
+    let stop = check.stop.expect("stops");
+    assert_eq!(stop.subject, "feat change");
+    assert_eq!(stop.conflicts.len(), 1);
+    assert_eq!(stop.conflicts[0].path, PathBuf::from("f.txt"));
+
+    // Main agrees with feat's change and picked its new file: git leaves
+    // that commit out, and the other replays cleanly (as nothing).
+    repo.checkout("main");
+    repo.commit("f.txt", "a\nB2\nc\n", "main agrees with feat");
+    repo.git(&["cherry-pick", "feat"]);
+    repo.checkout("feat");
+    settle(&mut rt, &key);
+    let check = rebase_check(&mut rt, &key, "main");
+    assert_eq!(check.stop, None);
+    assert_eq!((check.checked, check.total), (1, 1));
+    assert_eq!(read(&repo, "f.txt"), "a\nB2\nc\n", "nothing was touched");
+}
+
+#[test]
+fn rebases_and_undoes_the_rebase() {
+    let repo = diverged();
+    repo.checkout("main");
+    repo.commit("f.txt", "a\nB2\nc\n", "main agrees with feat");
+    repo.checkout("feat");
+    let before = repo.head();
+    repo.write("new.txt", "new\nlocal\n");
+    let (mut rt, key) = open(&repo);
+
+    // Local changes are shelved around it and come back.
+    ok(&mut rt, &key, |rt| rt.rebase(&key, "main", true));
+    assert_eq!(subject(&repo, "HEAD"), "feat adds a file");
+    assert_eq!(subject(&repo, "HEAD~1"), "main agrees with feat");
+    assert_eq!(read(&repo, "new.txt"), "new\nlocal\n");
+    assert!(rt.repo(&key).unwrap().shelves().is_empty());
+    let after = repo.head();
+    wait_undoable(&mut rt, &key, &after);
+    let undo = rt
+        .repo(&key)
+        .unwrap()
+        .rebase_undo()
+        .cloned()
+        .expect("undo offered");
+    assert_eq!((undo.branch.as_str(), undo.onto.as_str()), ("feat", "main"));
+    assert_eq!(
+        (undo.before.as_str(), undo.after.as_str()),
+        (before.as_str(), after.as_str())
+    );
+
+    ok(&mut rt, &key, |rt| rt.undo_rebase(&key));
+    assert_eq!(repo.head(), before);
+    assert_eq!(read(&repo, "new.txt"), "new\nlocal\n");
+    settle(&mut rt, &key);
+    assert!(rt.repo(&key).unwrap().rebase_undo().is_none());
+}
+
+#[test]
+fn conflicting_rebase_keeps_the_shelf() {
+    let repo = diverged();
+    repo.checkout("feat");
+    repo.write("other.txt", "local\n");
+    let (mut rt, key) = open(&repo);
+    let err = outcome(&mut rt, &key, |rt| rt.rebase(&key, "main", true)).expect("conflicts");
+    assert_eq!(err.kind, GitErrorKind::Conflict);
+    settle(&mut rt, &key);
+    let state = rt.repo(&key).unwrap();
+    assert!(matches!(state.operation(), Some(Operation::Rebase { .. })));
+    assert_eq!(state.shelves().len(), 1);
+    assert!(state.shelves()[0].auto);
+    assert!(state.rebase_undo().is_none());
+}

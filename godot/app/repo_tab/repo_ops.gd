@@ -25,6 +25,9 @@ signal changes_requested(conflicts: bool)
 signal message_suggested(summary: String, body: String)
 
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
+const MERGE_DIALOG: PackedScene = preload("res://app/merge/merge_dialog.tscn")
+## The merge dialog's git modes by strategy.
+const MERGE_MODES: Dictionary[String, String] = {"merge": "no_ff", "squash": "squash", "ff": "ff_only"}
 ## Choice in the upstream dialog that removes the upstream.
 const NO_UPSTREAM: String = "(none)"
 
@@ -70,18 +73,9 @@ var _switch: ConfirmationDialog = ConfirmationDialog.new()
 var _leave_button: Button = null
 ## The checkout the switch dialog is about: `{name, start, origin}`.
 var _pending_switch: Dictionary = {}
-## The merge the dialog is about: `{target, shown, origin}`.
-var _merge: Dictionary = {}
-## Why the merge dialog cannot merge yet ("" when it can).
-var _merge_reason: String = ""
-var _merge_status: Label = null
-var _merge_status_icon: TextureRect = null
-## Turns the status icon while the preview loads.
-var _merge_spin: Tween = null
-var _merge_conflicts: VBoxContainer = null
-var _merge_callout: Label = null
-var _merge_commits: VBoxContainer = null
-var _merge_commits_title: Label = null
+var _merge_dialog: MergeDialog = null
+## The control that opened the merge dialog (where its job reports).
+var _merge_origin: Control = null
 ## Merges started here: job id -> `{target, shown, mode, commits}`.
 var _merges: Dictionary[int, Dictionary] = {}
 ## Undoing a merge commit: keep its changes (OK) or remove the merge.
@@ -124,6 +118,10 @@ func _ready() -> void:
 	choices.add_child(_remove_merge_button)
 	_undo_merge.add_child(choices)
 	add_child(_undo_merge)
+	_merge_dialog = MERGE_DIALOG.instantiate() as MergeDialog
+	_merge_dialog.start_requested.connect(_start_merge)
+	_merge_dialog.session = session
+	add_child(_merge_dialog)
 
 
 func _notification(what: int) -> void:
@@ -135,14 +133,14 @@ func set_session(value: RepoSession) -> void:
 	if session != null and session.job_finished.is_connected(_on_job_finished):
 		session.job_finished.disconnect(_on_job_finished)
 		session.cleanup_loaded.disconnect(_on_cleanup_loaded)
-		session.merge_preview_ready.disconnect(_on_merge_preview)
 		session.version_ready.disconnect(_on_version_ready)
 		session.branch_delete_info_ready.disconnect(_on_delete_info)
 	session = value
+	if _merge_dialog != null:
+		_merge_dialog.session = value
 	if session != null:
 		session.job_finished.connect(_on_job_finished)
 		session.cleanup_loaded.connect(_on_cleanup_loaded)
-		session.merge_preview_ready.connect(_on_merge_preview)
 		session.version_ready.connect(_on_version_ready)
 		session.branch_delete_info_ready.connect(_on_delete_info)
 
@@ -228,10 +226,12 @@ func handles_error(error: Dictionary) -> bool:
 	var kind: String = String(error.get("kind", ""))
 	var command: String = String(error.get("command", ""))
 	var stopped: bool = kind == "conflict" and not command.contains("--abort") \
-			and (command.contains("merge ") or command.begins_with("cherry-pick") or command.begins_with("revert"))
-	# The merge dialog says why its preview failed.
-	var previewing: bool = _form_kind == "merge" and _form.visible and (command == "merge"
-			or command.begins_with("merge-tree") or command.begins_with("merge-base") or command.begins_with("rev-parse"))
+			and (command.contains("merge ") or command.contains("rebase ") or command.begins_with("cherry-pick")
+				or command.begins_with("revert"))
+	# The merge dialog says why its preview or rebase check failed.
+	var previewing: bool = _merge_dialog.visible and (command in ["merge", "rebase", "rebase check"]
+			or command.begins_with("merge-tree") or command.begins_with("merge-base") or command.begins_with("rev-parse")
+			or command.begins_with("rev-list") or command.begins_with("commit-tree"))
 	return (kind == "local_changes" and command.begins_with("switch")) \
 			or (kind == "not_fully_merged" and command.begins_with("branch")) or stopped or previewing
 
@@ -882,244 +882,36 @@ func _check_remote(values: Dictionary, current: String, needs_url: bool) -> Stri
 # --- Merges (PLAN §4 Merge with preview) --------------------------------------
 
 ## Opens the merge dialog for `target` (a branch, remote branch or tag by
-## full name, or a commit), shown as `shown`; it fills in once the preview
-## arrives. One column: `shown → here`, a status line (a spinner while
-## checking), the conflicted files, a callout for local changes the merge
-## would overwrite, the commits to merge (a list that scrolls once the dialog
-## would outgrow the window) and the message.
+## full name, or a commit), shown as `shown` (see `MergeDialog`).
 func merge_into_current(target: String, shown: String = "") -> void:
-	if shown.is_empty():
-		shown = target.left(7) if target.is_valid_hex_number() else target
-	_merge = {"target": target, "shown": shown, "origin": Actions.origin()}
-	_begin_form("merge", "Merge", "Merge", _start_merge.bind("default"))
-	var direction: HBoxContainer = HBoxContainer.new()
-	direction.add_child(_ref_chip(_ref_icon(target), shown))
-	var arrow: Label = Label.new()
-	arrow.text = "→"
-	arrow.theme_type_variation = &"DimLabel"
-	direction.add_child(arrow)
-	direction.add_child(_ref_chip(&"GitBranch", _here()))
-	_form.add_control("direction", "", direction)
-	var status: HBoxContainer = HBoxContainer.new()
-	_merge_status_icon = _form_icon(&"Reload")
-	status.add_child(_merge_status_icon)
-	_merge_status = Label.new()
-	_merge_status.text = "Checking…"
-	status.add_child(_merge_status)
-	_form.add_control("status", "", status)
-	_merge_conflicts = VBoxContainer.new()
-	_merge_conflicts.add_theme_constant_override(&"separation", 2)
-	_form.add_control("conflicts", "", _merge_conflicts)
-	var callout: PanelContainer = PanelContainer.new()
-	callout.theme_type_variation = &"Callout"
-	var callout_row: HBoxContainer = HBoxContainer.new()
-	var warning: TextureRect = _form_icon(&"StatusWarning")
-	warning.modulate = _form.get_theme_color(&"warning_color", FormDialog.THEME_TYPE)
-	callout_row.add_child(warning)
-	_merge_callout = Label.new()
-	_merge_callout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_merge_callout.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_merge_callout.mouse_filter = Control.MOUSE_FILTER_PASS
-	callout_row.add_child(_merge_callout)
-	callout.add_child(callout_row)
-	_form.add_control("local_changes", "", callout)
-	_merge_commits_title = Label.new()
-	_merge_commits_title.theme_type_variation = &"DimLabel"
-	_form.add_control("commits_title", "", _merge_commits_title)
-	_merge_commits = VBoxContainer.new()
-	_merge_commits.add_theme_constant_override(&"separation", 2)
-	_form.add_list("commits", "", _merge_commits)
-	# One line until the message has more: the box grows with its text.
-	var message: TextEdit = _form.add_text("message", "", "", "Merge commit message")
-	message.custom_minimum_size.y = 0.0
-	message.scroll_fit_content_height = true
-	for key: String in ["conflicts", "local_changes", "commits_title", "commits", "message"]:
-		_form.set_field_visible(key, false)
-	_merge_reason = tr("Checking for conflicts…")
-	_form.validator = func(_values: Dictionary) -> String: return _merge_reason
-	_form.set_ok_icon(AppTheme.icon(&"GitMerge"))
-	_form.open()
-	_spin(_merge_status_icon)
-	_merge["preview_job"] = session.load_merge_preview(target)
-	if int(_merge["preview_job"]) < 0:
-		_merge_failed("")
+	_merge_origin = Actions.origin()
+	_merge_dialog.open(target, shown)
 
 
-## The preview failed: the status says why and nothing can be merged.
-func _merge_failed(why: String) -> void:
-	_set_merge_status(&"StatusWarning", why if not why.is_empty() else tr("This cannot be merged"), &"error_color")
-	_merge_reason = tr("Cannot merge")
-	_form.revalidate()
+## The merge dialog (for tests and screenshots).
+func merge_dialog() -> MergeDialog:
+	return _merge_dialog
 
 
-## The merge dialog's status line (for tests).
-func merge_status_text() -> String:
-	return _merge_status.text if _merge_status != null and is_instance_valid(_merge_status) else ""
-
-
-## The conflicted files the merge dialog lists (for tests).
-func merge_conflict_paths() -> PackedStringArray:
-	var out: PackedStringArray = PackedStringArray()
-	if _merge_conflicts != null and is_instance_valid(_merge_conflicts) and _merge_conflicts.visible:
-		for row: Node in _merge_conflicts.get_children():
-			out.append(String(row.get_meta(&"path", "")))
-	return out
-
-
-func _on_merge_preview(target: String) -> void:
-	if _form_kind != "merge" or not _form.visible or target != String(_merge.get("target", "")):
+## Starts what the merge dialog chose: `strategy` `merge` (always a merge
+## commit), `squash`, `ff` (fast-forward only) or `rebase` (the current
+## branch onto `target`); local changes go on a shelf first when
+## `shelve_first`.
+func _start_merge(target: String, shown: String, strategy: String, message: String, shelve_first: bool) -> void:
+	if strategy == "rebase":
+		var rebase_job: int = session.rebase(target, shelve_first)
+		if rebase_job >= 0:
+			_merges[rebase_job] = {"target": target, "shown": shown, "mode": "rebase", "commits": PackedStringArray()}
+		_track(rebase_job, tr("Rebasing onto %s") % shown, "", Callable(), _merge_origin)
 		return
-	var p: Dictionary = session.merge_preview()
-	var into: String = _here()
-	var shown: String = String(_merge["shown"])
-	var count: int = int(p["commit_count"])
-	var files: int = int(p["file_count"])
-	var conflicts: Array = p["conflicts"]
-	var overlap: PackedStringArray = p["overlap"]
-	var message_shown: bool = true
-	var ok_text: String = ""
-	var menu: Array[Dictionary] = []
-	_merge_reason = ""
-	if bool(p["up_to_date"]):
-		_set_merge_status(&"StatusSuccess", tr("%s already has everything in %s") % [into, shown], &"success_color")
-		_merge_reason = tr("Already up to date")
-		ok_text = tr("Already up to date")
-		message_shown = false
-		_form.cancel_button_text = "Close"
-	elif bool(p["can_ff"]):
-		_set_merge_status(&"StatusSuccess", tr("Fast-forward: %s moves to %s") % [into, shown], &"success_color")
-		ok_text = tr("Fast-forward %s") % into
-		message_shown = false
-		menu = [{"label": "Always create merge commit", "icon": &"GitMerge", "run": _start_merge.bind("no_ff")},
-			{"label": "Squash into one commit…", "icon": &"GitCommit", "run": _start_merge.bind("squash")}]
-	elif conflicts.is_empty():
-		_set_merge_status(&"StatusSuccess", tr("No conflicts"), &"success_color")
-		ok_text = "Create merge commit"
-		menu = [{"label": "Squash into one commit…", "icon": &"GitCommit", "run": _start_merge.bind("squash")},
-			{"label": "Fast-forward only", "icon": &"GitBranch", "run": _start_merge.bind("ff_only"), "disabled": true,
-				"tooltip": tr("%s has commits %s doesn't") % [into, shown]}]
-	else:
-		_set_merge_status(&"GitConflict", tr("Conflicts in %s") % _files(conflicts.size()), &"error_color")
-		ok_text = "Merge and resolve…"
-		menu = [{"label": "Squash and resolve…", "icon": &"GitCommit", "run": _start_merge.bind("squash")}]
-	_fill_merge_conflicts(conflicts)
-	var overwritten: bool = not overlap.is_empty() and not bool(p["up_to_date"])
-	if overwritten:
-		var listed: String = overlap[0] if overlap.size() == 1 else tr("%s and %d more") % [overlap[0], overlap.size() - 1]
-		_merge_callout.text = tr("Local changes to %s are shelved first") % listed
-		_merge_callout.tooltip_text = tr("The merge would overwrite them. They come back after a clean merge; if it conflicts, they stay on the shelf until it is finished.") \
-				+ "\n" + "\n".join(overlap)
-		ok_text = "Shelve changes and merge"
-	_form.set_field_visible("local_changes", overwritten)
-	_fill_merge_commits(p["commits"], count)
-	_merge_commits_title.text = tr("%s · %s changed") % [_commits(count), _files(files)]
-	_form.set_field_visible("commits_title", count > 0)
-	_form.set_field_visible("commits", count > 0)
-	(_form.field("message") as TextEdit).text = String(p["message"])
-	_form.set_field_visible("message", message_shown)
-	_form.fit()
-	_form.ok_button_text = ok_text
-	_form.set_ok_icon(null if bool(p["up_to_date"]) else AppTheme.icon(&"GitMerge"))
-	_form.set_menu(menu)
-	_form.revalidate()
-	_form.get_ok_button().grab_focus()
-
-
-## The status line's icon (stops the spinner) and text, the icon in
-## FormDialog colour `color`.
-func _set_merge_status(icon: StringName, text: String, color: StringName) -> void:
-	if _merge_spin != null:
-		_merge_spin.kill()
-		_merge_spin = null
-	_merge_status_icon.rotation = 0.0
-	_merge_status_icon.texture = AppTheme.tintable_icon(icon)
-	_merge_status_icon.modulate = _form.get_theme_color(color, FormDialog.THEME_TYPE)
-	_merge_status.text = text
-
-
-## Up to five conflicted files, then "and N more".
-func _fill_merge_conflicts(conflicts: Array) -> void:
-	for child: Node in _merge_conflicts.get_children():
-		_merge_conflicts.remove_child(child)
-		child.queue_free()
-	var color: Color = _form.get_theme_color(FileRowPainter.CODE_COLORS["U"], FileRowPainter.THEME_TYPE)
-	for i: int in mini(5, conflicts.size()):
-		var path: String = String((conflicts[i] as Dictionary)["path"])
-		var row: HBoxContainer = HBoxContainer.new()
-		row.set_meta(&"path", path)
-		var icon: TextureRect = _form_icon(&"FileConflict")
-		icon.modulate = color
-		row.add_child(icon)
-		var label: Label = Label.new()
-		label.text = path
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		row.add_child(label)
-		_merge_conflicts.add_child(row)
-	if conflicts.size() > 5:
-		var more: Label = Label.new()
-		more.text = tr("and %d more") % (conflicts.size() - 5)
-		more.theme_type_variation = &"DimLabel"
-		_merge_conflicts.add_child(more)
-	_form.set_field_visible("conflicts", not conflicts.is_empty())
-
-
-## A row per commit: icon, short hash, subject, then author and age, dim.
-func _fill_merge_commits(commits: Array, count: int) -> void:
-	for child: Node in _merge_commits.get_children():
-		_merge_commits.remove_child(child)
-		child.queue_free()
-	var now: int = int(Time.get_unix_time_from_system())
-	for commit: Dictionary in commits:
-		var row: HBoxContainer = HBoxContainer.new()
-		var icon: TextureRect = _form_icon(&"GitCommit")
-		icon.modulate.a = 0.6
-		row.add_child(icon)
-		var short_oid: Label = Label.new()
-		short_oid.text = String(commit["oid"]).left(7)
-		short_oid.theme_type_variation = &"DetailsHash"
-		row.add_child(short_oid)
-		var subject: Label = Label.new()
-		subject.text = String(commit["subject"])
-		subject.tooltip_text = subject.text
-		subject.mouse_filter = Control.MOUSE_FILTER_PASS
-		subject.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		subject.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		row.add_child(subject)
-		var who: Label = Label.new()
-		who.text = "%s · %s" % [String(commit["author"]), ago(now - int(commit["time"]))]
-		who.theme_type_variation = &"DimLabel"
-		row.add_child(who)
-		_merge_commits.add_child(row)
-	if count > commits.size():
-		var more: Label = Label.new()
-		more.text = tr("and %d more") % (count - commits.size())
-		more.theme_type_variation = &"DimLabel"
-		_merge_commits.add_child(more)
-
-
-## A rounded chip with `icon` and `text`.
-func _ref_chip(icon: StringName, text: String) -> PanelContainer:
-	var chip: PanelContainer = PanelContainer.new()
-	chip.theme_type_variation = &"RefChip"
-	var row: HBoxContainer = HBoxContainer.new()
-	row.add_child(_form_icon(icon))
-	var label: Label = Label.new()
-	label.text = text
-	row.add_child(label)
-	chip.add_child(row)
-	return chip
-
-
-## The icon of a merge target: a tag, a remote branch, a commit or a branch.
-static func _ref_icon(target: String) -> StringName:
-	if target.begins_with("refs/tags/"):
-		return &"GitTag"
-	if target.begins_with("refs/remotes/"):
-		return &"GitRemote"
-	if target.is_valid_hex_number() and target.length() >= 7:
-		return &"GitCommit"
-	return &"GitBranch"
+	var mode: String = MERGE_MODES.get(strategy, "default")
+	var job: int = session.merge(target, mode, message, shelve_first)
+	var subjects: PackedStringArray = PackedStringArray()
+	for commit: Dictionary in _merge_dialog.preview().get("commits", []):
+		subjects.append(String(commit["subject"]))
+	if job >= 0:
+		_merges[job] = {"target": target, "shown": shown, "mode": mode, "commits": subjects}
+	_track(job, tr("Merging %s") % shown, "", Callable(), _merge_origin)
 
 
 ## An icon sized for a form line.
@@ -1135,14 +927,6 @@ func _form_icon(icon: StringName) -> TextureRect:
 	return rect
 
 
-## Turns `icon` until `_set_merge_status` stops it.
-func _spin(icon: TextureRect) -> void:
-	if _merge_spin != null:
-		_merge_spin.kill()
-	_merge_spin = icon.create_tween().set_loops()
-	_merge_spin.tween_property(icon, "rotation", TAU, 1.0).from(0.0)
-
-
 ## "just now", "5 min ago", "3 h ago", "2 d ago".
 static func ago(seconds: int) -> String:
 	if seconds < 60:
@@ -1152,23 +936,6 @@ static func ago(seconds: int) -> String:
 	if seconds < 86400:
 		return TranslationServer.translate("%d h ago") % floori(seconds / 3600.0)
 	return TranslationServer.translate("%d d ago") % floori(seconds / 86400.0)
-
-
-## Starts the merge the dialog shows, as `mode` (`default`, `no_ff`,
-## `squash`, `ff_only`); local changes the merge touches are shelved first.
-func _start_merge(values: Dictionary, mode: String) -> void:
-	var p: Dictionary = session.merge_preview()
-	var target: String = String(_merge["target"])
-	var shown: String = String(_merge["shown"])
-	var shelve_first: bool = not (p.get("overlap", PackedStringArray()) as PackedStringArray).is_empty()
-	var message: String = String(values.get("message", "")) if mode in ["default", "no_ff"] else ""
-	var job: int = session.merge(target, mode, message, shelve_first)
-	var subjects: PackedStringArray = PackedStringArray()
-	for commit: Dictionary in p.get("commits", []):
-		subjects.append(String(commit["subject"]))
-	if job >= 0:
-		_merges[job] = {"target": target, "shown": shown, "mode": mode, "commits": subjects}
-	_track(job, tr("Merging %s") % shown, "", Callable(), _merge.get("origin") as Control)
 
 
 ## "1 file", "3 files".
@@ -1228,9 +995,13 @@ func recreate_with_base(path: String) -> void:
 
 ## Undoes the commit the strip offers: its changes become local changes.
 ## A merge commit asks first: keep the merged changes, or remove the merge.
+## After a rebase made here, the branch goes back to before it.
 func undo_commit() -> void:
 	var commit: Dictionary = session.undoable_commit()
 	if commit.is_empty():
+		return
+	if not String(commit.get("rebase_onto", "")).is_empty():
+		_track(session.undo_rebase(), "Undoing the rebase", "", Callable(), Actions.origin())
 		return
 	if bool(commit["merge"]):
 		_pending_undo = commit
@@ -1685,8 +1456,6 @@ func _run_cleanup(values: Dictionary) -> void:
 
 func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> void:
 	var kind: String = String(error.get("kind", ""))
-	if not ok and job >= 0 and job == int(_merge.get("preview_job", -1)) and _form_kind == "merge" and _form.visible:
-		_merge_failed(String(error.get("message", "")))
 	if _checkouts.has(job):
 		var entry: Dictionary = _checkouts[job]
 		_checkouts.erase(job)

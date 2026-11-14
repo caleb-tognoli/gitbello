@@ -21,7 +21,8 @@ use gitbello_core::ignore::{
     IgnoreLine, IgnorePreview, IgnoreRule, IgnoreRules, IgnoreTarget, Suggestion,
 };
 use gitbello_core::merge::{
-    ConflictFile, ConflictKind, ConflictRow, ConflictRowKind, MergePreview,
+    ConflictFile, ConflictKind, ConflictRow, ConflictRowKind, MergePreview, PreviewCommit,
+    PreviewConflict, RebaseCheck,
 };
 use gitbello_core::repo::{
     Change, CommitDetails, CommitFile, Conflict, FileChange, FileState, Head, Operation, Ref,
@@ -871,27 +872,40 @@ pub fn conflict_rows(
     out
 }
 
-/// `{target, oid, up_to_date, can_ff, commit_count, commits, file_count,
-/// conflicts, overlap, message}`: `commits` are `{oid, subject, author,
-/// time}` (the first 50), `conflicts` `{path, kind}` with git's conflict
-/// type, `overlap` the local changes the merge touches.
-pub fn merge_preview(preview: &MergePreview) -> VarDictionary {
-    let mut commits = Array::<VarDictionary>::new();
-    for commit in &preview.commits {
-        commits.push(&vdict! {
+/// `{oid, subject, author, email, time}` per commit.
+fn preview_commits(commits: &[PreviewCommit]) -> Array<VarDictionary> {
+    let mut out = Array::<VarDictionary>::new();
+    for commit in commits {
+        out.push(&vdict! {
             "oid" => &gstr(&commit.oid),
             "subject" => &gstr(&commit.subject),
             "author" => &gstr(&commit.author),
+            "email" => &gstr(&commit.email),
             "time" => commit.time,
         });
     }
-    let mut conflicts = Array::<VarDictionary>::new();
-    for conflict in &preview.conflicts {
-        conflicts.push(&vdict! {
+    out
+}
+
+/// `{path, kind}` per conflict, with git's conflict type.
+fn preview_conflicts(conflicts: &[PreviewConflict]) -> Array<VarDictionary> {
+    let mut out = Array::<VarDictionary>::new();
+    for conflict in conflicts {
+        out.push(&vdict! {
             "path" => &path_str(&conflict.path),
             "kind" => &gstr(&conflict.kind),
         });
     }
+    out
+}
+
+/// `{target, oid, up_to_date, can_ff, commit_count, commits, file_count,
+/// conflicts, overlap, message, can_rebase, own_count, own_commits,
+/// own_merges, own_pushed}`: `commits` and `own_commits` (HEAD's own, what
+/// a rebase replays) are `{oid, subject, author, email, time}` (the first
+/// 50), `conflicts` `{path, kind}` with git's conflict type, `overlap` the
+/// local changes the merge touches.
+pub fn merge_preview(preview: &MergePreview) -> VarDictionary {
     let overlap: PackedStringArray = preview.overlap.iter().map(|p| path_str(p)).collect();
     vdict! {
         "target" => &gstr(&preview.target),
@@ -899,11 +913,35 @@ pub fn merge_preview(preview: &MergePreview) -> VarDictionary {
         "up_to_date" => preview.up_to_date,
         "can_ff" => preview.can_ff,
         "commit_count" => to_i64(preview.commit_count),
-        "commits" => &commits,
+        "commits" => &preview_commits(&preview.commits),
         "file_count" => to_i64(preview.files.len()),
-        "conflicts" => &conflicts,
+        "conflicts" => &preview_conflicts(&preview.conflicts),
         "overlap" => &overlap,
         "message" => &gstr(&preview.message),
+        "can_rebase" => preview.can_rebase(),
+        "own_count" => to_i64(preview.own_count),
+        "own_commits" => &preview_commits(&preview.own_commits),
+        "own_merges" => to_i64(preview.own_merges),
+        "own_pushed" => to_i64(preview.own_pushed),
+    }
+}
+
+/// `{target, total, checked, partial, stop}`: `stop` is empty, or the
+/// commit the rebase would stop at, `{oid, subject, conflicts}`.
+pub fn rebase_check(check: &RebaseCheck) -> VarDictionary {
+    let stop = check.stop.as_ref().map_or_else(VarDictionary::new, |stop| {
+        vdict! {
+            "oid" => &gstr(&stop.oid),
+            "subject" => &gstr(&stop.subject),
+            "conflicts" => &preview_conflicts(&stop.conflicts),
+        }
+    });
+    vdict! {
+        "target" => &gstr(&check.target),
+        "total" => to_i64(check.total),
+        "checked" => to_i64(check.checked),
+        "partial" => check.is_partial(),
+        "stop" => &stop,
     }
 }
 
@@ -936,7 +974,9 @@ pub fn operation_info(state: &RepoState) -> VarDictionary {
     }
 }
 
-/// `{oid, subject, body, time, merge}`, or empty when nothing can be undone.
+/// `{oid, subject, body, time, merge, rebase_onto}`, or empty when nothing
+/// can be undone; `rebase_onto` names what HEAD was just rebased onto here
+/// (Undo then undoes the rebase), else it is empty.
 pub fn undoable_commit(state: &RepoState) -> VarDictionary {
     let Some(commit) = state.undoable_commit() else {
         return VarDictionary::new();
@@ -947,6 +987,7 @@ pub fn undoable_commit(state: &RepoState) -> VarDictionary {
         "body" => &gstr(&commit.body),
         "time" => commit.time,
         "merge" => commit.is_merge(),
+        "rebase_onto" => &gstr(state.rebase_undo().map_or("", |u| u.onto.as_str())),
     }
 }
 

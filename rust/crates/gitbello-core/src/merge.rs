@@ -65,6 +65,7 @@ pub struct PreviewCommit {
     pub oid: String,
     pub subject: String,
     pub author: String,
+    pub email: String,
     /// Author time, seconds since the epoch.
     pub time: i64,
 }
@@ -99,27 +100,90 @@ pub struct MergePreview {
     pub overlap: Vec<PathBuf>,
     /// git's default merge message.
     pub message: String,
+    /// Commits of HEAD not in `target` that a rebase would replay (merges
+    /// left out), and the first of them.
+    pub own_count: usize,
+    pub own_commits: Vec<PreviewCommit>,
+    /// HEAD's merge commits not in `target` (a rebase flattens them).
+    pub own_merges: usize,
+    /// Those already on the current branch's upstream (a rebase rewrites
+    /// them, so a force push follows).
+    pub own_pushed: usize,
+}
+
+impl MergePreview {
+    /// Whether rebasing HEAD onto `target` would do anything a fast-forward
+    /// would not: HEAD has commits of its own and `target` has new ones.
+    pub fn can_rebase(&self) -> bool {
+        !self.up_to_date && !self.can_ff && self.own_count + self.own_merges > 0
+    }
+}
+
+/// Commits a rebase check simulates; more are not checked.
+pub const REBASE_CHECK_LIMIT: usize = 100;
+
+/// What rebasing HEAD onto `target` would do, commit by commit, worked out
+/// without touching the working tree (each commit replayed with
+/// `git merge-tree --merge-base`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RebaseCheck {
+    /// The ref or commit as asked for.
+    pub target: String,
+    /// Commits the rebase would replay (merges and commits `target`
+    /// already has left out, as git does).
+    pub total: usize,
+    /// Commits replayed cleanly before `stop`, or all checked.
+    pub checked: usize,
+    /// The first commit that would stop on conflicts.
+    pub stop: Option<RebaseStop>,
+}
+
+impl RebaseCheck {
+    /// Whether commits past [`REBASE_CHECK_LIMIT`] were left unchecked.
+    pub fn is_partial(&self) -> bool {
+        self.stop.is_none() && self.checked < self.total
+    }
+}
+
+/// The commit a rebase would stop at, with its conflicts.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RebaseStop {
+    pub oid: String,
+    pub subject: String,
+    pub conflicts: Vec<PreviewConflict>,
+}
+
+/// A rebase made here: the branch can go back to `before` while HEAD is
+/// still `after` (the undo strip's Undo rebase).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RebaseUndo {
+    pub branch: String,
+    /// What it was rebased onto, as shown.
+    pub onto: String,
+    pub before: String,
+    pub after: String,
 }
 
 /// Commits listed in a preview.
 pub const PREVIEW_COMMITS: usize = 50;
 
 /// `git log` format of [`parse_preview_commits`].
-pub const PREVIEW_LOG_FORMAT: &str = "--format=%H%x00%s%x00%an%x00%at%x00";
+pub const PREVIEW_LOG_FORMAT: &str = "--format=%H%x00%s%x00%an%x00%ae%x00%at%x00";
 
 /// Commits from `git log -z` with [`PREVIEW_LOG_FORMAT`].
 pub fn parse_preview_commits(output: &[u8]) -> Vec<PreviewCommit> {
     let fields: Vec<&[u8]> = output.split(|&b| b == 0).collect();
     fields
-        .chunks(4)
-        .filter(|c| c.len() == 4)
+        .chunks(5)
+        .filter(|c| c.len() == 5)
         .filter_map(|c| {
             let oid = text(c[0]).trim().to_owned();
             (!oid.is_empty()).then(|| PreviewCommit {
                 oid,
                 subject: text(c[1]),
                 author: text(c[2]),
-                time: text(c[3]).trim().parse().unwrap_or(0),
+                email: text(c[3]),
+                time: text(c[4]).trim().parse().unwrap_or(0),
             })
         })
         .collect()
@@ -1063,9 +1127,13 @@ after
 
     #[test]
     fn parses_log_records() {
-        let commits = parse_preview_commits(b"aaa\0one\0Ann\x001700000000\0\nbbb\0two\0Bo\x001\0");
+        let commits = parse_preview_commits(
+            b"aaa\0one\0Ann\0ann@x.org\x001700000000\0\nbbb\0two\0Bo\0bo@x.org\x001\0",
+        );
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].subject, "one");
+        assert_eq!(commits[0].email, "ann@x.org");
+        assert_eq!(commits[1].time, 1);
         assert_eq!(commits[1].oid, "bbb");
         let undo = parse_undoable(b"ccc\0p1 p2\x001700\0Merge x\n\nbody\n").unwrap();
         assert!(undo.is_merge());

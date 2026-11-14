@@ -924,6 +924,20 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	# A branch, tag or commit named in a dialog ("topic → main")
 	_variation(theme, &"RefChip", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"RefChip", _box(p.raised, 4, Vector4(8, 3, 10, 3), p.border, 1))
+	# The same chip as a button that picks another ref (the merge dialog's
+	# source, with a ▾ after its name)
+	_variation(theme, &"RefChipButton", &"Button")
+	var chip_margins: Vector4 = Vector4(8, 3, 8, 3)
+	theme.set_stylebox(&"normal", &"RefChipButton", _box(p.raised, 4, chip_margins, p.border, 1))
+	theme.set_stylebox(&"hover", &"RefChipButton", _box(p.hover, 4, chip_margins, p.border, 1))
+	theme.set_stylebox(&"pressed", &"RefChipButton", _box(p.hover, 4, chip_margins, p.accent, 1))
+	theme.set_stylebox(&"hover_pressed", &"RefChipButton", _box(p.hover, 4, chip_margins, p.accent, 1))
+	theme.set_stylebox(&"focus", &"RefChipButton", _box(Color.TRANSPARENT, 4, Vector4.ZERO, p.accent, 1))
+	theme.set_stylebox(&"disabled", &"RefChipButton", _box(p.raised, 4, chip_margins, p.border, 1))
+	theme.set_color(&"font_hover_color", &"RefChipButton", p.text)
+	theme.set_color(&"font_pressed_color", &"RefChipButton", p.text)
+	theme.set_color(&"font_hover_pressed_color", &"RefChipButton", p.text)
+	theme.set_constant(&"h_separation", &"RefChipButton", 6)
 	# One of a dialog's choices: a row with an icon, a title and a hint
 	_variation(theme, &"ChoiceRow", &"Button")
 	theme.set_stylebox(&"normal", &"ChoiceRow", _box(p.raised, 6, Vector4.ZERO, p.border, 1))
@@ -942,6 +956,24 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"Callout", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"Callout", _box(p.background.blend(Color(p.modified, 0.12)), 4,
 			Vector4(8, 6, 8, 6), Color(p.modified, 0.5), 1))
+	# What a preview found, in tinted pills (the merge dialog's "No conflicts",
+	# "12 files"): the tone's colour on a light wash of it
+	theme.set_font_size(&"font_size", &"SummaryBadge", 12)
+	theme.set_constant(&"icon_size", &"SummaryBadge", 12)
+	theme.set_constant(&"separation", &"SummaryBadge", 4)
+	theme.set_constant(&"gap", &"SummaryBadge", 6)
+	for entry: Array in [[&"success", p.added, p.added], [&"error", p.error, p.error],
+			[&"accent", p.accent_text, p.accent], [&"warning", p.modified, p.modified],
+			[&"neutral", p.text_muted, p.text]]:
+		theme.set_color(StringName(String(entry[0]) + "_color"), &"SummaryBadge", entry[1])
+		theme.set_stylebox(entry[0], &"SummaryBadge", _box(Color(entry[2], 0.16), 9, Vector4(7, 1, 8, 2)))
+	# The merge dialog: chips, badges, the strategy, then capped lists
+	theme.set_constant(&"width", &"MergeDialog", 540)
+	theme.set_constant(&"separation", &"MergeDialog", 10)
+	theme.set_constant(&"list_rows", &"MergeDialog", 6)
+	theme.set_constant(&"row_height", &"MergeDialog", 24)
+	theme.set_constant(&"avatar_size", &"MergeDialog", 16)
+	theme.set_font_size(&"chip_font_size", &"MergeDialog", 14)
 	theme.set_constant(&"width", &"SettingsDialog", 840)
 	theme.set_constant(&"height", &"SettingsDialog", 540)
 	theme.set_constant(&"label_width", &"SettingsDialog", 220)
@@ -1332,6 +1364,8 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"hover", &"ViewTab", _box(p.hover, 4, tab))
 	theme.set_stylebox(&"pressed", &"ViewTab", _box(Color(p.accent, 0.35), 4, tab, p.accent, 1))
 	theme.set_stylebox(&"hover_pressed", &"ViewTab", _box(Color(p.accent, 0.4), 4, tab, p.accent, 1))
+	# A choice that cannot be made now (the merge dialog's strategies)
+	theme.set_stylebox(&"disabled", &"ViewTab", _box(Color.TRANSPARENT, 4, tab))
 	theme.set_color(&"font_color", &"ViewTab", p.text_muted)
 	theme.set_color(&"icon_normal_color", &"ViewTab", Color(1, 1, 1, 0.6))
 	_variation(theme, &"HeaderDivider", &"VSeparator")

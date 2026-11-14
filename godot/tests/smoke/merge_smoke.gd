@@ -43,8 +43,7 @@ func run() -> void:
 	write_file(repo.path_join("topic.txt"), "topic\n")
 	expect(await _commit(session, "topic.txt", "Add topic.txt"), "added a file on topic")
 	expect(await wait_until(func() -> bool: return session.change_count() == 0), "clean on topic")
-	ops.checkout_branch("main")
-	expect(await wait_until(func() -> bool: return session.current_branch() == "main"), "back on main")
+	expect(await _switch(ops, session, "main"), "back on main")
 	# A local change the merge does not touch stays out of the merge commit.
 	write_file(repo.path_join("notes.txt"), "my notes\n")
 	expect(await wait_until(func() -> bool: return _code(session, "notes.txt") == "?"), "notes.txt is untracked")
@@ -58,15 +57,29 @@ func run() -> void:
 	expect_eq(popover.header_text(), "Merge into main", "the list says what it merges into")
 	popover.set_filter("topic")
 	press("Enter", popover)
-	var form: FormDialog = ops.form()
-	expect(await wait_until(func() -> bool: return form.visible), "the merge dialog opens")
-	expect(form.title == "Merge", "its title: %s" % form.title)
-	expect(await wait_until(func() -> bool: return form.ok_button_text == "Merge and resolve…"),
-			"the preview finds the conflict: %s / %s" % [form.ok_button_text, ops.merge_status_text()])
-	expect(ops.merge_status_text() == "Conflicts in 1 file", "it says so: %s" % ops.merge_status_text())
-	expect_eq(ops.merge_conflict_paths(), PackedStringArray(["conflict.txt"]), "it lists the conflicted file")
-	expect_eq(form.menu_labels(), PackedStringArray(["Squash and resolve…"]), "the ▾ offers a squash")
-	press("Enter", form)
+	var dialog: MergeDialog = ops.merge_dialog()
+	expect(await wait_until(func() -> bool: return dialog.visible), "the merge dialog opens")
+	expect_eq(dialog.title, "Merge into main", "its title")
+	expect_eq(dialog.source_text(), "topic", "the source chip names the branch")
+	var ok: Button = dialog.get_ok_button()
+	expect(await wait_until(func() -> bool: return ok.text == "Merge and resolve…"),
+			"the preview finds the conflict: %s / %s" % [ok.text, dialog.summary_texts()])
+	expect_eq(dialog.summary_texts(), PackedStringArray(["Conflicts", "2 files"]), "the badges say so")
+	expect_eq(dialog.conflict_paths(), PackedStringArray(["conflict.txt"]), "it lists the conflicted file")
+	expect_eq(dialog.conflicts_section().header_text(), "Conflicts · 1", "the section counts it")
+	expect_eq(dialog.commits_section().header_text(), "Commits · 2", "and the commits")
+	expect(dialog.commits_section().is_folded(), "the commits start folded when there are conflicts")
+	expect_eq(dialog.strategy(), "merge", "a diverged branch merges by default")
+	expect(not dialog.strategy_enabled("ff"), "it cannot fast-forward")
+	expect_eq(dialog.strategy_reason("ff"), "main has commits topic doesn't", "the reason shows")
+	expect(dialog.message_edit().visible and dialog.message_edit().text == "Merge branch 'topic'",
+			"the message shows git's: %s" % dialog.message_edit().text)
+	expect(dialog.set_strategy("squash"), "Squash can be picked")
+	expect_eq(ok.text, "Squash and resolve…", "the button follows the strategy")
+	expect(not dialog.message_edit().visible, "a squash has no merge message")
+	expect(not dialog.set_strategy("ff"), "a disabled strategy cannot be picked")
+	expect(dialog.set_strategy("merge"), "back to Merge")
+	press("Enter", dialog)
 	expect(await wait_until(func() -> bool: return session.operation() == "merge"), "the merge is in progress")
 	expect(await wait_until(func() -> bool: return view.banner_text() == "Merging topic into main · 1 file to resolve"),
 			"the banner says what is merged: %s" % view.banner_text())
@@ -119,9 +132,9 @@ func run() -> void:
 
 	# Again, side by side: a block button takes ours; then Abort.
 	ops.merge_into_current("refs/heads/topic", "topic")
-	expect(await wait_until(func() -> bool: return form.visible and form.ok_button_text == "Merge and resolve…"),
+	expect(await wait_until(func() -> bool: return dialog.visible and ok.text == "Merge and resolve…"),
 			"the dialog previews the conflict again")
-	form.submit()
+	ok.pressed.emit()
 	expect(await wait_until(func() -> bool: return changes.has_conflict_blocks()), "the resolver shows again")
 	Actions.run_action(&"diff.cycle_mode")
 	var diff: DiffView = changes.diff_view()
@@ -145,6 +158,50 @@ func run() -> void:
 	expect(read_file(conflict_path) == "one\nours\nthree\n", "main is as it was")
 	expect(await wait_until(func() -> bool: return box.summary().is_empty()),
 			"the merge's message goes with it: %s" % box.summary())
+
+	# Rebase topic onto main: the check stops at topic's first commit.
+	expect(await _switch(ops, session, "topic"), "on topic to rebase it")
+	ops.merge_into_current("refs/heads/main", "main")
+	expect(await wait_until(func() -> bool: return dialog.visible and dialog.strategy_enabled("rebase")),
+			"Rebase can be picked: %s" % dialog.strategy_reason("rebase"))
+	expect(dialog.set_strategy("rebase"), "Rebase is picked")
+	expect_eq(dialog.title, "Rebase topic", "the title says what is rebased")
+	expect(await wait_until(func() -> bool: return dialog.summary_texts().has("Conflicts")),
+			"the check finds the stop: %s" % dialog.summary_texts())
+	expect_eq(ok.text, "Shelve changes and rebase", "local changes go on a shelf first")
+	expect_eq(dialog.summary_texts(), PackedStringArray(["Conflicts", "1 file", "1 shelved"]), "the badges say so")
+	expect_eq(dialog.conflict_paths(), PackedStringArray(["conflict.txt"]), "it lists where it stops")
+	expect_eq(dialog.commits_section().header_text(), "To replay · 2", "topic's commits are replayed")
+	expect(dialog.incoming_section().visible and dialog.incoming_section().is_folded(), "main's commits come in, folded")
+	expect(not dialog.message_edit().visible, "a rebase has no message")
+	dialog.hide()
+
+	# A clean rebase, then Undo puts the branch back.
+	expect(await _switch(ops, session, "main"), "back on main")
+	session.create_branch("side", "main", false)
+	expect(await wait_until(func() -> bool: return _has_branch(session, "side")), "created side")
+	write_file(repo.path_join("main2.txt"), "main\n")
+	expect(await _commit(session, "main2.txt", "Main moves on"), "main moved on")
+	expect(await _switch(ops, session, "side"), "on side")
+	write_file(repo.path_join("side.txt"), "side\n")
+	expect(await _commit(session, "side.txt", "Side work"), "side has its own commit")
+	expect(await wait_until(func() -> bool: return String(session.undoable_commit().get("subject", "")) == "Side work"),
+			"side's commit is HEAD")
+	var before: String = String(session.undoable_commit()["oid"])
+	ops.merge_into_current("refs/heads/main", "main")
+	expect(await wait_until(func() -> bool: return dialog.visible and dialog.strategy_enabled("rebase")), "Rebase again")
+	dialog.set_strategy("rebase")
+	expect(await wait_until(func() -> bool: return dialog.summary_texts().has("No conflicts")),
+			"a clean rebase: %s" % dialog.summary_texts())
+	ok.pressed.emit()
+	expect(await wait_until(func() -> bool: return box.undo_text() == "Rebased side onto main"),
+			"the undo strip offers the rebase: %s" % box.undo_text())
+	expect(FileAccess.file_exists(repo.path_join("main2.txt")), "side has main's commit")
+	expect(_code(session, "notes.txt") == "?", "the local change came back")
+	expect(Actions.run_action(&"commit.undo"), "Undo runs")
+	expect(await wait_until(func() -> bool: return String(session.status().get("oid", "")) == before),
+			"side is back where it was")
+	expect(not FileAccess.file_exists(repo.path_join("main2.txt")), "without main's commit")
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	main.queue_free()
@@ -166,6 +223,15 @@ func _commit(session: RepoSession, path: String, message: String) -> bool:
 	var finished: bool = await wait_until(func() -> bool: return done[0])
 	session.job_finished.disconnect(on_finished)
 	return finished and done[1]
+
+
+## Switches to `branch`, bringing the local changes along when asked.
+func _switch(ops: RepoOps, session: RepoSession, branch: String) -> bool:
+	ops.checkout_branch(branch)
+	await wait_until(func() -> bool: return ops.switch_dialog().visible or session.current_branch() == branch, 5000)
+	if ops.switch_dialog().visible:
+		ops.switch_dialog().get_ok_button().pressed.emit()
+	return await wait_until(func() -> bool: return session.current_branch() == branch)
 
 
 static func _has_branch(session: RepoSession, branch: String) -> bool:

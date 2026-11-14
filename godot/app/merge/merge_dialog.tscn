@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/merge/merge_dialog.gd" id="1_merge"]
+
+[node name="MergeDialog" type="ConfirmationDialog"]
+script = ExtResource("1_merge")

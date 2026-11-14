@@ -10,8 +10,8 @@ use crate::git::{CancelToken, GitError, GitErrorKind};
 use crate::merge::{
     default_merge_message, parse_merge_tree, parse_preview_commits, parse_undoable,
     read_operation_details, ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode,
-    MergePreview, OperationDetails, UndoMode, PREVIEW_COMMITS, PREVIEW_LOG_FORMAT,
-    UNDOABLE_LOG_FORMAT,
+    MergePreview, OperationDetails, RebaseCheck, RebaseStop, UndoMode, PREVIEW_COMMITS,
+    PREVIEW_LOG_FORMAT, REBASE_CHECK_LIMIT, UNDOABLE_LOG_FORMAT,
 };
 use crate::repo::{detect_operation, git_path, Operation};
 
@@ -60,24 +60,29 @@ impl CliBackend {
     }
 
     /// `git merge-tree --write-tree` of HEAD and `oid` (exit code 1 means
-    /// conflicts, with the same output).
+    /// conflicts, with the same output); with `base`, that merge base
+    /// instead of theirs (a cherry-pick of `oid` when `base` is its parent).
     fn merge_tree(
         &self,
         toplevel: &Path,
         head: &str,
         oid: &str,
+        base: Option<&str>,
         cancel: &CancelToken,
     ) -> Result<crate::merge::MergeTree, GitError> {
-        let args = [
+        let base_arg = base.map(|b| format!("--merge-base={b}"));
+        let mut args = vec![
             "merge-tree",
             "--write-tree",
             "-z",
             "--name-only",
             "--messages",
-            head,
-            oid,
         ];
-        let mut stream = self.runner.read(toplevel).args(args).stream()?;
+        if let Some(arg) = &base_arg {
+            args.push(arg);
+        }
+        args.extend([head, oid]);
+        let mut stream = self.runner.read(toplevel).args(&args).stream()?;
         let mut output = Vec::new();
         loop {
             if cancel.is_cancelled() {
@@ -145,7 +150,7 @@ impl CliBackend {
             cancel,
         )?;
         preview.commits = parse_preview_commits(&log.stdout);
-        let tree = self.merge_tree(toplevel, &head, &oid, cancel)?;
+        let tree = self.merge_tree(toplevel, &head, &oid, None, cancel)?;
         let changed = self.read(
             toplevel,
             &["diff-tree", "-r", "-z", "--name-only", &head, &tree.tree],
@@ -158,7 +163,174 @@ impl CliBackend {
             .map(git_path)
             .collect();
         preview.conflicts = tree.conflicts;
+        if !preview.can_ff {
+            self.read_own_commits(toplevel, &head, &oid, &mut preview, cancel)?;
+        }
         Ok(preview)
+    }
+
+    /// What a rebase of HEAD onto `oid` would replay: HEAD's own commits,
+    /// its merges among them and those already on its upstream.
+    fn read_own_commits(
+        &self,
+        toplevel: &Path,
+        head: &str,
+        oid: &str,
+        preview: &mut MergePreview,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        use super::GitBackend;
+        let count = |args: &[&str]| -> Result<usize, GitError> {
+            let out = self.read(toplevel, args, cancel)?;
+            Ok(out.stdout_text().trim().parse().unwrap_or(0))
+        };
+        let own = format!("{oid}..{head}");
+        let all = count(&["rev-list", "--count", &own])?;
+        if all == 0 {
+            return Ok(());
+        }
+        preview.own_merges = count(&["rev-list", "--count", "--merges", &own])?;
+        preview.own_count = all - preview.own_merges.min(all);
+        let limit = format!("-n{PREVIEW_COMMITS}");
+        let log = self.read(
+            toplevel,
+            &["log", PREVIEW_LOG_FORMAT, "--no-merges", &limit, &own, "--"],
+            cancel,
+        )?;
+        preview.own_commits = parse_preview_commits(&log.stdout);
+        // Own commits the upstream has: those under where HEAD and the
+        // upstream meet.
+        let upstream = self
+            .resolve(toplevel, "HEAD@{upstream}", cancel)
+            .ok()
+            .flatten();
+        if let Some(upstream) = upstream {
+            if let Ok(met) = self.read(toplevel, &["merge-base", head, &upstream], cancel) {
+                let met = met.stdout_text().trim().to_owned();
+                if !met.is_empty() {
+                    let pushed = format!("{oid}..{met}");
+                    preview.own_pushed = count(&["rev-list", "--count", &pushed])?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn rebase_check_impl(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        cancel: &CancelToken,
+    ) -> Result<RebaseCheck, GitError> {
+        use super::GitBackend;
+        let missing = |what: String| GitError::new("rebase", GitErrorKind::Other, what);
+        let head = self
+            .resolve(toplevel, "HEAD", cancel)?
+            .ok_or_else(|| missing("there is no commit to rebase yet".to_owned()))?;
+        let oid = self
+            .resolve(toplevel, target, cancel)?
+            .ok_or_else(|| missing(format!("{target} does not name a commit")))?;
+        // The commits git would pick: no merges, none whose change `oid`
+        // already has.
+        let range = format!("{oid}...{head}");
+        let picks = self.read(
+            toplevel,
+            &[
+                "rev-list",
+                "--reverse",
+                "--no-merges",
+                "--right-only",
+                "--cherry-pick",
+                &range,
+            ],
+            cancel,
+        )?;
+        let picks: Vec<String> = picks
+            .stdout_text()
+            .lines()
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty())
+            .collect();
+        let mut check = RebaseCheck {
+            target: target.to_owned(),
+            total: picks.len(),
+            ..RebaseCheck::default()
+        };
+        // Replays each commit on the result so far; the commits made for it
+        // are unreachable and git prunes them later.
+        let mut onto = oid;
+        for pick in picks.iter().take(REBASE_CHECK_LIMIT) {
+            if cancel.is_cancelled() {
+                return Err(GitError::new("rebase check", GitErrorKind::Cancelled, ""));
+            }
+            let parent = format!("{pick}^");
+            let tree = self.merge_tree(toplevel, &onto, pick, Some(&parent), cancel)?;
+            if !tree.conflicts.is_empty() {
+                let subject = self
+                    .read(toplevel, &["log", "-1", "--format=%s", pick, "--"], cancel)?
+                    .stdout_text()
+                    .trim()
+                    .to_owned();
+                check.stop = Some(RebaseStop {
+                    oid: pick.clone(),
+                    subject,
+                    conflicts: tree.conflicts,
+                });
+                break;
+            }
+            onto = self
+                .runner
+                .read(toplevel)
+                .env("GIT_AUTHOR_NAME", "gitbello")
+                .env("GIT_AUTHOR_EMAIL", "gitbello@localhost")
+                .env("GIT_COMMITTER_NAME", "gitbello")
+                .env("GIT_COMMITTER_EMAIL", "gitbello@localhost")
+                .args(["commit-tree", &tree.tree, "-p", &onto, "-m", "rebase check"])
+                .cancel_token(cancel)
+                .run()?
+                .stdout_text()
+                .trim()
+                .to_owned();
+            check.checked += 1;
+        }
+        Ok(check)
+    }
+
+    pub(super) fn rebase_impl(
+        &self,
+        toplevel: &Path,
+        target: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.runner
+            .write(toplevel)
+            .args(["-c", "merge.conflictStyle=zdiff3", "rebase", target])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    pub(super) fn undo_rebase_impl(
+        &self,
+        toplevel: &Path,
+        after: &str,
+        before: &str,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        use super::GitBackend;
+        if self.resolve(toplevel, "HEAD", cancel)?.as_deref() != Some(after) {
+            return Err(GitError::new(
+                "undo rebase",
+                GitErrorKind::Stale,
+                "HEAD moved since the rebase; refresh and try again",
+            ));
+        }
+        self.runner
+            .write(toplevel)
+            .args(["reset", "-q", "--keep", before])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
     }
 
     pub(super) fn merge_impl(

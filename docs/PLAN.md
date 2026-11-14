@@ -251,7 +251,7 @@ File  Edit  Repository  Branch  View  Help
 - **File:** Home, Open repository…, Open recent (including open repositories), Clone…, Scan folder…, New repository (Create… and Initialize folder…), Close tab, Settings (Ctrl+,), Quit.
 - **Edit:** Copy, Select all, explicit Undo operations, Find and search matches.
 - **Repository:** Fetch, Pull, Push, New worktree, worktree management, Open terminal / file manager, Remotes and tags, Shelves, operation commands only while one is in progress, Refresh.
-- **Branch:** Switch…, New branch, Merge into current…, Rename, Set upstream.
+- **Branch:** Switch…, New branch, Merge / Rebase…, Rename, Set upstream.
 - **View:** checked Changes / History / Shelves choices, checked diff and Git log toggles, Command palette. Themes live in Settings and remain palette actions.
 - **Help:** Keyboard shortcuts, About.
 
@@ -312,7 +312,7 @@ Not in scope for M7.5: custom groups or tags (pin and folder groups only), listi
 **Branch button and popover.** The big button shows the active worktree's branch ("Detached at abc1234" when detached) and opens a popover:
 - A filter field, then Recent, Local (grouped by prefix such as `feature/`) and Remote (collapsed), each row with ↑↓. Each branch row has a branch icon, except the current branch uses a checkmark instead. Section arrows line up with top-level rows. The list opens with the current branch selected (nothing when it is not listed); while filtering, the first match is. Enter or a single click checks out. An unmatched search shows a quiet "No matching branches" message in the list area; changing or clearing the search restores the matching rows.
 - A branch checked out in another worktree has a worktree icon instead (its tooltip names the folder); choosing it selects that worktree's chip instead of checking out.
-- A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge into current… and Rebase current onto… come with M7. A remote branch's menu offers Delete remote branch…. Delete on a row deletes it, like the menu.
+- A New branch button. Row context menu: Check out, New branch, New tag, Rename, Delete, Set upstream; Merge / Rebase… (M7, M7.14). A remote branch's menu offers Delete remote branch…. Delete on a row deletes it, like the menu.
 - **Remotes and tags** are a couple of steps away: Repository → Remotes… and Tags… open management dialogs (add, rename, remove; create, delete, push tags).
 - **Graph menus keep a few actions:** a commit offers Check out, Create branch here, Tag here, Cherry-pick and Copy SHA; a ref label offers check out, push tag and delete.
 
@@ -378,21 +378,21 @@ This runs as a single job with rollback if any step fails.
 - Delete remote branch… on remote branches ("gone for everyone"), offering the local branch that tracks it (ticked when it has nothing the remote lacks). Delete tag offers its remote, off.
 - Clean up lists a row per worktree (merged or upstream gone, and what it would lose) with two toggles, Branches and On origin; Delete counts the ticked rows. The toast says "Deleted x here and on origin".
 
-**Merge with preview** (M7, Q&A 2026-10-31).
-- **Scope:** merge into the current branch only (the active worktree's branch). Rebase has no action yet; a rebase in progress (from Pull and rebase or the CLI) gets banner support only. Dragging a branch onto another comes later.
-- **Entry points:** the branch popover's row menu (Merge into current…), Branch → Merge into current… and the palette (a filterable branch picker), and the graph menu of a commit or ref label, shown only when that commit is not in HEAD (graph rows carry `in_head`, from `rev-list --branches --remotes --tags --not HEAD`, loaded with the graph).
+**Merge with preview** (M7, Q&A 2026-10-31; restyle and rebase M7.14, Q&A 2026-11-14).
+- **Scope:** merge into the current branch, or rebase the current branch onto the other one (the active worktree's branch). Dragging a branch onto another comes later.
+- **Entry points:** one action for both, **Merge / Rebase…** (`branch.merge`, Ctrl+Shift+B; `commit.merge` is Merge / Rebase commit…): the branch popover's row menu, the Branch menu and the palette (a filterable branch picker), and the graph menu of a commit or ref label, shown only when that commit is not in HEAD (graph rows carry `in_head`, from `rev-list --branches --remotes --tags --not HEAD`, loaded with the graph). The dialog's strategy picks merge or rebase.
 - **Preview** (a read job, nothing touched): `merge-tree --write-tree --name-only -z --messages HEAD <ref>` (exit 1 means conflicts), `rev-list --count` and the first 50 commits of `HEAD..<ref>`, `merge-base --is-ancestor` for fast-forward, and the merged files intersected with the local changes. Remote-tracking refs are used as of the last fetch.
-- **Dialog:** "Merge feature/login into main", then "✓ No conflicts · 3 commits · 12 files changed" or "Conflicts in 2 files: a.rs, b.rs", a collapsible commit list, an editable message prefilled with git's default (hidden when it will fast-forward), and Cancel plus a split button whose label says what will happen:
+- **Dialog** (`app/merge/merge_dialog.gd`, M7.14): titled "Merge into main" ("Rebase main" with Rebase picked). Rows:
+  1. `[⎇ topic ▾] → [⎇ main]` followed by the badges, one row that wraps to new lines when long names or many badges do not fit. The source chip opens the branch list in merge mode; another branch checks again in place and the strategy goes back to that case's default. Badges (`SummaryBadge`: tinted pills, icon and text): `✓ No conflicts` green, `⚠ Conflicts` red or `Fast-forward` accent; `12 files`; `⚠ 2 shelved` amber (files in its tooltip); for Rebase also `⚠ Rewrites 2 pushed` amber and `2 merges flattened`. While checking: a turning icon and "Checking…" in their place, no pill. A final state (up to date, failed) puts its line under the branches.
+  2. The strategy, joined buttons with icons: **Merge | Squash | Fast-forward | Rebase**; one that cannot run is disabled with the reason as its tooltip. It opens on Fast-forward when possible, else Merge, and is not remembered.
+  3. The merge commit's message (Merge only), one line that grows.
+  4. **Conflicts · N**, then **Commits · N** (History's compact rows: avatar, subject, author · age, short hash; the first 50, then "and N more"); for Rebase **To replay · N** (HEAD's own commits) and **Incoming · N** (folded). Each section folds and scrolls after six rows; Commits starts folded when there are conflicts.
 
-| Case | Primary | ▾ |
-|---|---|---|
-| Fast-forward possible | Fast-forward main | Always create merge commit · Squash into one commit… |
-| Diverged, clean | Create merge commit | Squash into one commit… · Fast-forward only (disabled, with the reason) |
-| Conflicts | Merge and resolve… | Squash and resolve… |
-| Nothing to merge | (Close only) "Already up to date" | — |
+  The primary button says what will happen: Create merge commit, Squash 3 commits, Fast-forward main, Rebase main, Merge / Squash / Rebase and resolve…, or Shelve changes and merge (squash, fast-forward, rebase). Nothing to merge or a failed preview leaves the chips, one line ("main already has everything in topic", or why) and Close.
+- **Rebase:** offered when HEAD is on a branch with commits of its own and the other side has new ones (otherwise it is a fast-forward). Picking it runs a check (a read job): the commits `rebase` would pick (`rev-list --reverse --no-merges --right-only --cherry-pick <ref>...HEAD`) replayed one by one with `merge-tree --write-tree --merge-base=<commit>^` on the result so far (an unreachable `commit-tree` each), up to 100; it stops at the first conflict ("Stops at abc1234 subject", its files under Conflicts), and past 100 says "Checked the first 100". `rebase` refuses local changes, so all of them go on a shelf first. Commits already on the upstream are counted (a force push follows through Sync's Rewritten flow, which asks); merges are flattened (no `--rebase-merges`).
 
 - **Local changes:** when they overlap the merged files, the dialog warns and the primary becomes "Shelve changes and merge" (an automatic shelf, the merge, then a restore after a clean merge; after a conflicting merge the shelf stays and the Changes view offers it back once the merge is committed or aborted). Changes that don't overlap stay put and are not part of the merge commit.
-- **Running:** `merge` with `--ff` / `--no-ff` / `--squash` / `--ff-only`, the message without an editor, and `-c merge.conflictStyle=zdiff3` so the base is in the markers. It blocks the worktree (overlay). Conflicts open Changes with the first conflicted file in the resolver.
+- **Running:** `merge` with `--no-ff` (Merge) / `--squash` / `--ff-only`, the message without an editor, or `rebase <ref>`, each with `-c merge.conflictStyle=zdiff3` so the base is in the markers. It blocks the worktree (overlay). Conflicts open Changes with the first conflicted file in the resolver.
 
 **Operation banner** (M7). "Merging feature/login into main · 2 of 3 conflicts left" (cherry-pick: "Cherry-picking abc1234 'subject'"; rebase: "Rebasing fix onto main · commit 2 of 5"). Buttons:
 - **Continue**, disabled until no conflict is left. Merge and cherry-pick: the same as the commit box's button. Rebase: `rebase --continue` with no editor.
@@ -418,6 +418,7 @@ This runs as a single job with rollback if any step fails.
 **Undo commit strip** (M7, GitHub Desktop style). Under the commit button: "<subject> · committed 3 min ago · Undo" for HEAD while it is unpushed (not on its upstream; with no upstream, not on any remote branch). It is hidden during an operation.
 - **Undo:** `reset --mixed <first parent>` after checking that HEAD is still that commit. The commit's changes join the local changes and its message fills an empty commit box. The next unpushed commit then shows, so several commits can be undone in a row into one set of changes. The first commit of a branch makes the branch unborn again (`update-ref -d`).
 - **Undoing a merge commit** asks first: **Undo, keep changes** (as above: everything merged becomes local changes and the merge is lost) or **Remove merge** (`reset --keep <first parent>`: the merged changes are not brought back, since they are still on the other branch; local changes are kept).
+- **Undoing a rebase** (M7.14): after a clean rebase made here, while HEAD is still its result and unpushed, the strip reads "Rebased topic onto main" and Undo moves the branch back (`reset --keep <before>`, after checking HEAD); local changes are kept.
 - Fast-forwarded commits show as ordinary commits.
 
 **Shelves** (M6.5 P4, D11; replace the classic stash workflow).
@@ -1218,6 +1219,16 @@ Out of scope: multi-line state (block comments, multi-line strings, Markdown cod
 - **Tests:** the syntax smoke checks every kind and plain text on every background, in both themes and with chosen added/removed colours at the extremes (white/black, green/magenta), and that unchanged lines keep the theme's colours. It prints how many colours moved per background: none on unchanged lines; in the dark theme none on added and removed lines and nearly all on the word tint; in the light theme most kinds move a little darker on every tinted background (they were tuned to 3:1 there). `KNOWN_SHORT` stays empty. `word_tint_sheet` takes 30/40/50/60% and adds a selection shot per theme (`DiffView.select_lines`).
 - **Numbers:** a table takes 0.7 to 1.1 ms the first time a background shows (shared by every view, cached by colours and background), 13 µs after; paging frames about 1 ms slower at p99 (49.7 against 48.5 ms, debug), fetches level (`docs/perf.md`).
 - **Open:** line numbers, the hunk expanders and the conflict cards keep their colours (not syntax text); the minimap's colours are unchanged.
+
+### M7.14 — Merge dialog restyle and rebase (≈1 week)
+
+Q&A 2026-11-14; the design is in §4 Merge with preview.
+- [x] `MergeDialog` (`app/merge/`) in place of the `FormDialog` merge form: a wrapping first row with the source picker and `SummaryBadge` pills, the strategy picker, capped folding sections (`MergeSection`), History-style commit rows with avatars (`PreviewCommit.email`)
+- [x] Icons `GitSquash` and `GitFastForward`
+- [x] Core: the preview counts HEAD's own commits, merges and pushed commits; `load_rebase_check` (per-commit `merge-tree`), `rebase` (shelve around it), `undo_rebase` and `RepoState::rebase_undo`; tests in `tests/merge.rs`
+- [x] Rebase segment, Undo rebase in the undo strip, one Merge / Rebase… action
+- [x] `merge_smoke.gd` covers the dialog and a conflicting and a clean rebase with Undo; `merge_screenshots.tscn` with `tests/visual/merge_prep.sh`
+- [x] Review stop: screenshots in both themes
 
 ### M8 — History tools and editing (a ≈1.5 weeks; b–d estimated when planned)
 

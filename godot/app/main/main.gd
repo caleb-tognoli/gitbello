@@ -1022,7 +1022,7 @@ func _register_merge_actions() -> void:
 	var has_head: Callable = func() -> bool:
 		return idle.call() and not String(session.call().status().get("oid", "")).is_empty()
 	var ref: Callable = func() -> Dictionary: return page.call().ref_target() if is_ready.call() else {}
-	Actions.register(&"branch.merge", "Merge into current branch…", "Branches",
+	Actions.register(&"branch.merge", "Merge / Rebase…", "Branches",
 			func() -> void:
 				var target: Dictionary = ref.call()
 				if target.is_empty():
@@ -1037,7 +1037,7 @@ func _register_merge_actions() -> void:
 			func() -> String:
 				return "Finish the operation in progress first." if is_ready.call() and not idle.call() \
 						else "There is no commit to merge into yet.")
-	Actions.register(&"commit.merge", "Merge commit into current branch…", "History",
+	Actions.register(&"commit.merge", "Merge / Rebase commit…", "History",
 			func() -> void:
 				var target: Dictionary = page.call().commit_target()
 				ops.call().merge_into_current(String(target["hash"]), String(target["hash"]).left(7)),

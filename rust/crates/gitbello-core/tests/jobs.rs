@@ -15,7 +15,7 @@ use gitbello_core::jobs::{
 };
 use gitbello_core::merge::{
     ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode, MergePreview, OperationDetails,
-    UndoMode,
+    RebaseCheck, UndoMode,
 };
 use gitbello_core::new_repo::CloneOptions;
 use gitbello_core::ops::{RefOp, SyncOp, WorktreeOp};
@@ -272,6 +272,15 @@ impl GitBackend for FakeBackend {
         _: Option<&str>,
         _: &CancelToken,
     ) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn rebase_check(&self, _: &Path, _: &str, _: &CancelToken) -> Result<RebaseCheck, GitError> {
+        Ok(RebaseCheck::default())
+    }
+    fn rebase(&self, _: &Path, _: &str, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn undo_rebase(&self, _: &Path, _: &str, _: &str, _: &CancelToken) -> Result<(), GitError> {
         Ok(())
     }
     fn operation_details(

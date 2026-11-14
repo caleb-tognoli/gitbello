@@ -30,6 +30,8 @@ const VERBS: Dictionary[String, String] = {
 	"cherry-pick": "Cherry-picking",
 	"abort": "Aborting",
 	"merge": "Merging",
+	"rebase": "Rebasing",
+	"undo rebase": "Undoing the rebase",
 	"continue": "Continuing",
 	"skip": "Skipping the commit",
 	"undo commit": "Undoing the commit",

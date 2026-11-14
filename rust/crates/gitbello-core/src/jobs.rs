@@ -31,7 +31,9 @@ use crate::diff::image::ImageSides;
 use crate::diff::FileDiff;
 use crate::git::{CancelToken, GitError, GitErrorKind, Progress};
 use crate::library::{LocationCheck, RepoSummary};
-use crate::merge::{ConflictFile, HeadInfo, MergePreview, OperationDetails};
+use crate::merge::{
+    ConflictFile, HeadInfo, MergePreview, OperationDetails, RebaseCheck, RebaseUndo,
+};
 use crate::repo::{
     CommitDetails, Ref, Remote, RepoPaths, RepoStatus, ShelfFile, StashEntry, Worktree,
 };
@@ -233,6 +235,10 @@ pub enum JobOutput {
     ShelfUndone(ShelfChange),
     /// What merging a branch would do (see `Runtime::load_merge_preview`).
     MergePreview(Box<MergePreview>),
+    /// What rebasing onto a branch would do (`Runtime::load_rebase_check`).
+    RebaseCheck(Box<RebaseCheck>),
+    /// A rebase finished cleanly; what undoing it needs.
+    Rebased(Box<RebaseUndo>),
     /// What deleting a branch would do (`Runtime::load_branch_delete_info`).
     BranchDeleteInfo(Box<crate::runtime::BranchDeleteInfo>),
     /// A branch delete finished; what it removed, for undo.

@@ -363,16 +363,18 @@ func _clear_filled_message() -> void:
 		set_message("", "")
 
 
-## The last unpushed commit: a commit or merge icon, its subject and Undo.
+## The last unpushed commit: a commit or merge icon, its subject and Undo;
+## after a rebase made here, the rebase ("Rebased topic onto main").
 func _update_undo_strip() -> void:
 	var commit_info: Dictionary = session.undoable_commit() if session != null else {}
 	_undo_strip.visible = not commit_info.is_empty() and _job < 0
 	if commit_info.is_empty():
 		return
 	var merge: bool = bool(commit_info.get("merge", false))
-	_undo_icon.texture = AppTheme.icon(&"GitMerge" if merge else &"GitCommit")
-	_undo_label.text = String(commit_info["subject"])
-	_undo_label.tooltip_text = String(commit_info["subject"])
+	var onto: String = String(commit_info.get("rebase_onto", ""))
+	_undo_icon.texture = AppTheme.icon(&"GitRebase" if not onto.is_empty() else &"GitMerge" if merge else &"GitCommit")
+	_undo_label.text = String(commit_info["subject"]) if onto.is_empty() 			else tr("Rebased %s onto %s") % [session.current_branch(), onto]
+	_undo_label.tooltip_text = _undo_label.text
 	_undo_button.tooltip_text = Actions.tooltip(&"commit.undo")
 
 
