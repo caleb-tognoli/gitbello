@@ -96,6 +96,39 @@ fn conflicted_merge_shows_unmerged_entries_and_operation() {
 }
 
 #[test]
+fn refs_know_when_branches_were_last_checked_out_in_any_worktree() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    repo.branch("feature/wörk");
+    repo.branch("never");
+    repo.branch("other");
+    repo.checkout("feature/wörk");
+    repo.checkout("main");
+    let worktree = repo.add_worktree("linked", "linked tree");
+    repo.command_in(&worktree)
+        .args(["checkout", "--quiet", "other"])
+        .run()
+        .unwrap();
+
+    let refs = backend(&repo).refs(repo.path(), &no_cancel()).unwrap();
+    let at = |name: &str| {
+        refs.iter()
+            .find(|r| r.short_name == name && r.kind == RefKind::Branch)
+            .unwrap_or_else(|| panic!("{name} missing from {refs:#?}"))
+            .checked_out_at
+    };
+    let (work, main, other) = (at("feature/wörk"), at("main"), at("other"));
+    assert!(work.is_some() && main > work, "{work:?} {main:?}");
+    // Checked out in the linked worktree, after main was here.
+    assert!(other > main, "{other:?} {main:?}");
+    assert_eq!(at("never"), None);
+    assert!(refs
+        .iter()
+        .filter(|r| r.kind != RefKind::Branch)
+        .all(|r| r.checked_out_at.is_none()));
+}
+
+#[test]
 fn refs_cover_branches_remotes_tags_and_stash() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");

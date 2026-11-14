@@ -235,6 +235,7 @@ fn ref_dict(r: &Ref) -> VarDictionary {
         "gone" => r.tracking.gone,
         "worktree" => &r.worktree.as_deref().map_or_else(GString::new, path_str),
         "committed_at" => r.committed_at.unwrap_or(0),
+        "checked_out_at" => r.checked_out_at.unwrap_or(0),
     }
 }
 

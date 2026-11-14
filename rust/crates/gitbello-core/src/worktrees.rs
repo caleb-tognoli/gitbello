@@ -280,6 +280,7 @@ mod tests {
             symref_target: symref.map(str::to_owned),
             worktree: None,
             committed_at: None,
+            checked_out_at: None,
         }
     }
 

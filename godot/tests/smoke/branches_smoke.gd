@@ -41,19 +41,23 @@ func run() -> void:
 				and String(selected.get("hash", "")) == String(session.status().get("oid", ""))),
 			"the new HEAD is selected before branching")
 
-	# A lone prefix stays inline; two branches with that prefix form a group.
+	# A short list: no headers, the current branch first, full names (the
+	# prefix is drawn muted), never grouped.
 	var popover: BranchPopover = page.active_view().branch_popover()
 	popover.set_filter("")
-	expect_eq(popover.row_labels(), PackedStringArray(["feature/login", "main"]),
-			"a single feature branch is not grouped")
+	expect_eq(popover.row_labels(), PackedStringArray(["main", "feature/login"]),
+			"the current branch comes first")
 	popover.set_filter("origin/")
-	expect(popover.row_names().is_empty(), "origin/main is not duplicated in Remote")
+	expect(popover.row_names().is_empty(), "origin/main, which main tracks, is not listed in Remote")
 	session.create_branch("feature/settings", "main", false)
 	expect(await wait_until(func() -> bool: return _has_branch(session, "feature/settings")),
 			"a second feature branch was created")
 	popover.set_filter("")
-	expect_eq(popover.row_labels(), PackedStringArray(["feature/", "login", "settings", "main"]),
-			"multiple feature branches are grouped")
+	expect_eq(popover.row_labels(), PackedStringArray(["main", "feature/login", "feature/settings"]),
+			"branches sharing a prefix stay flat")
+	var login_row: TreeItem = _row(popover, "feature/login")
+	expect(login_row != null and login_row.get_custom_color(0).a == 0.0,
+			"branch names are drawn over the tree, with their prefix muted")
 
 	# Ctrl+Shift+N: a new branch from HEAD; typed spaces become dashes.
 	press("Ctrl+Shift+N")
@@ -81,16 +85,6 @@ func run() -> void:
 	var opened_on: TreeItem = popover._tree.get_selected()
 	expect(opened_on != null and String((opened_on.get_metadata(0) as Dictionary)["short"]) == "topic-one",
 			"the list opens on the current branch")
-	# Section arrows are their icons, so they line up with top-level branches;
-	# a click folds them.
-	var folder: TreeItem = _row(popover, "feature/")
-	expect(popover._tree.hide_folding, "Tree's own arrows, in a margin left of the rows, are hidden")
-	expect_eq(folder.get_icon(0), AppTheme.icon(&"GuiTreeArrowDown"), "an open section shows a down arrow")
-	await _click(popover, folder)
-	expect(folder.collapsed and folder.get_icon(0) == AppTheme.icon(&"GuiTreeArrowRight"), "a click folds the section")
-	expect(popover.visible, "folding keeps the list open")
-	await _click(popover, folder)
-	expect(not folder.collapsed, "a second click unfolds it")
 	popover.set_filter("TOPIC")
 	_expect_branch_icons(popover, "topic-one")
 	popover.set_filter("main")

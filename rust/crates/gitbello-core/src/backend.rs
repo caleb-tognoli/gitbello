@@ -5,9 +5,9 @@
 //! Commands that take paths run in the worktree root with literal pathspecs,
 //! so status paths can be passed back unchanged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::blame::{BlameBlock, BlameOptions, BlameSource};
@@ -28,11 +28,11 @@ use crate::new_repo::{init_folder_error, CloneOptions};
 use crate::ops::{CheckoutTarget, PullMode, RefOp, SyncOp, WorktreeOp};
 use crate::path_log::PathCommit;
 use crate::repo::{
-    detect_operation, parse_commit_header, parse_name_status, parse_refs, parse_remote_urls,
-    parse_repo_paths, parse_shortstat, parse_stash_list, parse_status, parse_worktrees,
-    CommitDetails, Operation, ParseError, Ref, Remote, RepoPaths, RepoStatus, ShelfFile,
-    StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS, STASH_LIST_ARGS,
-    STATUS_ARGS, WORKTREES_ARGS,
+    apply_checkouts, detect_operation, parse_checkouts, parse_commit_header, parse_name_status,
+    parse_refs, parse_remote_urls, parse_repo_paths, parse_shortstat, parse_stash_list,
+    parse_status, parse_worktrees, CommitDetails, Operation, ParseError, Ref, Remote, RepoPaths,
+    RepoStatus, ShelfFile, StashEntry, Worktree, COMMIT_SHOW_FORMAT, REFS_ARGS, REPO_PATHS_ARGS,
+    STASH_LIST_ARGS, STATUS_ARGS, WORKTREES_ARGS,
 };
 use crate::worktrees::new_worktree_path_error;
 
@@ -1038,7 +1038,10 @@ impl GitBackend for CliBackend {
             .map(|r| r.name)
             .collect();
         let out = self.read(repo, REFS_ARGS, cancel)?;
-        parse_refs(&out.stdout, &remotes).map_err(|e| unexpected(REFS_ARGS, e))
+        let mut refs = parse_refs(&out.stdout, &remotes).map_err(|e| unexpected(REFS_ARGS, e))?;
+        let paths = self.repo_paths(repo, cancel)?;
+        apply_checkouts(&mut refs, &checkouts(&paths.common_dir));
+        Ok(refs)
     }
 
     fn worktrees(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Worktree>, GitError> {
@@ -2975,4 +2978,39 @@ fn read_untracked(path: &Path, limit: Option<usize>) -> Result<FileDiff, GitErro
         ));
     }
     Ok(untracked_diff(&fs::read(path).map_err(io_error)?))
+}
+
+/// The tail of each HEAD reflog read for [`checkouts`]: enough for the last
+/// few hundred checkouts without reading years of history.
+const REFLOG_TAIL: u64 = 256 * 1024;
+
+/// When each branch was last checked out, from the HEAD reflogs of the main
+/// worktree and every linked one (`<common>/worktrees/*/logs/HEAD`). These are
+/// plain files read directly, like the operation markers; missing or unreadable
+/// ones (a bare repository, reflogs turned off) are skipped.
+fn checkouts(common_dir: &Path) -> HashMap<String, i64> {
+    let mut out = HashMap::new();
+    let mut logs = vec![common_dir.join("logs").join("HEAD")];
+    if let Ok(entries) = fs::read_dir(common_dir.join("worktrees")) {
+        logs.extend(
+            entries
+                .flatten()
+                .map(|e| e.path().join("logs").join("HEAD")),
+        );
+    }
+    for log in logs {
+        if let Some(tail) = read_tail(&log, REFLOG_TAIL) {
+            parse_checkouts(&tail, &mut out);
+        }
+    }
+    out
+}
+
+fn read_tail(path: &Path, max: u64) -> Option<Vec<u8>> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(max))).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }

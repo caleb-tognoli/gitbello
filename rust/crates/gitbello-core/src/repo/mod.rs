@@ -19,7 +19,8 @@ pub use commit::{
 };
 pub use operation::{detect_operation, parse_repo_paths, Operation, RepoPaths, REPO_PATHS_ARGS};
 pub use refs::{
-    parse_refs, parse_remote_urls, parse_remotes, Ref, RefKind, Remote, Tracking, REFS_ARGS,
+    apply_checkouts, parse_checkouts, parse_refs, parse_remote_urls, parse_remotes, Ref, RefKind,
+    Remote, Tracking, REFS_ARGS,
 };
 pub use stash::{
     parse_stash_list, shelf_message, shelves, Shelf, ShelfFile, StashEntry, AUTO_SHELF_PREFIX,

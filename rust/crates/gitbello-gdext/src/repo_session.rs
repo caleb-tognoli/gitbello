@@ -395,8 +395,10 @@ impl RepoSession {
     }
 
     /// Local then remote branches: `{name, short_name, commit, is_head,
-    /// upstream, ahead, behind, gone, worktree, committed_at, kind}` (kind
-    /// `branch` or `remote`; `committed_at` in Unix seconds, 0 when unknown).
+    /// upstream, ahead, behind, gone, worktree, committed_at, checked_out_at,
+    /// kind}` (kind `branch` or `remote`; `committed_at` and `checked_out_at`,
+    /// when a local branch was last checked out in any worktree, in Unix
+    /// seconds, 0 when unknown).
     #[func]
     fn branch_refs(&self) -> Array<VarDictionary> {
         self.read(|s| s.refs().map(convert::branch_refs))

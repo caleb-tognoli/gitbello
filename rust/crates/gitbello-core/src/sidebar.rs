@@ -286,6 +286,7 @@ mod tests {
             symref_target: None,
             worktree: None,
             committed_at: None,
+            checked_out_at: None,
         }
     }
 

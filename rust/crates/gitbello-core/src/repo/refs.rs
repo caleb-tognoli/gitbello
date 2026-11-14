@@ -1,6 +1,8 @@
 //! `git for-each-ref` with NUL-separated fields, plus `git remote -v` for
-//! the remotes (their names split remote-tracking names).
+//! the remotes (their names split remote-tracking names) and the worktrees'
+//! HEAD reflogs (when each branch was last checked out).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::{git_path, text, ParseError};
@@ -55,6 +57,10 @@ pub struct Ref {
     /// Committer date (Unix seconds) of the commit the ref points at; `None`
     /// for annotated tags and symbolic refs.
     pub committed_at: Option<i64>,
+    /// When the branch was last checked out in any worktree (Unix seconds,
+    /// from the HEAD reflogs; see [`parse_checkouts`]). `None` when no reflog
+    /// remembers it, and for other kinds of refs.
+    pub checked_out_at: Option<i64>,
 }
 
 /// A configured remote and its URLs (`git remote -v`).
@@ -157,10 +163,54 @@ pub fn parse_refs(output: &[u8], remotes: &[String]) -> Result<Vec<Ref>, ParseEr
             symref_target: non_empty(f[7]),
             worktree: (!f[8].is_empty()).then(|| git_path(f[8])),
             committed_at: text(f[9]).trim().parse().ok(),
+            checked_out_at: None,
             name,
         });
     }
     Ok(refs)
+}
+
+/// The latest time each branch was checked out, from a HEAD reflog's lines
+/// (`<old> <new> <name> <<email>> <time> <tz>\t<message>`): the target of
+/// `checkout: moving from <a> to <b>` and of a rebase's `returning to
+/// refs/heads/<b>`. Targets that are not branch names (commits, tags) are
+/// kept too; [`apply_checkouts`] only looks up branches. Bad lines are skipped:
+/// a reflog read from its tail may start mid-line.
+pub fn parse_checkouts(reflog: &[u8], out: &mut HashMap<String, i64>) {
+    for line in reflog.split(|&b| b == b'\n') {
+        let line = text(line);
+        let Some((who, message)) = line.split_once('\t') else {
+            continue;
+        };
+        let mut tail = who.trim_end().rsplitn(3, ' ');
+        let (Some(_tz), Some(time)) = (tail.next(), tail.next()) else {
+            continue;
+        };
+        let Ok(time) = time.parse::<i64>() else {
+            continue;
+        };
+        let target = if let Some(moving) = message.strip_prefix("checkout: moving from ") {
+            moving.rsplit_once(" to ").map(|(_, to)| to)
+        } else if message.starts_with("rebase") {
+            message
+                .split_once("returning to refs/heads/")
+                .map(|(_, to)| to)
+        } else {
+            None
+        };
+        let Some(target) = target.map(str::trim).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        let at = out.entry(target.to_owned()).or_insert(time);
+        *at = (*at).max(time);
+    }
+}
+
+/// Sets each local branch's [`Ref::checked_out_at`] from [`parse_checkouts`].
+pub fn apply_checkouts(refs: &mut [Ref], checkouts: &HashMap<String, i64>) {
+    for r in refs.iter_mut().filter(|r| r.kind == RefKind::Branch) {
+        r.checked_out_at = checkouts.get(&r.short_name).copied();
+    }
 }
 
 fn classify(name: &str, remotes: &[String]) -> (RefKind, String) {
@@ -363,6 +413,38 @@ mod tests {
         assert_eq!((annotated.target.as_str(), annotated.commit()), (B, A));
         assert_eq!(refs[8].commit(), A);
         assert_eq!(refs[9].kind, RefKind::Other);
+    }
+
+    #[test]
+    fn reads_checkouts_from_a_reflog() {
+        // Read from its tail, a reflog may start mid-line.
+        let reflog = [
+            "ed main",
+            "0 1 A U Thor <a@x> 100 +0000\tcommit (initial): one",
+            "1 2 A U Thor <a@x> 200 +0100\tcheckout: moving from main to feature/wörk",
+            "2 1 A U Thor <a@x> 300 -0200\tcheckout: moving from feature/wörk to main",
+            "1 3 A U Thor <a@x> 400 +0000\tcheckout: moving from main to 3333333",
+            "3 2 A U Thor <a@x> 250 +0000\tcheckout: moving from 3333333 to feature/wörk",
+            "2 4 A U Thor <a@x> 500 +0000\trebase (finish): returning to refs/heads/local-only",
+            "4 4 bad line without a time\tcheckout: moving from a to b",
+        ]
+        .join("\n");
+        let mut checkouts = HashMap::new();
+        parse_checkouts(reflog.as_bytes(), &mut checkouts);
+        assert_eq!(checkouts.get("main"), Some(&300));
+        assert_eq!(checkouts.get("feature/wörk"), Some(&250));
+        assert_eq!(checkouts.get("local-only"), Some(&500));
+        assert_eq!(checkouts.get("b"), None);
+        // A later reflog (another worktree's) keeps the newest time.
+        parse_checkouts(
+            b"1 2 B <b@x> 900 +0000\tcheckout: moving from x to main\n",
+            &mut checkouts,
+        );
+        let mut refs = parse_refs(&captured(), &["origin".into()]).unwrap();
+        apply_checkouts(&mut refs, &checkouts);
+        assert_eq!(refs[0].checked_out_at, Some(900));
+        assert_eq!(refs[1].checked_out_at, Some(250));
+        assert_eq!(refs[4].checked_out_at, None);
     }
 
     #[test]

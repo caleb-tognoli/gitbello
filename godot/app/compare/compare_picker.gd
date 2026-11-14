@@ -2,7 +2,8 @@ class_name ComparePicker
 extends PopupPanel
 ## Picks one side of a comparison (PLAN M7.12): a filter, then Working copy
 ## (right side only), the local branches, remote branches, tags and recent
-## commits (recent comparisons have their own popover, M7.12c). While the
+## commits (recent comparisons have their own popover, M7.12c); branch names
+## show their prefix muted (`BranchNameLayer`). While the
 ## filter has text, the matching rows come first and the last row uses the
 ## text itself as a revision (`HEAD~3`, a hash, `v1.2^`);
 ## Enter takes the selected row. A revision git does not know shows as the
@@ -20,6 +21,8 @@ var session: RepoSession = null
 
 var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
 var _tree: Tree = Tree.new()
+## Draws the branch names, prefixes muted, over the tree.
+var _names: BranchNameLayer = null
 ## Whether the working copy can be chosen (the right side only).
 var _allow_working: bool = false
 ## The side shown when the picker opened, selected when listed.
@@ -44,6 +47,7 @@ func _ready() -> void:
 	_tree.item_activated.connect(func() -> void: _choose(_tree.get_selected()))
 	_tree.gui_input.connect(_on_tree_input)
 	box.add_child(_tree)
+	_names = BranchNameLayer.new(_tree)
 	AutoScroll.enable(_tree)
 
 
@@ -101,6 +105,8 @@ func choose_row(label: String) -> bool:
 
 func _rebuild() -> void:
 	_tree.clear()
+	_names.clear()
+	_names.prefix_color = get_theme_color(&"prefix_color", THEME_TYPE)
 	var root: TreeItem = _tree.create_item()
 	if session == null or not session.is_ready():
 		return
@@ -124,6 +130,7 @@ func _rebuild() -> void:
 			var short: String = String(ref["short_name"])
 			exact = exact or short == query
 			var item: TreeItem = _add(section, short, entry[2], {"spec": short, "working": false}, String(ref["name"]))
+			_names.add(item)
 			if bool(ref["is_head"]):
 				item.set_icon(0, AppTheme.icon(&"StatusSuccess"))
 				item.set_icon_modulate(0, get_theme_color(&"head_color", THEME_TYPE))

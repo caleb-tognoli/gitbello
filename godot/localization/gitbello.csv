@@ -203,6 +203,7 @@ keys,en,it
 "Filter branches","Filter branches","Filtra rami"
 "Recent","Recent","Recenti"
 "Remote","Remote","Remote"
+"Local","Local","Locali"
 "gone","gone","rimossa"
 "Checked out in %s","Checked out in %s","Estratto in %s"
 "tracks %s","tracks %s","segue %s"

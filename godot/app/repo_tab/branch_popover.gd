@@ -1,9 +1,10 @@
 class_name BranchPopover
 extends PopupPanel
-## The Branch button's list (PLAN §4): a filter, then Recent, local branches
-## (grouped by prefix such as `feature/`) and Remote branches with the commits
-## to push and pull. It opens
-## on the current branch. Enter or a single click chooses a branch; one checked
+## The Branch button's list (PLAN §4): a filter, then Recent (the current
+## branch and the ones last checked out), the other local branches and the
+## remote branches no local branch tracks, each listed once (see `sections`),
+## with the commits to push and pull. Names show their prefix (`feature/`)
+## muted; sections are plain headers. It opens on the current branch. Enter or a single click chooses a branch; one checked
 ## out in another worktree has a worktree icon and choosing it shows that
 ## worktree. Right-click opens the branch's menu. Opened to pick a branch to
 ## merge, it says so in a header, leaves out the current branch, shows how old
@@ -39,6 +40,8 @@ var _merging: bool = false
 ## the tree.
 var _counted: Array[TreeItem] = []
 var _count_layer: Control = Control.new()
+## Draws the branch names, prefixes muted, over the tree.
+var _names: BranchNameLayer = null
 ## The anchor window's UI scale, for the popup's size.
 var _scale: float = 1.0
 
@@ -61,8 +64,6 @@ func _ready() -> void:
 	_filter.done.connect(_on_filter_done)
 	box.add_child(_filter)
 	_tree.hide_root = true
-	# Sections draw their own arrow as their icon, so top-level branches and
-	# section arrows line up (Tree's arrows sit in a margin left of the rows).
 	_tree.hide_folding = true
 	_tree.columns = 2
 	_count_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -70,6 +71,7 @@ func _ready() -> void:
 	_count_layer.draw.connect(_draw_counts)
 	_tree.add_child(_count_layer)
 	_tree.draw.connect(_count_layer.queue_redraw)
+	_names = BranchNameLayer.new(_tree)
 	_tree.set_column_expand(1, false)
 	_tree.select_mode = Tree.SELECT_ROW
 	# A right-click selects its row first, so its menu is for that branch.
@@ -78,15 +80,14 @@ func _ready() -> void:
 	_tree.item_activated.connect(func() -> void: _choose(_tree.get_selected()))
 	_tree.item_mouse_selected.connect(_on_mouse_selected)
 	_tree.gui_input.connect(_on_tree_input)
-	_tree.item_collapsed.connect(func(item: TreeItem) -> void:
-		_set_arrow(item)
-		_fit.call_deferred())
 	box.add_child(_tree)
 	AutoScroll.enable(_tree)
 	_empty.theme_type_variation = &"DimLabel"
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# One line: a wrapping label measures its height at no width, which made
+	# the popover as tall as the message spelled one letter per line.
+	_empty.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_empty.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_empty.hide()
 	box.add_child(_empty)
@@ -168,70 +169,92 @@ func set_filter(text: String) -> void:
 func _rebuild() -> void:
 	_tree.clear()
 	_counted.clear()
+	_names.clear()
+	_names.prefix_color = get_theme_color(&"prefix_color", THEME_TYPE)
 	_empty.hide()
 	_tree.set_column_custom_minimum_width(1, 0)
 	var root: TreeItem = _tree.create_item()
 	if session == null or not session.is_ready():
 		return
-	var refs: Array[Dictionary] = session.branch_refs()
-	if _merging:
-		refs.assign(refs.filter(func(ref: Dictionary) -> bool: return not bool(ref["is_head"])))
+	var query: String = _filter.text().strip_edges().to_lower()
+	for section: Array in sections(session.branch_refs(), _merging):
+		var refs: Array[Dictionary] = []
+		refs.assign((section[1] as Array).filter(func(ref: Dictionary) -> bool:
+			return query.is_empty() or String(ref["short_name"]).to_lower().contains(query)))
+		if refs.is_empty():
+			continue
+		if not String(section[0]).is_empty():
+			_section(root, String(section[0]))
+		for ref: Dictionary in refs:
+			_add_ref(root, ref)
+	if query.is_empty():
+		_select_current()
+	else:
+		_select_first()
+	_fit()
+
+
+## The list's sections in order, as `[title, refs]` (an empty title has no
+## header row): Recent, the other local branches A–Z and the remote branches
+## no local branch tracks, A–Z. Recent holds the current branch, then the
+## branches last checked out (in any worktree), up to `RECENT_COUNT` rows.
+## With `RECENT_COUNT` local branches or fewer, or none checked out but the
+## current one, there is no Recent: the local list has no header and starts
+## with the current branch. `merging` leaves the current branch out and lists
+## its upstream first in Remote (the usual branch to merge after a fetch).
+static func sections(all: Array[Dictionary], merging: bool) -> Array:
 	var local: Array[Dictionary] = []
 	var remote: Array[Dictionary] = []
-	var local_names: PackedStringArray = PackedStringArray()
-	for ref: Dictionary in refs:
-		(local if String(ref["kind"]) == "branch" else remote).append(ref)
-		if String(ref["kind"]) == "branch":
-			local_names.append(String(ref["short_name"]))
-	remote.assign(remote.filter(func(ref: Dictionary) -> bool:
-		return not _remote_has_local(String(ref["short_name"]), local_names)))
-	refs.clear()
-	refs.append_array(local)
-	refs.append_array(remote)
-	var query: String = _filter.text().strip_edges().to_lower()
-	if not query.is_empty():
-		for ref: Dictionary in refs:
-			if String(ref["short_name"]).to_lower().contains(query):
-				_add_ref(root, ref, String(ref["short_name"]))
-		_select_first()
-		_fit()
-		return
+	var tracked: Dictionary[String, bool] = {}
+	var head_upstream: String = ""
+	var head: Dictionary = {}
+	for ref: Dictionary in all:
+		if String(ref["kind"]) != "branch":
+			remote.append(ref)
+			continue
+		if not String(ref["upstream"]).is_empty():
+			tracked[String(ref["upstream"])] = true
+		if bool(ref["is_head"]):
+			head_upstream = String(ref["upstream"])
+			head = ref
+			if merging:
+				continue
+		local.append(ref)
+	var by_name: Callable = func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a["short_name"]).naturalnocasecmp_to(String(b["short_name"])) < 0
+	local.sort_custom(by_name)
+	var remotes: Array[Dictionary] = []
+	var upstream: Array[Dictionary] = []
+	for ref: Dictionary in remote:
+		var short: String = String(ref["short_name"])
+		if merging and short == head_upstream:
+			upstream.append(ref)
+		elif not tracked.has(short):
+			remotes.append(ref)
+	remotes.sort_custom(by_name)
+	upstream.append_array(remotes)
 	var recent: Array[Dictionary] = []
-	recent.assign(local.filter(func(ref: Dictionary) -> bool: return not bool(ref["is_head"])))
+	recent.assign(local.filter(func(ref: Dictionary) -> bool:
+		return not bool(ref["is_head"]) and int(ref.get("checked_out_at", 0)) > 0))
 	recent.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return int(a["committed_at"]) > int(b["committed_at"]))
-	# Recent only helps once the local list is longer than it.
+		return int(a["checked_out_at"]) > int(b["checked_out_at"]))
+	var out: Array = []
+	var has_head: bool = not merging and not head.is_empty()
 	if local.size() > RECENT_COUNT and not recent.is_empty():
-		var section: TreeItem = _section(root, "Recent")
-		for i: int in mini(RECENT_COUNT, recent.size()):
-			_add_ref(section, recent[i], String(recent[i]["short_name"]))
-	var locals: TreeItem = root
-	var folder_counts: Dictionary[String, int] = {}
-	for ref: Dictionary in local:
-		var branch_name: String = String(ref["short_name"])
-		var slash: int = branch_name.rfind("/")
-		if slash > 0:
-			var folder: String = branch_name.left(slash)
-			folder_counts[folder] = int(folder_counts.get(folder, 0)) + 1
-	var folders: Dictionary[String, TreeItem] = {}
-	for ref: Dictionary in local:
-		var branch_name: String = String(ref["short_name"])
-		var parent: TreeItem = locals
-		var slash: int = branch_name.rfind("/")
-		var folder: String = branch_name.left(slash) if slash > 0 else ""
-		var grouped: bool = slash > 0 and int(folder_counts[folder]) > 1
-		if grouped:
-			if not folders.has(folder):
-				folders[folder] = _section(locals, folder + "/", false)
-			parent = folders[folder]
-		_add_ref(parent, ref, branch_name.substr(slash + 1) if grouped else branch_name)
-	if not remote.is_empty():
-		var remotes: TreeItem = _section(root, "Remote")
-		remotes.collapsed = true
-		for ref: Dictionary in remote:
-			_add_ref(remotes, ref, String(ref["short_name"]))
-	_select_current()
-	_fit()
+		recent.resize(mini(recent.size(), RECENT_COUNT - (1 if has_head else 0)))
+		if has_head:
+			recent.push_front(head)
+		var rest: Array[Dictionary] = []
+		rest.assign(local.filter(func(ref: Dictionary) -> bool: return not recent.has(ref)))
+		out.append(["Recent", recent])
+		out.append(["Local", rest])
+	else:
+		if has_head:
+			local.erase(head)
+			local.push_front(head)
+		out.append(["", local])
+	out.append(["Remote", upstream])
+	return out
 
 
 ## Sizes the list to its rows, up to the theme's `height`; with no rows it
@@ -257,45 +280,18 @@ func _fit() -> void:
 	size = Vector2i(Vector2(get_theme_constant(&"width", THEME_TYPE), chrome + tree_height) * _scale)
 
 
-## The last row a reader can see (collapsed sections hide their children).
+## The list's last row, or null.
 func _last_visible(item: TreeItem) -> TreeItem:
-	if item == null or item.get_child_count() == 0:
-		return null
-	var last: TreeItem = item.get_child(item.get_child_count() - 1)
-	if last.collapsed:
-		return last
-	var inner: TreeItem = _last_visible(last)
-	return inner if inner != null else last
+	return item.get_child(item.get_child_count() - 1) if item != null and item.get_child_count() > 0 else null
 
 
-static func _remote_has_local(remote_name: String, local_names: PackedStringArray) -> bool:
-	for local_name: String in local_names:
-		if remote_name.ends_with("/" + local_name):
-			return true
-	return false
-
-
-func _section(parent: TreeItem, text: String, header: bool = true) -> TreeItem:
+## A section's header: a muted row that can't be chosen.
+func _section(parent: TreeItem, text: String) -> void:
 	var item: TreeItem = _tree.create_item(parent)
-	item.set_text(0, tr(text) if header else text)
+	item.set_text(0, tr(text))
 	item.set_selectable(0, false)
 	item.set_selectable(1, false)
-	_set_arrow(item)
-	if header:
-		item.set_custom_color(0, get_theme_color(&"section_color", THEME_TYPE))
-		item.set_icon_modulate(0, get_theme_color(&"section_color", THEME_TYPE))
-	return item
-
-
-## A section's arrow, which is its icon (see `_ready`), centred in a branch
-## icon's width so section and branch names line up too.
-func _set_arrow(item: TreeItem) -> void:
-	if item.get_metadata(0) is Dictionary:
-		return
-	var arrow: Texture2D = AppTheme.icon(&"GuiTreeArrowRight" if item.collapsed else &"GuiTreeArrowDown")
-	var pad: Vector2 = (AppTheme.icon(&"GitBranch").get_size() - arrow.get_size()) / 2.0
-	item.set_icon(0, arrow)
-	item.set_icon_region(0, Rect2(-pad, arrow.get_size() + pad * 2.0))
+	item.set_custom_color(0, get_theme_color(&"section_color", THEME_TYPE))
 
 
 func _notification(what: int) -> void:
@@ -307,7 +303,7 @@ func _notification(what: int) -> void:
 		_rebuild()
 
 
-func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
+func _add_ref(parent: TreeItem, ref: Dictionary) -> void:
 	var item: TreeItem = _tree.create_item(parent)
 	var worktree: String = String(ref["worktree"])
 	var elsewhere: bool = not worktree.is_empty() and not bool(ref["is_head"]) \
@@ -323,7 +319,8 @@ func _add_ref(parent: TreeItem, ref: Dictionary, text: String) -> void:
 		if ref.has("committed_at") and int(ref["committed_at"]) > 0:
 			badge.append(RepoOps.ago(int(Time.get_unix_time_from_system()) - int(ref["committed_at"])))
 		item.set_icon_modulate(0, get_theme_color(&"icon_color", THEME_TYPE))
-	item.set_text(0, text)
+	item.set_text(0, String(ref["short_name"]))
+	_names.add(item)
 	item.set_text(1, " ".join(badge))
 	var margin_right: int = _tree.get_theme_constant(&"inner_item_margin_right")
 	var pills: float = SyncCounts.measure(_tree, ahead, behind).x
@@ -383,10 +380,6 @@ func _find_head(item: TreeItem) -> TreeItem:
 	for child: TreeItem in item.get_children():
 		if child.get_metadata(0) is Dictionary and bool((child.get_metadata(0) as Dictionary)["is_head"]):
 			return child
-		if not child.collapsed:
-			var found: TreeItem = _find_head(child)
-			if found != null:
-				return found
 	return null
 
 
@@ -396,10 +389,6 @@ func _first_ref(item: TreeItem) -> TreeItem:
 	for child: TreeItem in item.get_children():
 		if child.get_metadata(0) is Dictionary:
 			return child
-		if not child.collapsed:
-			var found: TreeItem = _first_ref(child)
-			if found != null:
-				return found
 	return null
 
 
@@ -417,15 +406,11 @@ func _collect(item: TreeItem, out: PackedStringArray) -> void:
 	for child: TreeItem in item.get_children():
 		if child.get_metadata(0) is Dictionary:
 			out.append(String((child.get_metadata(0) as Dictionary)["short"]))
-		elif not child.collapsed:
-			_collect(child, out)
 
 
 func _collect_labels(item: TreeItem, out: PackedStringArray) -> void:
 	for child: TreeItem in item.get_children():
 		out.append(child.get_text(0))
-		if not child.collapsed:
-			_collect_labels(child, out)
 
 
 func _on_mouse_selected(at_position: Vector2, button: int) -> void:
@@ -441,15 +426,13 @@ func _on_filter_done() -> void:
 	_select_first()
 
 
-## A click on a section folds it; a click on a branch chooses it once the
-## button is released over the row it pressed (the press selects it).
+## A click on a branch chooses it once the button is released over the row
+## it pressed (the press selects it); a click on a section header does nothing.
 func _on_tree_input(event: InputEvent) -> void:
 	var button: InputEventMouseButton = event as InputEventMouseButton
 	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
 		var at: TreeItem = _tree.get_item_at_position(button.position)
 		if at != null and not at.get_metadata(0) is Dictionary:
-			if button.pressed:
-				at.collapsed = not at.collapsed
 			_tree.accept_event()
 		elif at != null and not button.pressed and at == _tree.get_selected():
 			_choose(at)

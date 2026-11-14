@@ -1473,6 +1473,8 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"height", &"BranchPopover", 440)
 	theme.set_color(&"section_color", &"BranchPopover", p.text_muted)
 	theme.set_color(&"badge_color", &"BranchPopover", p.text_muted)
+	# A branch name's prefix (`feature/`, `origin/`), muted before the name.
+	theme.set_color(&"prefix_color", &"BranchPopover", p.text_muted)
 	theme.set_color(&"head_color", &"BranchPopover", p.head)
 	theme.set_color(&"icon_color", &"BranchPopover", Color(1, 1, 1, 0.6))
 	# Remotes… and Tags…
