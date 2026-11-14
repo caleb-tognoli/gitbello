@@ -1273,3 +1273,8 @@ keys,en,it
 "Clear filter options","Clear filter options","Azzera le opzioni dei filtri"
 "Filter and view options","Filter and view options","Opzioni di filtro e visualizzazione"
 "Focus a filter or search field first.","Focus a filter or search field first.","Seleziona prima un campo di filtro o di ricerca."
+"Preview","Preview","Anteprima"
+"The document as it reads, changes marked","The document as it reads, changes marked","Il documento come si legge, con le modifiche evidenziate"
+"Cannot preview this file.","Cannot preview this file.","Impossibile mostrare l'anteprima di questo file."
+"This file is too large to preview (more than %s).","This file is too large to preview (more than %s).","Questo file è troppo grande per l'anteprima (più di %s)."
+"Nothing to preview","Nothing to preview","Niente da mostrare"

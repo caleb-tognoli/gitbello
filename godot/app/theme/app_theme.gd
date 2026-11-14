@@ -482,6 +482,7 @@ static func build(light: bool, accent: Color = DEFAULT_ACCENT,
 	_add_changes(theme, p)
 	_add_shell_p2(theme, p)
 	_add_changes_p3(theme, p)
+	_add_markdown(theme, p)
 	_add_home(theme, p)
 	_add_shortcuts(theme, p)
 	_add_checks(theme, p)
@@ -1727,6 +1728,49 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 ## and the repository rows, flat until hovered.
 ## The Keyboard page of Settings: rows of actions with their shortcuts as key
 ## caps, in chips that record a new shortcut when clicked.
+## The Markdown preview (`MarkdownDiffView`): its text, code, quotes, rules
+## and tables, and the mark of a changed block (added and removed come from
+## `DiffView`, so they follow the chosen change colours).
+static func _add_markdown(theme: Theme, p: Palette) -> void:
+	var t: StringName = &"MarkdownDiff"
+	theme.set_color(&"background", t, p.background)
+	theme.set_color(&"text_color", t, p.text)
+	theme.set_color(&"muted_color", t, p.text_muted)
+	theme.set_color(&"link_color", t, p.accent_text)
+	theme.set_color(&"code_bg", t, p.background.blend(Color(p.text, 0.06)))
+	theme.set_color(&"quote_bar", t, p.border)
+	theme.set_color(&"rule_color", t, p.border)
+	theme.set_color(&"table_border", t, p.border)
+	theme.set_color(&"table_header_bg", t, p.background.blend(Color(p.text, 0.04)))
+	theme.set_color(&"changed_mark", t, p.modified)
+	theme.set_constant(&"max_width", t, 880)
+	theme.set_constant(&"margin", t, 16)
+	theme.set_constant(&"gap", t, 8)
+	theme.set_constant(&"indent", t, 24)
+	theme.set_constant(&"quote_width", t, 14)
+	theme.set_constant(&"mark_width", t, 3)
+	theme.set_constant(&"code_padding", t, 8)
+	var heading_sizes: PackedInt32Array = [24, 20, 17, 15, 14, 13]
+	for level: int in heading_sizes.size():
+		theme.set_font_size(StringName("h%d_font_size" % (level + 1)), t, heading_sizes[level])
+	theme.set_font_size(&"code_font_size", t, 13)
+	# The text of each block: bold, italic and code fonts of their own.
+	_variation(theme, &"MarkdownText", &"RichTextLabel")
+	var italic: FontVariation = FontVariation.new()
+	italic.base_font = ThemeDB.fallback_font
+	italic.variation_transform = Transform2D(Vector2(1.0, 0.0), Vector2(0.2, 1.0), Vector2.ZERO)
+	var bold_italic: FontVariation = italic.duplicate() as FontVariation
+	bold_italic.variation_embolden = 0.6
+	theme.set_font(&"bold_font", &"MarkdownText", bold_font())
+	theme.set_font(&"italics_font", &"MarkdownText", italic)
+	theme.set_font(&"bold_italics_font", &"MarkdownText", bold_italic)
+	theme.set_font(&"mono_font", &"MarkdownText", mono_font())
+	theme.set_color(&"default_color", &"MarkdownText", p.text)
+	theme.set_constant(&"line_separation", &"MarkdownText", 3)
+	theme.set_constant(&"table_h_separation", &"MarkdownText", 0)
+	theme.set_constant(&"table_v_separation", &"MarkdownText", 0)
+
+
 static func _add_shortcuts(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"row_height", &"ShortcutsPage", 30)
 	theme.set_constant(&"icon_size", &"ShortcutsPage", 16)

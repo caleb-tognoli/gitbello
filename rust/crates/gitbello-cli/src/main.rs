@@ -6,6 +6,7 @@ mod fixture;
 mod highlight_cmds;
 mod history_fixture;
 mod image_fixture;
+mod markdown_fixture;
 mod repo_cmds;
 mod syntax_fixture;
 
@@ -31,6 +32,8 @@ commands:
   stashes <path>                   stash list
   diff <root> <file> [--staged|--untracked] [--full]
                                    one file's diff (root = worktree root)
+  preview <root> <file> [--staged|--untracked] [--time]
+                                   a Markdown file's preview: its blocks, changes marked
   compare <root> <left> <right|--working> [--fork|--exact] [--file <path>]
                                    sides, counts and files of a comparison,
                                    or one file's diff in it
@@ -43,7 +46,7 @@ commands:
   op-state <path>                  git dirs and in-progress operation
   watch <path>                     print refreshes file changes would trigger
   config                           print the config file path and contents
-  fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history]
+  fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history] [--markdown]
                                    create throwaway repos for UI smoke tests
   home-bench <dir> [--depth N] [--max N]
                                    time Home's scan and summaries (read-only)
@@ -80,6 +83,7 @@ fn main() -> Result<()> {
         Some("worktrees") => repo_cmds::worktrees(rest),
         Some("stashes") => repo_cmds::stashes(rest),
         Some("diff") => repo_cmds::diff(rest),
+        Some("preview") => repo_cmds::preview(rest),
         Some("compare") => repo_cmds::compare(rest),
         Some("file-history") => repo_cmds::file_history(rest),
         Some("blame") => repo_cmds::blame(rest),

@@ -22,7 +22,7 @@ pub mod states;
 pub use detect::detect;
 pub use hints::{line_text, FileHints, Syntax};
 pub use kind::TokenKind;
-pub use languages::{Language, LanguageDef};
+pub use languages::{fence_language, Language, LanguageDef};
 pub use lexer::{language_tag, Cx, Lexer, LineState};
 pub use states::{DiffStates, LineStates, StatesStatus};
 

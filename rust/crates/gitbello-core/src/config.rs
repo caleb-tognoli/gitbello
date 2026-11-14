@@ -83,6 +83,8 @@ pub struct Config {
     pub diff_text_mode: DiffMode,
     /// How image diffs show (`split`, `onion`, `swipe` or `difference`).
     pub diff_image_mode: DiffMode,
+    /// How Markdown diffs show (`unified`, `split` or `preview`).
+    pub diff_markdown_mode: DiffMode,
     /// Show the minimap beside diffs (else only its strip of change marks).
     pub diff_minimap: bool,
     /// History rows on one line (no author line), as before M7.10.
@@ -181,6 +183,7 @@ impl Default for Config {
             removed_color: None,
             diff_text_mode: Viewer::Text.default_mode(),
             diff_image_mode: Viewer::Image.default_mode(),
+            diff_markdown_mode: Viewer::Markdown.default_mode(),
             diff_minimap: true,
             history_compact: false,
             history_graph: true,
@@ -240,6 +243,7 @@ fn take_mode(
 ) -> Result<Option<DiffMode>, ConfigError> {
     let expected = match viewer {
         Viewer::Image => "\"split\", \"onion\", \"swipe\" or \"difference\"",
+        Viewer::Markdown => "\"unified\", \"split\" or \"preview\"",
         Viewer::Text | Viewer::None => "\"unified\" or \"split\"",
     };
     match take_string(table, key)? {
@@ -284,6 +288,7 @@ const KEYS: &[&str] = &[
     "diff_side_by_side",
     "diff_text_mode",
     "diff_image_mode",
+    "diff_markdown_mode",
     "diff_minimap",
     "history_compact",
     "history_graph",
@@ -383,6 +388,8 @@ impl Config {
             },
             diff_image_mode: take_mode(&mut table, "diff_image_mode", Viewer::Image)?
                 .unwrap_or(Viewer::Image.default_mode()),
+            diff_markdown_mode: take_mode(&mut table, "diff_markdown_mode", Viewer::Markdown)?
+                .unwrap_or(Viewer::Markdown.default_mode()),
             diff_minimap: take_bool(&mut table, "diff_minimap")?.unwrap_or(true),
             history_compact: take_bool(&mut table, "history_compact")?.unwrap_or(false),
             history_graph: take_bool(&mut table, "history_graph")?.unwrap_or(true),
@@ -457,6 +464,7 @@ impl Config {
         for (key, mode) in [
             ("diff_text_mode", self.diff_text_mode),
             ("diff_image_mode", self.diff_image_mode),
+            ("diff_markdown_mode", self.diff_markdown_mode),
         ] {
             table.insert(key.into(), Value::String(mode.id().into()));
         }
@@ -662,6 +670,13 @@ mod tests {
         let both = Config::parse("diff_side_by_side = true\ndiff_text_mode = \"unified\"").unwrap();
         assert_eq!(both.diff_text_mode, DiffMode::Unified);
         assert_eq!(Config::default().diff_image_mode, DiffMode::Split);
+        assert_eq!(Config::default().diff_markdown_mode, DiffMode::Unified);
+        assert_eq!(
+            Config::parse("diff_markdown_mode = \"preview\"")
+                .unwrap()
+                .diff_markdown_mode,
+            DiffMode::Preview
+        );
         let keys =
             Config::parse("[keybindings]\n\"diff.toggle_side_by_side\" = \"Ctrl+Alt+S\"").unwrap();
         assert_eq!(
@@ -673,6 +688,8 @@ mod tests {
             ("diff_text_mode = \"onion\"", "diff_text_mode"),
             ("diff_image_mode = \"unified\"", "diff_image_mode"),
             ("diff_image_mode = \"single\"", "diff_image_mode"),
+            ("diff_text_mode = \"preview\"", "diff_text_mode"),
+            ("diff_markdown_mode = \"onion\"", "diff_markdown_mode"),
         ] {
             assert!(
                 matches!(Config::parse(text), Err(ConfigError::Invalid { key: k, .. }) if k == key),
@@ -705,6 +722,7 @@ mod tests {
             removed_color: Some("#d2691e".into()),
             diff_text_mode: DiffMode::Split,
             diff_image_mode: DiffMode::Swipe,
+            diff_markdown_mode: DiffMode::Preview,
             diff_minimap: false,
             history_compact: true,
             history_graph: false,

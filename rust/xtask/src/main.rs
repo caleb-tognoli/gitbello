@@ -279,6 +279,7 @@ fn smoke(args: &[String]) -> Result<()> {
         "--eol",
         "--syntax",
         "--history",
+        "--markdown",
     ]);
     run_status(fixture)?;
     // No auto-fetch moving badges mid-test, and a terminal command that

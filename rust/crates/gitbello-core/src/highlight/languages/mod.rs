@@ -112,6 +112,12 @@ pub static ALL: &[&LanguageDef] = &[
 ];
 
 /// No hints.
+/// The language a Markdown fence's info string names (`rust`, `js`,
+/// `py`, an extension…), as the Markdown lexer colours fenced code.
+pub fn fence_language(tag: &str) -> Option<Language> {
+    markdown::fence_language(tag)
+}
+
 pub fn no_hints(_lines: &[String]) -> FileHints {
     FileHints::default()
 }

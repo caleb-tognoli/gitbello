@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use super::image::image_format;
+use super::markdown;
 use super::{DiffContent, FileDiff};
 use crate::merge::{ConflictFile, ConflictKind};
 
@@ -14,6 +15,8 @@ use crate::merge::{ConflictFile, ConflictKind};
 pub enum Viewer {
     /// Lines of text (also the resolver's blocks).
     Text,
+    /// A Markdown file: its lines, or the document with its changes marked.
+    Markdown,
     /// Old and new pictures.
     Image,
     /// Nothing to switch: a binary summary, an empty diff, a message.
@@ -25,6 +28,7 @@ impl Viewer {
     pub fn id(self) -> &'static str {
         match self {
             Self::Text => "text",
+            Self::Markdown => "markdown",
             Self::Image => "image",
             Self::None => "none",
         }
@@ -33,6 +37,7 @@ impl Viewer {
     pub fn parse(text: &str) -> Option<Self> {
         Some(match text {
             "text" => Self::Text,
+            "markdown" => Self::Markdown,
             "image" => Self::Image,
             "none" => Self::None,
             _ => return None,
@@ -43,6 +48,7 @@ impl Viewer {
     pub fn all_modes(self) -> &'static [DiffMode] {
         match self {
             Self::Text => &[DiffMode::Unified, DiffMode::Split],
+            Self::Markdown => &[DiffMode::Unified, DiffMode::Split, DiffMode::Preview],
             Self::Image => &[
                 DiffMode::Split,
                 DiffMode::Onion,
@@ -56,7 +62,7 @@ impl Viewer {
     /// The mode a viewer starts in before one is saved.
     pub fn default_mode(self) -> DiffMode {
         match self {
-            Self::Text => DiffMode::Unified,
+            Self::Text | Self::Markdown => DiffMode::Unified,
             Self::Image => DiffMode::Split,
             Self::None => DiffMode::Single,
         }
@@ -78,6 +84,8 @@ pub enum DiffMode {
     Difference,
     /// The only side there is (an added or deleted image).
     Single,
+    /// A Markdown file drawn as a document, changes marked on it.
+    Preview,
 }
 
 impl DiffMode {
@@ -89,6 +97,7 @@ impl DiffMode {
             Self::Swipe => "swipe",
             Self::Difference => "difference",
             Self::Single => "single",
+            Self::Preview => "preview",
         }
     }
 
@@ -100,6 +109,7 @@ impl DiffMode {
             "swipe" => Self::Swipe,
             "difference" => Self::Difference,
             "single" => Self::Single,
+            "preview" => Self::Preview,
             _ => return None,
         })
     }
@@ -150,7 +160,7 @@ impl Offered {
 
 /// How `diff` of `path` can be shown. Text with both sides offers unified
 /// and split; an added or deleted file (untracked included) and a combined
-/// diff offer unified only; an image (see [`image_format`]) offers the image
+/// diff offer unified only; Markdown text also offers its preview; an image (see [`image_format`]) offers the image
 /// modes, or `single` with one side; other binary, too large and empty
 /// diffs offer nothing.
 pub fn offered(diff: &FileDiff, path: &Path) -> Offered {
@@ -165,6 +175,17 @@ pub fn offered(diff: &FileDiff, path: &Path) -> Offered {
                 Viewer::Image.all_modes().to_vec()
             } else {
                 vec![DiffMode::Single]
+            },
+        };
+    }
+    if markdown::previews(diff, path) {
+        let both = !diff.header.new_file && !diff.header.deleted_file;
+        return Offered {
+            viewer: Viewer::Markdown,
+            modes: if both {
+                Viewer::Markdown.all_modes().to_vec()
+            } else {
+                vec![DiffMode::Unified, DiffMode::Preview]
             },
         };
     }
@@ -279,6 +300,48 @@ mod tests {
     }
 
     #[test]
+    fn markdown_offers_its_preview() {
+        let modified = parse_diff(
+            b"diff --git a/R.md b/R.md
+index 1..2 100644
+--- a/R.md
++++ b/R.md
+@@ -1 +1 @@
+-a
++b
+",
+        )
+        .unwrap();
+        assert_eq!(
+            modes_of(&modified, "R.md"),
+            (Viewer::Markdown, vec!["unified", "split", "preview"])
+        );
+        assert_eq!(
+            modes_of(
+                &untracked_diff(
+                    b"# New
+"
+                ),
+                "docs/new.markdown"
+            ),
+            (Viewer::Markdown, vec!["unified", "preview"])
+        );
+        assert_eq!(
+            modes_of(&untracked_diff(b""), "empty.md"),
+            (Viewer::None, vec![])
+        );
+        let binary = parse_diff(
+            b"diff --git a/b.md b/b.md
+index 1..2 100644
+Binary files a/b.md and b/b.md differ
+",
+        )
+        .unwrap();
+        assert_eq!(modes_of(&binary, "b.md"), (Viewer::None, vec![]));
+        assert_eq!(modes_of(&modified, "R.txt").0, Viewer::Text);
+    }
+
+    #[test]
     fn a_mode_not_offered_falls_back_to_the_first() {
         let one = Offered::text(false);
         assert_eq!(one.mode(DiffMode::Split), Some(DiffMode::Unified));
@@ -323,7 +386,7 @@ mod tests {
 
     #[test]
     fn ids_round_trip() {
-        for viewer in [Viewer::Text, Viewer::Image, Viewer::None] {
+        for viewer in [Viewer::Text, Viewer::Markdown, Viewer::Image, Viewer::None] {
             assert_eq!(Viewer::parse(viewer.id()), Some(viewer));
             assert!(viewer
                 .all_modes()

@@ -179,8 +179,18 @@ pub enum JobOutput {
         staged: Option<Box<FileDiff>>,
         /// Both sides, when the image viewer shows the diff.
         images: Option<Box<ImageSides>>,
+        /// The preview of a Markdown file.
+        markdown: Option<std::sync::Arc<crate::diff::markdown::MarkdownDiff>>,
         /// How the diff's text is coloured.
         syntax: crate::highlight::Syntax,
+    },
+    /// The pictures of a Markdown preview (see
+    /// [`crate::diff::markdown::read_images`]), for diff `generation` of `slot`.
+    MarkdownImages {
+        slot: crate::runtime::DiffSlot,
+        generation: u64,
+        refs: Vec<crate::diff::markdown::ImageRef>,
+        images: std::sync::Arc<[Option<crate::diff::markdown::MarkdownImage>]>,
     },
     /// The old side of a diff (blob `oid`); `None` when it was too large.
     OldFile {

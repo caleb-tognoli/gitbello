@@ -9,6 +9,9 @@ use gitbello_core::compare::{
 };
 use gitbello_core::diff::eol::{EndingSummary, FinalNewline, Marker};
 use gitbello_core::diff::image::{ImageSides, SideImage};
+use gitbello_core::diff::markdown::{
+    self, BlockKind, Content, LinkTarget, ListMarker, MarkdownDiff,
+};
 use gitbello_core::diff::{
     changed_ranges, display_text,
     viewer::{self, Offered},
@@ -1097,9 +1100,149 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             if let Some(images) = state.images() {
                 info.set("image", &images_info(images));
             }
+            if let Some(preview) = state.markdown() {
+                info.set(
+                    "markdown",
+                    &markdown_info(preview, state.markdown_images_ready()),
+                );
+            }
         }
     }
     info
+}
+
+/// `{blocks, changes, too_large, limit, images, images_ready}` of a
+/// Markdown preview: its block count, the indices of the changed blocks,
+/// whether a side was too large to preview, the size limit in bytes, how
+/// many repository pictures it shows and whether they were read.
+pub fn markdown_info(preview: &MarkdownDiff, images_ready: bool) -> VarDictionary {
+    let changes: PackedInt64Array = preview.changes().into_iter().map(to_i64).collect();
+    vdict! {
+        "blocks" => to_i64(preview.blocks.len()),
+        "changes" => &changes,
+        "too_large" => preview.too_large,
+        "limit" => to_i64(markdown::MAX_MARKDOWN_BYTES),
+        "images" => to_i64(preview.images.len()),
+        "images_ready" => images_ready,
+    }
+}
+
+/// Blocks `start..start + count` of a Markdown preview, each `{kind, level,
+/// quote, indent, marker, number, checked, change, anchor}` plus, by kind,
+/// `spans` (paragraph, heading), `info` and `lines` (code: `{text, change,
+/// syntax}`, `syntax` as in `diff_lines`), or `aligns` and `rows` (table:
+/// `{cells, change}`, each cell its spans). `kind` is `paragraph`,
+/// `heading`, `code`, `table` or `rule`; `marker` is "", `bullet`,
+/// `ordered` or `task`; `anchor` is a heading's (else empty). A span is
+/// `{text, style, link, change, target, path, anchor, image}` with `style`
+/// the bits of `markdown::style`, `target` where its link points (`web`,
+/// `file`, `anchor` or empty), `path` the repository file, `anchor` the
+/// heading after `#` and `image` the index of its picture
+/// (`RepoSession.markdown_image`, -1 for none). Every `change` is `same`,
+/// `added`, `removed` or `changed`.
+pub fn markdown_blocks(preview: &MarkdownDiff, start: usize, count: usize) -> Array<VarDictionary> {
+    let spans_array = |index: usize, spans: &[markdown::Span]| -> Array<VarDictionary> {
+        spans
+            .iter()
+            .map(|span| {
+                let link = span.link.as_deref().unwrap_or("");
+                let (target, path, anchor) = match preview.link_target(link) {
+                    LinkTarget::Web(_) => ("web", String::new(), String::new()),
+                    LinkTarget::File { path, anchor } => (
+                        "file",
+                        path.to_string_lossy().replace('\\', "/"),
+                        anchor.unwrap_or_default(),
+                    ),
+                    LinkTarget::Anchor(anchor) => ("anchor", String::new(), anchor),
+                    LinkTarget::None => ("", String::new(), String::new()),
+                };
+                let image = preview.image_of(index, span).map_or(-1, to_i64);
+                vdict! {
+                    "text" => &gstr(&span.text),
+                    "style" => i64::from(span.style),
+                    "link" => &gstr(link),
+                    "change" => span.change.id(),
+                    "target" => target,
+                    "path" => &gstr(&path),
+                    "anchor" => &gstr(&anchor),
+                    "image" => image,
+                }
+            })
+            .collect()
+    };
+    preview
+        .blocks
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(count)
+        .map(|(index, shown)| {
+            let block = &shown.block;
+            let (marker, number, checked) = match block.marker {
+                None => ("", 0, false),
+                Some(ListMarker::Bullet) => ("bullet", 0, false),
+                Some(ListMarker::Ordered(n)) => ("ordered", i64::try_from(n).unwrap_or(0), false),
+                Some(ListMarker::Task(done)) => ("task", 0, done),
+            };
+            let level = match block.kind {
+                BlockKind::Heading(level) => i64::from(level),
+                _ => 0,
+            };
+            let mut out = vdict! {
+                "kind" => block.kind.id(),
+                "level" => level,
+                "quote" => i64::from(block.quote),
+                "indent" => i64::from(block.indent),
+                "marker" => marker,
+                "number" => number,
+                "checked" => checked,
+                "change" => shown.change.id(),
+                "anchor" => &gstr(shown.anchor.as_deref().unwrap_or("")),
+            };
+            match &block.content {
+                Content::Text(spans) => out.set("spans", &spans_array(index, spans)),
+                Content::Code { info, lines } => {
+                    let lines: Array<VarDictionary> = lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| {
+                            let mut syntax = PackedInt32Array::new();
+                            for token in shown.syntax.get(i).map_or(&[][..], Vec::as_slice) {
+                                syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
+                                syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
+                                syntax.push(token.kind.id());
+                            }
+                            vdict! {
+                                "text" => &gstr(&line.text),
+                                "change" => line.change.id(),
+                                "syntax" => &syntax,
+                            }
+                        })
+                        .collect();
+                    out.set("info", &gstr(info));
+                    out.set("lines", &lines);
+                }
+                Content::Table { aligns, rows } => {
+                    let aligns: PackedStringArray = aligns.iter().map(|a| gstr(a.id())).collect();
+                    let rows: Array<VarDictionary> = rows
+                        .iter()
+                        .map(|row| {
+                            let cells: VarArray = row
+                                .cells
+                                .iter()
+                                .map(|c| spans_array(index, c).to_variant())
+                                .collect();
+                            vdict! { "cells" => &cells, "change" => row.change.id() }
+                        })
+                        .collect();
+                    out.set("aligns", &aligns);
+                    out.set("rows", &rows);
+                }
+                Content::None => {}
+            }
+            out
+        })
+        .collect()
 }
 
 /// `{format, old, new}` of an image diff (ours and theirs for a conflict),

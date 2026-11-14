@@ -62,6 +62,13 @@ func _ready() -> void:
 		return session.commit_diff_lines(start, count) if session != null else [])
 	_diff_panel.set_image_source(func(side: String) -> Dictionary:
 		return session.image_side("commit", side) if session != null else {})
+	_diff_panel.set_markdown_source(func(start: int, count: int) -> Array:
+		return session.markdown_blocks("commit", start, count) if session != null else [],
+		func(index: int) -> Dictionary:
+			return session.markdown_image("commit", index) if session != null else {})
+	_diff_panel.file_link_requested.connect(func(path: String) -> void:
+		if session != null:
+			DiffPanel.show_linked_file(_files, session.toplevel(), path))
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows("commit", start, count) if session != null else [])
 	_diff_panel.set_minimap_sources(

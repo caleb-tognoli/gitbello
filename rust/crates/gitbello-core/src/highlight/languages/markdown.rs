@@ -64,7 +64,7 @@ const ALIASES: &[(&str, &str)] = &[
 ];
 
 /// The language a fence's info string names.
-fn fence_language(tag: &str) -> Option<Language> {
+pub fn fence_language(tag: &str) -> Option<Language> {
     let tag = tag
         .trim_start_matches('{')
         .trim_start_matches('.')

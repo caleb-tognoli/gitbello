@@ -9,6 +9,7 @@ use crate::repo::{Change, ParseError};
 pub mod eol;
 pub mod image;
 mod layout;
+pub mod markdown;
 pub mod minimap;
 mod patch;
 pub mod version;

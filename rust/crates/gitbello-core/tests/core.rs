@@ -31,6 +31,7 @@ mod library;
 mod line_endings;
 mod line_staging;
 mod line_states;
+mod markdown_diffs;
 mod merge;
 mod minimap;
 mod moves;

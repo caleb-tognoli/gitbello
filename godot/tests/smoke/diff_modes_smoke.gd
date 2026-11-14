@@ -42,18 +42,24 @@ func run() -> void:
 	expect(panel.mode_button("split").tooltip_text.contains(Shortcuts.display("Ctrl+Shift+D")), "the tooltip names the cycle shortcut")
 	expect(Actions.is_enabled(&"diff.cycle_mode"), "the cycle action is enabled")
 
-	# New and deleted files offer unified only: no picker, no saving.
+	# A new text file offers unified only: no picker, no saving.
 	expect_eq(panel.counts_text(), "+1 −1", "both counts show when both are non-zero")
-	for path: String in ["notes.txt", "README.md"]:
-		expect(await _select(changes, session, path), "%s's diff loads" % path)
-		expect_eq(panel.counts_text(), "+1" if path == "notes.txt" else "−1", "a zero count is left out for %s" % path)
-		expect_eq(panel.modes(), PackedStringArray(["unified"]), "%s offers unified only" % path)
-		expect(not panel.picker_visible() and panel.mode_button("unified") == null, "%s shows no picker" % path)
-		expect(panel.mode() == "unified" and not panel.view().side_by_side, "%s falls back to unified" % path)
-		expect_eq(Core.diff_mode("text"), "split", "the fallback leaves the saved mode alone")
-		expect(not Actions.is_enabled(&"diff.cycle_mode"), "nothing to cycle for %s" % path)
-		press("Ctrl+Shift+D")
-		expect_eq(Core.diff_mode("text"), "split", "Ctrl+Shift+D does nothing for %s" % path)
+	expect(await _select(changes, session, "notes.txt"), "notes.txt's diff loads")
+	expect_eq(panel.counts_text(), "+1", "a zero count is left out")
+	expect_eq(panel.modes(), PackedStringArray(["unified"]), "a new text file offers unified only")
+	expect(not panel.picker_visible() and panel.mode_button("unified") == null, "a new text file shows no picker")
+	expect(panel.mode() == "unified" and not panel.view().side_by_side, "a new text file falls back to unified")
+	expect_eq(Core.diff_mode("text"), "split", "the fallback leaves the saved mode alone")
+	expect(not Actions.is_enabled(&"diff.cycle_mode"), "nothing to cycle for a new text file")
+	press("Ctrl+Shift+D")
+	expect_eq(Core.diff_mode("text"), "split", "Ctrl+Shift+D does nothing for a new text file")
+	# A deleted Markdown file offers unified and its preview, not split.
+	expect(await _select(changes, session, "README.md"), "README.md's diff loads")
+	expect_eq(panel.counts_text(), "−1", "only the removed count")
+	expect_eq(panel.viewer(), "markdown", "Markdown has its own viewer")
+	expect_eq(panel.modes(), PackedStringArray(["unified", "preview"]), "a deleted Markdown file offers unified and preview")
+	expect(panel.mode() == "unified" and not panel.view().side_by_side, "it opens unified")
+	expect_eq(Core.diff_mode("text"), "split", "the Markdown viewer leaves the text mode alone")
 
 	# Back on the modified file, the saved mode comes back; the key cycles.
 	expect(await _select(changes, session, "app.txt"), "app.txt again")

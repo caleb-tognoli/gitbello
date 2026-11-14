@@ -19,6 +19,7 @@ use crate::backend::{
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
+use crate::diff::markdown::{self, ImageRef, MarkdownDiff, MarkdownImage};
 use crate::diff::version::{self, VersionSide};
 use crate::diff::{
     build_patch, display_text, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand,
@@ -120,6 +121,8 @@ pub const COMMIT_DIFF_JOB_LABEL: &str = "load commit diff";
 pub const OLD_FILE_JOB_LABEL: &str = "read old file";
 /// Open: writes the version of a file to open (see [`Runtime::open_version`]).
 pub const VERSION_JOB_LABEL: &str = "open file";
+/// Reads the repository's pictures a Markdown preview shows.
+pub const MARKDOWN_IMAGES_JOB_LABEL: &str = "read markdown images";
 /// Finds the state each line of a diff's sides (or of the conflicted file)
 /// starts in, after the diff loaded (see [`DiffState::line_states`]).
 pub const LINE_STATES_JOB_LABEL: &str = "read line states";
@@ -245,6 +248,7 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | LINE_STATES_JOB_LABEL
         | CONFLICT_JOB_LABEL
         | VERSION_JOB_LABEL
+        | MARKDOWN_IMAGES_JOB_LABEL
         | HEAD_MESSAGE_JOB_LABEL
         | SHELF_FILES_JOB_LABEL
         | LOCATION_JOB_LABEL
@@ -1608,6 +1612,13 @@ pub struct DiffState {
     layout: DiffLayout,
     /// Both sides, when the image viewer shows the diff.
     images: Option<ImageSides>,
+    /// The preview of a Markdown file, both sides compared.
+    markdown: Option<Arc<MarkdownDiff>>,
+    /// The preview's pictures, read after the diff: the generation they
+    /// were read for, which they are and their bytes.
+    markdown_images: Option<MarkdownImages>,
+    /// The pictures job and the diff generation it is for.
+    images_job: Option<(JobId, u64)>,
     /// How the diff's text is coloured, found by the load job.
     syntax: Syntax,
     /// The state each line of either side starts in (kept while a reload
@@ -1638,6 +1649,9 @@ impl DiffState {
             old_failed: None,
             layout: DiffLayout::default(),
             images: None,
+            markdown: None,
+            markdown_images: None,
+            images_job: None,
             syntax: Syntax::plain(),
             states: DiffStates::default(),
             states_status: StatesStatus::None,
@@ -1680,6 +1694,34 @@ impl DiffState {
     /// Both sides of an image diff, once read (see [`image::read_sides`]).
     pub fn images(&self) -> Option<&ImageSides> {
         self.images.as_ref()
+    }
+
+    /// The preview of a Markdown diff, once read (see
+    /// [`markdown::read_sides`]).
+    pub fn markdown(&self) -> Option<&MarkdownDiff> {
+        self.markdown.as_deref()
+    }
+
+    /// Picture `index` of the preview ([`MarkdownDiff::images`]), once read;
+    /// `None` while reading or when it could not be read.
+    pub fn markdown_image(&self, index: usize) -> Option<&MarkdownImage> {
+        let markdown = self.markdown.as_deref()?;
+        let images = self.markdown_images.as_ref()?;
+        if images.refs != markdown.images {
+            return None;
+        }
+        images.images.get(index)?.as_ref()
+    }
+
+    /// Whether the preview's pictures were read (none to read counts).
+    pub fn markdown_images_ready(&self) -> bool {
+        self.markdown.as_deref().is_none_or(|m| {
+            m.images.is_empty()
+                || self
+                    .markdown_images
+                    .as_ref()
+                    .is_some_and(|i| i.refs == m.images)
+        })
     }
 
     /// The rows to show (empty until the diff loaded).
@@ -2237,6 +2279,8 @@ impl Runtime {
             next.old_failed = keep.old_failed;
             next.layout = keep.layout;
             next.images = keep.images;
+            next.markdown = keep.markdown;
+            next.markdown_images = keep.markdown_images;
         }
         *current = Some(next);
         self.diff_generation += 1;
@@ -3875,6 +3919,7 @@ impl Runtime {
             let landed = matches!(kind, EventKind::Finished(_) | EventKind::Cancelled);
             apply_diff(state, DiffSlot::Changes, kind, &repo, out);
             refresh_diff_picks(state);
+            submit_markdown_images(&self.scheduler, state, DiffSlot::Changes);
             submit_diff_states(&self.scheduler, state, DiffSlot::Changes);
             submit_old_file(&self.scheduler, state, DiffSlot::Changes);
             if landed {
@@ -3896,12 +3941,14 @@ impl Runtime {
         }
         if label == COMMIT_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Commit, kind, &repo, out);
+            submit_markdown_images(&self.scheduler, state, DiffSlot::Commit);
             submit_diff_states(&self.scheduler, state, DiffSlot::Commit);
             submit_old_file(&self.scheduler, state, DiffSlot::Commit);
             return;
         }
         if label == COMPARE_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::Compare, kind, &repo, out);
+            submit_markdown_images(&self.scheduler, state, DiffSlot::Compare);
             submit_diff_states(&self.scheduler, state, DiffSlot::Compare);
             submit_old_file(&self.scheduler, state, DiffSlot::Compare);
             return;
@@ -3924,6 +3971,7 @@ impl Runtime {
         }
         if label == FILE_DIFF_JOB_LABEL {
             apply_diff(state, DiffSlot::File, kind, &repo, out);
+            submit_markdown_images(&self.scheduler, state, DiffSlot::File);
             submit_old_file(&self.scheduler, state, DiffSlot::File);
             return;
         }
@@ -3942,6 +3990,10 @@ impl Runtime {
             if let EventKind::Finished(result) = kind {
                 apply_old_file(state, result.ok(), &repo, out);
             }
+            return;
+        }
+        if label == MARKDOWN_IMAGES_JOB_LABEL {
+            apply_markdown_images(state, job, kind, &repo, out);
             return;
         }
         if label == VERSION_JOB_LABEL {
@@ -4629,6 +4681,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::Scan(_)
         | JobOutput::Location(_)
         | JobOutput::Version(_)
+        | JobOutput::MarkdownImages { .. }
         | JobOutput::Diff { .. }
         | JobOutput::OldFile { .. }
         | JobOutput::LineStates(_)
@@ -5271,6 +5324,7 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
             let diff = backend.diff(&toplevel, &target, limit, cancel)?;
             let images =
                 image::read_sides(backend, &toplevel, &target, &diff, image_limit, cancel)?;
+            let markdown = markdown::read_sides(backend, &toplevel, &target, &diff, cancel)?;
             let staged = if as_staged {
                 let staged = DiffTarget {
                     kind: if target.kind == DiffKind::Amend {
@@ -5290,6 +5344,7 @@ fn submit_diff(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot, 
                 diff: Box::new(diff),
                 staged,
                 images: images.map(Box::new),
+                markdown,
                 syntax,
             })
         })),
@@ -5518,6 +5573,97 @@ fn read_side(
             Ok(fits.then(|| fs::read(path).ok()).flatten())
         }
         StatesSource::None | StatesSource::Old(_) | StatesSource::TooLarge => Ok(None),
+    }
+}
+
+/// A Markdown preview's pictures, as read.
+#[derive(Debug, Clone)]
+struct MarkdownImages {
+    refs: Vec<ImageRef>,
+    images: Arc<[Option<MarkdownImage>]>,
+}
+
+/// Starts reading the pictures of the Markdown preview in `slot` when its
+/// diff loaded a generation they were not read for.
+fn submit_markdown_images(scheduler: &JobScheduler, state: &mut RepoState, slot: DiffSlot) {
+    let key = state.key.clone();
+    let Some(toplevel) = state.toplevel.clone() else {
+        return;
+    };
+    let Some(diff) = state.slot_mut(slot).as_mut() else {
+        return;
+    };
+    let generation = diff.generation;
+    if diff.loading || diff.images_job.is_some_and(|(_, g)| g == generation) {
+        return;
+    }
+    let Some(refs) = diff
+        .markdown
+        .as_deref()
+        .map(|m| m.images.clone())
+        .filter(|r| !r.is_empty())
+    else {
+        return;
+    };
+    if let Some((job, _)) = diff.images_job.take() {
+        scheduler.cancel(job);
+    }
+    let target = diff.target.clone();
+    let job = scheduler.submit(JobSpec::read(&key, MARKDOWN_IMAGES_JOB_LABEL, move |ctx| {
+        let images =
+            markdown::read_images(ctx.backend(), &toplevel, &target, &refs, ctx.cancel_token())?;
+        Ok(JobOutput::MarkdownImages {
+            slot,
+            generation,
+            refs,
+            images: images.into(),
+        })
+    }));
+    diff.images_job = Some((job, generation));
+}
+
+/// Keeps the pictures a [`MARKDOWN_IMAGES_JOB_LABEL`] job read, when its
+/// diff is still shown.
+fn apply_markdown_images(
+    state: &mut RepoState,
+    job: JobId,
+    kind: EventKind,
+    repo: &Path,
+    out: &mut Vec<RuntimeEvent>,
+) {
+    let output = match kind {
+        EventKind::Finished(Ok(JobOutput::MarkdownImages {
+            slot,
+            generation,
+            refs,
+            images,
+        })) => Some((slot, generation, refs, images)),
+        EventKind::Finished(_) | EventKind::Cancelled => None,
+        EventKind::Started | EventKind::Progress(_) => return,
+    };
+    for slot in [
+        DiffSlot::Changes,
+        DiffSlot::Commit,
+        DiffSlot::Compare,
+        DiffSlot::File,
+    ] {
+        let Some(diff) = state.slot_mut(slot).as_mut() else {
+            continue;
+        };
+        if !diff.images_job.is_some_and(|(j, _)| j == job) {
+            continue;
+        }
+        diff.images_job = None;
+        if let Some((_, _, refs, images)) =
+            output.filter(|(s, g, _, _)| *s == slot && *g == diff.generation)
+        {
+            diff.markdown_images = Some(MarkdownImages { refs, images });
+            out.push(RuntimeEvent::DiffChanged {
+                repo: repo.to_path_buf(),
+                slot,
+            });
+        }
+        return;
     }
 }
 
@@ -5861,6 +6007,7 @@ fn apply_diff(
             diff,
             staged,
             images,
+            markdown,
             syntax,
         })) if generation == current.generation => {
             current.loading = false;
@@ -5877,6 +6024,7 @@ fn apply_diff(
             };
             current.diff = Some(*diff);
             current.images = images.map(|i| *i);
+            current.markdown = markdown;
             current.syntax = syntax;
             current.error = None;
             current.relayout();

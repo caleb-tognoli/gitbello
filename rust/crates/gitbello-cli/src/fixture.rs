@@ -1,4 +1,4 @@
-//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history]`: builds
+//! `gitbello-cli fixture <dir> [--repos N] [--images] [--eol] [--syntax] [--history] [--markdown]`: builds
 //! throwaway repositories for the Godot smoke tests (GDScript never runs git itself).
 //!
 //! Each `repo-<n>` has: two commits on `main`, a `feature/login` branch, a
@@ -8,7 +8,7 @@
 //! so a fetch leaves `main` one ahead and one behind. `--images` adds the
 //! image repositories of `image_fixture`, `--eol` the line-endings one of
 //! `eol_fixture`, `--syntax` the syntax one of `syntax_fixture`, `--history` the file-history one
-//! of `history_fixture`.
+//! of `history_fixture`, `--markdown` the Markdown one of `markdown_fixture`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +23,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut eol = false;
     let mut syntax = false;
     let mut history = false;
+    let mut markdown = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -37,6 +38,7 @@ pub fn run(args: &[String]) -> Result<()> {
             "--eol" => eol = true,
             "--syntax" => syntax = true,
             "--history" => history = true,
+            "--markdown" => markdown = true,
             other if dir.is_none() => dir = Some(PathBuf::from(other)),
             other => bail!("unexpected argument `{other}`"),
         }
@@ -51,7 +53,7 @@ pub fn run(args: &[String]) -> Result<()> {
     fs::write(&global_config, "")?;
     // The repositories are independent: build them all at once.
     type Build = fn(&Git<'_>, &Path) -> Result<()>;
-    let extras: [(bool, &str, Build, &str); 4] = [
+    let extras: [(bool, &str, Build, &str); 5] = [
         (
             images,
             "images",
@@ -75,6 +77,12 @@ pub fn run(args: &[String]) -> Result<()> {
             "history",
             crate::history_fixture::build,
             "the file-history repository",
+        ),
+        (
+            markdown,
+            "markdown",
+            crate::markdown_fixture::build,
+            "the Markdown repository",
         ),
     ];
     let (runner, global_config, dir) = (&runner, global_config.as_path(), dir.as_path());

@@ -258,6 +258,14 @@ func _wire_diff() -> void:
 		return session.slot_diff_lines(SLOT, start, count) if session != null else [])
 	_diff_panel.set_image_source(func(side: String) -> Dictionary:
 		return session.image_side(SLOT, side) if session != null else {})
+	_diff_panel.set_markdown_source(func(start: int, count: int) -> Array:
+		return session.markdown_blocks(SLOT, start, count) if session != null else [],
+		func(index: int) -> Dictionary:
+			return session.markdown_image(SLOT, index) if session != null else {})
+	_diff_panel.file_link_requested.connect(func(path: String) -> void:
+		if session != null and not DiffPanel.show_linked_file(null, session.toplevel(), path):
+			if feedback != null and feedback.toasts != null:
+				feedback.toasts.show_toast("Cannot open the file", path))
 	_diff_panel.set_split_source(func(start: int, count: int) -> Array:
 		return session.diff_split_rows(SLOT, start, count) if session != null else [])
 	_diff_panel.set_minimap_sources(

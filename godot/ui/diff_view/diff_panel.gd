@@ -18,12 +18,18 @@ extends VBoxContainer
 ## ImageDiffView with a Fit / 100% toggle and the sizes in the header; its
 ## bytes come from `set_image_source` and decode on worker threads, kept by
 ## side `id`. A binary image conflict's card previews ours and theirs.
+## A Markdown file (`viewer` `markdown`) also offers Preview: the document
+## drawn with its changes marked (`MarkdownDiffView`, blocks from
+## `set_markdown_source`).
 
 const GROUP: StringName = &"diff_panels"
 ## Icon, title and description of each mode, by `viewer:mode`.
 const MODES: Dictionary[String, Array] = {
 	"text:unified": [&"Panels1", "Unified", "Old and new lines in one column"],
 	"text:split": [&"Panels2Alt", "Side by side", "Old lines on the left, new lines on the right"],
+	"markdown:unified": [&"Panels1", "Unified", "Old and new lines in one column"],
+	"markdown:split": [&"Panels2Alt", "Side by side", "Old lines on the left, new lines on the right"],
+	"markdown:preview": [&"MarkdownPreview", "Preview", "The document as it reads, changes marked"],
 	"image:split": [&"Panels2Alt", "Side by side", "Old image on the left, new image on the right"],
 	"image:onion": [&"ImageOnion", "Onion skin", "New image over the old one, faded with the slider or Left/Right"],
 	"image:swipe": [&"ImageSwipe", "Swipe", "Drag the divider: old image on its left, new on its right"],
@@ -67,6 +73,9 @@ signal conflict_step_requested(forward: bool)
 signal conflict_changes_requested(on: bool)
 ## Open was chosen on an image side (`old` or `new`) in its context menu.
 signal open_side_requested(side: String)
+## A Markdown preview's link to another file of the repository was clicked
+## (repository-relative `path`; see `show_linked_file`).
+signal file_link_requested(path: String)
 
 @onready var _status_icon: TextureRect = %StatusIcon
 @onready var _path: RichTextLabel = %DiffPath
@@ -128,6 +137,8 @@ var _mode: String = ""
 var _image_view: ImageDiffView = ImageDiffView.new()
 ## The binary conflict card's ours | theirs previews.
 var _preview: ImageDiffView = ImageDiffView.new()
+## A Markdown file's Preview mode.
+var _markdown: MarkdownDiffView = MarkdownDiffView.new()
 ## `func(side: String) -> Dictionary`: `RepoSession.image_side` of the slot.
 var _image_source: Callable = Callable()
 ## Worker tasks by token, and what each decodes: `[view, side, id]`.
@@ -218,6 +229,15 @@ func _build_image_views() -> void:
 	_preview.hide()
 	_card.add_sibling(_preview)
 	_card.get_parent().move_child(_preview, _card.get_index())
+	_markdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_markdown.hide()
+	_view.add_sibling(_markdown)
+	_markdown.attach_strip()
+	_markdown.file_link_clicked.connect(func(path: String, anchor: String) -> void:
+		if path == String(_info.get("path", "")):
+			_markdown.scroll_to_anchor(anchor)
+		else:
+			file_link_requested.emit(path))
 
 
 func _exit_tree() -> void:
@@ -460,7 +480,7 @@ func mode() -> String:
 	return _mode
 
 
-## What draws the diff shown: `text`, `image` or `none`.
+## What draws the diff shown: `text`, `markdown`, `image` or `none`.
 func viewer() -> String:
 	return _viewer
 
@@ -489,7 +509,51 @@ func choose_mode(mode_id: String) -> void:
 ## Shows `viewer_id`'s saved mode again (after it changed) if it is the viewer shown.
 func apply_saved_mode(viewer_id: String) -> void:
 	if viewer_id == _viewer:
+		var previewed: bool = _markdown.visible
 		_set_offered(_viewer, _modes)
+		# Preview and the lines are drawn by different views.
+		if previewed != showing_preview() and not _info.is_empty():
+			show_info(_info)
+
+
+## Whether a Markdown file shows in Preview.
+func showing_preview() -> bool:
+	return _viewer == "markdown" and _mode == "preview"
+
+
+## The Markdown preview (it shows only in the Preview mode).
+func markdown_view() -> MarkdownDiffView:
+	return _markdown
+
+
+## Whether the Markdown preview is on screen with changes to move between.
+func can_jump_in_preview() -> bool:
+	return is_visible_in_tree() and _markdown.visible and not _markdown.changes().is_empty()
+
+
+## Where a Markdown preview's blocks come from: `func(start: int, count:
+## int) -> Array` (`RepoSession.markdown_blocks` of the panel's slot), and
+## its pictures: `func(index: int) -> Dictionary` (`RepoSession.
+## markdown_image`).
+func set_markdown_source(source: Callable, image_source: Callable) -> void:
+	_markdown.source = source
+	_markdown.image_source = image_source
+
+
+## A preview's link to `path` (repository-relative) in `toplevel`: selects
+## it in `list` (a file list with `path_at`) when listed, else opens the
+## working copy in its default app. Returns false when neither is there.
+static func show_linked_file(list: VirtualList, toplevel: String, path: String) -> bool:
+	if list != null:
+		for row: int in list.row_count():
+			if String(list.call(&"path_at", row)) == path:
+				list.select_only(row)
+				list.scroll_to_row(row)
+				return true
+	var full: String = toplevel.path_join(path)
+	if toplevel.is_empty() or not (FileAccess.file_exists(full) or DirAccess.dir_exists_absolute(full)):
+		return false
+	return RepoOps.opener.call(full) == OK
 
 
 ## Shows the modes `offered` of `viewer_id` in the picker (hidden for fewer
@@ -504,7 +568,7 @@ func _set_offered(viewer_id: String, offered: PackedStringArray) -> void:
 		_build_switch()
 	for child: Node in _switch.get_children():
 		(child as Button).set_pressed_no_signal(String(child.get_meta(&"mode")) == _mode)
-	if _viewer == "text":
+	if _viewer == "text" or _viewer == "markdown":
 		_view.side_by_side = _mode == "split"
 	elif _viewer == "image":
 		_image_view.mode = _mode
@@ -629,6 +693,7 @@ func clear(placeholder: String = "", icon: StringName = &"") -> void:
 	_show_side_bar({}, PackedStringArray())
 	_set_offered("none", PackedStringArray())
 	_hide_images()
+	_hide_markdown()
 	_loading.hide_loading()
 	_show_placeholder()
 
@@ -676,6 +741,7 @@ func show_info(info: Dictionary) -> void:
 			if key != _shown:
 				_view.show_lines(0, 0, false)
 				_hide_images()
+				_hide_markdown()
 				_hide_message()
 				_loading.show_loading(true, tr("Loading diff…"))
 			else:
@@ -686,6 +752,7 @@ func show_info(info: Dictionary) -> void:
 			var error: Dictionary = info.get("error", {})
 			_view.show_lines(0, 0, false)
 			_hide_images()
+			_hide_markdown()
 			_show_whole_button(false, false)
 			_show_side_bar({}, PackedStringArray())
 			show_message(tr("Cannot show this diff.\n%s") % tr(String(error.get("message", error.get("title", "")))))
@@ -702,6 +769,8 @@ func show_info(info: Dictionary) -> void:
 	_show_conflict_bar(0, PackedStringArray())
 	_show_side_bar(info.get("conflict_bar", {}), info.get("side_names", PackedStringArray(["ours", "theirs"])))
 	var content: String = String(info.get("content", "text"))
+	if not (showing_preview() and content == "text"):
+		_hide_markdown()
 	if _viewer == "image" and info.has("image") and content != "conflict":
 		_show_images(info.get("image", {}), keep, translated_notes)
 		return
@@ -719,6 +788,9 @@ func show_info(info: Dictionary) -> void:
 				if String(info.get("kind", "")) == "head":
 					buttons.push_front(["eol_restore", tr("Restore line endings"), AppTheme.icon(&"Undo")])
 				show_card(eol_card_text(info), buttons, code)
+				return
+			if showing_preview() and content == "text":
+				_show_markdown(info.get("markdown", {}), keep)
 				return
 			_hide_message()
 			_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep,
@@ -863,6 +935,34 @@ func _hide_images() -> void:
 		_image_view.hide()
 		_image_view.clear()
 	_preview.hide()
+
+
+## A Markdown file's Preview: its blocks, or why there are none.
+func _show_markdown(markdown: Dictionary, keep: bool) -> void:
+	_view.show_lines(0, 0, false)
+	_show_whole_button(false, false)
+	if markdown.is_empty() or bool(markdown.get("too_large", false)) or int(markdown.get("blocks", 0)) == 0:
+		_hide_markdown()
+		_view.hide()
+		if markdown.is_empty():
+			show_message(tr("Cannot preview this file."))
+		elif bool(markdown.get("too_large", false)):
+			show_message(tr("This file is too large to preview (more than %s).") % _size_text(int(markdown.get("limit", -1))))
+		else:
+			show_empty(&"TextFile", "Nothing to preview")
+		return
+	_hide_message()
+	_view.hide()
+	_markdown.show()
+	_markdown.show_blocks(int(markdown["blocks"]), markdown.get("changes", PackedInt64Array()), keep,
+			bool(markdown.get("images_ready", true)))
+
+
+func _hide_markdown() -> void:
+	if _markdown.visible:
+		_markdown.hide()
+		_markdown.clear()
+	_view.show()
 
 
 ## Whether `path` has an extension the image viewer shows.

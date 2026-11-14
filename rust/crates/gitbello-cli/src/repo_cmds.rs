@@ -701,3 +701,118 @@ pub fn blame(args: &[String]) -> Result<()> {
     }
     Ok(())
 }
+
+/// `preview <root> <file> [--staged|--untracked] [--time]`: the Markdown
+/// preview of one file's diff, a line per block (`+` added, `-` removed,
+/// `~` changed), changed words as `[-old-]` and `{+new+}`.
+pub fn preview(args: &[String]) -> Result<()> {
+    use gitbello_core::diff::markdown::{self, Change, Content, ListMarker, Span};
+    let mut positional = Vec::new();
+    let mut kind = DiffKind::Head;
+    let mut time = false;
+    for arg in args {
+        match arg.as_str() {
+            "--staged" => kind = DiffKind::Staged,
+            "--untracked" => kind = DiffKind::Untracked,
+            "--time" => time = true,
+            other => positional.push(other),
+        }
+    }
+    let [root, file] = positional[..] else {
+        bail!("preview needs a worktree root and a file path");
+    };
+    let backend = backend()?;
+    let target = DiffTarget {
+        kind,
+        path: PathBuf::from(file),
+        original_path: None,
+        commit: None,
+    };
+    let cancel = CancelToken::new();
+    let started = std::time::Instant::now();
+    let diff = backend.diff(Path::new(root), &target, Some(LARGE_DIFF_BYTES), &cancel)?;
+    let diffed = started.elapsed();
+    let Some(preview) = markdown::read_sides(&backend, Path::new(root), &target, &diff, &cancel)?
+    else {
+        bail!("{file} has no preview (not a Markdown text diff)");
+    };
+    let total = started.elapsed();
+    if preview.too_large {
+        println!("# too large to preview");
+    }
+    let spans = |spans: &[Span]| -> String {
+        spans
+            .iter()
+            .map(|s| match s.change {
+                Change::Removed => format!("[-{}-]", s.text),
+                Change::Added => format!("{{+{}+}}", s.text),
+                _ => s.text.clone(),
+            })
+            .collect::<String>()
+            .replace('\n', "⏎")
+    };
+    for shown in &preview.blocks {
+        let block = &shown.block;
+        let mark = match shown.change {
+            Change::Same => ' ',
+            Change::Added => '+',
+            Change::Removed => '-',
+            Change::Changed => '~',
+        };
+        let marker = match block.marker {
+            None => String::new(),
+            Some(ListMarker::Bullet) => "• ".into(),
+            Some(ListMarker::Ordered(n)) => format!("{n}. "),
+            Some(ListMarker::Task(done)) => if done { "[x] " } else { "[ ] " }.into(),
+        };
+        let prefix = format!(
+            "{mark} {}{}{marker}",
+            "> ".repeat(usize::from(block.quote)),
+            "  ".repeat(usize::from(block.indent.saturating_sub(1)))
+        );
+        match &block.content {
+            Content::Text(text) => println!("{prefix}{} {}", block.kind.id(), spans(text)),
+            Content::Code { info, lines } => {
+                println!("{prefix}code {info}");
+                for line in lines {
+                    println!("{prefix}  {} {}", &line.change.id()[..1], line.text);
+                }
+            }
+            Content::Table { rows, .. } => {
+                for row in rows {
+                    let cells: Vec<String> = row.cells.iter().map(|c| spans(c)).collect();
+                    println!("{prefix}| {} {}", &row.change.id()[..1], cells.join(" | "));
+                }
+            }
+            Content::None => println!("{prefix}{}", block.kind.id()),
+        }
+    }
+    let read = std::time::Instant::now();
+    let pictures =
+        markdown::read_images(&backend, Path::new(root), &target, &preview.images, &cancel)?;
+    let pictured = read.elapsed();
+    for (image, picture) in preview.images.iter().zip(&pictures) {
+        let side = if image.old { "old" } else { "new" };
+        match picture {
+            Some(p) => println!(
+                "# picture {} ({side}): {} {} bytes",
+                image.path.display(),
+                p.format.id(),
+                p.bytes.len()
+            ),
+            None => println!("# picture {} ({side}): not read", image.path.display()),
+        }
+    }
+    if time {
+        println!(
+            "# {} blocks, {} changed; diff {:.1} ms, total {:.1} ms; {} pictures {:.1} ms",
+            preview.blocks.len(),
+            preview.changes().len(),
+            diffed.as_secs_f64() * 1000.0,
+            total.as_secs_f64() * 1000.0,
+            pictures.len(),
+            pictured.as_secs_f64() * 1000.0
+        );
+    }
+    Ok(())
+}

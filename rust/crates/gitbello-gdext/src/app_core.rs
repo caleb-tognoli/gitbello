@@ -935,13 +935,15 @@ impl AppCore {
             .map_or_else(GString::new, |e| gstr(&e.to_string()))
     }
 
-    /// The saved mode of `viewer` (`text` or `image`), such as `split`.
+    /// The saved mode of `viewer` (`text`, `markdown` or `image`), such as
+    /// `split`.
     #[func]
     fn diff_mode(&self, viewer: GString) -> GString {
         let viewer = Viewer::parse(&viewer.to_string()).unwrap_or_default();
         let mode = runtime_cell::with(|rt| match viewer {
             Viewer::Text => rt.config().diff_text_mode,
             Viewer::Image => rt.config().diff_image_mode,
+            Viewer::Markdown => rt.config().diff_markdown_mode,
             Viewer::None => viewer.default_mode(),
         })
         .unwrap_or(viewer.default_mode());
@@ -962,6 +964,7 @@ impl AppCore {
             match viewer {
                 Viewer::Text => rt.config_mut().diff_text_mode = mode,
                 Viewer::Image => rt.config_mut().diff_image_mode = mode,
+                Viewer::Markdown => rt.config_mut().diff_markdown_mode = mode,
                 Viewer::None => return false,
             }
             rt.save_config().is_ok()

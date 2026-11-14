@@ -146,7 +146,7 @@ fn gradient(width: u32, height: u32) -> Vec<u8> {
 
 /// An RGBA PNG with `pixel(x, y)` for each pixel, deflate-stored (no
 /// compression), so it needs no crate.
-fn png(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
+pub(crate) fn png(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
     let mut raw = Vec::with_capacity((height * (width * 4 + 1)) as usize);
     for y in 0..height {
         raw.push(0);

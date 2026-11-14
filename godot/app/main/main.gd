@@ -628,11 +628,11 @@ func _register_actions() -> void:
 			_says("Focus a filter or search field first."))
 	Actions.register(&"history.toggle_graph", "Show history graph", "View", _toggle_history_graph)
 	Actions.register(&"diff.next_change", "Next change", "View",
-			func() -> void: _navigable_diff().jump_to_change(true), PackedStringArray(["F7"]),
-			func() -> bool: return _navigable_diff() != null)
+			func() -> void: _jump_to_change(true), PackedStringArray(["F7"]),
+			func() -> bool: return _preview_panel() != null or _navigable_diff() != null)
 	Actions.register(&"diff.previous_change", "Previous change", "View",
-			func() -> void: _navigable_diff().jump_to_change(false), PackedStringArray(["Shift+F7"]),
-			func() -> bool: return _navigable_diff() != null)
+			func() -> void: _jump_to_change(false), PackedStringArray(["Shift+F7"]),
+			func() -> bool: return _preview_panel() != null or _navigable_diff() != null)
 	Actions.register(&"diff.retry", "Retry diff", "View",
 			func() -> void:
 				var page: RepoTab = current_page()
@@ -1262,6 +1262,28 @@ func _navigable_diff() -> DiffView:
 				diff = panel.view()
 				break
 	return diff if diff != null and diff.row_count() > 0 and diff.change_source.is_valid() else null
+
+
+## Moves to the next or previous change of the Markdown preview on screen,
+## else of the navigable diff.
+func _jump_to_change(forward: bool) -> void:
+	var panel: DiffPanel = _preview_panel()
+	if panel != null:
+		panel.markdown_view().jump_to_change(forward)
+	elif _navigable_diff() != null:
+		_navigable_diff().jump_to_change(forward)
+
+
+## The diff panel on screen showing a Markdown preview with changes, or null
+## (a focused diff elsewhere wins).
+func _preview_panel() -> DiffPanel:
+	if _focused_diff() != null:
+		return null
+	for node: Node in get_tree().get_nodes_in_group(DiffPanel.GROUP):
+		var panel: DiffPanel = node as DiffPanel
+		if panel != null and panel.can_jump_in_preview():
+			return panel
+	return null
 
 
 ## The diff panel on screen that can show its whole file, or null.

@@ -2083,6 +2083,49 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
+    /// Blocks `start..start + count` of the Markdown preview of the diff in
+    /// `slot` (`changes`, `commit`, `compare` or `file`); see
+    /// `convert::markdown_blocks`. Empty without a preview.
+    #[func]
+    fn markdown_blocks(&self, slot: GString, start: i64, count: i64) -> Array<VarDictionary> {
+        let slot = parse_slot(&slot);
+        let start = usize::try_from(start).unwrap_or(0);
+        let count = usize::try_from(count).unwrap_or(0);
+        self.read(|s| {
+            if let (DiffSlot::Changes, Some(_)) = (slot, s.conflict()) {
+                return None;
+            }
+            let preview = slot_diff(s, slot)?.markdown()?;
+            Some(convert::markdown_blocks(preview, start, count))
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Picture `index` of the Markdown preview in `slot`: `{format, bytes,
+    /// id}` (`id` changes with the bytes), or empty while it is read or when
+    /// it could not be.
+    #[func]
+    fn markdown_image(&self, slot: GString, index: i64) -> VarDictionary {
+        let slot = parse_slot(&slot);
+        let Ok(index) = usize::try_from(index) else {
+            return VarDictionary::new();
+        };
+        self.read(|s| {
+            let picture = slot_diff(s, slot)?.markdown_image(index)?;
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&picture.bytes[..], &mut hasher);
+            let id = format!("{:x}", std::hash::Hasher::finish(&hasher));
+            Some(vdict! {
+                "format" => picture.format.id(),
+                "bytes" => &PackedByteArray::from(&picture.bytes[..]),
+                "id" => &gstr(&id),
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
     /// Like `diff_lines`, for the commit file diff.
     #[func]
     fn commit_diff_lines(&self, start: i64, count: i64) -> Array<VarDictionary> {

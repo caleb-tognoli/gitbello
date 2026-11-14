@@ -214,7 +214,7 @@ pub fn image_format(diff: &FileDiff, path: &Path) -> Option<ImageFormat> {
 }
 
 /// Whether the new side of a diff of `kind` is the working-tree file.
-fn new_side_on_disk(kind: DiffKind) -> bool {
+pub(super) fn new_side_on_disk(kind: DiffKind) -> bool {
     matches!(
         kind,
         DiffKind::Unstaged
@@ -293,7 +293,7 @@ pub fn read_conflict_sides(
     Ok(Some(ImageSides { format, old, new }))
 }
 
-fn is_zero(oid: &str) -> bool {
+pub(super) fn is_zero(oid: &str) -> bool {
     oid.bytes().all(|b| b == b'0')
 }
 
