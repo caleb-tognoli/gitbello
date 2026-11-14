@@ -903,7 +903,7 @@ func _update_blame_bar() -> void:
 		_blame_version.text = ""
 		_blame_version.tooltip_text = ""
 	else:
-		_blame_version.text = tr("As of %s") % ("%s  %s" % [String(commit["oid"]).left(7), String(commit["subject"])])
+		_blame_version.text = tr("As of %s") % ("%s  %s" % [ShortHash.of(String(commit["oid"])), String(commit["subject"])])
 		_blame_version.tooltip_text = tr("The file as this commit left it")
 	var lines: int = int(_blame_info.get("lines", 0))
 	if not _blame_note.is_empty():
@@ -1081,7 +1081,7 @@ func _update_bar() -> void:
 	var start_name: String = String(_request.get("start_name", ""))
 	var fixed: bool = not String(_request.get("start", "")).is_empty()
 	if start_name.is_empty():
-		start_name = String(_request.get("start", "")).left(7)
+		start_name = ShortHash.of(String(_request.get("start", "")))
 	_start.visible = fixed
 	_start.text = tr("as of %s") % (start_name if start_name.length() <= MAX_START_CHARS
 			else start_name.left(MAX_START_CHARS - 1) + "…")

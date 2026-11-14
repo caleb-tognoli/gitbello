@@ -409,7 +409,7 @@ func _on_shelf_selected(shelf: Dictionary) -> void:
 	_shelf_branch.text = branch if not branch.is_empty() else tr("No branch")
 	var offset: int = int(Time.get_time_zone_from_system()["bias"]) * 60
 	_shelf_date.text = Time.get_datetime_string_from_unix_time(int(shelf["time"]) + offset, true).left(16)
-	_shelf_hash.text = oid.left(10)
+	_shelf_hash.text = ShortHash.of(oid)
 	_shelf_hash.tooltip_text = oid
 	_shelf_auto.visible = bool(shelf["auto"])
 	if changed:

@@ -201,7 +201,7 @@ func open(target: String, shown: String = "") -> void:
 ## Checks `target` again from the start (opening, or the source chip).
 func _load(target: String, shown: String) -> void:
 	_target = target
-	_shown = shown if not shown.is_empty() else (target.left(7) if target.is_valid_hex_number() else target)
+	_shown = shown if not shown.is_empty() else (ShortHash.of(target) if target.is_valid_hex_number() else target)
 	_preview = {}
 	_failure = ""
 	_message.text = ""
@@ -501,7 +501,7 @@ func _render_rebase(p: Dictionary, into: String) -> void:
 		_conflicts.set_title(tr("Conflicts"), conflicts.size())
 		_fill_conflicts(conflicts)
 		var at: Label = Label.new()
-		at.text = tr("Stops at %s %s") % [String(stop["oid"]).left(7), String(stop["subject"])]
+		at.text = tr("Stops at %s %s") % [ShortHash.of(String(stop["oid"])), String(stop["subject"])]
 		at.tooltip_text = at.text
 		at.mouse_filter = Control.MOUSE_FILTER_PASS
 		at.theme_type_variation = &"DimLabel"
@@ -593,10 +593,12 @@ func _fill_commits(section: MergeSection, commits: Array, count: int) -> void:
 		who.theme_type_variation = &"DimLabel"
 		row.add_child(who)
 		var oid: Label = Label.new()
-		oid.text = String(commit["oid"]).left(7)
+		oid.text = ShortHash.of(String(commit["oid"]))
+		oid.tooltip_text = String(commit["oid"])
+		oid.mouse_filter = Control.MOUSE_FILTER_PASS
 		oid.theme_type_variation = &"DetailsHash"
 		row.add_child(oid)
-		section.add_row(row, String(commit["oid"]).left(7))
+		section.add_row(row, ShortHash.of(String(commit["oid"])))
 	if count > commits.size():
 		var more: Label = Label.new()
 		more.text = tr("and %d more") % (count - commits.size())

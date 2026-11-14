@@ -378,7 +378,7 @@ static func _marker(wt: Dictionary) -> StringName:
 
 func _branch_text(wt: Dictionary) -> String:
 	if bool(wt["detached"]):
-		return tr("detached %s") % String(wt["head"]).left(7)
+		return tr("detached %s") % ShortHash.of(String(wt["head"]))
 	return String(wt["branch"])
 
 

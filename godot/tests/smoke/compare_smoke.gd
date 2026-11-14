@@ -150,11 +150,11 @@ func run() -> void:
 	expect(await _compared(session), "the commits compare")
 	expect_eq(String(session.compare_info()["left"]["oid"]), pair[0], "the older commit is on the left")
 	expect_eq(String(session.compare_info()["mode"]), "fork", "commits compare since the fork")
-	expect(not compare.bar_button("left").text.contains(pair[0].left(7)), "the chips name commits by subject: %s"
+	expect(not compare.bar_button("left").text.contains(ShortHash.of(pair[0])), "the chips name commits by subject: %s"
 			% compare.bar_button("left").text)
 	var commit_recent: Dictionary = Core.compare_recent(compare._repo_key())[0]
 	var commit_label: String = CompareRecentPopover.label(commit_recent)
-	expect(not commit_label.contains(pair[0].left(7)) and commit_label.contains(" ⇄ "),
+	expect(not commit_label.contains(ShortHash.of(pair[0])) and commit_label.contains(" ⇄ "),
 			"Recent names commits by subject: %s" % commit_label)
 
 	# A branch's menu offers both comparisons.

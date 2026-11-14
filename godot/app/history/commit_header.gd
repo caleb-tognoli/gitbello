@@ -8,9 +8,6 @@ extends PanelContainer
 
 ## The theme type its sizes and tints come from.
 const THEME_TYPE: StringName = &"CommitDetails"
-## Characters shown of the commit's and its parents' hashes.
-const HASH_LENGTH: int = 10
-const PARENT_LENGTH: int = 7
 ## Refs shown by name; more fold into counted chips (`_show_refs`).
 const MAX_REF_CHIPS: int = 6
 
@@ -100,7 +97,7 @@ func show_info(info: Dictionary) -> void:
 	_date.tooltip_text = tr("Author date")
 	var oid: String = String(info["oid"])
 	_shown_oid = oid
-	_hash.text = oid.left(HASH_LENGTH)
+	_hash.text = ShortHash.of(oid)
 	_hash.tooltip_text = oid
 	_show_parents(oid, info["parents"] if links_parents else PackedStringArray())
 	_show_refs(info.get("refs", []))
@@ -292,7 +289,7 @@ func _show_parents(oid: String, parents: PackedStringArray) -> void:
 	for index: int in parents.size():
 		var parent: String = parents[index]
 		var link: LinkButton = LinkButton.new()
-		link.text = parent.left(PARENT_LENGTH)
+		link.text = ShortHash.of(parent)
 		link.tooltip_text = tr("Go to parent %d") % (index + 1) + "\n" + parent
 		link.theme_type_variation = &"DetailsParentLink"
 		link.underline = LinkButton.UNDERLINE_MODE_ON_HOVER

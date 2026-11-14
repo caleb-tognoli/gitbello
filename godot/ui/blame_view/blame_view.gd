@@ -194,7 +194,7 @@ func _set_hover_commit(oid: String) -> void:
 
 
 ## Over the gutter: the commit's subject, its author and exact date, and
-## its short hash.
+## its full hash.
 func _get_tooltip(at_position: Vector2) -> String:
 	var row: int = row_at(at_position)
 	if row < 0 or at_position.x >= _lead_width():
@@ -205,7 +205,7 @@ func _get_tooltip(at_position: Vector2) -> String:
 	if bool(data.get("working", false)):
 		return tr("Not committed yet")
 	return "%s\n%s · %s\n%s" % [String(data.get("summary", "")), String(data.get("author", "")),
-			RelativeDate.exact(int(data.get("time", 0)), _utc_offset), String(data["commit"]).left(7)]
+			RelativeDate.exact(int(data.get("time", 0)), _utc_offset), String(data["commit"])]
 
 
 func _update_theme() -> void:

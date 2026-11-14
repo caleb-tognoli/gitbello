@@ -146,7 +146,7 @@ func _check_search(session: RepoSession, list: CommitList) -> void:
 	expect_eq(session.search_overview(6), PackedByteArray([1, 1, 1, 1, 0, 0]),
 			"the overview marks the top two of three rows")
 	var oid: String = list.hash_at(2)
-	session.search_commits(oid.left(7))
+	session.search_commits(ShortHash.of(oid))
 	expect(await wait_until(func() -> bool: return bool(session.search_info().get("done", false))),
 			"the hash search finishes")
 	expect_eq(session.next_match(0, true), 2, "a hash prefix finds its commit")
@@ -267,7 +267,7 @@ func _check_parent_links(main: Main, page: RepoTab) -> void:
 	var parent: String = parents[0]
 	var row: int = int(page.session.graph_parent_rows(0)[parent])
 	var link: LinkButton = details.parent_links()[0]
-	expect_eq(link.text, parent.left(7), "the parent hash stays short")
+	expect_eq(link.text, ShortHash.of(parent), "the parent hash stays short")
 	expect(link.tooltip_text.contains(parent), "the tooltip contains the full parent OID")
 	expect_eq(link.focus_mode, Control.FOCUS_ALL, "parent links are keyboard accessible")
 	link.grab_focus()

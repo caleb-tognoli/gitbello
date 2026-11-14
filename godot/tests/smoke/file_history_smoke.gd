@@ -158,7 +158,7 @@ func run() -> void:
 			["Improve login", "Move auth into login"], "the matches, newest first")
 	expect_eq(list.cursor, 1, "the selected version stays selected")
 	expect(not list.match_strip().visible, "no strip of matches: only they are listed")
-	filter.set_text(String(added["oid"]).left(7))
+	filter.set_text(ShortHash.of(String(added["oid"])))
 	expect(await _filtered(session, view, 1), "a hash finds its commit")
 	expect_eq(String(list.version_at(0)["subject"]), "Add auth", "the first commit")
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "which is selected")

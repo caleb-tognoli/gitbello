@@ -118,7 +118,10 @@ fn tags_and_commits_also_compare_since_the_fork() {
 
     let by_hash = compare(&repo, &first, rev("HEAD~0"), None);
     assert_eq!(by_hash.left.kind, SideKind::Commit);
-    assert_eq!(by_hash.left.name(), &first[..7]);
+    assert_eq!(
+        by_hash.left.name(),
+        &first[..gitbello_core::graph::SHORT_HASH_LEN]
+    );
     assert_eq!(by_hash.right.kind, SideKind::Commit);
     assert_eq!(by_hash.right.name(), "HEAD~0");
 }

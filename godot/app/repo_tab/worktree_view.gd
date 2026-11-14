@@ -1052,7 +1052,7 @@ func _update_header() -> void:
 	var branch: String = session.current_branch()
 	var head: String = String(session.status().get("oid", ""))
 	if branch.is_empty():
-		branch = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("No branch yet")
+		branch = tr("Detached at %s") % ShortHash.of(head) if not head.is_empty() else tr("No branch yet")
 	_branch_button.show_state(branch, AppTheme.icon(&"GitBranch"), session.is_ready())
 	# A long name is cut short on the button: the tooltip has all of it.
 	_branch_button.tooltip_text = (branch + "
@@ -1110,12 +1110,12 @@ func _update_banner() -> void:
 	var text: String = doing
 	match operation:
 		"merge":
-			var merged: String = other if not other.is_empty() else oid.left(7)
+			var merged: String = other if not other.is_empty() else ShortHash.of(oid)
 			text = tr("Merging %s into %s") % [merged, head] if not head.is_empty() else tr("Merging %s") % merged
 		"cherry_pick":
-			text = tr("Cherry-picking %s") % oid.left(7)
+			text = tr("Cherry-picking %s") % ShortHash.of(oid)
 		"revert":
-			text = tr("Reverting %s") % oid.left(7)
+			text = tr("Reverting %s") % ShortHash.of(oid)
 		"rebase":
 			text = tr("Rebasing %s onto %s") % [head if not head.is_empty() else "HEAD", _onto_name(oid)]
 	var steps: int = int(info.get("steps", 0)) if operation == "rebase" else 0
@@ -1163,7 +1163,7 @@ func _onto_name(oid: String) -> String:
 	for ref: Dictionary in session.branch_refs():
 		if String(ref["commit"]) == oid and String(ref["kind"]) == "branch":
 			return String(ref["short_name"])
-	return oid.left(7)
+	return ShortHash.of(oid)
 
 
 static func _ago(seconds: int) -> String:

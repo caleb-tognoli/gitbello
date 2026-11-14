@@ -6,7 +6,7 @@ mod loader;
 mod log;
 mod search;
 
-pub use index::{to_hex, CommitRow, GraphIndex, IndexMemory, CHECKPOINT_INTERVAL};
+pub use index::{to_hex, CommitRow, GraphIndex, IndexMemory, CHECKPOINT_INTERVAL, SHORT_HASH_LEN};
 pub use lanes::{Lane, LaneState, NodeId, RowLayout, Segment, SegmentKind};
 pub use loader::{
     GraphLoadError, GraphLoader, GraphReader, LoadProgress, LoadState, FIRST_PAGE_ROWS,

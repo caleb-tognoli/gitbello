@@ -136,7 +136,7 @@ func _rebuild() -> void:
 		for tag: Dictionary in tags:
 			exact = exact or String(tag["name"]) == query
 			_add(section, String(tag["name"]), &"GitTag", {"spec": String(tag["name"]), "working": false},
-					String(tag["commit"]).left(10))
+					String(tag["commit"]))
 	var commits: Array[Dictionary] = []
 	for row: Dictionary in session.graph_rows(0, RECENT_COMMITS):
 		var oid: String = String(row["hash"])

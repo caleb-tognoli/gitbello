@@ -80,10 +80,14 @@ impl CommitRow<'_> {
 
     pub fn short_hash(&self) -> String {
         let mut hex = self.hash_hex();
-        hex.truncate(7);
+        hex.truncate(SHORT_HASH_LEN);
         hex
     }
 }
+
+/// Characters in a short commit hash, wherever one is shown. Keep it equal to
+/// `ShortHash.LENGTH` in `godot/ui/short_hash/short_hash.gd`.
+pub const SHORT_HASH_LEN: usize = 7;
 
 pub fn to_hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";

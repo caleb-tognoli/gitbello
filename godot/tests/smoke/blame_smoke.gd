@@ -144,7 +144,7 @@ func run() -> void:
 	expect_eq(String(info["path"]), OLD, "under the name it had")
 	expect_eq(int(info["lines"]), 12, "with the lines it had")
 	expect_eq(view.blame_status_text(), "12 lines · 1 commit", "all by one commit")
-	expect_eq(view.blame_version_text(), tr("As of %s") % ("%s  %s" % [first.left(7), "Add auth"]), "the strip names it")
+	expect_eq(view.blame_version_text(), tr("As of %s") % ("%s  %s" % [ShortHash.of(first), "Add auth"]), "the strip names it")
 	expect_eq(blame.cursor, 9, "the caret stays on the line")
 	expect(await wait_until(func() -> bool: return view.blame_focus().is_empty() and not view.details_header().visible),
 			"a version without the focused commit's lines lets go of it")

@@ -82,7 +82,8 @@ func _rebuild() -> void:
 	for tag: Dictionary in _session.tags():
 		var item: TreeItem = _tree.create_item(root)
 		item.set_text(0, String(tag["name"]))
-		item.set_text(1, String(tag["commit"]).left(7))
+		item.set_text(1, ShortHash.of(String(tag["commit"])))
+		item.set_tooltip_text(1, String(tag["commit"]))
 		item.set_text(2, tr("annotated") if bool(tag["annotated"]) else tr("lightweight"))
 		if String(tag["name"]) == chosen:
 			item.select(0)

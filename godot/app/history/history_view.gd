@@ -301,7 +301,7 @@ func _update_scope() -> void:
 	var head: String = String(session.status().get("oid", "")) if session != null else ""
 	var current: String = tr("Current branch: %s") % branch
 	if branch.is_empty():
-		current = tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("Current branch")
+		current = tr("Detached at %s") % ShortHash.of(head) if not head.is_empty() else tr("Current branch")
 	var all: bool = bool(info.get("all_branches", false))
 	if _options == null:
 		return

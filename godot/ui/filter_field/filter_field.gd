@@ -29,7 +29,8 @@ const THEME_TYPE: StringName = &"FilterField"
 
 var _options_button: Button = null
 var _popover: OptionsPopover = null
-var _badge: CountBadge = CountBadge.new()
+## The count on the options button (made by `add_options`).
+var _badge: CountBadge = null
 
 @onready var _search_icon: TextureRect = %SearchIcon
 @onready var _text: LineEdit = %Text
@@ -123,6 +124,7 @@ func add_options() -> OptionsPopover:
 	_options_button = add_button(&"Sliders", "Options")
 	_options_button.toggle_mode = true
 	_options_button.focus_mode = Control.FOCUS_NONE
+	_badge = CountBadge.new()
 	_options_button.add_child(_badge)
 	_options_button.pressed.connect(open_options)
 	return _popover
@@ -170,7 +172,7 @@ func options_button() -> Button:
 	return _options_button
 
 
-## The count on the options button, for tests.
+## The count on the options button, for tests (null without `add_options`).
 func options_badge() -> CountBadge:
 	return _badge
 

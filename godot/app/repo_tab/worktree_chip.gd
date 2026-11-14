@@ -151,7 +151,7 @@ func _details() -> Array[Array]:
 func _branch_text() -> String:
 	if bool(worktree["detached"]):
 		var head: String = String(worktree["head"])
-		return tr("Detached at %s") % head.left(7) if not head.is_empty() else tr("No branch yet")
+		return tr("Detached at %s") % ShortHash.of(head) if not head.is_empty() else tr("No branch yet")
 	var branch: String = String(worktree["branch"])
 	return branch if not branch.is_empty() else tr("No branch yet")
 

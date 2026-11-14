@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::diff::{CommitSide, DiffKind, DiffTarget};
+use crate::graph::SHORT_HASH_LEN;
 use crate::repo::{git_path, Change};
 
 /// The right side of a comparison.
@@ -124,9 +125,9 @@ impl ResolvedSide {
             return String::new();
         }
         let spec = self.spec.trim();
-        let is_hash = spec.len() >= 7 && spec.chars().all(|c| c.is_ascii_hexdigit());
+        let is_hash = spec.len() >= SHORT_HASH_LEN && spec.chars().all(|c| c.is_ascii_hexdigit());
         if is_hash {
-            spec[..7].to_owned()
+            spec[..SHORT_HASH_LEN].to_owned()
         } else {
             spec.to_owned()
         }

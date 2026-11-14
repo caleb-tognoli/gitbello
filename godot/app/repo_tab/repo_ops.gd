@@ -379,12 +379,12 @@ func checkout_remote(ref_name: String) -> int:
 
 
 func checkout_commit(oid: String) -> void:
-	_ask("Check out commit", tr("Check out %s?\nHEAD will be detached: new commits are not on any branch until you create one.") % oid.left(7),
+	_ask("Check out commit", tr("Check out %s?\nHEAD will be detached: new commits are not on any branch until you create one.") % ShortHash.of(oid),
 			"Check out", _checkout_detached.bind(oid))
 
 
 func _checkout_detached(oid: String) -> void:
-	_checkout(oid.left(7), func(changes: String) -> int: return session.checkout_commit(oid, changes))
+	_checkout(ShortHash.of(oid), func(changes: String) -> int: return session.checkout_commit(oid, changes))
 
 
 func _checkout(shown: String, start: Callable) -> int:
@@ -1109,9 +1109,9 @@ func _run_undo(commit: Dictionary, mode: String, origin: Control) -> void:
 func cherry_pick(oid: String, subject: String) -> void:
 	var onto: String = session.current_branch()
 	var origin: Control = Actions.origin()
-	_ask("Cherry-pick", tr("Apply %s “%s” on top of %s?") % [oid.left(7), subject, onto if not onto.is_empty() else "HEAD"],
+	_ask("Cherry-pick", tr("Apply %s “%s” on top of %s?") % [ShortHash.of(oid), subject, onto if not onto.is_empty() else "HEAD"],
 			"Cherry-pick", func() -> void:
-				_track(session.cherry_pick(oid), tr("Cherry-picking %s") % oid.left(7), "",
+				_track(session.cherry_pick(oid), tr("Cherry-picking %s") % ShortHash.of(oid), "",
 						Callable(), origin))
 
 
@@ -1139,9 +1139,9 @@ func abort_operation() -> void:
 		"rebase":
 			stopping = tr("rebasing %s") % String(info.get("head_name", ""))
 		"cherry_pick":
-			stopping = tr("cherry-picking %s") % String(info.get("other_oid", "")).left(7)
+			stopping = tr("cherry-picking %s") % ShortHash.of(String(info.get("other_oid", "")))
 		"revert":
-			stopping = tr("reverting %s") % String(info.get("other_oid", "")).left(7)
+			stopping = tr("reverting %s") % ShortHash.of(String(info.get("other_oid", "")))
 	var resolved: int = int(info.get("resolved", 0))
 	var question: String = tr("Stop %s and discard its changes?") % stopping if resolved == 0 \
 			else tr("Stop %s and discard its changes, with the %s you resolved?") % [stopping, _files(resolved)]
@@ -1152,7 +1152,7 @@ func abort_operation() -> void:
 func copy_hash(oid: String) -> void:
 	DisplayServer.clipboard_set(oid)
 	if feedback != null and feedback.toasts != null:
-		feedback.toasts.show_success(tr("Copied %s") % oid.left(7))
+		feedback.toasts.show_success(tr("Copied %s") % ShortHash.of(oid))
 
 
 ## Opens a file Open asked for (`RepoSession.version_ready`) in its default

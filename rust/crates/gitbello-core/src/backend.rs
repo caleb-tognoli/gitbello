@@ -2528,7 +2528,7 @@ fn stale_shelf(oid: &str) -> GitError {
         GitErrorKind::Stale,
         format!(
             "the shelf {} is no longer in the stash list",
-            oid.get(..7).unwrap_or(oid)
+            oid.get(..crate::graph::SHORT_HASH_LEN).unwrap_or(oid)
         ),
     )
 }

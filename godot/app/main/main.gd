@@ -1053,7 +1053,7 @@ func _register_merge_actions() -> void:
 	Actions.register(&"commit.merge", "Merge / Rebase commit…", "History",
 			func() -> void:
 				var target: Dictionary = page.call().commit_target()
-				ops.call().merge_into_current(String(target["hash"]), String(target["hash"]).left(7)),
+				ops.call().merge_into_current(String(target["hash"]), ShortHash.of(String(target["hash"]))),
 			PackedStringArray(),
 			func() -> bool:
 				var target: Dictionary = page.call().commit_target() if is_ready.call() else {}
@@ -1199,7 +1199,7 @@ func _start_point(ref: Dictionary, commit: Dictionary) -> Array:
 	var head_oid: String = String(current_page().session.status().get("oid", ""))
 	if not commit.is_empty() and String(commit["hash"]) != head_oid:
 		var oid: String = String(commit["hash"])
-		return [oid, "%s “%s”" % [oid.left(7), String(commit["subject"])]]
+		return [oid, "%s “%s”" % [ShortHash.of(oid), String(commit["subject"])]]
 	var head: String = current_page().session.current_branch()
 	return ["HEAD", head if not head.is_empty() else "HEAD"]
 
