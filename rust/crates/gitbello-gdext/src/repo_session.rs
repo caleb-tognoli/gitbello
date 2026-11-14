@@ -147,6 +147,10 @@ impl RepoSession {
     /// (`branch_delete_info`).
     #[signal]
     fn branch_delete_info_ready(job: i64);
+    /// The info `load_worktree_delete_info` returned `job` for arrived
+    /// (`worktree_delete_info`, empty when the check failed).
+    #[signal]
+    fn worktree_delete_info_ready(job: i64);
     /// The files of shelf `oid` arrived (`shelf_files`).
     #[signal]
     fn shelf_files_loaded(oid: GString);
@@ -653,10 +657,14 @@ impl RepoSession {
         )
     }
 
-    /// `{branch, base, not_in_base, ahead, remote, worktree, is_head}`;
-    /// `remote` is the remote branch (`origin/x`) while the remote has it,
-    /// else "", `worktree` the other worktree that has it checked out, else
-    /// "". Empty until it arrived.
+    /// `{branch, base, not_in_base, squashed, checked, ahead, remote,
+    /// worktree, is_head}`; `remote` is the remote branch (`origin/x`) while
+    /// the remote has it, else "", `worktree` the other worktree that has it
+    /// checked out, else "". Ready as soon as `load_branch_delete_info`
+    /// returns, with `checked` false (and `not_in_base` 0) until
+    /// `branch_delete_info_ready`; still false then when the check failed.
+    /// `not_in_base` counts a commit squashed or rebased into the base as
+    /// merged, `squashed` that the base has the whole change in one commit.
     #[func]
     fn branch_delete_info(&self) -> VarDictionary {
         self.read(|s| {
@@ -665,6 +673,8 @@ impl RepoSession {
                     "branch" => &gstr(&info.branch),
                     "base" => &gstr(info.base.as_deref().unwrap_or("")),
                     "not_in_base" => i64::from(info.not_in_base),
+                    "squashed" => info.squashed,
+                    "checked" => info.checked,
                     "ahead" => i64::from(info.ahead),
                     "remote" => &gstr(&info.remote.as_ref().map(|r| r.short_name()).unwrap_or_default()),
                     "worktree" => &info.worktree.as_deref().map_or_else(GString::new, path_str),
@@ -1050,6 +1060,65 @@ impl RepoSession {
         })
     }
 
+    /// Removes worktree `path` like `remove_worktree`, first keeping commit
+    /// `oid` as new branch `keep`. Label `remove worktree`.
+    #[func]
+    fn remove_worktree_keeping(
+        &self,
+        path: GString,
+        force: bool,
+        keep: GString,
+        oid: GString,
+    ) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.remove_worktree_keeping(
+                    &self.key,
+                    PathBuf::from(path.to_string()),
+                    force,
+                    keep.to_string(),
+                    oid.to_string(),
+                )
+            })
+            .flatten(),
+        )
+    }
+
+    /// What deleting linked worktree `path` loses besides its changes;
+    /// arrives with `worktree_delete_info_ready(job)`. -1 when the worktree
+    /// is not read yet.
+    #[func]
+    fn load_worktree_delete_info(&self, path: GString) -> i64 {
+        job_id(
+            runtime_cell::with(|rt| {
+                rt.load_worktree_delete_info(&self.key, &PathBuf::from(path.to_string()))
+            })
+            .flatten(),
+        )
+    }
+
+    /// `{path, operation, branch, unreferenced, head}`: the operation in
+    /// progress there (an id as in `operation()`), the local branch it
+    /// started from (a rebase's or bisect's) else "", and for a detached
+    /// worktree without one the commits of its HEAD that no branch, remote
+    /// branch or tag has. Empty until it arrived, or when the check failed.
+    #[func]
+    fn worktree_delete_info(&self) -> VarDictionary {
+        self.read(|s| {
+            s.worktree_delete_info().map(|info| {
+                vdict! {
+                    "path" => &path_str(&info.path),
+                    "operation" => &gstr(convert::operation_id(info.operation)),
+                    "branch" => &gstr(info.branch.as_deref().unwrap_or("")),
+                    "unreferenced" => i64::from(info.unreferenced),
+                    "head" => &gstr(info.head.as_deref().unwrap_or("")),
+                }
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
     /// Label `lock worktree`.
     #[func]
     fn lock_worktree(&self, path: GString, reason: GString) -> i64 {
@@ -1079,7 +1148,8 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.load_cleanup(&self.key)).flatten())
     }
 
-    /// `{path, branch, reason, changed, ahead, locked}`; reason is `merged`
+    /// `{path, branch, reason, changed, ahead, locked}`; reason is
+    /// `merged`, `squashed` (its changes squashed or rebased into the base)
     /// or `upstream_gone`, changed is -1 when unknown.
     #[func]
     fn cleanup_candidates(&self) -> Array<VarDictionary> {
@@ -1091,6 +1161,7 @@ impl RepoSession {
                     "branch" => &gstr(&c.branch),
                     "reason" => match c.reason {
                         CleanupReason::Merged => "merged",
+                        CleanupReason::Squashed => "squashed",
                         CleanupReason::UpstreamGone => "upstream_gone",
                     },
                     "changed" => c.changed.map_or(-1, to_i64),

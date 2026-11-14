@@ -194,7 +194,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return read_file(lines_path).begins_with("topic 1\n")),
 			"the commit was picked onto main")
 
-	# Deleting renamed from its context menu: it is not merged, which the one
+	# Deleting renamed from its context menu: its commit was picked, which the one
 	# dialog says; Undo brings it back.
 	press("Ctrl+B")
 	expect(await wait_until(func() -> bool: return popover.visible), "Ctrl+B opens the branch list")
@@ -213,9 +213,12 @@ func run() -> void:
 	expect("Delete branch…" in page.menu_labels(), "the branch menu offers delete: %s" % [page.menu_labels()])
 	expect(page.press_menu("Delete branch…"), "delete chosen from the menu")
 	expect(await wait_until(func() -> bool: return form.visible), "delete asks first")
-	expect(_notes(form).contains("not in"), "the dialog says what is merged nowhere else: %s" % _notes(form))
+	# Its one commit was picked onto main, so its change is there: merged.
+	expect(await wait_until(func() -> bool: return form.item_facts("branch") == PackedStringArray(["merged"])),
+			"once checked, a branch whose commits were picked counts as merged: %s" % [form.item_facts("branch")])
 	expect_eq(form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
-	press("Enter")
+	expect(form.get_ok_button().has_focus(), "Delete has the focus")
+	press("Enter", form)
 	expect(await wait_until(func() -> bool: return not _has_branch(session, "renamed")), "renamed was deleted at once")
 	expect(await wait_until(func() -> bool: return session.can_undo_branch_delete("renamed")), "the delete can be undone")
 	session.undo_branch_delete("renamed")

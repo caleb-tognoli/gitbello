@@ -1847,6 +1847,8 @@ static func _add_loading(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"spinner_color", T, p.accent)
 	theme.set_color(&"spinner_track", T, Color(p.accent, 0.18))
 	theme.set_constant(&"spinner_size", T, 26)
+	# LoadingSpinner's, beside text ("Checking…")
+	theme.set_constant(&"inline_size", T, 13)
 	theme.set_constant(&"gap", T, 12)
 	theme.set_constant(&"line_height", T, 3)
 

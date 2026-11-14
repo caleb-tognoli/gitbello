@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use gitbello_core::backend::{GitBackend, PatchGuard, ProgressSink, ShelfChange};
+use gitbello_core::backend::{ContentMerge, GitBackend, PatchGuard, ProgressSink, ShelfChange};
 use gitbello_core::diff::{DiffTarget, FileDiff, PatchMode};
 use gitbello_core::git::{CancelToken, GitError, GitErrorKind};
 use gitbello_core::jobs::{
@@ -250,6 +250,19 @@ impl GitBackend for FakeBackend {
         _: &str,
         _: &CancelToken,
     ) -> Result<u32, GitError> {
+        Ok(0)
+    }
+    fn merged_by_content(
+        &self,
+        _: &Path,
+        _: &[String],
+        tips: &[String],
+        _: usize,
+        _: &CancelToken,
+    ) -> Result<Vec<ContentMerge>, GitError> {
+        Ok(vec![ContentMerge::default(); tips.len()])
+    }
+    fn unreferenced_count(&self, _: &Path, _: &str, _: &CancelToken) -> Result<u32, GitError> {
         Ok(0)
     }
     fn resolve(&self, _: &Path, _: &str, _: &CancelToken) -> Result<Option<String>, GitError> {

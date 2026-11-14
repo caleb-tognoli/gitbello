@@ -67,6 +67,24 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 - History of a repository without commits says so in the commit list, not the details.
 - Empty states wait for the load: a panel stays blank until it knows it has nothing.
 
+### Deleting worktrees
+- Delete dialogs open at once; whether the branch is merged fills in when the check
+  finishes (the loading spinner and "Checking…" meanwhile, or "could not check").
+- What a row loses shows as small tinted badges with icons, like the merge dialog's
+  ("2 not in main", "1 not pushed", "1 changed file", "rebasing"), merged branches in
+  green; hover one for the details.
+- A branch squash-merged into main counts as merged ("squash-merged"), and one whose
+  commits were rebased or picked into main as "merged", in Delete worktree, Delete branch
+  and Clean up merged worktrees.
+- Delete worktree ticks the branch (and its remote branch) only once it is found merged.
+- A worktree in the middle of a rebase or bisect offers the branch it started from, and
+  says the operation goes with it.
+- A detached worktree with commits on no branch offers "Keep as" a new branch, ticked,
+  with a green count of the commits it keeps; click the name to rename it. Unticked, the
+  folder says how many commits on no branch go with it.
+- Clicking right on a row's check box toggles it (it used to toggle twice); Space toggles
+  a focused row.
+
 ## 1.1.0
 
 ### Compare

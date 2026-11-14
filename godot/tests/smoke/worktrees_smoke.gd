@@ -188,8 +188,8 @@ func run() -> void:
 	var delete_form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return delete_form.visible), "delete asks first")
 	var with_branch: CheckBox = delete_form.field("delete_branch") as CheckBox
-	expect(with_branch != null and with_branch.button_pressed and with_branch.accessibility_name == "spare",
-			"deleting the branch too is offered, on")
+	expect(with_branch != null and with_branch.accessibility_name == "spare", "deleting the branch too is offered")
+	expect(await wait_until(func() -> bool: return with_branch.button_pressed), "on, once it is found merged")
 	expect_eq(delete_form.get_ok_button().theme_type_variation, &"DangerButton", "Delete is the red button")
 	press("Enter")
 	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "the spare worktree was deleted")
@@ -285,6 +285,8 @@ func _delete_while_in_use(main: Main, page: RepoTab, session: RepoSession, repo:
 	expect(await _menu_for(page, session, "repo-10-busy", "Delete…"), "the menu offers delete")
 	var form: FormDialog = page.ops().form()
 	expect(await wait_until(func() -> bool: return form.visible), "delete asks first")
+	expect(await wait_until(func() -> bool: return bool(form.values().get("delete_branch", false))),
+			"its merged branch is ticked once checked")
 	press("Enter")
 	var retry: Array[Button] = []
 	expect(await wait_until(func() -> bool:

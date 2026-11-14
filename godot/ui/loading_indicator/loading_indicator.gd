@@ -112,12 +112,19 @@ func _draw_center() -> void:
 
 ## A faint ring with an arc turning around it, `side` pixels across.
 func _draw_spinner(center: Vector2, side: float) -> void:
+	draw_spinner(self, center, side, _elapsed())
+
+
+## The spinner on `item` (with this theme type's colours), `elapsed` seconds
+## into its turning; `LoadingSpinner` draws the same one inline.
+static func draw_spinner(item: Control, center: Vector2, side: float, elapsed: float) -> void:
 	var width: float = maxf(side * 0.12, 1.5)
 	var radius: float = (side - width) * 0.5
-	draw_arc(center, radius, 0.0, TAU, 48, get_theme_color(&"spinner_track", THEME_TYPE), width, true)
-	var turn: float = fmod(_elapsed() / TURN, 1.0)
+	item.draw_arc(center, radius, 0.0, TAU, 48, item.get_theme_color(&"spinner_track", THEME_TYPE), width, true)
+	var turn: float = fmod(elapsed / TURN, 1.0)
 	var start: float = turn * TAU - PI * 0.5
-	draw_arc(center, radius, start, start + ARC * TAU, 24, get_theme_color(&"spinner_color", THEME_TYPE), width, true)
+	item.draw_arc(center, radius, start, start + ARC * TAU, 24, item.get_theme_color(&"spinner_color", THEME_TYPE),
+			width, true)
 
 
 ## An indeterminate line along the top edge: a segment sliding across a

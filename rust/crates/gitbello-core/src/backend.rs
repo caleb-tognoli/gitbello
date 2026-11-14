@@ -41,11 +41,13 @@ mod blame;
 mod compare;
 mod ignore;
 mod merge;
+mod merged;
 mod path_log;
 mod people;
 mod shelf_files;
 
 pub use amend::AmendSnapshot;
+pub use merged::{ContentMerge, CONTENT_MERGE_LIMIT};
 
 /// A shelf replacement, retained to undo a per-file discard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,6 +371,26 @@ pub trait GitBackend: Send + Sync {
         repo: &Path,
         bases: &[String],
         tip: &str,
+        cancel: &CancelToken,
+    ) -> Result<u32, GitError>;
+    /// For each of `tips`, its commits (merges left out) that no base has,
+    /// counting a commit whose change a base has as merged, and whether a
+    /// base has its whole change in one commit (a squash merge). Looks at
+    /// the bases' newest `limit` non-merge commits. Read-only.
+    fn merged_by_content(
+        &self,
+        repo: &Path,
+        bases: &[String],
+        tips: &[String],
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<Vec<ContentMerge>, GitError>;
+    /// Commits of `oid` that no branch, remote branch or tag has: what is
+    /// lost when a detached worktree at `oid` goes.
+    fn unreferenced_count(
+        &self,
+        repo: &Path,
+        oid: &str,
         cancel: &CancelToken,
     ) -> Result<u32, GitError>;
 
@@ -2087,6 +2109,43 @@ impl GitBackend for CliBackend {
         out.stdout_text().trim().parse().map_err(|_| {
             GitError::new(
                 format!("rev-list --count {tip}"),
+                GitErrorKind::UnexpectedOutput,
+                out.stdout_text(),
+            )
+        })
+    }
+
+    fn merged_by_content(
+        &self,
+        repo: &Path,
+        bases: &[String],
+        tips: &[String],
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<Vec<ContentMerge>, GitError> {
+        self.merged_by_content_impl(repo, bases, tips, limit, cancel)
+    }
+
+    fn unreferenced_count(
+        &self,
+        repo: &Path,
+        oid: &str,
+        cancel: &CancelToken,
+    ) -> Result<u32, GitError> {
+        let args = [
+            "rev-list",
+            "--count",
+            oid,
+            "--not",
+            "--branches",
+            "--remotes",
+            "--tags",
+            "--",
+        ];
+        let out = self.read(repo, &args, cancel)?;
+        out.stdout_text().trim().parse().map_err(|_| {
+            GitError::new(
+                format!("rev-list --count {oid}"),
                 GitErrorKind::UnexpectedOutput,
                 out.stdout_text(),
             )

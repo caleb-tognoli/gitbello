@@ -13,7 +13,9 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use crate::backend::{CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange};
+use crate::backend::{
+    CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange, CONTENT_MERGE_LIMIT,
+};
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
@@ -71,9 +73,9 @@ use blame::{apply_blame_commit, apply_blamed_version, blame_after_status};
 pub use blame::{BlameState, BLAME_COMMIT_JOB_LABEL, BLAME_JOB_LABEL, BLAME_VERSION_JOB_LABEL};
 use branch_delete::BranchDeleteState;
 pub use branch_delete::{
-    BranchDelete, BranchDeleteInfo, DeletedBranch, RemoteBranch, BRANCH_DELETE_INFO_JOB_LABEL,
-    DELETE_BRANCH_JOB_LABEL, DELETE_REMOTE_BRANCH_JOB_LABEL, MAX_BRANCH_UNDO,
-    UNDO_BRANCH_DELETE_JOB_LABEL,
+    BranchDelete, BranchDeleteInfo, DeletedBranch, RemoteBranch, WorktreeDeleteInfo,
+    BRANCH_DELETE_INFO_JOB_LABEL, DELETE_BRANCH_JOB_LABEL, DELETE_REMOTE_BRANCH_JOB_LABEL,
+    MAX_BRANCH_UNDO, UNDO_BRANCH_DELETE_JOB_LABEL, WORKTREE_DELETE_INFO_JOB_LABEL,
 };
 use compare::{apply_compare, compare_after_refs, compare_after_status};
 pub use compare::{
@@ -388,8 +390,15 @@ pub enum RuntimeEvent {
         repo: PathBuf,
         target: String,
     },
-    /// The delete info of job `job`, from [`Runtime::load_branch_delete_info`].
+    /// The delete info of job `job`, from [`Runtime::load_branch_delete_info`]
+    /// (still `checked: false` when the check failed).
     BranchDeleteInfoLoaded {
+        repo: PathBuf,
+        job: JobId,
+    },
+    /// The info of job `job`, from [`Runtime::load_worktree_delete_info`]
+    /// (none when the check failed).
+    WorktreeDeleteInfoLoaded {
         repo: PathBuf,
         job: JobId,
     },
@@ -3474,8 +3483,29 @@ impl Runtime {
                     let worktrees = backend.worktrees(repo, cancel)?;
                     let refs = backend.refs(repo, cancel)?;
                     let merged = backend.merged_branches(repo, &base, cancel)?;
+                    // Branches squashed or rebased into the base count too.
+                    let tips: Vec<String> = worktrees
+                        .iter()
+                        .filter(|wt| !wt.is_main && wt.prunable.is_none())
+                        .filter_map(|wt| wt.branch.clone())
+                        .filter(|b| !merged.contains(b))
+                        .collect();
+                    let bases = [base.clone()];
+                    let content = backend.merged_by_content(
+                        repo,
+                        &bases,
+                        &tips,
+                        CONTENT_MERGE_LIMIT,
+                        cancel,
+                    )?;
+                    let squashed: Vec<String> = tips
+                        .into_iter()
+                        .zip(content)
+                        .filter(|(_, c)| c.missing == 0)
+                        .map(|(tip, _)| tip)
+                        .collect();
                     Ok(JobOutput::Cleanup(cleanup_candidates(
-                        &worktrees, &refs, &merged, &base, &badges, &current,
+                        &worktrees, &refs, &merged, &squashed, &base, &badges, &current,
                     )))
                 })),
         )
@@ -4558,6 +4588,7 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::IgnoreRules(_)
         | JobOutput::Ignored(_)
         | JobOutput::BranchDeleteInfo(_)
+        | JobOutput::WorktreeDeleteInfo(_)
         | JobOutput::BranchDeleted(_)
         | JobOutput::BranchRestored(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}

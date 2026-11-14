@@ -241,6 +241,7 @@ pub enum JobOutput {
     Rebased(Box<RebaseUndo>),
     /// What deleting a branch would do (`Runtime::load_branch_delete_info`).
     BranchDeleteInfo(Box<crate::runtime::BranchDeleteInfo>),
+    WorktreeDeleteInfo(Box<crate::runtime::WorktreeDeleteInfo>),
     /// A branch delete finished; what it removed, for undo.
     BranchDeleted(Box<crate::runtime::DeletedBranch>),
     /// The delete was undone.

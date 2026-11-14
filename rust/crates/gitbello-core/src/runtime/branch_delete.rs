@@ -4,8 +4,10 @@
 //! its commit, the remote branch pushed back, the upstream).
 
 use super::*;
+use crate::backend::{ContentMerge, CONTENT_MERGE_LIMIT};
 
 pub const BRANCH_DELETE_INFO_JOB_LABEL: &str = "check branch";
+pub const WORKTREE_DELETE_INFO_JOB_LABEL: &str = "check worktree";
 pub const DELETE_BRANCH_JOB_LABEL: &str = "delete branch";
 pub const DELETE_REMOTE_BRANCH_JOB_LABEL: &str = "delete remote branch";
 pub const UNDO_BRANCH_DELETE_JOB_LABEL: &str = "undo branch delete";
@@ -40,8 +42,15 @@ pub struct BranchDeleteInfo {
     /// What it is compared with: the base's local branch (`main`), else the
     /// base (`origin/main`); commits in either count as merged.
     pub base: Option<String>,
-    /// Commits on the branch that `base` lacks.
+    /// Commits on the branch (merges left out) whose change `base` lacks:
+    /// a commit squashed or rebased into it counts as merged (see
+    /// [`crate::backend::GitBackend::merged_by_content`]).
     pub not_in_base: u32,
+    /// `base` has the branch's whole change in one commit: squash-merged.
+    pub squashed: bool,
+    /// `not_in_base` and `squashed` are known; until then they are 0 and
+    /// false (the rest is known when the load starts).
+    pub checked: bool,
     /// Commits not pushed to its upstream.
     pub ahead: u32,
     /// Its upstream, while the remote still has it.
@@ -50,6 +59,23 @@ pub struct BranchDeleteInfo {
     pub worktree: Option<PathBuf>,
     /// It is checked out here.
     pub is_head: bool,
+}
+
+/// What deleting a worktree would lose besides its changes, for the dialog
+/// ([`Runtime::load_worktree_delete_info`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeDeleteInfo {
+    pub path: PathBuf,
+    /// The operation in progress there.
+    pub operation: Option<Operation>,
+    /// The local branch that operation started from (a rebase's or a
+    /// bisect's: the worktree shows as detached meanwhile).
+    pub branch: Option<String>,
+    /// Detached with no operation: the commits of its HEAD that no branch,
+    /// remote branch or tag has.
+    pub unreferenced: u32,
+    /// Its HEAD commit, if it has one.
+    pub head: Option<String>,
 }
 
 /// One delete ([`Runtime::delete_branch`]): the local `branch` (none for a
@@ -88,6 +114,11 @@ impl RepoState {
     /// The delete info of the last [`Runtime::load_branch_delete_info`].
     pub fn branch_delete_info(&self) -> Option<&BranchDeleteInfo> {
         self.branch_delete.info.as_ref()
+    }
+
+    /// The info of the last [`Runtime::load_worktree_delete_info`].
+    pub fn worktree_delete_info(&self) -> Option<&WorktreeDeleteInfo> {
+        self.branch_delete.worktree_info.as_ref()
     }
 
     /// Whether the delete named `id` ([`DeletedBranch::id`]) can be undone.
@@ -134,6 +165,8 @@ impl RepoState {
 pub(super) struct BranchDeleteState {
     info: Option<BranchDeleteInfo>,
     info_job: Option<JobId>,
+    worktree_info: Option<WorktreeDeleteInfo>,
+    worktree_job: Option<JobId>,
     undo: Vec<DeletedBranch>,
 }
 
@@ -160,39 +193,150 @@ impl Runtime {
             .collect();
         let base = local_base.or(remote_base);
         let remote = state.live_upstream(branch);
+        // The status is read again soon after a switch, the branches later:
+        // until then the branch list still marks the old branch as HEAD.
+        let is_head = state
+            .current_branch()
+            .map_or(found.is_head, |current| current == branch);
+        let worktree = found
+            .worktree
+            .clone()
+            .filter(|_| !is_head && is_head == found.is_head);
         if let Some(old) = state.branch_delete.info_job.take() {
             self.scheduler.cancel(old);
         }
-        state.branch_delete.info = None;
-        let branch = branch.to_owned();
+        // What is known now shows at once; the job adds what is merged.
+        let partial = BranchDeleteInfo {
+            branch: branch.to_owned(),
+            base,
+            not_in_base: 0,
+            squashed: false,
+            checked: false,
+            ahead: if remote.is_some() {
+                found.tracking.ahead
+            } else {
+                0
+            },
+            remote,
+            worktree,
+            is_head,
+        };
+        state.branch_delete.info = Some(partial.clone());
         let job = self.scheduler.submit(JobSpec::read(
             key,
             BRANCH_DELETE_INFO_JOB_LABEL,
             move |ctx| {
-                let tip = format!("refs/heads/{branch}");
-                let not_in_base = if bases.is_empty() {
-                    0
+                let tip = format!("refs/heads/{}", partial.branch);
+                let merge = if bases.is_empty() {
+                    ContentMerge::default()
                 } else {
                     ctx.backend()
-                        .count_commits(&toplevel, &bases, &tip, ctx.cancel_token())?
+                        .merged_by_content(
+                            &toplevel,
+                            &bases,
+                            &[tip],
+                            CONTENT_MERGE_LIMIT,
+                            ctx.cancel_token(),
+                        )?
+                        .first()
+                        .copied()
+                        .unwrap_or_default()
                 };
                 Ok(JobOutput::BranchDeleteInfo(Box::new(BranchDeleteInfo {
-                    branch,
-                    base,
-                    not_in_base,
-                    ahead: if remote.is_some() {
-                        found.tracking.ahead
-                    } else {
-                        0
-                    },
-                    remote,
-                    worktree: found.worktree.filter(|_| !found.is_head),
-                    is_head: found.is_head,
+                    not_in_base: merge.missing,
+                    squashed: merge.squashed,
+                    checked: true,
+                    ..partial
                 })))
             },
         ));
         state.branch_delete.info_job = Some(job);
         Some(job)
+    }
+
+    /// Works out what deleting linked worktree `path` would lose besides its
+    /// changes: the branch an operation there started from and, detached,
+    /// the commits nothing else has. Arrives as
+    /// [`RuntimeEvent::WorktreeDeleteInfoLoaded`].
+    pub fn load_worktree_delete_info(&mut self, key: &Path, path: &Path) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get_mut(key)?;
+        let found = state
+            .worktrees()?
+            .iter()
+            .find(|wt| normalize(&wt.path) == normalize(path))?
+            .clone();
+        if let Some(old) = state.branch_delete.worktree_job.take() {
+            self.scheduler.cancel(old);
+        }
+        state.branch_delete.worktree_info = None;
+        let job = self.scheduler.submit(JobSpec::read(
+            key,
+            WORKTREE_DELETE_INFO_JOB_LABEL,
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let details = backend.operation_details(&found.path, cancel)?;
+                let mut info = WorktreeDeleteInfo {
+                    path: found.path.clone(),
+                    operation: details.as_ref().map(|d| d.kind),
+                    branch: None,
+                    unreferenced: 0,
+                    head: found.head.clone(),
+                };
+                if let Some(name) = details.and_then(|d| d.head_name) {
+                    let full = format!("refs/heads/{name}");
+                    if backend.resolve(&toplevel, &full, cancel)?.is_some() {
+                        info.branch = Some(name);
+                    }
+                } else if found.detached && info.operation.is_none() {
+                    if let Some(head) = &found.head {
+                        info.unreferenced = backend.unreferenced_count(&toplevel, head, cancel)?;
+                    }
+                }
+                Ok(JobOutput::WorktreeDeleteInfo(Box::new(info)))
+            },
+        ));
+        state.branch_delete.worktree_job = Some(job);
+        Some(job)
+    }
+
+    /// Removes worktree `path` (`force` discarding its changes or lock) as
+    /// [`WorktreeOp::Remove`] does, first keeping commit `oid` as new branch
+    /// `keep` (unless it already is: trying again after a failure). Label
+    /// `remove worktree`.
+    pub fn remove_worktree_keeping(
+        &self,
+        key: &Path,
+        path: PathBuf,
+        force: bool,
+        keep: String,
+        oid: String,
+    ) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        self.repos.get(key).filter(|s| s.is_ready())?;
+        let leftovers = self.leftover_worktrees.clone();
+        let label = WorktreeOp::Remove {
+            path: path.clone(),
+            force,
+        }
+        .label();
+        Some(
+            self.scheduler
+                .submit(JobSpec::write(key, label, worktree_refresh(), move |ctx| {
+                    let (backend, repo, cancel) = (ctx.backend(), ctx.repo(), ctx.cancel_token());
+                    let full = format!("refs/heads/{keep}");
+                    if backend.resolve(&toplevel, &full, cancel)?.as_deref() != Some(oid.as_str()) {
+                        let create = RefOp::CreateBranch {
+                            name: keep,
+                            start: oid,
+                            checkout: false,
+                        };
+                        backend.ref_op(&toplevel, &create, cancel)?;
+                    }
+                    remove_worktree(backend, repo, &path, force, &leftovers, cancel)
+                        .map(|()| JobOutput::Done)
+                })),
+        )
     }
 
     /// Deletes what `delete` names: its worktree first (stopping if that
@@ -305,6 +449,23 @@ impl Runtime {
         repo: &Path,
         out: &mut Vec<RuntimeEvent>,
     ) -> bool {
+        if label == WORKTREE_DELETE_INFO_JOB_LABEL {
+            if state.branch_delete.worktree_job == Some(job) {
+                match kind {
+                    EventKind::Finished(Ok(JobOutput::WorktreeDeleteInfo(info))) => {
+                        state.branch_delete.worktree_info = Some(info.as_ref().clone());
+                    }
+                    EventKind::Finished(_) => state.branch_delete.worktree_info = None,
+                    _ => return true,
+                }
+                state.branch_delete.worktree_job = None;
+                out.push(RuntimeEvent::WorktreeDeleteInfoLoaded {
+                    repo: repo.to_owned(),
+                    job,
+                });
+            }
+            return true;
+        }
         if label == BRANCH_DELETE_INFO_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::BranchDeleteInfo(info))) = kind {
                 if state.branch_delete.info_job == Some(job) {
@@ -316,6 +477,16 @@ impl Runtime {
                     });
                 }
                 return true;
+            }
+            // A failed check leaves the info unchecked, and says so.
+            if let EventKind::Finished(Err(_)) = kind {
+                if state.branch_delete.info_job == Some(job) {
+                    state.branch_delete.info_job = None;
+                    out.push(RuntimeEvent::BranchDeleteInfoLoaded {
+                        repo: repo.to_owned(),
+                        job,
+                    });
+                }
             }
             return false;
         }

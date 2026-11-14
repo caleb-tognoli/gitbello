@@ -19,7 +19,7 @@ signal worktree_close_requested(path: String)
 ## view, or calls `show_missing`.
 signal worktree_missing(path: String)
 ## The user confirmed deleting a worktree (see `RepoOps.delete_requested`).
-signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String)
+signal worktree_delete_requested(path: String, force: bool, branch: String, remote: String, keep: Dictionary)
 
 enum View { HISTORY, CHANGES, SHELVES, COMPARE, FILE }
 
@@ -209,8 +209,9 @@ func _ready() -> void:
 	_ops.notice.connect(func(title_text: String, message: String) -> void: notice.emit(title_text, message))
 	_ops.open_requested.connect(func(path: String) -> void: worktree_open_requested.emit(path))
 	_ops.close_requested.connect(func(path: String) -> void: worktree_close_requested.emit(path))
-	_ops.delete_requested.connect(func(path: String, force: bool, branch: String, remote: String) -> void:
-		worktree_delete_requested.emit(path, force, branch, remote))
+	_ops.delete_requested.connect(func(path: String, force: bool, branch: String, remote: String,
+			keep: Dictionary) -> void:
+		worktree_delete_requested.emit(path, force, branch, remote, keep))
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_menu_id)
 	_menu.popup_hide.connect(func() -> void:

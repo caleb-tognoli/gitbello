@@ -131,6 +131,8 @@ pub fn default_base(refs: &[Ref], remote: Option<&str>) -> Option<String> {
 pub enum CleanupReason {
     /// Its branch is merged into the base.
     Merged,
+    /// The base has its branch's changes, squashed or rebased.
+    Squashed,
     /// Its branch's upstream was deleted (often after a squash merge).
     UpstreamGone,
 }
@@ -150,13 +152,15 @@ pub struct CleanupCandidate {
 }
 
 /// Linked worktrees whose branch is merged into `base` (`merged` lists the
-/// full names of local branches merged into it) or whose upstream is gone.
+/// full names of local branches merged into it, `squashed` those whose
+/// changes it has squashed or rebased) or whose upstream is gone.
 /// The main worktree, `current`, detached or missing worktrees and the
 /// base's own branch are never offered.
 pub fn cleanup_candidates(
     worktrees: &[Worktree],
     refs: &[Ref],
     merged: &[String],
+    squashed: &[String],
     base: &str,
     badges: &HashMap<PathBuf, Badge>,
     current: &Path,
@@ -177,6 +181,8 @@ pub fn cleanup_candidates(
                 .find(|r| r.kind == RefKind::Branch && r.name == full);
             let reason = if merged.iter().any(|m| m == full) {
                 CleanupReason::Merged
+            } else if squashed.iter().any(|m| m == full) {
+                CleanupReason::Squashed
             } else if r.is_some_and(|r| r.tracking.gone) {
                 CleanupReason::UpstreamGone
             } else {
@@ -331,6 +337,7 @@ mod tests {
             wt("/w/done", Some("done")),
             wt("/w/squashed", Some("squashed")),
             wt("/w/active", Some("active")),
+            wt("/w/squash-merged", Some("squash-merged")),
             wt("/w/detached", None),
             wt("/w/main-copy", Some("main")),
             locked,
@@ -360,10 +367,12 @@ mod tests {
             },
         )]
         .into();
+        let squashed = ["refs/heads/squash-merged".to_owned()];
         let found = cleanup_candidates(
             &worktrees,
             &refs,
             &merged,
+            &squashed,
             "origin/main",
             &badges,
             Path::new("/w/current"),
@@ -377,6 +386,7 @@ mod tests {
             [
                 ("done", CleanupReason::Merged, Some(3), 0, false),
                 ("squashed", CleanupReason::UpstreamGone, None, 2, false),
+                ("squash-merged", CleanupReason::Squashed, None, 0, false),
                 ("done-too", CleanupReason::Merged, None, 0, true),
             ]
         );

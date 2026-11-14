@@ -348,9 +348,9 @@ func _on_view_state(v: WorktreeView) -> void:
 ## Deletes worktree `path` (with `branch` and remote branch `remote` unless
 ## empty) from another worktree: its own view closes first, showing the main
 ## worktree if it was the one shown.
-func _delete_worktree(path: String, force: bool, branch: String, remote: String) -> void:
+func _delete_worktree(path: String, force: bool, branch: String, remote: String, keep: Dictionary) -> void:
 	close_worktree(path)
-	_pending_delete = {"path": path, "force": force, "branch": branch, "remote": remote}
+	_pending_delete = {"path": path, "force": force, "branch": branch, "remote": remote, "keep": keep}
 	_run_pending_delete()
 
 
@@ -361,7 +361,7 @@ func _run_pending_delete() -> void:
 	var pending: Dictionary = _pending_delete
 	_pending_delete = {}
 	_active.ops().delete_worktree(String(pending["path"]), bool(pending["force"]), String(pending["branch"]),
-			String(pending["remote"]))
+			String(pending["remote"]), pending["keep"] as Dictionary)
 
 
 func _refresh_strip() -> void:

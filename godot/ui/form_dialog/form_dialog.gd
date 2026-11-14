@@ -14,6 +14,8 @@ extends ConfirmationDialog
 signal field_changed(key: String)
 
 const THEME_TYPE: StringName = &"FormDialog"
+## The look of an item row's facts (the merge dialog's badges).
+const BADGE: StringName = &"SummaryBadge"
 
 ## `func(values: Dictionary) -> String`: what is wrong, or "" when valid.
 ## While something is wrong OK is disabled, with the reason as its tooltip.
@@ -39,6 +41,9 @@ var _split: HBoxContainer = HBoxContainer.new()
 var _width: int = 0
 ## Scrolling lists (see `add_list`).
 var _lists: Array[ScrollContainer] = []
+## Item rows' facts (see `add_item`), and the fields the user changed.
+var _facts: Dictionary[String, HBoxContainer] = {}
+var _touched: Dictionary[String, bool] = {}
 
 @onready var _intro: VBoxContainer = %Intro
 @onready var _box: GridContainer = %Fields
@@ -110,6 +115,8 @@ func begin(title_text: String, ok_text: String, on_submit: Callable) -> void:
 	_ref_names.clear()
 	_pickers.clear()
 	_lists.clear()
+	_facts.clear()
+	_touched.clear()
 	_error = ""
 	_width = get_theme_constant(&"width", THEME_TYPE)
 	set_menu([])
@@ -181,6 +188,7 @@ func add_list(key: String, label: String, rows: Control) -> ScrollContainer:
 ## Sizes the lists to their rows (see `add_list`) and the dialog to its
 ## fields, after fields changed, and centres it again: it may have grown.
 func fit() -> void:
+	_fit_label_column()
 	_fit_lists()
 	_shrink_to_content()
 	if visible:
@@ -326,50 +334,141 @@ func _browse(key: String) -> void:
 
 
 ## A row naming one thing the form acts on: a check box, `icon`, `text` in a
-## chip and `facts` at the right end (`{text, tone}`; tone `&"warning"`,
-## `&"success"`, `&"error"` or `&""` for dim). A `fixed` row is always ticked
+## chip and `facts` at the right end as badges (`{text, tone, tip, icon}`;
+## tone `&"warning"`, `&"success"`, `&"error"` or `&""` for neutral; `{text,
+## busy: true}` is a spinner while a check runs). A `fixed` row is always ticked
 ## (what the form is about); others are field `key`. `indent` puts the row
 ## under the one above (a part of it). Clicking anywhere on it toggles it.
+## `rename_key` (unless "") makes the chip a name the user can change:
+## clicking it turns it into a line, field `rename_key`. `lead` (unless "")
+## comes before the icon: what the row does when it is not a delete ("Keep
+## as").
 func add_item(key: String, icon: StringName, text: String, value: bool = true, fixed: bool = false,
-		facts: Array = [], indent: bool = false, tooltip: String = "") -> CheckBox:
+		facts: Array = [], indent: bool = false, tooltip: String = "", rename_key: String = "",
+		lead: String = "") -> CheckBox:
 	var row: HBoxContainer = HBoxContainer.new()
 	row.tooltip_text = tooltip
 	var check: CheckBox = CheckBox.new()
 	check.button_pressed = value or fixed
 	check.disabled = fixed
-	check.mouse_filter = Control.MOUSE_FILTER_PASS
+	# The row takes every click: a box that took them too would toggle twice
+	# (the row on press, the box on release). Space still toggles it.
+	check.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# The chip shows the name; screen readers and tests read it here.
 	check.accessibility_name = text
 	if indent:
 		row.add_child(_check_gap())
 	row.add_child(check)
+	if not lead.is_empty():
+		var lead_label: Label = Label.new()
+		lead_label.text = lead
+		row.add_child(lead_label)
 	row.add_child(_icon(icon))
 	var chip: PanelContainer = PanelContainer.new()
 	chip.theme_type_variation = &"RefChip"
 	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	var chip_row: HBoxContainer = HBoxContainer.new()
+	chip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_child(chip_row)
 	var name_label: Label = Label.new()
 	name_label.text = text
-	chip.add_child(name_label)
+	chip_row.add_child(name_label)
+	if not rename_key.is_empty():
+		chip_row.add_child(_icon(&"Rename", &"DimLabel"))
 	row.add_child(chip)
+	if not rename_key.is_empty():
+		_add_rename(row, chip, name_label, rename_key)
 	var spacer: Control = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spacer.custom_minimum_size.x = float(get_theme_constant(&"separation", THEME_TYPE) * 2)
 	spacer.mouse_filter = Control.MOUSE_FILTER_PASS
 	row.add_child(spacer)
-	for fact: Dictionary in facts:
-		_add_fact(row, String(fact["text"]), StringName(fact.get("tone", &"")))
+	var facts_box: HBoxContainer = HBoxContainer.new()
+	facts_box.mouse_filter = Control.MOUSE_FILTER_PASS
+	facts_box.add_theme_constant_override(&"separation", get_theme_constant(&"gap", BADGE))
+	row.add_child(facts_box)
+	_show_facts(facts_box, facts)
 	row.gui_input.connect(func(event: InputEvent) -> void:
 		var click: InputEventMouseButton = event as InputEventMouseButton
 		if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT and not check.disabled:
 			check.button_pressed = not check.button_pressed
 			row.accept_event())
 	if not fixed:
-		check.toggled.connect(func(_on: bool) -> void: _touch(key))
+		check.toggled.connect(func(_on: bool) -> void:
+			_touched[key] = true
+			_touch(key))
 	_add_label("")
 	_box.add_child(row)
 	if not key.is_empty():
 		_fields[key] = check
+		_facts[key] = facts_box
 	return check
+
+
+## Replaces the facts of item `key` (see `add_item`).
+func set_item_facts(key: String, facts: Array) -> void:
+	var facts_box: HBoxContainer = _facts.get(key)
+	if facts_box != null:
+		_show_facts(facts_box, facts)
+
+
+## The texts of item `key`'s facts (for tests and screenshots).
+func item_facts(key: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var facts_box: HBoxContainer = _facts.get(key)
+	if facts_box != null:
+		for child: Node in facts_box.get_children():
+			if child.has_meta(&"text") and not child.is_queued_for_deletion():
+				out.append(String(child.get_meta(&"text")))
+	return out
+
+
+## Ticks item `key` or not, as code: unless the user already changed it.
+func suggest_item(key: String, value: bool) -> void:
+	var check: CheckBox = _fields.get(key) as CheckBox
+	if check != null and not _touched.has(key) and check.button_pressed != value:
+		check.set_pressed_no_signal(value)
+		field_changed.emit(key)
+		_validate()
+
+
+## Whether the user changed field `key`.
+func touched(key: String) -> bool:
+	return _touched.has(key)
+
+
+func _show_facts(facts_box: HBoxContainer, facts: Array) -> void:
+	for child: Node in facts_box.get_children():
+		facts_box.remove_child(child)
+		child.queue_free()
+	for fact: Dictionary in facts:
+		_add_fact(facts_box, String(fact["text"]), StringName(fact.get("tone", &"")), String(fact.get("tip", "")),
+				StringName(fact.get("icon", &"")), bool(fact.get("busy", false)))
+
+
+## A chip whose name turns into line `key` when clicked (see `add_item`).
+func _add_rename(row: HBoxContainer, chip: PanelContainer, name_label: Label, key: String) -> void:
+	var line: LineEdit = LineEdit.new()
+	line.text = name_label.text
+	line.hide()
+	line.expand_to_text_length = true
+	row.add_child(line)
+	chip.mouse_default_cursor_shape = Control.CURSOR_IBEAM
+	chip.tooltip_text = tr("Rename")
+	chip.gui_input.connect(func(event: InputEvent) -> void:
+		var click: InputEventMouseButton = event as InputEventMouseButton
+		if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
+			chip.hide()
+			line.show()
+			line.grab_focus()
+			line.select_all()
+			chip.accept_event())
+	line.text_changed.connect(func(text: String) -> void:
+		name_label.text = text
+		_on_line_changed(text, line))
+	line.text_submitted.connect(func(_text: String) -> void: submit())
+	_fields[key] = line
+	_ref_names.append(key)
 
 
 ## A dim line with `icon`: what else happens ("Switches to main").
@@ -420,21 +519,62 @@ func _check_gap() -> Control:
 	return gap
 
 
-## One fact at the end of an item row, coloured by `tone`.
-func _add_fact(row: HBoxContainer, text: String, tone: StringName) -> void:
-	var color_name: StringName = StringName(String(tone) + "_color")
-	if tone == &"warning" or tone == &"error":
-		row.add_child(_icon(&"StatusWarning", THEME_TYPE, color_name))
-	elif tone == &"success":
-		row.add_child(_icon(&"StatusSuccess", THEME_TYPE, color_name))
+## One fact at the end of an item row: a badge tinted by `tone` with
+## `icon` (else the tone's: a warning sign or a tick) and `tip` (unless "")
+## as its tooltip; or, `busy`, a turning spinner and a dim `text` while a
+## check runs (no badge).
+func _add_fact(row: BoxContainer, text: String, tone: StringName, tip: String = "",
+		icon: StringName = &"", busy: bool = false) -> void:
+	if busy:
+		row.add_child(_busy(text))
+		return
+	var badge_tone: StringName = tone if not tone.is_empty() else &"neutral"
+	var badge: PanelContainer = PanelContainer.new()
+	badge.add_theme_stylebox_override(&"panel", get_theme_stylebox(badge_tone, BADGE))
+	badge.set_meta(&"text", text)
+	badge.tooltip_text = tip
+	badge.mouse_filter = Control.MOUSE_FILTER_PASS
+	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var color: Color = get_theme_color(StringName(String(badge_tone) + "_color"), BADGE)
+	var line: HBoxContainer = HBoxContainer.new()
+	line.add_theme_constant_override(&"separation", get_theme_constant(&"separation", BADGE))
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if icon.is_empty():
+		icon = &"StatusSuccess" if tone == &"success" else &"StatusWarning" if tone in [&"warning", &"error"] else &""
+	if not icon.is_empty():
+		var side: float = float(get_theme_constant(&"icon_size", BADGE))
+		var rect: TextureRect = TextureRect.new()
+		rect.texture = AppTheme.tintable_icon(icon)
+		rect.modulate = color
+		rect.custom_minimum_size = Vector2(side, side)
+		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_child(rect)
 	var label: Label = Label.new()
 	label.text = text
-	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	if tone.is_empty():
-		label.theme_type_variation = &"DimLabel"
-	else:
-		label.add_theme_color_override(&"font_color", get_theme_color(color_name, THEME_TYPE))
-	row.add_child(label)
+	label.add_theme_color_override(&"font_color", color)
+	label.add_theme_font_size_override(&"font_size", get_theme_font_size(&"font_size", BADGE))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(label)
+	badge.add_child(line)
+	row.add_child(badge)
+
+
+## The loading spinner and a dim `text`, while a check runs.
+func _busy(text: String) -> HBoxContainer:
+	var busy: HBoxContainer = HBoxContainer.new()
+	busy.set_meta(&"text", text)
+	busy.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	busy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	busy.add_theme_constant_override(&"separation", get_theme_constant(&"separation", BADGE) + 2)
+	busy.add_child(LoadingSpinner.new())
+	var label: Label = Label.new()
+	label.text = text
+	label.theme_type_variation = &"DimLabel"
+	busy.add_child(label)
+	return busy
 
 
 ## An icon sized for a form line, tinted with `color` of `type` (unless "").

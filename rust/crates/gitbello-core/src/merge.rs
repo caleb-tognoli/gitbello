@@ -293,7 +293,8 @@ pub fn strip_comments(message: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationDetails {
     pub kind: Operation,
-    /// The branch being merged into or rebased (short name), if known.
+    /// The branch being merged into, rebased or bisected from (short
+    /// name), if known.
     pub head_name: Option<String>,
     /// The other side: the merged branch, the picked commit's subject, or
     /// what a rebase replays onto.
@@ -366,7 +367,14 @@ pub fn read_operation_details(
             };
             details.step = step.zip(steps);
         }
-        Operation::ApplyMailbox | Operation::Bisect => {}
+        Operation::Bisect => {
+            // The branch it started on, unless it started detached.
+            let started = line("BISECT_START");
+            details.head_name = started
+                .filter(|n| !(n.len() >= 40 && n.bytes().all(|b| b.is_ascii_hexdigit())))
+                .map(short);
+        }
+        Operation::ApplyMailbox => {}
     }
     details
 }
