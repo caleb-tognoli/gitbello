@@ -28,7 +28,9 @@ const CHIP_MENU: Array[Array] = [
 
 var _ops: IgnoreOps = null
 var _session: RepoSession = null
-var _chips: HFlowContainer = HFlowContainer.new()
+## The source chips, scrolling sideways when they do not fit.
+var _chip_row: ScrollRow = ScrollRow.new()
+var _chips: HBoxContainer = _chip_row.content()
 var _chip_menu: PopupMenu = PopupMenu.new()
 var _lines: Tree = Tree.new()
 var _recap: HBoxContainer = HBoxContainer.new()
@@ -57,7 +59,8 @@ func _ready() -> void:
 	ok_button_text = tr("Close")
 	var box: VBoxContainer = VBoxContainer.new()
 	add_child(box)
-	box.add_child(_chips)
+	_chips.theme_type_variation = &"ChipRow"
+	box.add_child(_chip_row)
 	box.add_child(HSeparator.new())
 	var split: HSplitContainer = HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -207,6 +210,11 @@ func chip(index: int) -> IgnoreSourceChip:
 	return chips[index] if index >= 0 and index < chips.size() else null
 
 
+## The row of source chips (for tests).
+func chip_row() -> ScrollRow:
+	return _chip_row
+
+
 func chip_menu() -> PopupMenu:
 	return _chip_menu
 
@@ -298,6 +306,9 @@ func _update_chips() -> void:
 	var chips: Array[IgnoreSourceChip] = _chip_nodes()
 	for i: int in chips.size():
 		chips[i].selected = i == _source
+	if _source >= 0 and _source < chips.size():
+		# Once the row is laid out.
+		_chip_row.reveal.call_deferred(chips[_source])
 
 
 func _open_chip_menu(at_position: Vector2, index: int) -> void:

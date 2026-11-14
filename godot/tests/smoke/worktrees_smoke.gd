@@ -328,9 +328,16 @@ func _overflow_selection() -> void:
 	await _settle_strip()
 	expect(strip.overflows(), "the test strip overflows")
 	expect(_chip_in_view(strip, last), "an initially selected last chip scrolls into view")
+	var main_chip: WorktreeChip = strip.chips()[0]
+	expect(main_chip.get_parent() != strip.scroll_row().content(), "the main worktree's chip is outside the scroll")
+	var main_x: float = main_chip.global_position.x
+	var scrolled: int = strip._scroll.scroll_horizontal
+	expect(scrolled > 0, "revealing the last chip scrolled the linked ones")
 	strip.show_worktrees(rows, first)
 	await _settle_strip()
-	expect(_chip_in_view(strip, first), "selecting the first chip scrolls back")
+	expect(_chip_in_view(strip, first), "the main worktree's chip stays in view")
+	expect_eq(main_chip.global_position.x, main_x, "and in place while the linked chips scroll")
+	expect_eq(strip._scroll.scroll_horizontal, scrolled, "choosing it leaves the linked chips where they are")
 	# Filled, not opened: the actions its footer reads left with the test's Main.
 	strip.all_list().fill(rows, first)
 	strip.all_list().choose(5)
@@ -351,6 +358,9 @@ func _overflow_selection() -> void:
 	strip.size.x = 340.0
 	await _settle_strip()
 	expect(_chip_in_view(strip, last), "narrowing the strip keeps its selection in view")
+	# The main worktree's chip does not scroll: leave the linked ones room.
+	strip.size.x = 520.0
+	await _settle_strip()
 	rows[0]["name"] = "a-longer-main-worktree-folder"
 	strip.show_worktrees(rows, last)
 	await _settle_strip()
@@ -364,7 +374,7 @@ func _overflow_selection() -> void:
 	await _settle_strip()
 	for chip: WorktreeChip in strip.chips():
 		if Paths.same(chip.path(), last):
-			expect(absf(chip.global_position.x - strip._scroll.global_position.x) < 2.0,
+			expect(chip.global_position.x - strip._scroll.global_position.x <= strip.scroll_row().cover_width() + 1.0,
 					"an oversized selected chip exposes its leading edge")
 	rows[0]["name"] = "worktree-0"
 	rows.remove_at(5)
@@ -452,9 +462,15 @@ func _settle_strip() -> void:
 
 
 static func _chip_in_view(strip: WorktreeStrip, path: String) -> bool:
-	var viewport: Rect2 = strip._scroll.get_global_rect()
 	for chip: WorktreeChip in strip.chips():
 		if Paths.same(chip.path(), path):
+			var row: ScrollRow = strip.scroll_row()
+			var viewport: Rect2 = strip.get_global_rect()
+			if chip.get_parent() == row.content():
+				# Clear of the arrows over the row's ends.
+				var span: Vector2 = row._visible_span(float(row.scroll_container().scroll_horizontal))
+				var origin: float = row.content().global_position.x
+				viewport = Rect2(origin + span.x, 0.0, span.y - span.x, 0.0)
 			var rect: Rect2 = chip.get_global_rect()
 			return rect.position.x >= viewport.position.x - 1.0 and rect.end.x <= viewport.end.x + 1.0
 	return false

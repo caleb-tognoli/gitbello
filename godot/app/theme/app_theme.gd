@@ -829,7 +829,7 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"separation", &"ShellLayout", 0)
 	theme.set_constant(&"max_tab_width", &"Shell", 320)
 	_variation(theme, &"ViewBar", &"PanelContainer")
-	var bar: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 5, 8, 5))
+	var bar: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 3, 8, 9))
 	bar.border_color = p.border
 	bar.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"ViewBar", bar)
@@ -1291,12 +1291,22 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"sync_color", &"RepoTabs", p.accent)
 	# The worktree strip under the tabs, joined to the active tab like a toolbar
 	_variation(theme, &"WorktreeStrip", &"PanelContainer")
-	var strip: StyleBoxFlat = _box(p.surface, 0, Vector4(8, 6, 8, 6))
-	strip.border_color = p.border
-	strip.border_width_bottom = 1
-	theme.set_stylebox(&"panel", &"WorktreeStrip", strip)
+	# Close to the view bar under it, which keeps the room below
+	theme.set_stylebox(&"panel", &"WorktreeStrip", _box(p.surface, 0, Vector4(8, 6, 8, 2)))
 	_variation(theme, &"ChipRow", &"HBoxContainer")
 	theme.set_constant(&"separation", &"ChipRow", 2)
+	# A chip row that scrolls: ‹ and › over its ends, on a fade in its background
+	_variation(theme, &"ScrollRow", &"Container")
+	theme.set_color(&"fade_color", &"ScrollRow", p.surface)
+	theme.set_constant(&"fade_width", &"ScrollRow", 16)
+	_variation(theme, &"ScrollRowArrow", &"ToolbarButton")
+	var arrow_box: Vector4 = Vector4(2, 4, 2, 4)
+	theme.set_stylebox(&"normal", &"ScrollRowArrow", _box(Color.TRANSPARENT, 4, arrow_box))
+	theme.set_stylebox(&"hover", &"ScrollRowArrow", _box(p.hover, 4, arrow_box))
+	theme.set_stylebox(&"pressed", &"ScrollRowArrow", _box(Color(p.accent, 0.25), 4, arrow_box))
+	theme.set_stylebox(&"hover_pressed", &"ScrollRowArrow", _box(Color(p.accent, 0.35), 4, arrow_box))
+	theme.set_stylebox(&"disabled", &"ScrollRowArrow", _box(Color.TRANSPARENT, 4, arrow_box))
+	theme.set_color(&"icon_normal_color", &"ScrollRowArrow", Color(1, 1, 1, 0.7))
 	# Worktree chips: plain text with a hover background, the shown one filled
 	var chip: Vector4 = Vector4(10, 4, 10, 4)
 	for entry: Array in [[&"WorktreeChip", Color.TRANSPARENT], [&"WorktreeChipHover", p.hover],
