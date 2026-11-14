@@ -508,7 +508,17 @@ impl Inner {
         let spec = JobSpec::read(repo, kind.label(), move |ctx: &JobContext| {
             let (repo, cancel, backend) = (ctx.repo(), ctx.cancel_token(), ctx.backend());
             match kind {
-                RefreshKind::Status => backend.status(repo, cancel).map(JobOutput::Status),
+                RefreshKind::Status => {
+                    let mut status = backend.status(repo, cancel)?;
+                    // Unpaired files are still a correct status: only a
+                    // cancel stops the refresh.
+                    if let Err(err) = backend.pair_moves(repo, &mut status, cancel) {
+                        if err.kind == GitErrorKind::Cancelled {
+                            return Err(err);
+                        }
+                    }
+                    Ok(JobOutput::Status(status))
+                }
                 RefreshKind::Refs => {
                     let remotes = backend.remotes(repo, cancel)?;
                     backend

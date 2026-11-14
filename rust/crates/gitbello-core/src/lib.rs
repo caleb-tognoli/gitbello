@@ -21,6 +21,7 @@ pub mod jobs;
 pub mod launch;
 pub mod library;
 pub mod merge;
+pub mod moves;
 pub mod new_repo;
 
 pub mod ops;

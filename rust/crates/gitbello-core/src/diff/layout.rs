@@ -343,6 +343,20 @@ impl DiffLayout {
                 first: 0,
                 count: diff.split_row_count(),
             });
+            // A rename or mode change without edits: the whole file shows
+            // as unchanged lines once asked for (and its old side read).
+            if diff.content == DiffContent::Text && has_old_blob(diff) {
+                let lines = old.map(OldFile::line_count);
+                let shown = if expansion.is_whole() {
+                    lines.unwrap_or(0)
+                } else {
+                    0
+                };
+                layout.hidden(1, 0, shown, None);
+                layout.gaps.push(Gap {
+                    hidden: lines.map(|n| n - shown),
+                });
+            }
             return layout;
         }
         // Side-by-side rows of the hunk headers.
@@ -548,6 +562,14 @@ impl DiffLayout {
     pub fn max_line_number(&self) -> u32 {
         self.max_line
     }
+}
+
+/// Whether `diff` names a real old blob (not the zeros of a missing side).
+fn has_old_blob(diff: &FileDiff) -> bool {
+    diff.header
+        .old_oid
+        .as_deref()
+        .is_some_and(|oid| !oid.chars().all(|c| c == '0'))
 }
 
 /// Whether the last hunk ends at the end of the old file: it ends in fewer
@@ -813,6 +835,35 @@ index 1111111..2222222 100644
         let layout = DiffLayout::build(&diff, &Expansion::default(), None);
         assert!(!layout.has_hidden());
         assert_eq!(layout.row_count(false), diff.line_count());
+    }
+
+    #[test]
+    fn a_rename_without_edits_shows_its_file_only_when_whole() {
+        let mut diff = parse_diff(
+            b"diff --git a/a.txt b/b.txt\nsimilarity index 100%\nrename from a.txt\nrename to b.txt\n",
+        )
+        .unwrap();
+        let closed = DiffLayout::build(&diff, &Expansion::default(), None);
+        assert_eq!(closed.row_count(false), 0);
+        assert!(!closed.has_hidden(), "no old blob: nothing to show");
+        diff.header.old_oid = Some("1111111".into());
+        let unread = DiffLayout::build(&diff, &Expansion::default(), None);
+        assert!(unread.has_hidden());
+        assert_eq!(unread.row_count(false), 0);
+        let old = old();
+        let read = DiffLayout::build(&diff, &Expansion::default(), Some(&old));
+        assert_eq!(read.hidden_lines(0), Some(40));
+        let mut whole = Expansion::default();
+        whole.set_whole(true);
+        let open = DiffLayout::build(&diff, &whole, Some(&old));
+        assert_eq!(open.row_count(false), 40);
+        assert_eq!(open.row_count(true), 40);
+        assert!(!open.has_hidden());
+        assert_eq!(
+            open.row(false, 0),
+            Some(LayoutRow::Hidden { old: 1, new: 1 })
+        );
+        assert_eq!(open.max_line_number(), 40);
     }
 
     #[test]

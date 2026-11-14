@@ -67,6 +67,26 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 - History of a repository without commits says so in the commit list, not the details.
 - Empty states wait for the load: a panel stays blank until it knows it has nothing.
 
+### Renamed and moved files
+- File lists show a moved file under its new path; a file renamed in its folder still
+  reads `docs/old.md → new.md`. The tooltip says where it came from.
+- The diff header shows both full paths, `src/util.rs → lib/core/util.rs`, cutting the
+  old path's folders first when narrow, then the new path's, never the new file name.
+- A file moved without `git mv` shows in Changes as one renamed file instead of a deleted
+  and an untracked one, with its diff against the old path. Committing, discarding (and
+  its Undo) and shelving take both paths. Skipped above 500 deleted or untracked files.
+- Amending a commit that moved a file shows the rename, and so does a move made while
+  amending.
+- Shelving a staged rename takes its old path along.
+
+### Cards
+- A file renamed or copied without changes, or whose mode alone changed, shows a card
+  with Show file: the whole file, until the whole-file toggle is turned off. The choice is
+  kept for that file until gitbello closes.
+- A conflict where one side deleted the file the other changed, or where only one side
+  has it, offers Show changes: the changed side's diff against the merge base (or the
+  only side's whole file), read-only, under a slim bar with the same choices.
+
 ### Deleting worktrees
 - Delete dialogs open at once; whether the branch is merged fills in when the check
   finishes (the loading spinner and "Checking…" meanwhile, or "could not check").

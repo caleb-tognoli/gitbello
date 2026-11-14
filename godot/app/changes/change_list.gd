@@ -210,6 +210,9 @@ func _get_tooltip(at_position: Vector2) -> String:
 	if data.is_empty():
 		return ""
 	var tip: String = String(data["path"])
+	var rename: String = FileRowPainter.rename_tip(data)
+	if not rename.is_empty():
+		tip += "\n" + rename
 	if bool(data.get("ignored", false)):
 		if data.has("ignored_source"):
 			return tip + "\n" + tr("Ignored by %s, line %d: %s") % [String(data["ignored_source"]),
@@ -219,7 +222,7 @@ func _get_tooltip(at_position: Vector2) -> String:
 		tip += "\n" + tr("Conflicted: resolve it before committing.")
 	elif bool(data.get("resolved", false)):
 		tip += "\n" + tr("Conflicts resolved")
-	elif not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
+	elif rename.is_empty() and not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
 		tip += "\n" + FileRowPainter.code_name(String(data["code"]))
 	if bool(data.get("endings_only", false)):
 		tip += "\n" + tr("Only line endings changed")

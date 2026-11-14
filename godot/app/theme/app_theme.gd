@@ -1563,6 +1563,13 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	blame_bar.border_color = p.border
 	blame_bar.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"BlameBar", blame_bar)
+	# A conflict without blocks shown as its changed side's diff: its card
+	# shrunk to a strip over the diff, with the choices
+	_variation(theme, &"ConflictSideBar", &"PanelContainer")
+	var side_bar: StyleBoxFlat = _box(p.surface, 0, Vector4(10, 4, 6, 4))
+	side_bar.border_color = p.border
+	side_bar.border_width_bottom = 1
+	theme.set_stylebox(&"panel", &"ConflictSideBar", side_bar)
 	# Its bar names the file: a line of text, padded like a list header.
 	_variation(theme, &"FileBar", &"PanelContainer")
 	var file_bar: StyleBoxFlat = _box(p.background, 0, Vector4(10, 8, 10, 8))

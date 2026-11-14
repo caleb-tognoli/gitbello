@@ -42,6 +42,7 @@ mod compare;
 mod ignore;
 mod merge;
 mod merged;
+mod moves;
 mod path_log;
 mod people;
 mod shelf_files;
@@ -64,6 +65,16 @@ pub trait GitBackend: Send + Sync {
     /// Root of the worktree containing `repo` (fails in a bare repository).
     fn toplevel(&self, repo: &Path, cancel: &CancelToken) -> Result<PathBuf, GitError>;
     fn status(&self, repo: &Path, cancel: &CancelToken) -> Result<RepoStatus, GitError>;
+    /// Pairs `status`'s deleted and untracked files that git sees as the
+    /// same file moved into one renamed change (see [`crate::moves`]).
+    fn pair_moves(
+        &self,
+        _repo: &Path,
+        _status: &mut RepoStatus,
+        _cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        Ok(())
+    }
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError>;
     fn worktrees(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Worktree>, GitError>;
     fn operation(&self, repo: &Path, cancel: &CancelToken) -> Result<Option<Operation>, GitError>;
@@ -763,11 +774,17 @@ const COMMIT_INDEX: &str = "gitbello-commit-index";
 #[derive(Debug, Clone)]
 pub struct CliBackend {
     runner: GitRunner,
+    /// The last moves found per worktree, with the fingerprint of the files
+    /// they were found among.
+    moves: moves::MoveCache,
 }
 
 impl CliBackend {
     pub fn new(runner: GitRunner) -> Self {
-        Self { runner }
+        Self {
+            runner,
+            moves: moves::MoveCache::default(),
+        }
     }
 
     pub fn runner(&self) -> &GitRunner {
@@ -1005,6 +1022,15 @@ impl GitBackend for CliBackend {
         Ok(status)
     }
 
+    fn pair_moves(
+        &self,
+        repo: &Path,
+        status: &mut RepoStatus,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.find_moves(repo, status, cancel)
+    }
+
     fn refs(&self, repo: &Path, cancel: &CancelToken) -> Result<Vec<Ref>, GitError> {
         let remotes: Vec<String> = self
             .remotes(repo, cancel)?
@@ -1070,6 +1096,9 @@ impl GitBackend for CliBackend {
         if target.kind == DiffKind::Untracked {
             return read_untracked(&toplevel.join(&target.path), limit);
         }
+        if let DiffKind::ConflictSide { .. } = target.kind {
+            return self.conflict_side_diff(toplevel, target, limit, cancel);
+        }
         let amend_index = if target.kind == DiffKind::Amend {
             let base = target
                 .commit
@@ -1090,15 +1119,38 @@ impl GitBackend for CliBackend {
                 .arg(&target.path)
                 .cancel_token(cancel)
                 .run()?;
-            if entry.stdout.is_empty() && toplevel.join(&target.path).is_file() {
+            let new_file = entry.stdout.is_empty() && toplevel.join(&target.path).is_file();
+            if new_file && target.original_path.is_none() {
                 return read_untracked(&toplevel.join(&target.path), limit);
             }
-            Some(self.amend_read_index(toplevel, base, cancel)?)
+            let index = self.amend_read_index(toplevel, base, cancel)?;
+            // A move's new path is new to the baseline: intent-to-add, so
+            // the diff pairs it with its source.
+            if new_file {
+                self.mark_intent_to_add(
+                    toplevel,
+                    &index.0,
+                    std::slice::from_ref(&target.path),
+                    cancel,
+                )?;
+            }
+            Some(index)
         } else {
             None
         };
+        // An uncommitted move: its new path is untracked, which `git diff`
+        // skips unless the index has it intent-to-add.
+        let move_index = match (&target.kind, &target.original_path) {
+            (DiffKind::Head, Some(_)) if !self.in_index(toplevel, &target.path, cancel)? => Some(
+                self.intent_to_add_index(toplevel, std::slice::from_ref(&target.path), cancel)?,
+            ),
+            _ => None,
+        };
         let mut cmd = self.runner.read(toplevel).env("GIT_LITERAL_PATHSPECS", "1");
         if let Some(index) = &amend_index {
+            cmd = cmd.env("GIT_INDEX_FILE", &index.0);
+        }
+        if let Some(index) = &move_index {
             cmd = cmd.env("GIT_INDEX_FILE", &index.0);
         }
         if let (DiffKind::Commit, Some(commit)) = (target.kind, &target.commit) {
@@ -1128,7 +1180,12 @@ impl GitBackend for CliBackend {
                     "missing amend parent",
                 )
             })?;
-            cmd = cmd.args(["--no-renames", base]);
+            let renames = if target.original_path.is_some() {
+                "-M"
+            } else {
+                "--no-renames"
+            };
+            cmd = cmd.args([renames, base]);
             if target.kind == DiffKind::AmendStaged {
                 cmd = cmd.arg(&side.oid);
             }
@@ -1168,6 +1225,25 @@ impl GitBackend for CliBackend {
         let mut diff = parse_diff(&output).map_err(|e| unexpected(&[command.as_str()], e))?;
         if let DiffContent::Binary { .. } = diff.content {
             diff.content = self.binary_sizes(toplevel, target, cancel);
+        }
+        // A rename, copy or mode change without edits has no `index` line:
+        // its old blob is looked up so the whole file can still be shown.
+        let unchanged = diff.content == DiffContent::Text
+            && diff.hunks.is_empty()
+            && diff.header.old_oid.is_none()
+            && (diff.header.original_path().is_some() || !diff.header.notes().is_empty());
+        if unchanged {
+            let (old_spec, _) = Self::side_specs(target);
+            let found = self
+                .runner
+                .read(toplevel)
+                .args(["rev-parse", "--verify", "--quiet", &old_spec])
+                .cancel_token(cancel)
+                .run();
+            if let Ok(out) = found {
+                let oid = out.stdout_text().trim().to_owned();
+                diff.header.old_oid = (!oid.is_empty()).then_some(oid);
+            }
         }
         Ok(diff)
     }
@@ -2687,21 +2763,16 @@ impl CliBackend {
         }
     }
 
-    /// Old and new sizes of a binary file, from the object database and the
-    /// working tree. A side that does not exist stays `None`.
-    fn binary_sizes(
-        &self,
-        toplevel: &Path,
-        target: &DiffTarget,
-        cancel: &CancelToken,
-    ) -> DiffContent {
+    /// A diff's sides as `rev:path` (`:path` for the index); the new side is
+    /// `None` when it is the working tree.
+    fn side_specs(target: &DiffTarget) -> (String, Option<String>) {
         let slashed = |p: &Path| p.to_string_lossy().replace('\\', "/");
         let path = slashed(&target.path);
         let old_path = target
             .original_path
             .as_deref()
             .map_or_else(|| path.clone(), slashed);
-        let (old_spec, new_spec) = match target.kind {
+        match target.kind {
             DiffKind::Staged => (format!("HEAD:{old_path}"), Some(format!(":{path}"))),
             DiffKind::Head => (format!("HEAD:{old_path}"), None),
             DiffKind::Amend | DiffKind::AmendStaged => {
@@ -2734,7 +2805,65 @@ impl CliBackend {
                     .unwrap_or("HEAD");
                 (format!("{base}:{old_path}"), None)
             }
+            DiffKind::ConflictSide { stage } => {
+                (format!(":1:{old_path}"), Some(format!(":{stage}:{path}")))
+            }
+        }
+    }
+
+    /// The diff of a conflicted file's side against the merge base, or the
+    /// whole side as added when there is no base.
+    fn conflict_side_diff(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        limit: Option<usize>,
+        cancel: &CancelToken,
+    ) -> Result<FileDiff, GitError> {
+        let (base, side) = Self::side_specs(target);
+        let side = side.unwrap_or_default();
+        let has_base = self
+            .runner
+            .read(toplevel)
+            .args(["rev-parse", "--verify", "--quiet", &base])
+            .cancel_token(cancel)
+            .run()
+            .is_ok();
+        if !has_base {
+            let limit = limit.unwrap_or(usize::MAX);
+            return Ok(match self.blob(toplevel, &side, limit, cancel)? {
+                Some(content) => untracked_diff(&content),
+                None => FileDiff::too_large(limit.saturating_add(1)),
+            });
+        }
+        let stream = self
+            .runner
+            .read(toplevel)
+            .args(DIFF_ARGS)
+            .args([&base, &side])
+            .stream()?;
+        let command = stream.command().to_owned();
+        let output = match read_limited(stream, limit.unwrap_or(usize::MAX), cancel)? {
+            Limited::Read(output) => output,
+            Limited::TooLarge(bytes) => return Ok(FileDiff::too_large(bytes)),
+            Limited::Cancelled => return Ok(FileDiff::default()),
         };
+        let mut diff = parse_diff(&output).map_err(|e| unexpected(&[command.as_str()], e))?;
+        if let DiffContent::Binary { .. } = diff.content {
+            diff.content = self.binary_sizes(toplevel, target, cancel);
+        }
+        Ok(diff)
+    }
+
+    /// Old and new sizes of a binary file, from the object database and the
+    /// working tree. A side that does not exist stays `None`.
+    fn binary_sizes(
+        &self,
+        toplevel: &Path,
+        target: &DiffTarget,
+        cancel: &CancelToken,
+    ) -> DiffContent {
+        let (old_spec, new_spec) = Self::side_specs(target);
         let mut input = format!("{old_spec}\n");
         if let Some(spec) = &new_spec {
             input.push_str(spec);

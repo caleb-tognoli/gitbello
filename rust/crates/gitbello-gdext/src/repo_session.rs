@@ -1366,6 +1366,13 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.select_change(&self.key, &path, full));
     }
 
+    /// Shows the changed side's diff of the conflict without blocks shown
+    /// (`diff_info` then has `conflict_bar`), or its card again.
+    #[func]
+    fn show_conflict_changes(&self, on: bool) {
+        runtime_cell::with(|rt| rt.show_conflict_changes(&self.key, on));
+    }
+
     #[func]
     fn clear_diff(&self) {
         runtime_cell::with(|rt| rt.select_diff(&self.key, None, false));
@@ -1375,7 +1382,8 @@ impl RepoSession {
     /// plus `pickable` (lines can be picked) and `as_staged` (the file is
     /// committed exactly as staged outside gitbello).
     /// A conflicted file shows its conflicts instead: see
-    /// `convert::conflict_info`.
+    /// `convert::conflict_info`, or, while it shows its changed side, the
+    /// diff with `conflict_bar` (see `convert::conflict_bar`).
     #[func]
     fn diff_info(&self) -> VarDictionary {
         self.read(|s| {
@@ -1385,6 +1393,9 @@ impl RepoSession {
             let mut info = convert::diff_info(s.diff());
             info.set("pickable", s.can_pick_lines());
             info.set("as_staged", s.diff_as_staged());
+            if let Some(conflict) = s.conflict_bar() {
+                info.set("conflict_bar", &convert::conflict_bar(conflict));
+            }
             info
         })
         .unwrap_or_default()

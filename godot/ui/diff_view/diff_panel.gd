@@ -2,8 +2,8 @@ class_name DiffPanel
 extends VBoxContainer
 ## A file diff with its header (status icon, path, notes, +/− counts,
 ## whole file, unified or side by side) and the messages shown instead of lines
-## (loading, binary, too large, no changes, errors). The path reads like the
-## file lists': its folder muted, a renamed file `docs/old.md → new.md`.
+## (loading, binary, too large, no changes, errors). The path's folder is
+## muted; a renamed file shows both paths, `src/util.rs → lib/util.rs`.
 ## Callers pass `RepoSession.diff_info()`-style dictionaries to `show_info`.
 ## A conflicted file (`content` `conflict`) shows its conflict blocks with a
 ## bar in the header (the sides' colours and names from `side_names`, the
@@ -62,6 +62,9 @@ signal base_requested(show: bool)
 signal card_action(id: String)
 ## The previous or next conflict block was asked for.
 signal conflict_step_requested(forward: bool)
+## A conflict without blocks asked to show the changed side's diff (`true`,
+## Show changes on its card) or its card again (the bar's close button).
+signal conflict_changes_requested(on: bool)
 ## Open was chosen on an image side (`old` or `new`) in its context menu.
 signal open_side_requested(side: String)
 
@@ -104,6 +107,12 @@ var _card_table: GridContainer = GridContainer.new()
 var _conflict_bar: HBoxContainer = HBoxContainer.new()
 var _legend: Array[Label] = []
 var _block_position: Label = Label.new()
+## The card of a conflict without blocks, shrunk to a bar over the changed
+## side's diff (`conflict_bar` in the info): its text and its choices.
+var _side_bar: PanelContainer = PanelContainer.new()
+var _side_bar_icon: TextureRect = TextureRect.new()
+var _side_bar_text: Label = Label.new()
+var _side_bar_buttons: HBoxContainer = HBoxContainer.new()
 ## The image viewer's context menu (Open) and the side it was opened on.
 var _image_menu: PopupMenu = PopupMenu.new()
 var _image_menu_side: String = ""
@@ -143,6 +152,9 @@ var _image_notes: PackedStringArray = PackedStringArray()
 ## `kind:path` of the diffs whose only changes are endings that were asked
 ## to show as a diff (Show diff on their card), for this session.
 static var _eol_full: Dictionary[String, bool] = {}
+## `kind:path` of the diffs without changed lines (a rename, a mode change)
+## whose file was asked for (Show file on their card), for this session.
+static var _file_shown: Dictionary[String, bool] = {}
 
 
 func _ready() -> void:
@@ -155,7 +167,11 @@ func _ready() -> void:
 	set_minimap_enabled(Core.diff_minimap())
 	_view.expand_requested.connect(func(gap: int, how: String) -> void: expand_requested.emit(gap, how))
 	_whole_button.icon = AppTheme.icon(&"ExpandAll")
-	_whole_button.toggled.connect(func(on: bool) -> void: whole_file_requested.emit(on))
+	_whole_button.toggled.connect(func(on: bool) -> void:
+		# Turning it off on a file without changed lines goes back to its card.
+		if not on:
+			_file_shown.erase(_shown)
+		whole_file_requested.emit(on))
 	_base_button.text = "Base"
 	_base_button.icon = AppTheme.icon(&"GitCommit")
 	_base_button.toggle_mode = true
@@ -182,6 +198,8 @@ func _ready() -> void:
 	_card_table.hide()
 	_message_label.add_sibling(_card_table)
 	_build_image_views()
+	# The path's folders are cut to the header's width.
+	_path.resized.connect(func() -> void: _show_path(_path_shown[0], _path_shown[1], _path_shown[2]))
 	_apply_theme()
 
 
@@ -252,6 +270,74 @@ func _build_conflict_bar() -> void:
 	_columns.draw.connect(_draw_columns)
 	_view.resized.connect(_columns.queue_redraw)
 	_columns.hide()
+	_build_side_bar(stack)
+
+
+func _build_side_bar(stack: Control) -> void:
+	_side_bar.theme_type_variation = &"ConflictSideBar"
+	var row: HBoxContainer = HBoxContainer.new()
+	row.theme_type_variation = &"DiffHeaderRow"
+	_side_bar.add_child(row)
+	_side_bar_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_side_bar_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_side_bar_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_side_bar_icon)
+	_side_bar_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_side_bar_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_side_bar_text.clip_text = true
+	_side_bar_text.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(_side_bar_text)
+	_side_bar_buttons.theme_type_variation = &"DiffHeaderRow"
+	row.add_child(_side_bar_buttons)
+	var close: Button = Button.new()
+	close.theme_type_variation = &"IconToggle"
+	close.focus_mode = Control.FOCUS_NONE
+	close.icon = AppTheme.icon(&"Close")
+	close.tooltip_text = "Hide changes"
+	close.pressed.connect(func() -> void:
+		_file_shown.erase("conflict:" + String(_info.get("path", "")))
+		conflict_changes_requested.emit(false))
+	row.add_child(close)
+	stack.add_sibling(_side_bar)
+	move_child(_side_bar, stack.get_index())
+	_side_bar.hide()
+
+
+## Shows the bar of the conflict without blocks `bar` (`{kind, side}`, from
+## `conflict_bar`) over its changed side's diff; hidden for an empty `bar`.
+func _show_side_bar(bar: Dictionary, names: PackedStringArray) -> void:
+	_side_bar.visible = not bar.is_empty()
+	if bar.is_empty():
+		return
+	var choice: Array = _conflict_choice(String(bar.get("kind", "")), String(bar.get("side", "")), names)
+	_side_bar_text.text = String(choice[0])
+	_side_bar_text.tooltip_text = _side_bar_text.text
+	var side: float = float(get_theme_font_size(&"font_size", &"Label")) + 2.0
+	_side_bar_icon.custom_minimum_size = Vector2(side, side)
+	_side_bar_icon.texture = FileRowPainter.code_icon(String(choice[2]))
+	_side_bar_icon.self_modulate = FileRowPainter.code_color(self, String(choice[2]))
+	for child: Node in _side_bar_buttons.get_children():
+		_side_bar_buttons.remove_child(child)
+		child.queue_free()
+	for button_info: Array in choice[1]:
+		var button: Button = Button.new()
+		button.text = String(button_info[1])
+		button.icon = button_info[2] as Texture2D
+		button.focus_mode = Control.FOCUS_NONE
+		var id: String = String(button_info[0])
+		button.pressed.connect(func() -> void: card_action.emit(id))
+		_side_bar_buttons.add_child(button)
+
+
+## The bar over a conflict's side diff (for tests): `text · button ·
+## button`, or "" when it is hidden.
+func side_bar_text() -> String:
+	if not _side_bar.visible:
+		return ""
+	var parts: PackedStringArray = PackedStringArray([_side_bar_text.text])
+	for child: Node in _side_bar_buttons.get_children():
+		parts.append((child as Button).text)
+	return " · ".join(parts)
 
 
 ## Shows the column names while side by side shows conflict blocks.
@@ -540,6 +626,7 @@ func clear(placeholder: String = "", icon: StringName = &"") -> void:
 	_show_whole_button(false, false)
 	_base_button.hide()
 	_show_conflict_bar(0, PackedStringArray())
+	_show_side_bar({}, PackedStringArray())
 	_set_offered("none", PackedStringArray())
 	_hide_images()
 	_loading.hide_loading()
@@ -600,6 +687,7 @@ func show_info(info: Dictionary) -> void:
 			_view.show_lines(0, 0, false)
 			_hide_images()
 			_show_whole_button(false, false)
+			_show_side_bar({}, PackedStringArray())
 			show_message(tr("Cannot show this diff.\n%s") % tr(String(error.get("message", error.get("title", "")))))
 			_retry.show()
 			_set_offered("none", PackedStringArray())
@@ -612,6 +700,7 @@ func show_info(info: Dictionary) -> void:
 	_show_whole_button(bool(info.get("can_expand", false)) or whole, whole)
 	_base_button.hide()
 	_show_conflict_bar(0, PackedStringArray())
+	_show_side_bar(info.get("conflict_bar", {}), info.get("side_names", PackedStringArray(["ours", "theirs"])))
 	var content: String = String(info.get("content", "text"))
 	if _viewer == "image" and info.has("image") and content != "conflict":
 		_show_images(info.get("image", {}), keep, translated_notes)
@@ -643,8 +732,22 @@ func show_info(info: Dictionary) -> void:
 			var large: String = "This image is large (more than %s)." if is_image_path(path) else "This diff is large (more than %s)."
 			show_message(tr(large) % _size_text(int(info["bytes"])), true)
 		"empty":
+			# A rename or mode change: its file, once asked for, or a card
+			# offering it.
+			var can_show: bool = bool(info.get("can_expand", false)) or whole
+			if whole and int(info.get("line_count", 0)) > 0:
+				_hide_message()
+				_view.show_lines(int(info["line_count"]), int(info["max_line"]), keep,
+						int(info.get("split_count", info["line_count"])))
+				return
 			_view.show_lines(0, 0, false)
-			if notes.is_empty():
+			if can_show:
+				var title: String = tr(EMPTY_TITLES.get(code, "No changes")) if notes.is_empty() \
+						else "\n".join(translated_notes)
+				show_card(title, [["show_file", tr("Show file"), AppTheme.icon(&"TextFile")]], code)
+				if _file_shown.has(key) and not whole:
+					whole_file_requested.emit.call_deferred(true)
+			elif notes.is_empty():
 				show_empty(EMPTY_ICONS.get(code, &"TextFile"), EMPTY_TITLES.get(code, "No changes"))
 			else:
 				show_message("\n".join(translated_notes))
@@ -656,7 +759,6 @@ func _show_conflict(info: Dictionary, keep: bool) -> void:
 	var conflict: Dictionary = info.get("conflict", {})
 	var kind: String = String(conflict.get("kind", ""))
 	var blocks: int = int(conflict.get("blocks", 0))
-	var side: String = "we" if String(conflict.get("side", "")) == "ours" else "they"
 	if kind in ["content", "add_add"] and blocks > 0:
 		_hide_message()
 		_card.hide()
@@ -674,18 +776,14 @@ func _show_conflict(info: Dictionary, keep: bool) -> void:
 		return
 	_view.show_lines(0, 0, false)
 	var names: PackedStringArray = info.get("side_names", PackedStringArray(["ours", "theirs"]))
-	# `side` is the one that deleted the file, or the only one that has it.
-	var one: int = 0 if side == "we" else 1
-	var named: String = names[one]
-	var unnamed: String = names[1 - one]
 	match kind:
-		"modify_delete":
-			show_card(tr("%s deleted it · %s changed it") % [named, unnamed],
-					[["keep", tr("Keep %s's version") % unnamed, _side_dot(1 - one)],
-					["delete", tr("Delete it, as %s did") % named, _side_dot(one)]], "D")
-		"added_by_one":
-			show_card(tr("Only %s has it · %s probably renamed it") % [named, unnamed],
-					[["keep", "Keep it", _side_dot(one)], ["delete", "Delete it", AppTheme.icon(&"Remove")]], "A")
+		"modify_delete", "added_by_one":
+			var choice: Array = _conflict_choice(kind, String(conflict.get("side", "")), names)
+			var buttons: Array = (choice[1] as Array).duplicate()
+			buttons.append(["show_changes", tr("Show changes"), AppTheme.icon(&"TextFile")])
+			show_card(String(choice[0]), buttons, String(choice[2]))
+			if _file_shown.has(_shown):
+				conflict_changes_requested.emit.call_deferred(true)
 		"both_deleted":
 			show_card(tr("%s and %s both deleted or renamed it") % [names[0], names[1]],
 					[["delete", "Delete it", AppTheme.icon(&"Remove")]], "D")
@@ -707,6 +805,21 @@ func _show_conflict(info: Dictionary, keep: bool) -> void:
 				_load_sides(_preview, image)
 		_:
 			show_message("No conflicts are left in this file; it is marked resolved.")
+
+
+## The card of a conflict without blocks of `kind` (`modify_delete` or
+## `added_by_one`) whose `side` (`ours`, `theirs`) deleted the file, or is the
+## only one that has it: `[text, buttons, status code]`.
+func _conflict_choice(kind: String, side: String, names: PackedStringArray) -> Array:
+	var one: int = 0 if side == "ours" else 1
+	var named: String = names[one]
+	var unnamed: String = names[1 - one]
+	if kind == "modify_delete":
+		return [tr("%s deleted it · %s changed it") % [named, unnamed],
+				[["keep", tr("Keep %s's version") % unnamed, _side_dot(1 - one)],
+				["delete", tr("Delete it, as %s did") % named, _side_dot(one)]], "D"]
+	return [tr("Only %s has it · %s probably renamed it") % [named, unnamed],
+			[["keep", tr("Keep it"), _side_dot(one)], ["delete", tr("Delete it"), AppTheme.icon(&"Remove")]], "A"]
 
 
 ## An image diff: the viewer (fitted when the file first shows) with the
@@ -1005,6 +1118,12 @@ func _on_card_action(id: String) -> void:
 	if id == "eol_show_diff" and not _shown.is_empty():
 		_eol_full[_shown] = true
 		show_info(_info)
+	elif id == "show_file" and not _shown.is_empty():
+		_file_shown[_shown] = true
+		whole_file_requested.emit(true)
+	elif id == "show_changes" and not _shown.is_empty():
+		_file_shown[_shown] = true
+		conflict_changes_requested.emit(true)
 
 
 ## A message with buttons (`[id, label, icon]`) that emit `card_action`, over
@@ -1149,28 +1268,32 @@ func counts_text() -> String:
 	return shown_counts(_added, _removed)
 
 
-## The header's path as shown, such as `docs/a.md → b.md`.
+## The header's path as shown, such as `docs/a.md → docs/b.md`.
 func path_text() -> String:
 	return _path.get_parsed_text()
 
 
-## `path` like the file lists show it: everything before the file name
-## muted (`FileRowPainter.path_lead`, so a rename reads `docs/old.md → new.md`);
-## the tooltip says where a renamed or copied file came from and how similar it is.
+## `path` with everything before the file name muted; a rename or copy shows
+## both full paths, `src/util.rs → lib/util.rs`, folders cut from the left
+## when narrow (`FileRowPainter.header_path`). The tooltip says where a
+## renamed or copied file came from and how similar it is.
 func _show_path(path: String, original: String, similarity: int) -> void:
 	_path_shown = [path, original, similarity]
 	_path.clear()
 	_path.tooltip_text = path
-	var lead: PackedStringArray = FileRowPainter.path_lead(path, original)
+	var font: Font = _path.get_theme_font(&"normal_font")
+	var font_size: int = _path.get_theme_font_size(&"normal_font_size")
+	var measure: Callable = func(text: String) -> float:
+		return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var parts: PackedStringArray = FileRowPainter.header_path(path, original, _path.size.x - 2.0, measure)
 	_path.push_color(FileRowPainter.dir_color(self))
-	_path.add_text(lead[0] + lead[1])
+	_path.add_text(parts[0])
 	_path.pop()
-	_path.add_text(path.get_file())
-	if original.is_empty() or original == path:
-		return
-	_path.tooltip_text = tr("Copied from %s") % original if _code == "C" else tr("Renamed from %s") % original
-	if similarity >= 0:
-		_path.tooltip_text += tr(" · %d%% similar") % similarity
+	_path.add_text(parts[1])
+	var tip: String = FileRowPainter.rename_tip({"path": path, "original_path": original, "code": _code,
+			"similarity": similarity})
+	if not tip.is_empty():
+		_path.tooltip_text = "%s\n%s" % [path, tip]
 
 
 func _apply_theme() -> void:

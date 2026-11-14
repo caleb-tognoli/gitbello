@@ -52,8 +52,8 @@ impl RepoState {
     pub(super) fn change_target(&self, path: &Path) -> Option<DiffTarget> {
         let mut target = changes::diff_target(self.changes_status()?, path);
         if let Some(snapshot) = self.amend.as_ref().and_then(|a| a.snapshot.as_ref()) {
+            // A rename keeps its source (from `diff_target`).
             target.kind = DiffKind::Amend;
-            target.original_path = None;
             target.commit = Some(CommitSide {
                 oid: snapshot.tree.clone(),
                 parent: Some(snapshot.base.clone()),

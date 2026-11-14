@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use super::{CliBackend, GitBackend, IndexWrite};
 use crate::git::{CancelToken, GitError, GitErrorKind};
+use crate::moves::{parse_renames, Move, MAX_CANDIDATES};
 use crate::repo::{git_path, Change, FileChange, FileState, RepoStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,8 +186,17 @@ impl CliBackend {
                 .map(git_path)
                 .collect())
         };
+        let new_to_base = untracked(&base_index.0)?;
+        let moves = self.amend_moves(
+            repo,
+            snapshot,
+            &base_index.0,
+            &working,
+            &new_to_base,
+            cancel,
+        )?;
         for (paths, changes) in [
-            (untracked(&base_index.0)?, &mut working),
+            (new_to_base, &mut working),
             (untracked(&tree_index.0)?, &mut changed),
         ] {
             for path in paths {
@@ -225,8 +235,95 @@ impl CliBackend {
                 },
             };
         }
+        pair_amend_moves(&mut working, &moves);
         status.changes = working.into_values().collect();
         Ok(status)
+    }
+
+    /// Files deleted since the amend baseline that git sees moved to a file
+    /// new since then (`new_to_base`), in the original commit or after it.
+    fn amend_moves(
+        &self,
+        repo: &Path,
+        snapshot: &AmendSnapshot,
+        base_index: &Path,
+        working: &BTreeMap<PathBuf, FileChange>,
+        new_to_base: &[PathBuf],
+        cancel: &CancelToken,
+    ) -> Result<Vec<Move>, GitError> {
+        let deleted: Vec<PathBuf> = working
+            .values()
+            .filter(|c| {
+                matches!(
+                    c.state,
+                    FileState::Tracked {
+                        index: Change::Deleted,
+                        ..
+                    }
+                )
+            })
+            .map(|c| c.path.clone())
+            .collect();
+        let fits = |paths: &[PathBuf]| !paths.is_empty() && paths.len() <= MAX_CANDIDATES;
+        if !fits(&deleted) || !fits(new_to_base) {
+            return Ok(Vec::new());
+        }
+        // The read index is the baseline's tree: the new files go in
+        // intent-to-add, then the baseline against the working tree pairs.
+        self.mark_intent_to_add(repo, base_index, new_to_base, cancel)?;
+        let out = self
+            .runner
+            .read(repo)
+            .env("GIT_INDEX_FILE", base_index)
+            .args([
+                "diff",
+                "-z",
+                "-M",
+                "--name-status",
+                "--diff-filter=R",
+                "--no-ext-diff",
+                "--no-textconv",
+                &snapshot.base,
+                "--",
+            ])
+            .cancel_token(cancel)
+            .run()?;
+        Ok(parse_renames(&out.stdout, &deleted, new_to_base))
+    }
+}
+
+/// Folds each move's source into its new path's change: renamed in the
+/// amended commit when it deleted the source and added the new path,
+/// renamed in the working tree when neither is in it; left alone otherwise.
+fn pair_amend_moves(working: &mut BTreeMap<PathBuf, FileChange>, moves: &[Move]) {
+    let index_of = |c: &FileChange| match c.state {
+        FileState::Tracked { index, .. } => Some(index),
+        _ => None,
+    };
+    for found in moves {
+        let (Some(source), Some(target)) = (working.get(&found.from), working.get(&found.to))
+        else {
+            continue;
+        };
+        let state = match (index_of(source), index_of(target), target.state) {
+            (Some(Change::Deleted), Some(Change::Added), FileState::Tracked { worktree, .. }) => {
+                FileState::Tracked {
+                    index: Change::Renamed,
+                    worktree,
+                }
+            }
+            (Some(Change::Unmodified), Some(Change::Unmodified), _) => FileState::Tracked {
+                index: Change::Unmodified,
+                worktree: Change::Renamed,
+            },
+            _ => continue,
+        };
+        working.remove(&found.from);
+        if let Some(target) = working.get_mut(&found.to) {
+            target.state = state;
+            target.original_path = Some(found.from.clone());
+            target.score = Some(found.score);
+        }
     }
 }
 

@@ -89,9 +89,10 @@ func _get_tooltip(at_position: Vector2) -> String:
 	var status: String = tr("Untracked") if bool(data.get("untracked", false)) \
 			else FileRowPainter.code_name(String(data.get("code", "")))
 	var lines: PackedStringArray = PackedStringArray([String(data["path"])])
-	if not String(data.get("original_path", "")).is_empty():
-		lines.append(tr("From %s") % String(data["original_path"]))
-	if not status.is_empty():
+	var rename: String = FileRowPainter.rename_tip(data)
+	if not rename.is_empty():
+		lines.append(rename)
+	if not status.is_empty() and rename.is_empty():
 		lines.append(status)
 	if int(data.get("additions", -1)) < 0:
 		lines.append(tr("Binary file"))

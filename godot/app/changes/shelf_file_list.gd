@@ -51,4 +51,8 @@ func _draw_row(index: int, rect: Rect2, _selected_row: bool) -> void:
 
 
 func _get_tooltip(at: Vector2) -> String:
-	return path_at(row_at(at))
+	var index: int = row_at(at)
+	if index < 0 or index >= _files.size():
+		return ""
+	var rename: String = FileRowPainter.rename_tip(_files[index])
+	return path_at(index) if rename.is_empty() else "%s\n%s" % [path_at(index), rename]

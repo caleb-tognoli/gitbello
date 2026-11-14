@@ -202,6 +202,45 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return String(session.status().get("oid", "")) == before),
 			"side is back where it was")
 	expect(not FileAccess.file_exists(repo.path_join("main2.txt")), "without main's commit")
+
+	# main deletes a file edit changes: Show changes on the card shows edit's
+	# change under a bar with the choices; Keep from the bar resolves it.
+	expect(await _switch(ops, session, "main"), "on main for the modify/delete")
+	var gone: String = repo.path_join("gone.txt")
+	write_file(gone, "one\ntwo\nthree\n")
+	expect(await _commit(session, "gone.txt", "Add gone.txt"), "committed gone.txt")
+	session.create_branch("edit", "main", false)
+	expect(await wait_until(func() -> bool: return _has_branch(session, "edit")), "created edit")
+	DirAccess.remove_absolute(gone)
+	expect(await _commit(session, "gone.txt", "Delete gone.txt"), "deleted it on main")
+	expect(await _switch(ops, session, "edit"), "on edit")
+	expect(await wait_until(func() -> bool: return FileAccess.file_exists(gone)), "edit has gone.txt")
+	write_file(gone, "one\nTWO\nthree\n")
+	expect(await _commit(session, "gone.txt", "Edit gone.txt"), "changed it on edit")
+	expect(await _switch(ops, session, "main"), "back on main to merge edit")
+	ops.merge_into_current("refs/heads/edit", "edit")
+	expect(await wait_until(func() -> bool: return dialog.visible and ok.text == "Merge and resolve…"),
+			"the dialog previews the modify/delete: %s" % ok.text)
+	ok.pressed.emit()
+	var panel: DiffPanel = changes.diff_panel()
+	expect(await wait_until(func() -> bool: return panel.card_buttons().has("Show changes")),
+			"the card offers Show changes: %s" % panel.card_buttons())
+	panel.card_action.emit("show_changes")
+	expect(await wait_until(func() -> bool: return panel.side_bar_text() == "main deleted it · edit changed it · Keep edit's version · Delete it, as main did"),
+			"the card became a bar: %s" % panel.side_bar_text())
+	var shown: Dictionary = session.diff_info()
+	expect(await wait_until(func() -> bool: return int(session.diff_info().get("additions", 0)) == 1),
+			"the diff is edit's change: %s" % shown)
+	expect(not bool(session.diff_info().get("pickable", true)), "it is read-only")
+	panel.card_action.emit("keep")
+	expect(await wait_until(func() -> bool: return int(session.operation_info().get("conflicts", -1)) == 0),
+			"Keep from the bar resolved it")
+	expect(read_file(gone) == "one\nTWO\nthree\n", "edit's version was kept")
+	expect(await wait_until(func() -> bool: return panel.side_bar_text().is_empty()), "the bar goes with the conflict")
+	expect(Actions.run_action(&"operation.abort"), "Abort the modify/delete merge")
+	expect(await wait_until(func() -> bool: return confirm.visible), "Abort asks first")
+	confirm.get_ok_button().pressed.emit()
+	expect(await wait_until(func() -> bool: return session.operation().is_empty()), "the merge was aborted")
 	while main.tab_count() > 0:
 		main.close_tab(0)
 	main.queue_free()

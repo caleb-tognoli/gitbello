@@ -501,6 +501,9 @@ pub struct ConflictState {
     states: Option<(u64, Arc<LineStates>)>,
     /// The content hash the running states job is for.
     states_job: Option<(JobId, u64)>,
+    /// A conflict without blocks shows the changed side's diff (in the
+    /// Changes diff slot) instead of its card.
+    changes: bool,
 }
 
 impl ConflictState {
@@ -521,6 +524,7 @@ impl ConflictState {
             content: None,
             states: None,
             states_job: None,
+            changes: false,
         }
     }
 
@@ -920,9 +924,16 @@ impl RepoState {
         }
     }
 
-    /// The conflicted file selected in the Changes view, if any.
+    /// The conflicted file selected in the Changes view, if any; `None`
+    /// while it shows its changed side's diff (see [`Self::conflict_bar`]).
     pub fn conflict(&self) -> Option<&ConflictState> {
-        self.conflict.as_ref()
+        self.conflict.as_ref().filter(|c| !c.changes)
+    }
+
+    /// The conflict without blocks whose changed side's diff the Changes
+    /// view shows ([`Self::diff`]), under a bar with its choices.
+    pub fn conflict_bar(&self) -> Option<&ConflictState> {
+        self.conflict.as_ref().filter(|c| c.changes)
     }
 
     pub fn conflict_shows_base(&self) -> bool {
@@ -1688,7 +1699,7 @@ impl DiffState {
     /// Blob id of the diff's old side, when it has one.
     fn old_oid(&self) -> Option<&str> {
         let diff = self.diff.as_ref()?;
-        if diff.content != DiffContent::Text || diff.hunks.is_empty() {
+        if diff.content != DiffContent::Text {
             return None;
         }
         diff.header
@@ -1703,7 +1714,10 @@ impl DiffState {
         let Some(oid) = self.old_oid() else {
             return false;
         };
-        (!self.expansion.is_empty() || !self.layout.end_known())
+        // Without hunks there is nothing to place: only Show file reads it.
+        let unplaced =
+            !self.layout.end_known() && self.diff.as_ref().is_some_and(|d| !d.hunks.is_empty());
+        (!self.expansion.is_empty() || unplaced)
             && self.old.is_none()
             && !self.old_loading
             && !self.states_read_old
@@ -2306,6 +2320,50 @@ impl Runtime {
         }
     }
 
+    /// Shows the diff of the side that changed (or the only side) of the
+    /// conflict without blocks shown, read-only against the merge base, or
+    /// its card again.
+    pub fn show_conflict_changes(&mut self, key: &Path, on: bool) {
+        let Some(state) = self.repos.get_mut(key) else {
+            return;
+        };
+        let Some(conflict) = state.conflict.as_mut() else {
+            return;
+        };
+        let stage = match conflict.kind {
+            ConflictKind::ModifyDelete { deleted_by_us } => {
+                if deleted_by_us {
+                    3
+                } else {
+                    2
+                }
+            }
+            ConflictKind::AddedByOne { by_us } => {
+                if by_us {
+                    2
+                } else {
+                    3
+                }
+            }
+            _ => return,
+        };
+        if conflict.changes == on {
+            return;
+        }
+        conflict.changes = on;
+        let target = on.then(|| DiffTarget {
+            kind: DiffKind::ConflictSide { stage },
+            path: conflict.path.clone(),
+            original_path: None,
+            commit: None,
+        });
+        self.select_slot(key, DiffSlot::Changes, target, false);
+        self.pending.push(RuntimeEvent::DiffChanged {
+            repo: key.to_path_buf(),
+            slot: DiffSlot::Changes,
+        });
+    }
+
     /// Includes or excludes whole files in the commit selection.
     pub fn pick_files(&mut self, key: &Path, paths: &[PathBuf], include: bool) -> bool {
         let Some(state) = self.repos.get_mut(key) else {
@@ -2496,22 +2554,25 @@ impl Runtime {
         if paths.is_empty() {
             return None;
         }
-        let (untracked, tracked): (Vec<PathBuf>, Vec<PathBuf>) =
-            changes::with_rename_sources(status, &paths)
-                .into_iter()
-                .partition(|path| {
-                    status
-                        .changes
-                        .iter()
-                        .any(|c| c.path == *path && c.state == FileState::Untracked)
-                });
+        let all = changes::with_rename_sources(status, &paths);
+        // Rename sources discarding brings back; undo removes them again.
+        let sources: Vec<PathBuf> = all.iter().filter(|p| !paths.contains(p)).cloned().collect();
+        let (untracked, tracked): (Vec<PathBuf>, Vec<PathBuf>) = all
+            .into_iter()
+            .partition(|path| changes::is_new_on_disk(status, path));
         Some(self.scheduler.submit(JobSpec::write(
             key,
             DISCARD_JOB_LABEL,
             RefreshSet::EMPTY.with(RefreshKind::Status),
             move |ctx| {
                 let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
-                let backups = backend.backup(&toplevel, &paths, cancel)?;
+                let mut backups = backend.backup(&toplevel, &paths, cancel)?;
+                backups.extend(
+                    sources
+                        .into_iter()
+                        .filter(|source| !toplevel.join(source).exists())
+                        .map(|source| (source, String::new())),
+                );
                 backend.discard(&toplevel, &tracked, &untracked, cancel)?;
                 Ok(JobOutput::Discarded(backups))
             },
@@ -2783,8 +2844,14 @@ impl Runtime {
     /// `name`. Label [`SHELVE_JOB_LABEL`].
     pub fn shelve(&self, key: &Path, paths: Vec<PathBuf>, name: &str) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
-        let branch = self.repos.get(key)?.current_branch().unwrap_or("HEAD");
+        let state = self.repos.get(key)?;
+        let branch = state.current_branch().unwrap_or("HEAD");
         let message = shelf_message(branch, name, false);
+        // A rename takes its source along.
+        let paths = match state.status() {
+            Some(status) => changes::with_rename_sources(status, &paths),
+            None => paths,
+        };
         Some(self.scheduler.submit(JobSpec::write(
             key,
             SHELVE_JOB_LABEL,
@@ -4908,7 +4975,11 @@ fn submit_mark_resolved(scheduler: &JobScheduler, state: &RepoState, paths: Vec<
 /// shows its conflicts); while conflicts are around, the resolved files are
 /// read and files whose markers went away are found.
 fn after_status_conflicts(scheduler: &JobScheduler, state: &mut RepoState, generation: u64) {
-    let diff_path = state.diff.as_ref().map(|d| d.target.path.clone());
+    let diff_path = state
+        .diff
+        .as_ref()
+        .filter(|d| !matches!(d.target.kind, DiffKind::ConflictSide { .. }))
+        .map(|d| d.target.path.clone());
     if let Some(kind) = diff_path.as_deref().and_then(|p| state.conflict_kind(p)) {
         if let Some(path) = diff_path {
             state.diff = None;

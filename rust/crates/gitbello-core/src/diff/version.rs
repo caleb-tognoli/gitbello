@@ -52,6 +52,7 @@ pub fn new_source(target: &DiffTarget) -> Option<VersionSource> {
         | DiffKind::Amend
         | DiffKind::Working => Some(VersionSource::Working(target.path.clone())),
         DiffKind::Staged => Some(VersionSource::Blob(format!(":{path}"))),
+        DiffKind::ConflictSide { stage } => Some(VersionSource::Blob(format!(":{stage}:{path}"))),
         DiffKind::Commit | DiffKind::AmendStaged => target
             .commit
             .as_ref()
@@ -68,6 +69,7 @@ pub fn old_source(target: &DiffTarget) -> Option<VersionSource> {
         DiffKind::Untracked => None,
         DiffKind::Unstaged => Some(VersionSource::Blob(format!(":{path}"))),
         DiffKind::Staged | DiffKind::Head => Some(VersionSource::Blob(format!("HEAD:{path}"))),
+        DiffKind::ConflictSide { .. } => Some(VersionSource::Blob(format!(":1:{path}"))),
         DiffKind::Commit | DiffKind::Amend | DiffKind::AmendStaged | DiffKind::Working => target
             .commit
             .as_ref()

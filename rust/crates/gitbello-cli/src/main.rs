@@ -25,7 +25,7 @@ commands:
   version                          print the core version
   graph <path> [--rows a..b]       print graph rows (default 0..50)
   graph-bench <path>               time a full graph load and print metrics
-  status <path>                    working tree status
+  status <path> [--time]           working tree status (moves paired as in Changes)
   refs <path>                      branches, remote branches, tags
   worktrees <path>                 worktrees of the repository
   stashes <path>                   stash list

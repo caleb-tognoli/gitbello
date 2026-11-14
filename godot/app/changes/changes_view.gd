@@ -173,6 +173,7 @@ func _ready() -> void:
 			ops.resolve_file(conflict_path(), id))
 	_diff_panel.base_requested.connect(_on_base_requested)
 	_diff_panel.conflict_step_requested.connect(step_conflict)
+	_diff_panel.conflict_changes_requested.connect(func(on: bool) -> void: session.show_conflict_changes(on))
 	_diff_view.undo_choice_requested.connect(func() -> void: Actions.run_action(&"conflict.undo"))
 	_diff_panel.open_side_requested.connect(func(side: String) -> void: session.open_version("changes", side))
 	_both_menu.add_item("Ours first", 0)
@@ -799,9 +800,13 @@ func begin_amend(target: Dictionary) -> void:
 
 # --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
 
-## Whether the diff pane shows a conflicted file's resolver.
+## Whether the diff pane shows a conflicted file's resolver (or the diff of
+## the side that changed a file the other side deleted, under its choices).
 func is_conflict_shown() -> bool:
-	return session != null and String(session.diff_info().get("kind", "")) == "conflict"
+	if session == null:
+		return false
+	var info: Dictionary = session.diff_info()
+	return String(info.get("kind", "")) == "conflict" or info.has("conflict_bar")
 
 
 ## The conflicted file the resolver shows, or "".
@@ -1388,6 +1393,10 @@ func _on_diff_changed() -> void:
 		info["side_names"] = _diff_view.side_names
 		info["code"] = "U"
 		info["notes"] = PackedStringArray()
+	elif info.has("conflict_bar"):
+		_diff_view.side_names = _side_names({})
+		info["side_names"] = _diff_view.side_names
+		info["code"] = "U"
 	_diff_panel.show_info(info)
 	if _jump_to_block and String(info.get("state", "")) == "ready":
 		_jump_to_block = false

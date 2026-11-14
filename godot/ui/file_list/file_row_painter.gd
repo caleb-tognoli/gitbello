@@ -65,8 +65,6 @@ var _ignored_color: Color = Color.WHITE
 ## Draw the commit-selection checkbox before each row.
 var show_picks: bool = false
 var _picks: PickPainter = PickPainter.new()
-## `path_lead` of renamed rows, by original and path.
-var _rename_leads: Dictionary[String, PackedStringArray] = {}
 
 
 ## Reads the theme values from `control` (call again on theme changes).
@@ -112,7 +110,7 @@ func draw(canvas: CanvasItem, rect: Rect2, data: Dictionary) -> void:
 	x += _code_width
 	var path: String = String(data["path"]) + ("/" if bool(data.get("ignored_dir", false)) else "")
 	var name: String = path.trim_suffix("/").get_file() + ("/" if path.ends_with("/") else "")
-	var lead: PackedStringArray = _lead(path, String(data.get("original_path", "")))
+	var lead: PackedStringArray = path_lead(path, String(data.get("original_path", "")))
 	var room: float = rect.end.x - _padding - x
 	var right: float = rect.end.x - _padding
 	if bool(data.get("amending", false)) and bool(data.get("in_original_commit", false)):
@@ -164,18 +162,69 @@ func _draw_chip(canvas: CanvasItem, text: String, right: float, rect: Rect2) -> 
 
 
 ## What goes before a row's file name, muted: `[folder, separator]`, such as
-## `["src/ui", "/"]`. A renamed file reads `docs/old.md → new.md`, a moved
-## one `{src → lib}/util.rs` (see `rename_dir`), both `{src → lib}/a.rs → b.rs`.
+## `["src/ui", "/"]`. A file renamed in its folder reads `docs/old.md → new.md`;
+## a moved one shows only its new path (the tooltip and the diff header say
+## where it came from).
 static func path_lead(path: String, original: String) -> PackedStringArray:
 	var dir: String = path.trim_suffix("/").get_base_dir()
-	if original.is_empty() or original == path:
+	if original.is_empty() or original == path or original.get_base_dir() != dir:
 		return PackedStringArray([dir, "/" if not dir.is_empty() else ""])
-	var old_dir: String = original.get_base_dir()
-	var folder: String = dir if old_dir == dir else rename_dir(old_dir, dir)
-	if original.get_file() == path.get_file():
-		return PackedStringArray([folder, "/" if not folder.is_empty() else ""])
-	var old_name: String = original.get_file()
-	return PackedStringArray([folder.path_join(old_name) if not folder.is_empty() else old_name, " → "])
+	return PackedStringArray([original, " → "])
+
+
+## The tooltip line of a renamed or copied row (`original_path`, `code` and
+## an optional `similarity`): "Renamed from src/util.rs · 92% similar", or "".
+static func rename_tip(data: Dictionary) -> String:
+	var original: String = String(data.get("original_path", ""))
+	if original.is_empty() or original == String(data.get("path", "")):
+		return ""
+	var tip: String = TranslationServer.translate(&"Copied from %s" if String(data.get("code", "")) == "C"
+			else &"Renamed from %s") % original
+	var similarity: int = int(data.get("similarity", -1))
+	if similarity >= 0:
+		tip += TranslationServer.translate(&" · %d%% similar") % similarity
+	return tip
+
+
+## `text` cut from the left to fit `room` (`…ore/util.rs`), keeping at least
+## its last `keep` characters (or "" when `keep` is 0 and nothing fits);
+## `measure` gives a string's width.
+static func left_trimmed(text: String, room: float, keep: int, measure: Callable) -> String:
+	if float(measure.call(text)) <= room:
+		return text
+	for start: int in range(1, text.length() - keep):
+		var cut: String = "…" + text.substr(start)
+		if float(measure.call(cut)) <= room:
+			return cut
+	return "…" + text.right(keep) if keep > 0 else ""
+
+
+## The diff header's path in `room`: `[muted lead, file name]`. A rename or
+## copy shows both full paths, `src/util.rs → lib/core/` before `util.rs`.
+## When too wide the old path's folders give way first (`…/util.rs → lib/`),
+## then the new path's folders (`…/util.rs → util.rs`), then the old name
+## (`… → util.rs`); the new name stays whole.
+static func header_path(path: String, original: String, room: float, measure: Callable) -> PackedStringArray:
+	var name: String = path.get_file()
+	var dir: String = path.get_base_dir()
+	var new_lead: String = dir + "/" if not dir.is_empty() else ""
+	var old: String = "" if original.is_empty() or original == path else original
+	var arrow: String = " → " if not old.is_empty() else ""
+	var width: Callable = func(lead: String) -> float: return float(measure.call(lead + name))
+	if room <= 0.0 or float(width.call(old + arrow + new_lead)) <= room:
+		return PackedStringArray([old + arrow + new_lead, name])
+	var old_cut: String = old
+	if not old.is_empty():
+		var keep: int = mini(original.get_file().length() + 1, old.length())
+		old_cut = left_trimmed(old, room - float(width.call(arrow + new_lead)), keep, measure)
+		if old_cut.length() > old.length():
+			old_cut = old
+	var new_cut: String = left_trimmed(new_lead, room - float(width.call(old_cut + arrow)), 0, measure)
+	if float(width.call(old_cut + arrow + new_cut)) <= room:
+		return PackedStringArray([old_cut + arrow + new_cut, name])
+	if not old.is_empty() and float(width.call("…" + arrow)) <= room:
+		return PackedStringArray(["…" + arrow, name])
+	return PackedStringArray(["", name])
 
 
 func _text_width(text: String) -> float:
@@ -189,24 +238,6 @@ func _trimmed(text: String, width: float) -> TextLine:
 	line.width = maxf(1.0, width)
 	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	return line
-
-
-## A folder that changed in a rename, `prefix{old → new}suffix`.
-static func rename_dir(old_dir: String, new_dir: String) -> String:
-	var parts: PackedStringArray = Core.rename_parts(old_dir, new_dir)
-	return "%s{%s → %s}%s" % [parts[0], parts[1], parts[2], parts[3]]
-
-
-## `path_lead`, cached for renamed rows (rows are drawn every frame).
-func _lead(path: String, original: String) -> PackedStringArray:
-	if original.is_empty() or original == path:
-		return path_lead(path, original)
-	var key: String = original + "\n" + path
-	if not _rename_leads.has(key):
-		if _rename_leads.size() > 256:
-			_rename_leads.clear()
-		_rename_leads[key] = path_lead(path, original)
-	return _rename_leads[key]
 
 
 ## The status icon of `code` (white, to tint with `code_color`), or null.

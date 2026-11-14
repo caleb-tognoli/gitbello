@@ -181,15 +181,23 @@ fn is_staged_removal(change: &FileChange) -> bool {
     )
 }
 
-/// Whether the index holds a rename of `change.original_path` to its path.
-fn is_staged_rename(change: &FileChange) -> bool {
+/// Whether the index holds a rename of `change.original_path` to its path,
+/// or the working tree does (an uncommitted move, see [`crate::moves`]).
+fn is_rename(change: &FileChange) -> bool {
     matches!(
         change.state,
         FileState::Tracked {
             index: Change::Renamed,
             ..
         }
-    )
+    ) || crate::moves::is_worktree_move(change)
+}
+
+/// Whether `path` is a file git does not track yet: untracked, or the new
+/// path of an uncommitted move. Discarding deletes it.
+pub fn is_new_on_disk(status: &RepoStatus, path: &Path) -> bool {
+    find(status, path)
+        .is_some_and(|c| c.state == FileState::Untracked || crate::moves::is_worktree_move(c))
 }
 
 /// One-letter code of a file's change against HEAD (`M`, `A`, `D`, `R`,
@@ -201,7 +209,7 @@ pub fn change_code(change: &FileChange) -> &'static str {
         FileState::Ignored => "!",
         FileState::Tracked { index, worktree } => match (index, worktree) {
             (_, Change::Deleted) | (Change::Deleted, _) => "D",
-            (Change::Renamed, _) => "R",
+            (Change::Renamed, _) | (_, Change::Renamed) => "R",
             (Change::Copied, _) => "C",
             (Change::Added, _) => "A",
             (Change::TypeChanged, _) | (_, Change::TypeChanged) => "T",
@@ -211,7 +219,7 @@ pub fn change_code(change: &FileChange) -> &'static str {
 }
 
 /// The diff the Changes view shows for `path`: the working tree against
-/// HEAD (a staged rename compares against its source); an untracked file
+/// HEAD (a rename compares against its source); an untracked file
 /// in full; a conflicted file as git's combined diff.
 pub fn diff_target(status: &RepoStatus, path: &Path) -> DiffTarget {
     let change = find(status, path);
@@ -225,20 +233,20 @@ pub fn diff_target(status: &RepoStatus, path: &Path) -> DiffTarget {
         kind,
         path: path.to_path_buf(),
         original_path: change
-            .filter(|c| is_staged_rename(c))
+            .filter(|c| is_rename(c))
             .and_then(|c| c.original_path.clone()),
         commit: None,
     }
 }
 
-/// `paths` plus the sources of the staged renames among them, which go
-/// along when a rename is unstaged, discarded or committed.
+/// `paths` plus the sources of the renames among them, which go along when
+/// a rename is unstaged, discarded, shelved or committed.
 pub fn with_rename_sources(status: &RepoStatus, paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::with_capacity(paths.len());
     for path in paths {
         out.push(path.clone());
         let source = find(status, path)
-            .filter(|c| is_staged_rename(c))
+            .filter(|c| is_rename(c))
             .and_then(|c| c.original_path.clone());
         out.extend(source);
     }
@@ -551,10 +559,7 @@ impl Selection {
             let Some(pick) = self.pick(&change.path) else {
                 continue;
             };
-            let source = change
-                .original_path
-                .clone()
-                .filter(|_| is_staged_rename(change));
+            let source = change.original_path.clone().filter(|_| is_rename(change));
             match pick {
                 FilePick::Excluded => {}
                 // A staged removal whose file is still on disk (untracked

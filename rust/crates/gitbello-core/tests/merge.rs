@@ -723,3 +723,80 @@ fn conflicting_rebase_keeps_the_shelf() {
     assert!(state.shelves()[0].auto);
     assert!(state.rebase_undo().is_none());
 }
+
+/// The diff state of the Changes view once it has loaded.
+fn loaded_diff(rt: &mut Runtime, key: &Path) -> gitbello_core::diff::FileDiff {
+    poll_until(rt, |rt, _| {
+        rt.repo(key)
+            .and_then(|s| s.diff())
+            .is_some_and(|d| !d.is_loading() && d.diff().is_some())
+    });
+    rt.repo(key)
+        .and_then(|s| s.diff())
+        .and_then(|d| d.diff())
+        .cloned()
+        .expect("diff")
+}
+
+#[test]
+fn a_conflict_without_blocks_shows_the_changed_side_on_request() {
+    let repo = TestRepo::init();
+    repo.commit("gone.txt", "one\ntwo\nthree\n", "base");
+    repo.commit("moved.txt", "a\nb\n", "base 2");
+    repo.branch("feat");
+    repo.git(&["rm", "-q", "gone.txt"]);
+    repo.git(&["mv", "moved.txt", "ours.txt"]);
+    repo.git(&["commit", "-q", "-m", "main deletes and renames"]);
+    repo.checkout("feat");
+    repo.commit("gone.txt", "one\nTWO\nthree\n", "feat edits");
+    repo.git(&["mv", "moved.txt", "theirs.txt"]);
+    repo.git(&["commit", "-q", "-m", "feat renames"]);
+    repo.checkout("main");
+    let (mut rt, key) = open(&repo);
+    let err = outcome(&mut rt, &key, |rt| {
+        rt.merge(&key, "feat", MergeMode::Default, None, false)
+    });
+    assert_eq!(err.map(|e| e.kind), Some(GitErrorKind::Conflict));
+
+    // We deleted it, they changed it: their side against the base.
+    show_conflict(&mut rt, &key, "gone.txt");
+    rt.show_conflict_changes(&key, true);
+    let diff = loaded_diff(&mut rt, &key);
+    let state = rt.repo(&key).unwrap();
+    assert!(
+        state.conflict().is_none(),
+        "the diff shows instead of the card"
+    );
+    assert_eq!(
+        state.conflict_bar().map(|c| c.path().to_path_buf()),
+        Some(PathBuf::from("gone.txt"))
+    );
+    assert!(!state.can_pick_lines(), "read-only");
+    assert_eq!((diff.additions, diff.deletions), (1, 1));
+    assert!(!diff.header.new_file && !diff.header.deleted_file);
+
+    // Back to the card.
+    rt.show_conflict_changes(&key, false);
+    let state = rt.repo(&key).unwrap();
+    assert!(state.conflict().is_some() && state.conflict_bar().is_none());
+    assert!(state.diff().is_none());
+
+    // Only we have it: the whole file, added.
+    show_conflict(&mut rt, &key, "ours.txt");
+    assert_eq!(
+        rt.repo(&key).unwrap().conflict().unwrap().kind(),
+        ConflictKind::AddedByOne { by_us: true }
+    );
+    rt.show_conflict_changes(&key, true);
+    let diff = loaded_diff(&mut rt, &key);
+    assert!(diff.header.new_file);
+    assert_eq!(diff.additions, 2);
+
+    // Keeping it from the bar resolves it; the file then shows as a diff.
+    ok(&mut rt, &key, |rt| {
+        rt.resolve_file(&key, Path::new("ours.txt"), FileChoice::Keep)
+    });
+    let state = rt.repo(&key).unwrap();
+    assert!(state.conflict_bar().is_none());
+    assert_eq!(read(&repo, "ours.txt"), "a\nb\n");
+}

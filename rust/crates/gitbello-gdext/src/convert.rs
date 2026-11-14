@@ -672,7 +672,8 @@ pub fn compare_file_row(file: &CompareFile) -> VarDictionary {
 }
 
 /// A Changes view row: `{path, original_path, code, pick, conflicted,
-/// resolved, as_staged, amending, in_original_commit, locked, endings_only}`.
+/// resolved, as_staged, amending, in_original_commit, locked, endings_only,
+/// similarity}` (`similarity` of a rename, -1 otherwise).
 /// `resolved` marks a file whose conflicts were resolved during the
 /// operation, `locked` a checkbox that shows the index (a merge or
 /// cherry-pick is being committed), `endings_only` a modified file whose
@@ -683,6 +684,7 @@ pub fn change_row(change: &FileChange, state: &RepoState) -> VarDictionary {
         "path" => &path_str(&change.path),
         "original_path" => &change.original_path.as_deref().map_or_else(GString::new, path_str),
         "code" => change_code(change),
+        "similarity" => change.score.map_or(-1, i64::from),
         "pick" => state.pick_state(&change.path).id(),
         "conflicted" => is_conflicted(change),
         "resolved" => state.is_resolved(&change.path),
@@ -779,6 +781,16 @@ pub fn conflict_info(state: &ConflictState, show_base: bool) -> VarDictionary {
 /// The side a non-text conflict is about: `ours` or `theirs` deleted a
 /// modified file (`modify_delete`), or is the only one with it
 /// (`added_by_one`); "" otherwise.
+/// A conflict without blocks shown as its changed side's diff: `{path,
+/// kind, side}` (as in [`conflict_info`]'s `conflict`).
+pub fn conflict_bar(state: &ConflictState) -> VarDictionary {
+    vdict! {
+        "path" => &path_str(state.path()),
+        "kind" => state.kind().id(),
+        "side" => conflict_side(state.kind()),
+    }
+}
+
 fn conflict_side(kind: ConflictKind) -> &'static str {
     match kind {
         ConflictKind::ModifyDelete {
@@ -1022,6 +1034,7 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
         DiffKind::AmendStaged => "staged",
         DiffKind::Commit => "commit",
         DiffKind::Working => "working",
+        DiffKind::ConflictSide { .. } => "conflict_side",
     };
     let mut info = vdict! {
         "path" => &path_str(&target.path),
@@ -1050,7 +1063,8 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
                 DiffContent::TooLarge { bytes } => (-1, -1, size(Some(bytes))),
                 DiffContent::Text | DiffContent::Combined => (-1, -1, -1),
             };
-            let content = if diff.is_empty() {
+            // No lines: a rename or mode change without edits shows a card.
+            let content = if diff.line_count() == 0 && diff.content == DiffContent::Text {
                 "empty"
             } else {
                 diff_content_id(diff.content)

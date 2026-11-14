@@ -6,7 +6,6 @@ use gitbello_core::avatars::{Provider, Providers};
 use gitbello_core::changes::split_message;
 use gitbello_core::compare::{push_recent, CompareMode, CompareSide, RecentComparison};
 use gitbello_core::config::{parse_accent, LanguageChoice, ThemeChoice};
-use gitbello_core::diff::rename_parts;
 use gitbello_core::diff::version;
 use gitbello_core::diff::viewer::{DiffMode, Viewer};
 use gitbello_core::git::{CommandOutcome, GitErrorKind};
@@ -934,17 +933,6 @@ impl AppCore {
             .set_list(&repo, RECENT_KEY, list)
             .err()
             .map_or_else(GString::new, |e| gstr(&e.to_string()))
-    }
-
-    /// The rename of `old` to `new` as `[prefix, old, new, suffix]`, to
-    /// show as `prefix{old → new}suffix` (see `diff::rename_parts`).
-    #[func]
-    fn rename_parts(&self, old: GString, new: GString) -> PackedStringArray {
-        let parts = rename_parts(&old.to_string(), &new.to_string());
-        [parts.prefix, parts.old, parts.new, parts.suffix]
-            .iter()
-            .map(|p| gstr(p))
-            .collect()
     }
 
     /// The saved mode of `viewer` (`text` or `image`), such as `split`.

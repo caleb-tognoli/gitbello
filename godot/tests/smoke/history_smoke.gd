@@ -39,12 +39,29 @@ func run() -> void:
 	expect(not first_code.is_empty(), "the first file has a status code")
 	expect_eq(details.diff_panel().status_code(), first_code, "the diff header shows the file's status icon")
 	expect_eq(details.diff_panel().path_text(), details.file_list().path_at(0), "the header shows the path")
-	expect_eq(Core.rename_parts("src/util.rs", "lib/util.rs"), PackedStringArray(["", "src", "lib", "/util.rs"]),
-			"a move shares the file name")
 	expect_eq(FileRowPainter.path_lead("src/ui/a.rs", ""), PackedStringArray(["src/ui", "/"]), "the folder leads the name")
 	expect_eq(FileRowPainter.path_lead("a.rs", ""), PackedStringArray(["", ""]), "a top-level file has no folder")
 	expect_eq(FileRowPainter.path_lead("docs/b.md", "docs/a.md"), PackedStringArray(["docs/a.md", " → "]), "a rename")
-	expect_eq(FileRowPainter.path_lead("lib/u.rs", "src/u.rs"), PackedStringArray(["{src → lib}", "/"]), "a move")
+	expect_eq(FileRowPainter.path_lead("lib/u.rs", "src/u.rs"), PackedStringArray(["lib", "/"]), "a move shows its new path")
+	expect_eq(FileRowPainter.path_lead("lib/b.rs", "src/a.rs"), PackedStringArray(["lib", "/"]),
+			"a move and rename shows its new path")
+	expect_eq(FileRowPainter.rename_tip({"path": "lib/u.rs", "original_path": "src/u.rs", "code": "R", "similarity": 92}),
+			"Renamed from src/u.rs · 92% similar", "a moved row's tooltip says where it came from")
+	var chars: Callable = func(text: String) -> float: return float(text.length())
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/u.rs", 100.0, chars),
+			PackedStringArray(["src/u.rs → lib/core/", "u.rs"]), "the header shows both paths")
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/old/u.rs", 22.0, chars),
+			PackedStringArray(["…/u.rs → lib/core/", "u.rs"]), "a narrow header cuts the old folders first")
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/old/u.rs", 17.0, chars),
+			PackedStringArray(["…/u.rs → …re/", "u.rs"]), "then the new folders, never the new name")
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/old/u.rs", 14.0, chars),
+			PackedStringArray(["…/u.rs → ", "u.rs"]), "then the new folders go")
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/old/u.rs", 10.0, chars),
+			PackedStringArray(["… → ", "u.rs"]), "then the old name")
+	expect_eq(FileRowPainter.header_path("lib/core/u.rs", "src/old/u.rs", 5.0, chars),
+			PackedStringArray(["", "u.rs"]), "and at last only the new name is left")
+	expect_eq(FileRowPainter.header_path("src/ui/a.rs", "", 8.0, chars), PackedStringArray(["…ui/", "a.rs"]),
+			"an unrenamed path cuts its folder from the left")
 	expect(details.body_text().is_empty(), "a one-line message has no body")
 	expect(details.collapsed, "without a body the details shrink to fit")
 	expect(details.totals_text().begins_with("+"), "the files section shows the commit's totals: %s" % details.totals_text())

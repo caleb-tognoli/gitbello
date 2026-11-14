@@ -59,9 +59,23 @@ pub fn print_command_log(backend: &CliBackend) {
 }
 
 pub fn status(args: &[String]) -> Result<()> {
-    let repo = repo_arg(args, "status")?;
+    let time = args.iter().any(|a| a == "--time");
+    let rest: Vec<String> = args.iter().filter(|a| *a != "--time").cloned().collect();
+    let repo = repo_arg(&rest, "status")?;
     let backend = backend()?;
-    let status = backend.status(&repo, &CancelToken::new())?;
+    let cancel = CancelToken::new();
+    let started = std::time::Instant::now();
+    let mut status = backend.status(&repo, &cancel)?;
+    let read = started.elapsed();
+    // Files moved without `git mv` pair as in Changes.
+    backend.pair_moves(&repo, &mut status, &cancel)?;
+    if time {
+        eprintln!(
+            "status {} ms · move pairing {} ms",
+            read.as_millis(),
+            (started.elapsed() - read).as_millis()
+        );
+    }
     let head = match &status.head {
         Head::Branch(name) => format!("On branch {name}"),
         Head::Detached => "HEAD detached".to_owned(),

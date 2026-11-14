@@ -76,5 +76,11 @@ func _get_tooltip(at_position: Vector2) -> String:
 	var data: Dictionary = row(row_at(at_position))
 	if data.is_empty():
 		return ""
+	var lines: PackedStringArray = PackedStringArray([String(data["path"])])
+	var rename: String = FileRowPainter.rename_tip(data)
+	if not rename.is_empty():
+		lines.append(rename)
 	var status: String = FileRowPainter.code_name(String(data.get("code", "")))
-	return String(data["path"]) if status.is_empty() else "%s\n%s" % [data["path"], status]
+	if not status.is_empty() and rename.is_empty():
+		lines.append(status)
+	return "\n".join(lines)
