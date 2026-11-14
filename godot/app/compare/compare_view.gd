@@ -8,7 +8,8 @@ extends VBoxContainer
 ## selected commit's details over its files beside the diff of the selected
 ## file. Diffs read left → right and are read-only. The files are what the
 ## right side changed since the fork; when the left side has commits of its
-## own, a line above the files offers the full difference. Several commits
+## own, the Include pill on their section switches All changes to the full
+## difference. Several commits
 ## can be cherry-picked; a file's menu restores it from either side (with
 ## Undo). Each side is a chip that opens a `ComparePicker`. A working-copy
 ## side follows the files; ref sides follow the refs.
@@ -74,10 +75,6 @@ var _details: VSplitContainer = VSplitContainer.new()
 var _details_header: CommitHeader = COMMIT_HEADER.instantiate() as CommitHeader
 var _files_split: HSplitContainer = HSplitContainer.new()
 var _files_box: VBoxContainer = VBoxContainer.new()
-## Above the files when the sides have both moved: what the files leave out.
-var _hint_bar: PanelContainer = PanelContainer.new()
-var _hint: Label = Label.new()
-var _hint_link: LinkButton = LinkButton.new()
 var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
 var _header: ListHeader = LIST_HEADER.instantiate() as ListHeader
 var _files: CompareFileList = CompareFileList.new()
@@ -102,6 +99,7 @@ func _ready() -> void:
 	_commits.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_left.add_child(_commits)
 	_commits.focus_changed.connect(focus_commit)
+	_commits.include_toggled.connect(func() -> void: Actions.run_action(&"compare.full_difference"))
 	_commits.context_menu_requested.connect(_on_commit_context)
 	_commits.refs_requested.connect(func(_row: int, at: Vector2, labels: Array) -> void:
 		_refs_popover.open_at(labels, _commits.get_screen_transform() * at))
@@ -166,27 +164,10 @@ func _build_bar() -> void:
 	row.add_child(_recent_button)
 
 
-## The files' column: the full-difference line, the filter, the count and
-## the list.
+## The files' column: the filter, the count and the list.
 func _build_files() -> void:
 	_files_box.theme_type_variation = &"PaneColumn"
 	_files_split.add_child(_files_box)
-	_hint_bar.theme_type_variation = &"FilterBar"
-	_hint_bar.hide()
-	_files_box.add_child(_hint_bar)
-	var hint_row: VBoxContainer = VBoxContainer.new()
-	hint_row.add_theme_constant_override(&"separation", 0)
-	_hint_bar.add_child(hint_row)
-	_hint.theme_type_variation = &"DimLabel"
-	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_hint.custom_minimum_size.x = 1.0
-	hint_row.add_child(_hint)
-	_hint_link.underline = LinkButton.UNDERLINE_MODE_ON_HOVER
-	_hint_link.focus_mode = Control.FOCUS_NONE
-	_hint_link.pressed.connect(func() -> void: Actions.run_action(&"compare.full_difference", _hint_link))
-	_hint_link.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	hint_row.add_child(_hint_link)
 	var filter_bar: PanelContainer = PanelContainer.new()
 	filter_bar.theme_type_variation = &"FilterBar"
 	_filter.placeholder = tr("Filter changed files")
@@ -353,9 +334,16 @@ func shows_full_difference() -> bool:
 	return shown_mode() == "exact"
 
 
-## Switches between the changes since the fork and the full difference.
+## Switches All changes between the changes since the fork and the full
+## difference (the Include pill), and selects All changes to show it.
 func toggle_full_difference() -> void:
-	set_mode("fork" if shows_full_difference() else "exact")
+	if not can_toggle_full_difference():
+		return
+	var mode: String = "fork" if shows_full_difference() else "exact"
+	if not focused_commit().is_empty():
+		session.focus_compare_commit("")
+		_files.show_files(0)
+	set_mode(mode)
 
 
 ## Whether the full difference can be toggled: the sides share history and
@@ -430,7 +418,6 @@ func _on_compare_changed() -> void:
 			_loading.show_loading(true, tr("Comparing…"))
 			_header.set_text("")
 			_header.show_counts(0, 0)
-			_show_hint()
 		"error":
 			_loading.hide_loading()
 			_files.show_files(0)
@@ -441,12 +428,10 @@ func _on_compare_changed() -> void:
 			_message.text = _error_text(_info.get("error", {}))
 			_message.show()
 			_diff_panel.clear("")
-			_show_hint()
 		"ready":
 			_remember()
 			_commits.show_commits(_info, _side_name("left"), _side_name("right"), focused_commit())
 			_show_details()
-			_show_hint()
 			match String(_info.get("focus_state", "none")):
 				"loading":
 					_loading.show_loading(true, tr("Loading commit…"))
@@ -524,33 +509,6 @@ func _show_details() -> void:
 ## The details can only be resized while they have a message body.
 func _update_details_split() -> void:
 	_details.collapsed = not _details_header.visible or not _details_header.has_body()
-
-
-## The line over the files when they leave something out: the left side's
-## own commits (since the fork), or what the full difference adds.
-func _show_hint() -> void:
-	var loaded: bool = String(_info.get("state", "")) == "ready"
-	var behind: int = int(_info.get("only_left", 0))
-	var visible_hint: bool = loaded and focused_commit().is_empty()
-	var newer: String = ListHeader.count_text(behind, "newer commit")
-	if not bool(_info.get("can_fork", true)):
-		_hint.text = tr("No shared history: every difference.")
-		_hint_link.hide()
-	elif shows_full_difference() and behind > 0:
-		_hint.text = tr("Every difference, with %s from %s.") % [newer, _side_name("left")]
-		_hint_link.text = tr("Only since the fork")
-		_hint_link.show()
-	elif shows_full_difference():
-		_hint.text = tr("Every difference.")
-		_hint_link.text = tr("Only since the fork")
-		_hint_link.show()
-	elif behind > 0:
-		_hint.text = tr("%s: %s not included.") % [_side_name("left"), newer]
-		_hint_link.text = tr("Show full difference")
-		_hint_link.show()
-	else:
-		visible_hint = false
-	_hint_bar.visible = visible_hint
 
 
 ## What a failed comparison says.
@@ -814,7 +772,6 @@ func _side_name(which: String) -> String:
 func _apply_theme() -> void:
 	_left.custom_minimum_size.x = float(get_theme_constant(&"min_left_width", &"Panes"))
 	_files_box.custom_minimum_size.x = float(get_theme_constant(&"min_files_width", CommitDetails.THEME_TYPE))
-	_hint_link.add_theme_font_size_override(&"font_size", _hint.get_theme_font_size(&"font_size"))
 	_update_bar()
 
 
@@ -907,20 +864,13 @@ func list_header() -> ListHeader:
 	return _header
 
 
-## The bar's buttons, by name: left, swap, right, recent; and full (the
-## link that switches the full difference).
+## The bar's buttons, by name: left, swap, right, recent.
 func bar_button(which: String) -> BaseButton:
-	return {"left": _left_button, "swap": _swap_button, "right": _right_button, "recent": _recent_button,
-		"full": _hint_link}[which]
+	return {"left": _left_button, "swap": _swap_button, "right": _right_button, "recent": _recent_button}[which]
 
 
 func counts() -> SyncCounts:
 	return _counts
-
-
-## The line over the files while it shows, or "".
-func hint_text() -> String:
-	return _hint.text if _hint_bar.visible else ""
 
 
 ## The message shown instead of files (an error, no differences), or "".

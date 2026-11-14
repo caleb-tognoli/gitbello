@@ -1047,6 +1047,7 @@ From Caleb's review of b (2026-11-08). It replaces the Files/Commits tabs, the m
 - [x] Commit rows are History's two-line rows (subject; avatars, author · date; ref chips), without the graph: `CommitList` takes its rows from a source, and Compare's rows carry email, co-authors and refs. The details block is History's, split out of `CommitDetails` as its own component.
 - [x] No hashes shown: a side that is a plain commit shows its subject (the hash in the tooltip); Restore names the sides.
 - [x] Mode switch dropped: always since the fork. When the left side has commits of its own, a dim line "<left> has N newer commits not included · Show full difference" switches to the full difference (and back); unrelated histories always show it.
+  - [x] Later replaced: the line over the files went; the "Only on <left> (N)" header has an **Include** pill at its right (outlined off, filled on). Off, All changes is since the fork and the left side's commits are dimmed; on, it is the full difference (from the left side's tip, so those commits show undone, as its tooltip says). Clicking it from a commit selects All changes; unrelated histories keep it on, locked. Recent comparisons remember it; `compare.full_difference` is "Include the left side's commits".
 - [x] Bar: Back and the bar's × go (the tab has its ×); a Recent button at the far right opens a popover of the repository's recent comparisons, which leave the side pickers.
 - [x] File rows without `+N −M` (the list header keeps the totals), as in Changes.
 - [x] Smoke test; shots in both themes; review stop

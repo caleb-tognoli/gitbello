@@ -1518,7 +1518,7 @@ func _register_compare_actions() -> void:
 			func() -> void: page.call().compare().swap(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_swap(),
 			_says("The working copy stays on the right."))
-	Actions.register(&"compare.full_difference", "Show full difference / only since the fork", "Compare",
+	Actions.register(&"compare.full_difference", "Include the left side's commits", "Compare",
 			func() -> void: page.call().compare().toggle_full_difference(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_toggle_full_difference(),
 			_says("The files already show every difference."))

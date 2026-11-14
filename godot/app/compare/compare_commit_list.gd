@@ -6,10 +6,16 @@ extends CommitList
 ## fetched for a window around the visible rows). The cursor's commit
 ## narrows the files to its own; All changes shows the whole comparison.
 ## Ctrl/Shift select several commits to cherry-pick. The section headers are
-## one-line rows that the cursor skips; clicking one folds its commits.
+## one-line rows that the cursor skips; clicking one folds its commits. The
+## left side's header has an **Include** pill: on, All changes is the full
+## difference (from the left side's tip, so its commits show undone); off,
+## only what the right side changed since the fork, and the left side's
+## commits are dimmed. Without shared history it stays on.
 
 ## The cursor moved to a commit (its `oid`) or to All changes ("").
 signal focus_changed(oid: String)
+## The Include pill was clicked.
+signal include_toggled()
 
 ## The side names for the section headers.
 var _left_name: String = ""
@@ -26,6 +32,13 @@ var _runs: Array[Dictionary] = []
 ## The cursor before the last move, to skip headers in its direction.
 var _last_cursor: int = -1
 var _line: TextLine = TextLine.new()
+## Whether All changes includes the left side's commits (the full
+## difference), and whether that cannot change (no shared history).
+var _included: bool = false
+var _include_locked: bool = false
+## Where the Include pill was drawn last frame (empty when not shown).
+var _pill_rect: Rect2 = Rect2()
+var _pill_hovered: bool = false
 
 
 func _init() -> void:
@@ -50,6 +63,8 @@ func show_commits(info: Dictionary, left_name: String, right_name: String, focus
 	_listed_right = int(info.get("listed_right", 0))
 	_truncated = bool(info.get("commits_truncated", false))
 	_file_count = int(info.get("all_file_count", 0))
+	_include_locked = not bool(info.get("can_fork", true))
+	_included = _include_locked or String(info.get("mode", "")) == "exact"
 	_layout()
 	reload()
 	var row: int = row_of(focus)
@@ -88,6 +103,26 @@ func toggle_section(kind: String) -> void:
 		select_only(row)
 		set_block_signals(false)
 	_last_cursor = cursor
+
+
+## Whether All changes includes the left side's commits (the pill is on).
+func includes_left() -> bool:
+	return _included
+
+
+## Whether the pill cannot be turned off (the sides share no history).
+func include_locked() -> bool:
+	return _include_locked
+
+
+## Whether `row` is drawn faded (a left-side commit left out of All changes).
+func is_row_dimmed(row: int) -> bool:
+	return kind_at(row) == "commit" and _is_dimmed(row, commit_at(row))
+
+
+## Where the Include pill was drawn (local), or an empty rect.
+func include_pill_rect() -> Rect2:
+	return _pill_rect
 
 
 ## The commit at `row` (`RepoSession.compare_commits` row), or empty.
@@ -241,10 +276,19 @@ func _fetch_rows(start: int, count: int) -> Array[Dictionary]:
 	return out
 
 
-## A click on a section header folds it; one on "more" does nothing.
+## A click on the Include pill toggles it; one elsewhere on a section header
+## folds it; one on "more" does nothing.
 func _gui_input(event: InputEvent) -> void:
+	var motion: InputEventMouseMotion = event as InputEventMouseMotion
+	if motion != null:
+		_set_pill_hovered(_on_pill(motion.position))
 	var mouse: InputEventMouseButton = event as InputEventMouseButton
 	if mouse != null and mouse.pressed and mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+		if _on_pill(mouse.position):
+			if mouse.button_index == MOUSE_BUTTON_LEFT and not _include_locked:
+				include_toggled.emit()
+			accept_event()
+			return
 		var kind: String = kind_at(row_at(mouse.position))
 		if kind in ["right", "left", "more"]:
 			grab_focus()
@@ -253,6 +297,37 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 			return
 	super(event)
+
+
+func _notification(what: int) -> void:
+	super(what)
+	if what == NOTIFICATION_MOUSE_EXIT:
+		_set_pill_hovered(false)
+
+
+func _on_pill(at: Vector2) -> bool:
+	return _pill_rect.has_area() and _pill_rect.has_point(at)
+
+
+func _set_pill_hovered(value: bool) -> void:
+	if value == _pill_hovered:
+		return
+	_pill_hovered = value
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if value and not _include_locked 			else Control.CURSOR_ARROW
+	queue_redraw()
+
+
+## The left side's commits fade while All changes leaves them out.
+func _is_dimmed(row: int, data: Dictionary) -> bool:
+	return super(row, data) or (not _included and _side_of(row) == "left")
+
+
+## The section (`right` or `left`) commit row `row` belongs to, or "".
+func _side_of(row: int) -> String:
+	var index: int = _commit_index(row)
+	if index < 0:
+		return ""
+	return "right" if index < _listed_right else "left"
 
 
 ## Moves off a section header in the direction the cursor went.
@@ -273,6 +348,11 @@ func _on_selection() -> void:
 			focus_changed.emit("")
 		"commit":
 			focus_changed.emit(String(commit_at(cursor).get("oid", "")))
+
+
+func _draw() -> void:
+	_pill_rect = Rect2()
+	super()
 
 
 func _draw_row(row: int, rect: Rect2, selected_row: bool) -> void:
@@ -296,7 +376,10 @@ func _draw_row(row: int, rect: Rect2, selected_row: bool) -> void:
 		"right":
 			_draw_section(tr("Only on %s (%d)") % [_right_name, _listed_right], inner, is_collapsed(kind))
 		"left":
-			_draw_section(tr("Only on %s (%d)") % [_left_name, _total - _listed_right], inner, is_collapsed(kind))
+			var pill_left: float = _draw_include_pill(inner)
+			var name_rect: Rect2 = inner
+			name_rect.end.x = pill_left - float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
+			_draw_section(tr("Only on %s (%d)") % [_left_name, _total - _listed_right], name_rect, is_collapsed(kind))
 		"more":
 			_draw_section(tr("More commits are not listed"), inner, false, false)
 
@@ -312,6 +395,29 @@ func _draw_section(text: String, rect: Rect2, collapsed: bool, arrow: bool = tru
 		x += icon_size.x + float(get_theme_constant(&"label_gap", LIST_THEME_TYPE))
 	var line: TextLine = _text_line(text, rect.end.x - x, get_theme_font_size(&"meta_font_size", LIST_THEME_TYPE))
 	line.draw(get_canvas_item(), Vector2(x, roundf(rect.position.y + (rect.size.y - line.get_size().y) * 0.5)), color)
+
+
+## The Include pill at the right of `rect` (the left side's header), filled
+## while on; returns its left edge.
+func _draw_include_pill(rect: Rect2) -> float:
+	var on: bool = _included
+	var style_name: String = "include_on" if on else "include_off"
+	if _pill_hovered and not _include_locked:
+		style_name += "_hover"
+	var box: StyleBox = get_theme_stylebox(StringName(style_name), LIST_THEME_TYPE)
+	var line: TextLine = TextLine.new()
+	line.add_string(tr("Include"), get_theme_font(&"font", &"Label"), get_theme_font_size(&"include_font_size", LIST_THEME_TYPE))
+	var text_size: Vector2 = line.get_size()
+	var pill_size: Vector2 = (text_size + box.get_minimum_size()).round()
+	var top: float = roundf(rect.position.y + (rect.size.y - pill_size.y) * 0.5)
+	var pill: Rect2 = Rect2(Vector2(rect.end.x - pill_size.x, top), pill_size)
+	draw_style_box(box, pill)
+	var color: Color = get_theme_color(&"include_on_color" if on else &"include_color", LIST_THEME_TYPE)
+	if _include_locked:
+		color.a *= 0.6
+	line.draw(get_canvas_item(), pill.position + Vector2(box.get_margin(SIDE_LEFT), box.get_margin(SIDE_TOP)), color)
+	_pill_rect = pill
+	return pill.position.x
 
 
 ## No line under the last commit of a section.
@@ -331,6 +437,11 @@ func _text_line(text: String, width: float, font_size: int) -> TextLine:
 func _get_tooltip(at_position: Vector2) -> String:
 	var row: int = row_at(at_position)
 	match kind_at(row):
+		"left":
+			if _on_pill(at_position):
+				if _include_locked:
+					return tr("No shared history: every difference is shown.")
+				return tr("Compare with %s's tip: these commits show as undone.") % _left_name
 		"all":
 			return tr("Every file the comparison changes")
 		"commit":

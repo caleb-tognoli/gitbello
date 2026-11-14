@@ -10,7 +10,8 @@ extends SmokeTest
 ## details over its files), Restore from a side with Undo, the
 ## working-copy side following an edit, a fetch moving a ref side and
 ## offering its commit to cherry-pick (the confirmation is cancelled), the
-## full-difference line when both sides moved, and the tab's ×. On fixture
+## Include pill on the left side's commits when both sides moved (from a
+## focused commit, it selects All changes), and the tab's ×. On fixture
 ## `repo-16`: `main` is one commit ahead of `feature/login`, `app.txt` is
 ## edited and `notes.txt` untracked; the origin has a commit `repo-16` has
 ## not fetched. It fetches and restores (then undoes) `app.txt`. Skipped
@@ -48,7 +49,7 @@ func run() -> void:
 	expect_eq(int(info["only_left"]), 0, "feature/login has nothing main lacks")
 	expect_eq(compare.bar_button("left").text, "feature/login", "the left chip names the base")
 	expect_eq(compare.bar_button("right").text, "main", "the right chip names the compared side")
-	expect(compare.hint_text().is_empty(), "no line over the files: feature/login has no commits of its own")
+	expect(not Actions.is_enabled(&"compare.full_difference"), "nothing to include: feature/login has no commits of its own")
 	expect(compare.list_header().counts_text().contains("1"), "the header counts the lines: %s" % compare.list_header().counts_text())
 	expect(await wait_until(func() -> bool: return compare.file_list().path_at(compare.file_list().cursor) == "app.txt"),
 			"the first file is selected")
@@ -66,14 +67,16 @@ func run() -> void:
 	expect_eq(compare.bar_button("left").text, "main", "the sides swapped")
 	expect_eq(int(session.compare_info()["file_count"]), 0, "nothing since the fork")
 	expect(compare.message_text().begins_with(tr("No differences")), "says there are no differences: %s" % compare.message_text())
-	expect(compare.hint_text().contains("main"), "the line names main's newer commit: %s" % compare.hint_text())
+	var swapped: CompareCommitList = compare.commit_list()
+	expect_eq(swapped.kind_at(1), "left", "main's own commits have a section")
+	expect(not swapped.includes_left(), "the Include pill starts off")
 	expect(Actions.is_enabled(&"compare.full_difference"), "the full difference is offered")
-	compare.bar_button("full").emit_signal(&"pressed")
+	swapped.include_toggled.emit()
 	expect(await _compared(session), "the full difference loads")
 	expect_eq(String(session.compare_info()["mode"]), "exact", "every difference")
 	expect_eq(int(session.compare_info()["file_count"]), 1, "it shows the file")
 	expect(compare.message_text().is_empty(), "the message hides")
-	expect_eq((compare.bar_button("full") as LinkButton).text, tr("Only since the fork"), "the link switches back")
+	expect(swapped.includes_left(), "the pill is on")
 
 	# The Recent popover reopens feature/login ⇄ main.
 	expect(Actions.run_action(&"compare.recent"), "Recent comparisons runs")
@@ -208,7 +211,6 @@ func run() -> void:
 		return not compare.focused_commit().is_empty() and compare.details_header().visible), "the commit's details load")
 	expect_eq(compare.details_header().summary_text(), "Improve app", "the details name the commit")
 	expect_eq(compare.file_list().row_count(), 1, "the commit changed one file")
-	expect(compare.hint_text().is_empty(), "no full-difference line for one commit")
 	expect(not Actions.is_enabled(&"compare.cherry_pick"), "main's commit is already in HEAD")
 	expect(compare.cherry_pick_reason().contains("Improve app"), "the reason names it: %s" % compare.cherry_pick_reason())
 	commits.select_only(1)
@@ -277,16 +279,23 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return confirm.visible), "cherry-picking asks first")
 	confirm.hide()
 
-	# Both sides moved: main's own commit is left out until the full
-	# difference is asked for.
-	commits.select_only(0)
-	expect(await _compared(session), "All changes again")
-	var since_fork: int = int(session.compare_info()["file_count"])
-	expect(compare.hint_text().contains("main"), "the line names main's newer commit: %s" % compare.hint_text())
-	Actions.run_action(&"compare.full_difference")
+	# Both sides moved: main's own commit is left out (and dimmed) until
+	# the Include pill is on. From the focused commit, it selects All changes.
+	var since_fork: int = int(session.compare_info()["all_file_count"])
+	var left_row: int = -1
+	for row: int in commits.row_count():
+		if commits.kind_at(row) == "left":
+			left_row = row + 1
+	expect(commits.kind_at(left_row) == "commit" and commits.is_row_dimmed(left_row),
+			"main's own commit is dimmed")
+	expect(Actions.is_enabled(&"compare.full_difference"), "main's commits can be included")
+	commits.include_toggled.emit()
 	expect(await _compared(session), "the full difference loads")
+	expect(compare.focused_commit().is_empty() and commits.cursor == 0, "the pill selects All changes")
 	expect(int(session.compare_info()["file_count"]) > since_fork, "it adds main's own change")
-	Actions.run_action(&"compare.full_difference")
+	expect(commits.includes_left() and not commits.is_row_dimmed(left_row),
+			"the pill is on and main's commit no longer dimmed")
+	commits.include_toggled.emit()
 	expect(await _compared(session), "only since the fork again")
 	expect_eq(int(session.compare_info()["file_count"]), since_fork, "back to the changes since the fork")
 

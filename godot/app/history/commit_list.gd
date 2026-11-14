@@ -423,7 +423,7 @@ func _draw_row(row: int, rect: Rect2, _selected_row: bool) -> void:
 	if data.is_empty():
 		return
 	rows_drawn += 1
-	var dimmed: bool = not _query.is_empty() and not bool(data.get("match", false))
+	var dimmed: bool = _is_dimmed(row, data)
 	if show_graph:
 		var geometry: GraphView.RowGeometry = _geometry.get(row)
 		if geometry == null:
@@ -615,6 +615,11 @@ func _trailing_width(_data: Dictionary) -> float:
 ## line they are on), faded by `alpha` on a dimmed row.
 func _draw_trailing(_row: int, _data: Dictionary, _rect: Rect2, _alpha: float) -> void:
 	pass
+
+
+## Whether `row` is drawn faded: by default, a row the search does not match.
+func _is_dimmed(_row: int, data: Dictionary) -> bool:
+	return not _query.is_empty() and not bool(data.get("match", false))
 
 
 ## Room the push icon takes before a compact row's subject: none unless the

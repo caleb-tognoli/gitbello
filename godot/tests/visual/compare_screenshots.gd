@@ -1,8 +1,9 @@
 extends Node
 ## Captures Compare (PLAN M7.12c) in numbered shots, dark then light: All
 ## changes, a commit with its details, the commit and file menus, the
-## working-copy side, both sides moved (the full-difference line), a folded
-## section, History's details with two commits selected, those commits
+## working-copy side, both sides moved (the Include pill off with the left
+## side's commits dimmed, hovered, then on from a selected commit, each
+## with a 3x crop of the pill's row), a folded section, History's details with two commits selected, those commits
 ## compared and the Recent popover listing them by subject. Pass
 ## --repo=<CLI fixture repo> --out=<directory> and launch windowed with
 ## GITBELLO_CONFIG set to a scratch file (recent comparisons are saved
@@ -74,9 +75,25 @@ func _ready() -> void:
 					and int(info.get("only_left", 0)) > 0 and int(info.get("only_right", 0)) > 0):
 			return
 		await _shot("both-moved-" + mode, null)
+		await _crop("include-off-" + mode, commits)
+		commits._set_pill_hovered(true)
+		await _crop("include-hover-" + mode, commits)
+		commits._set_pill_hovered(false)
+		# From a selected commit, the pill selects All changes.
+		commits.select_only(2)
+		if not await _wait(func() -> bool: return not compare.focused_commit().is_empty()):
+			return
+		commits.include_toggled.emit()
+		if not await _compared(session):
+			return
+		await _shot("included-" + mode, null)
+		await _crop("include-on-" + mode, commits)
 		commits.toggle_section("left")
 		await _shot("folded-" + mode, null)
 		commits.toggle_section("left")
+		commits.include_toggled.emit()
+		if not await _compared(session):
+			return
 		# History: two commits selected offer Compare commits.
 		Actions.run_action(&"compare.close")
 		worktree.show_view(WorktreeView.View.HISTORY)
@@ -121,6 +138,30 @@ func _wait(predicate: Callable) -> bool:
 			return false
 		await get_tree().process_frame
 	return true
+
+
+## A 3x crop of the left side's section header in `commits`, and the row
+## above and below it.
+func _crop(file_name: String, commits: CompareCommitList) -> void:
+	for frame: int in 30:
+		await get_tree().process_frame
+	var header: int = -1
+	for row: int in commits.row_count():
+		if commits.kind_at(row) == "left":
+			header = row
+	if header < 0:
+		printerr("compare_screenshots: %s: no left section" % file_name)
+		return
+	var top: float = commits.row_top(header) - commits.scroll_offset() - 12.0
+	var height: float = commits.row_extent(header) + 36.0
+	var origin: Vector2 = commits.get_global_position()
+	var rect: Rect2i = Rect2i(Rect2(origin + Vector2(0.0, top), Vector2(commits.size.x, height)))
+	var image: Image = get_viewport().get_texture().get_image().get_region(rect)
+	image.resize(image.get_width() * 3, image.get_height() * 3, Image.INTERPOLATE_NEAREST)
+	var path: String = _out.path_join("%02d-%s.png" % [_step, file_name])
+	_step += 1
+	image.save_png(path)
+	print("SHOT ", path)
 
 
 ## The window, with `popup` (a separate window) drawn in where it shows.
