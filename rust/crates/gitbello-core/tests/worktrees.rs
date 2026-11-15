@@ -1,18 +1,21 @@
-//! Worktrees (M6) through the runtime: add, lock, remove and prune, the
-//! new-task flow with its rollback, the cleanup flow, missing folders and
+//! Worktrees (M6, M7.16) through the runtime: add, lock, remove and prune,
+//! creating worktrees (bases, fetch fallback, free folders, rollback, setup
+//! and undo), the cleanup flow, missing folders and
 //! badges across open worktrees.
 
 use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use gitbello_core::config::{Config, DEFAULT_WORKTREE_TEMPLATE};
-use gitbello_core::git::GitErrorKind;
-use gitbello_core::ops::{NewTask, WorktreeOp};
-use gitbello_core::runtime::{normalize, JobState, Runtime, RuntimeEvent};
+use gitbello_core::git::{GitError, GitErrorKind};
+use gitbello_core::ops::{NewWorktree, WorktreeOp, WorktreeStart};
+use gitbello_core::runtime::{normalize, CreatedWorktree, JobState, Runtime, RuntimeEvent};
+use gitbello_core::worktree_setup::WorktreeSetup;
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
-use support::rt::{ok, open, outcome, poll_until, settle};
+use support::rt::{finish, ok, open, outcome, poll_until, settle};
 use support::TestRepo;
 
 fn worktree_paths(rt: &Runtime, key: &Path) -> Vec<PathBuf> {
@@ -115,22 +118,56 @@ fn add_lock_remove_and_prune_worktrees() {
     assert_eq!(worktree_paths(&rt, &key).len(), 1);
 }
 
+/// Starts a create and runs it to the end: its job and error, if any.
+fn create(
+    rt: &mut Runtime,
+    key: &Path,
+    branch: &str,
+    start: WorktreeStart,
+    path: &Path,
+) -> (u64, Option<GitError>) {
+    let request = NewWorktree {
+        branch: branch.into(),
+        start,
+        path: path.to_path_buf(),
+    };
+    let job = rt.create_worktree(key, request).expect("the create starts");
+    let error = finish(rt, key, Some(job));
+    settle_worktrees(rt, key);
+    (job, error)
+}
+
+/// What create `job` made; it must have succeeded.
+fn created(rt: &Runtime, key: &Path, job: u64) -> CreatedWorktree {
+    rt.repo(key)
+        .expect("open")
+        .created_worktree(job)
+        .expect("created")
+        .clone()
+}
+
+fn new_branch(base: &str) -> WorktreeStart {
+    WorktreeStart::NewBranch { base: base.into() }
+}
+
+fn rev(repo: &TestRepo, dir: &Path, name: &str) -> String {
+    repo.command_in(dir)
+        .args(["rev-parse", name])
+        .run()
+        .expect("rev-parse")
+        .stdout_text()
+        .trim()
+        .to_owned()
+}
+
 #[test]
-fn new_task_fetches_the_base_and_adds_a_worktree() {
+fn create_fetches_the_base_and_adds_a_worktree() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
     let remote = repo.add_remote();
     let other = repo.clone_remote(&remote, "other");
-    let upstream_tip = {
-        repo.push_from(&other, "b.txt", "b\n", "newer on the remote");
-        repo.command_in(&other)
-            .args(["rev-parse", "HEAD"])
-            .run()
-            .unwrap()
-            .stdout_text()
-            .trim()
-            .to_owned()
-    };
+    repo.push_from(&other, "b.txt", "b\n", "newer on the remote");
+    let upstream_tip = rev(&repo, &other, "HEAD");
     let (mut rt, key) = open(&repo);
     let state = rt.repo(&key).unwrap();
     assert_eq!(state.default_base().as_deref(), Some("origin/main"));
@@ -138,20 +175,19 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
     let path = worktree_path(DEFAULT_WORKTREE_TEMPLATE, &main, "feature/new task");
     assert_eq!(path, main.join(".worktrees").join("feature-new-task"));
 
-    let task = NewTask {
-        branch: "feature/new-task".into(),
-        base: "origin/main".into(),
-        path: path.clone(),
-        fetch_remote: Some("origin".into()),
-        track_base: false,
-    };
-    ok(&mut rt, &key, |rt| rt.new_task(&key, task.clone()));
-    settle_worktrees(&mut rt, &key);
+    let base = new_branch("origin/main");
+    let (job, error) = create(&mut rt, &key, "feature/new-task", base, &path);
+    assert!(error.is_none(), "{error:?}");
     assert!(listed(&rt, &key, &path));
     assert!(
         path.join("b.txt").is_file(),
         "started from the fetched base"
     );
+    let made = created(&rt, &key, job);
+    assert_eq!(made.path, path);
+    assert!(made.created_branch);
+    assert_eq!(made.tip, upstream_tip);
+    assert_eq!(made.stale, None, "fetched");
     let branch = rt
         .repo(&key)
         .unwrap()
@@ -159,7 +195,7 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
         .unwrap()
         .clone();
     assert_eq!(branch.target, upstream_tip);
-    assert_eq!(branch.upstream, None, "the task branch does not track main");
+    assert_eq!(branch.upstream, None, "the new branch does not track main");
     let exclude = main.join(".git/info/exclude");
     assert!(fs::read_to_string(&exclude)
         .unwrap()
@@ -186,19 +222,37 @@ fn new_task_fetches_the_base_and_adds_a_worktree() {
 
     // The same branch again is refused before anything is created.
     let other_path = repo.sibling("another");
-    let again = NewTask {
-        path: other_path.clone(),
-        ..task
-    };
-    let err = outcome(&mut rt, &key, |rt| rt.new_task(&key, again)).expect("exists");
-    assert_eq!(err.kind, GitErrorKind::AlreadyExists, "{err}");
+    let base = new_branch("origin/main");
+    let (_, error) = create(&mut rt, &key, "feature/new-task", base, &other_path);
+    assert_eq!(error.expect("exists").kind, GitErrorKind::AlreadyExists);
     assert!(!other_path.exists());
 }
 
 #[test]
-fn new_task_can_check_out_a_remote_branch_tracking_it() {
+fn create_starts_from_tags_and_commits() {
+    let repo = TestRepo::init();
+    let first = repo.commit("a.txt", "a\n", "first");
+    repo.git(&["tag", "v1"]);
+    repo.commit("a.txt", "b\n", "second");
+    let (mut rt, key) = open(&repo);
+
+    let tagged = repo.sibling("from tag");
+    let (job, error) = create(&mut rt, &key, "hotfix", new_branch("v1"), &tagged);
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(created(&rt, &key, job).tip, first);
+    assert_eq!(fs::read_to_string(tagged.join("a.txt")).unwrap(), "a\n");
+
+    let at_commit = repo.sibling("from cömmit");
+    let (job, error) = create(&mut rt, &key, "old", new_branch(&first[..10]), &at_commit);
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(created(&rt, &key, job).tip, first);
+}
+
+#[test]
+fn create_checks_out_an_existing_or_a_remote_branch() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
+    repo.branch("existing");
     let remote = repo.add_remote();
     let other = repo.clone_remote(&remote, "other");
     let git = |args: &[&str]| {
@@ -214,54 +268,277 @@ fn new_task_can_check_out_a_remote_branch_tracking_it() {
     git(&["push", "--quiet", "origin", "topic"]);
     let (mut rt, key) = open(&repo);
 
+    // Pushed after the last fetch: the create's fetch brings it.
     let path = repo.sibling("topic wört");
-    let task = NewTask {
-        branch: "topic".into(),
-        base: "origin/topic".into(),
-        path: path.clone(),
-        fetch_remote: Some("origin".into()),
-        track_base: true,
+    let remote_start = WorktreeStart::Remote {
+        upstream: "origin/topic".into(),
     };
-    ok(&mut rt, &key, |rt| rt.new_task(&key, task));
-    settle_worktrees(&mut rt, &key);
-    assert!(listed(&rt, &key, &path));
-    assert!(
-        path.join("t.txt").is_file(),
-        "the fetched remote branch is checked out"
-    );
+    let (job, error) = create(&mut rt, &key, "topic", remote_start, &path);
+    assert!(error.is_none(), "{error:?}");
+    assert!(path.join("t.txt").is_file(), "the fetched remote branch");
+    assert!(created(&rt, &key, job).created_branch);
     let branch = rt.repo(&key).unwrap().branch("topic").unwrap().clone();
     assert_eq!(
         branch.upstream.as_deref(),
         Some("refs/remotes/origin/topic")
     );
+
+    let existing = repo.sibling("existing");
+    let (job, error) = create(
+        &mut rt,
+        &key,
+        "existing",
+        WorktreeStart::Existing,
+        &existing,
+    );
+    assert!(error.is_none(), "{error:?}");
+    assert!(!created(&rt, &key, job).created_branch);
+    assert!(listed(&rt, &key, &existing));
+
+    let unknown = repo.sibling("unknown");
+    let (_, error) = create(&mut rt, &key, "nope", WorktreeStart::Existing, &unknown);
+    assert!(error.expect("unknown").stderr.contains("not found"));
 }
 
 #[test]
-fn new_task_rolls_back_when_the_worktree_cannot_be_added() {
+fn a_taken_folder_gets_a_number() {
     let repo = TestRepo::init();
     repo.commit("a.txt", "a\n", "first");
     let (mut rt, key) = open(&repo);
-    // A non-empty folder: `git worktree add -b` creates the branch, then
-    // refuses the folder.
-    let path = repo.sibling("occupied");
-    fs::create_dir_all(&path).unwrap();
-    fs::write(path.join("keep.txt"), "mine\n").unwrap();
-    let task = NewTask {
-        branch: "doomed".into(),
-        base: "main".into(),
-        path: path.clone(),
-        fetch_remote: None,
-        track_base: false,
-    };
-    let err = outcome(&mut rt, &key, |rt| rt.new_task(&key, task)).expect("refused");
-    assert!(err.stderr.contains("already exists"), "{err}");
-    settle_worktrees(&mut rt, &key);
+    let wanted = repo.sibling("occupied");
+    fs::create_dir_all(&wanted).unwrap();
+    fs::write(wanted.join("keep.txt"), "mine\n").unwrap();
+
+    let (job, error) = create(&mut rt, &key, "task", new_branch("main"), &wanted);
+    assert!(error.is_none(), "{error:?}");
+    let path = repo.sibling("occupied-2");
+    assert_eq!(created(&rt, &key, job).path, path);
+    assert!(listed(&rt, &key, &path));
+    assert_eq!(
+        fs::read_to_string(wanted.join("keep.txt")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[test]
+fn create_rolls_back_when_the_worktree_cannot_be_added() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let (mut rt, key) = open(&repo);
+    // git creates the branch, then cannot make the folder under a file.
+    let file = repo.sibling("a file");
+    fs::write(&file, "x\n").unwrap();
+    let (_, error) = create(
+        &mut rt,
+        &key,
+        "doomed",
+        new_branch("main"),
+        &file.join("sub"),
+    );
+    assert!(error.is_some());
     assert!(
         rt.repo(&key).unwrap().branch("doomed").is_none(),
         "branch rolled back"
     );
     assert_eq!(worktree_paths(&rt, &key).len(), 1);
-    assert_eq!(fs::read_to_string(path.join("keep.txt")).unwrap(), "mine\n");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "x\n");
+}
+
+#[test]
+fn an_offline_create_starts_from_the_base_last_fetched() {
+    let repo = TestRepo::init();
+    let tip = repo.commit("a.txt", "a\n", "first");
+    let remote = repo.add_remote();
+    let (mut rt, key) = open(&repo);
+    // The remote goes away (offline, say).
+    fs::rename(&remote, repo.sibling("gone.git")).unwrap();
+
+    let path = repo.sibling("offline");
+    let (job, error) = create(&mut rt, &key, "offline", new_branch("origin/main"), &path);
+    assert!(error.is_none(), "{error:?}");
+    let made = created(&rt, &key, job);
+    assert_eq!(made.tip, tip);
+    let stale = made.stale.expect("not fetched");
+    assert_eq!(stale.base, "origin/main");
+    assert!(!stale.timed_out && !stale.error.is_empty(), "{stale:?}");
+    assert!(stale.fetched_at.is_some_and(|t| t > 0), "{stale:?}");
+
+    // A remote branch never fetched cannot be checked out offline.
+    let never = WorktreeStart::Remote {
+        upstream: "origin/never".into(),
+    };
+    let (_, error) = create(&mut rt, &key, "never", never, &repo.sibling("never"));
+    let error = error.expect("nothing to start from");
+    assert_eq!(error.command, "fetch", "{error}");
+    assert!(rt.repo(&key).unwrap().branch("never").is_none());
+}
+
+#[test]
+fn a_slow_fetch_falls_back_after_the_timeout() {
+    let repo = TestRepo::init();
+    let tip = repo.commit("a.txt", "a\n", "first");
+    repo.add_remote();
+    let (mut rt, key) = open(&repo);
+    rt.set_fetch_timeout(Duration::ZERO);
+
+    let path = repo.sibling("slow");
+    let (job, error) = create(&mut rt, &key, "slow", new_branch("origin/main"), &path);
+    assert!(error.is_none(), "{error:?}");
+    let made = created(&rt, &key, job);
+    assert_eq!(made.tip, tip);
+    assert!(made.stale.is_some_and(|s| s.timed_out));
+}
+
+/// A setup command that writes `file` in its folder (in both shells).
+fn write_command(file: &str) -> String {
+    format!("echo done> {file}")
+}
+
+#[test]
+fn setup_copies_untracked_files_and_runs_its_command() {
+    let repo = TestRepo::init();
+    repo.commit(".gitignore", ".env*\nnode_modules/\n", "ignore");
+    let main = repo.path().to_path_buf();
+    fs::write(main.join(".env"), "SECRET=1\n").unwrap();
+    fs::write(main.join(".env.local"), "LOCAL=1\n").unwrap();
+    fs::create_dir_all(main.join(".vscode")).unwrap();
+    fs::write(main.join(".vscode").join("settings.json"), "{}\n").unwrap();
+    fs::create_dir_all(main.join("node_modules").join("x")).unwrap();
+    fs::write(main.join("node_modules").join("x").join("i.js"), "1\n").unwrap();
+    let (mut rt, key) = open(&repo);
+    assert!(rt.worktree_setup(&key).is_empty());
+    let patterns = [".env*".into(), ".vscode/".into(), ".worktrees/".into()];
+    let setup = WorktreeSetup::cleaned(&patterns, &write_command("setup.txt"));
+    assert!(rt.set_worktree_setup(&key, setup.clone()));
+    assert_eq!(rt.worktree_setup(&key), setup);
+
+    let path = main.join(".worktrees").join("task");
+    let (_, error) = create(&mut rt, &key, "task", new_branch("main"), &path);
+    assert!(error.is_none(), "{error:?}");
+    // A file already there is kept.
+    fs::write(path.join(".env.local"), "MINE=1\n").unwrap();
+    let job = rt.run_worktree_setup(&key, &path).expect("a setup");
+    assert!(rt.repo(&key).unwrap().setup_running(&path));
+    let error = finish(&mut rt, &key, Some(job));
+    assert!(error.is_none(), "{error:?}");
+    assert!(!rt.repo(&key).unwrap().setup_running(&path));
+    assert_eq!(fs::read_to_string(path.join(".env")).unwrap(), "SECRET=1\n");
+    assert_eq!(
+        fs::read_to_string(path.join(".env.local")).unwrap(),
+        "MINE=1\n"
+    );
+    assert!(path.join(".vscode").join("settings.json").is_file());
+    assert!(!path.join("node_modules").exists(), "not in the patterns");
+    assert!(
+        !path.join(".worktrees").exists(),
+        "never a worktree into another"
+    );
+    assert!(path.join("setup.txt").is_file(), "the command ran there");
+}
+
+#[test]
+fn a_failed_setup_keeps_the_worktree_and_its_output() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let (mut rt, key) = open(&repo);
+    rt.set_worktree_setup(&key, WorktreeSetup::cleaned(&[], "echo oops&& exit 3"));
+    let path = repo.sibling("failing");
+    let (_, error) = create(&mut rt, &key, "failing", new_branch("main"), &path);
+    assert!(error.is_none(), "{error:?}");
+
+    let job = rt.run_worktree_setup(&key, &path);
+    let error = finish(&mut rt, &key, job).expect("the command fails");
+    assert_eq!(error.exit_code, Some(3), "{error}");
+    assert!(error.stderr.contains("oops"), "{error}");
+    assert!(listed(&rt, &key, &path), "kept");
+}
+
+#[test]
+fn undo_deletes_what_the_create_made() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    repo.branch("existing");
+    let (mut rt, key) = open(&repo);
+
+    let path = repo.sibling("undone");
+    let (_, error) = create(&mut rt, &key, "undone", new_branch("main"), &path);
+    assert!(error.is_none(), "{error:?}");
+    fs::write(path.join("new.txt"), "untracked\n").unwrap();
+    assert!(rt.repo(&key).unwrap().can_undo_create(&path));
+    ok(&mut rt, &key, |rt| rt.undo_new_worktree(&key, &path));
+    settle_worktrees(&mut rt, &key);
+    assert!(!path.exists() && !listed(&rt, &key, &path));
+    assert!(rt.repo(&key).unwrap().branch("undone").is_none());
+    assert!(!rt.repo(&key).unwrap().can_undo_create(&path));
+
+    // An existing branch stays.
+    let existing = repo.sibling("existing");
+    let (_, error) = create(
+        &mut rt,
+        &key,
+        "existing",
+        WorktreeStart::Existing,
+        &existing,
+    );
+    assert!(error.is_none(), "{error:?}");
+    ok(&mut rt, &key, |rt| rt.undo_new_worktree(&key, &existing));
+    assert!(!existing.exists());
+    assert!(rt.repo(&key).unwrap().branch("existing").is_some());
+}
+
+#[test]
+fn undo_refuses_once_there_is_work_in_the_worktree() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let (mut rt, key) = open(&repo);
+
+    let edited = repo.sibling("edited");
+    let (_, error) = create(&mut rt, &key, "edited", new_branch("main"), &edited);
+    assert!(error.is_none(), "{error:?}");
+    fs::write(edited.join("a.txt"), "changed\n").unwrap();
+    let error = outcome(&mut rt, &key, |rt| rt.undo_new_worktree(&key, &edited)).expect("refused");
+    assert_eq!(error.kind, GitErrorKind::LocalChanges, "{error}");
+    assert!(edited.join("a.txt").is_file());
+
+    let committed = repo.sibling("committed");
+    let (_, error) = create(&mut rt, &key, "committed", new_branch("main"), &committed);
+    assert!(error.is_none(), "{error:?}");
+    repo.command_in(&committed)
+        .args(["commit", "--quiet", "--allow-empty", "-m", "work"])
+        .run()
+        .unwrap();
+    let undo = |rt: &mut Runtime| rt.undo_new_worktree(&key, &committed);
+    let error = outcome(&mut rt, &key, undo).expect("refused");
+    assert!(error.stderr.contains("new commits"), "{error}");
+    settle_worktrees(&mut rt, &key);
+    assert!(listed(&rt, &key, &committed));
+    assert!(rt.repo(&key).unwrap().branch("committed").is_some());
+}
+
+#[test]
+fn undo_stops_a_running_setup() {
+    let repo = TestRepo::init();
+    repo.commit("a.txt", "a\n", "first");
+    let (mut rt, key) = open(&repo);
+    // Longer than the tests wait for anything.
+    let slow = if cfg!(windows) {
+        "ping -n 60 127.0.0.1 > nul"
+    } else {
+        "sleep 60"
+    };
+    rt.set_worktree_setup(&key, WorktreeSetup::cleaned(&[], slow));
+    let path = repo.sibling("slow setup");
+    let (_, error) = create(&mut rt, &key, "slow", new_branch("main"), &path);
+    assert!(error.is_none(), "{error:?}");
+    rt.run_worktree_setup(&key, &path).expect("a setup");
+    std::thread::sleep(Duration::from_millis(300));
+
+    ok(&mut rt, &key, |rt| rt.undo_new_worktree(&key, &path));
+    assert!(!path.exists());
+    poll_until(&mut rt, |rt, _| {
+        !rt.repo(&key).unwrap().setup_running(&path)
+    });
+    assert!(rt.repo(&key).unwrap().branch("slow").is_none());
 }
 
 #[test]

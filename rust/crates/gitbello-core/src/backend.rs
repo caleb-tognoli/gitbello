@@ -512,6 +512,28 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<Vec<PathBuf>, GitError> {
         Err(unsupported("ignore rules"))
     }
+    /// The untracked files and folders of the worktree at `toplevel` that
+    /// gitignore-style `patterns` match, ignored or not, a matching folder
+    /// listed once (`node_modules/`). Nested repositories and worktrees are
+    /// not looked into.
+    fn untracked_by_patterns(
+        &self,
+        _toplevel: &Path,
+        _patterns: &[String],
+        _cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        Err(unsupported("worktree setup"))
+    }
+    /// When `reference` last moved (its reflog), in Unix seconds; `None`
+    /// without a reflog.
+    fn ref_updated_at(
+        &self,
+        _repo: &Path,
+        _reference: &str,
+        _cancel: &CancelToken,
+    ) -> Result<Option<i64>, GitError> {
+        Ok(None)
+    }
     /// The tracked files that `patterns` match.
     fn tracked_matching(
         &self,
@@ -899,6 +921,13 @@ impl CliBackend {
         }
         writeln!(file, "/.worktrees/").map_err(io)
     }
+}
+
+/// The time in `refs/remotes/origin/main@{1731600000}` (`log -g --date=unix --format=%gd`).
+fn parse_reflog_time(text: &str) -> Option<i64> {
+    let line = text.lines().next()?.trim();
+    let inner = line.strip_suffix('}')?.rsplit_once("@{")?.1;
+    inner.parse().ok()
 }
 
 /// NUL-separated paths for `--pathspec-from-file=- --pathspec-file-nul`.
@@ -1722,6 +1751,9 @@ impl GitBackend for CliBackend {
                     None => cmd.arg("--all"),
                 }
             }
+            SyncOp::FetchBranch { remote, branch } => {
+                cmd.args(["fetch", "--progress", "--", remote, branch])
+            }
             SyncOp::Pull { mode } => {
                 // Explicit flags win over the user's pull.rebase / pull.ff config.
                 let flags: &[&str] = match mode {
@@ -2478,6 +2510,38 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<Vec<PathBuf>, GitError> {
         self.untracked_matching_impl(toplevel, paths, patterns, cancel)
+    }
+
+    fn untracked_by_patterns(
+        &self,
+        toplevel: &Path,
+        patterns: &[String],
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        self.untracked_by_patterns_impl(toplevel, patterns, cancel)
+    }
+
+    fn ref_updated_at(
+        &self,
+        repo: &Path,
+        reference: &str,
+        cancel: &CancelToken,
+    ) -> Result<Option<i64>, GitError> {
+        let args = [
+            "log",
+            "-g",
+            "-n1",
+            "--date=unix",
+            "--format=%gd",
+            reference,
+            "--",
+        ];
+        match self.read(repo, &args, cancel) {
+            Ok(out) => Ok(parse_reflog_time(&out.stdout_text())),
+            // No reflog for it.
+            Err(err) if err.exit_code == Some(128) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn tracked_matching(

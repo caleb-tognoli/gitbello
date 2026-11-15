@@ -24,7 +24,7 @@ const MENUS: Array[Array] = [
 		["Undo", [&"changes.undo_discard", &"changes.undo_ignore", &"shelf.undo_discard", &"conflict.undo", &"commit.undo"]], &"",
 		&"view.find", &"history.next_match", &"history.previous_match"]],
 	["Repository", [&"sync.fetch", &"sync.pull", &"sync.push", &"", &"task.new",
-		["Worktrees", [&"worktree.add_existing", &"worktree.cleanup", &"worktree.prune"]], &"",
+		["Worktrees", [&"worktree.setup", &"worktree.cleanup", &"worktree.prune"]], &"",
 		&"repo.open_terminal", &"repo.show_in_file_manager", &"",
 		["Remotes and tags", [&"repo.remotes", &"repo.tags"]], &"repo.ignore_rules",
 		["Shelves", [&"changes.shelve", &"shelf.restore_left"]], &"",

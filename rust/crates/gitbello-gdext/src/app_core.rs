@@ -22,7 +22,7 @@ use gitbello_core::ui_state::{self, UiState};
 
 /// UI state list of a repository's recent comparisons.
 const RECENT_KEY: &str = "compare_recent";
-use gitbello_core::worktrees::new_worktree_path_error;
+use gitbello_core::worktrees::{free_worktree_path, new_worktree_path_error};
 use godot::prelude::*;
 
 use crate::convert::{self, gstr, path_str, to_i64};
@@ -1111,6 +1111,13 @@ impl AppCore {
     #[func]
     fn new_worktree_path_error(&self, path: GString) -> GString {
         gstr(new_worktree_path_error(Path::new(&path.to_string())).unwrap_or_default())
+    }
+
+    /// `path`, or the first of `path-2`, `path-3`… a new worktree can go in
+    /// when `path` is taken (as creating a worktree picks it).
+    #[func]
+    fn free_worktree_path(&self, path: GString) -> GString {
+        path_str(&free_worktree_path(Path::new(&path.to_string())))
     }
 
     /// The settings the Settings dialog edits: `{pull_mode,

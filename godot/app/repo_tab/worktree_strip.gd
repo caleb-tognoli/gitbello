@@ -12,6 +12,8 @@ signal worktree_chosen(path: String)
 signal worktree_menu_requested(worktree: Dictionary, at_position: Vector2)
 ## A row's context menu was requested in the worktree list (`all_list()`).
 signal list_menu_requested(worktree: Dictionary, at_position: Vector2)
+## Enter on the worktree list's filter with no match: New worktree `branch`.
+signal new_worktree_requested(branch: String)
 ## A chip was middle-clicked: show its folder.
 signal worktree_reveal_requested(worktree: Dictionary)
 
@@ -60,6 +62,7 @@ func _ready() -> void:
 	add_child(_all_list)
 	_all_list.chosen.connect(func(path: String) -> void: worktree_chosen.emit(path))
 	_all_list.menu_requested.connect(func(wt: Dictionary, at: Vector2) -> void: list_menu_requested.emit(wt, at))
+	_all_list.new_requested.connect(func(branch: String) -> void: new_worktree_requested.emit(branch))
 
 
 func _notification(what: int) -> void:

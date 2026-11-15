@@ -25,10 +25,10 @@ enum View { HISTORY, CHANGES, SHELVES, COMPARE, FILE }
 
 ## Context menu entries per ref type; &"" is a separator.
 const REF_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
-		&"branch.new", &"tag.new", &"", &"branch.rename", &"branch.set_upstream", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
-		&"branch.new", &"tag.new", &"", &"branch.delete_remote"],
+	"branch": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
+		&"compare.with", &"", &"branch.new", &"tag.new", &"", &"branch.rename", &"branch.set_upstream", &"branch.delete"],
+	"remote": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
+		&"compare.with", &"", &"branch.new", &"tag.new", &"", &"branch.delete_remote"],
 	"tag": [&"commit.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
 		&"branch.new", &"", &"tag.push", &"tag.delete"],
 	"worktree": [&"worktree.open_terminal", &"worktree.show_in_file_manager",
@@ -36,14 +36,14 @@ const REF_MENUS: Dictionary[String, Array] = {
 }
 ## A ref label in the graph offers fewer actions than the branch list.
 const LABEL_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
-		&"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
-		&"branch.delete_remote"],
+	"branch": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
+		&"compare.with", &"", &"branch.delete"],
+	"remote": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
+		&"compare.with", &"", &"branch.delete_remote"],
 	"tag": [&"branch.merge", &"", &"compare.with_current", &"compare.with", &"", &"tag.push", &"tag.delete"],
 }
 const COMMIT_MENU: Array[StringName] = [&"history.compare_selected", &"", &"commit.amend", &"commit.checkout",
-	&"branch.new", &"tag.new", &"", &"commit.cherry_pick", &"commit.merge", &"", &"commit.compare_working",
+	&"commit.new_worktree", &"branch.new", &"tag.new", &"", &"commit.cherry_pick", &"commit.merge", &"", &"commit.compare_working",
 	&"commit.compare_with", &"", &"commit.copy_hash"]
 const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"", &"sync.pull_merge", &"sync.pull_rebase", &"",
 	&"sync.push", &"sync.force_push"]
@@ -228,6 +228,7 @@ func _ready() -> void:
 		_menu.reparent(_popover)
 		show_ref_menu.call_deferred(ref, at))
 	_popover.new_branch_requested.connect(func() -> void: Actions.run_action(&"branch.new", _branch_button))
+	_popover.new_worktree_requested.connect(_on_branch_new_worktree)
 	_history.commit_menu_requested.connect(_on_commit_menu)
 	_history.label_menu_requested.connect(_on_label_menu)
 	_history.notice.connect(notice.emit)
@@ -758,6 +759,16 @@ func _on_branch_chosen(ref: Dictionary) -> void:
 		_ops.checkout_remote(String(ref["name"]))
 	elif not bool(ref["is_head"]):
 		_ops.checkout_branch(String(ref["short"]))
+
+
+## Alt+Enter in the branch list: a branch checked out in another worktree
+## shows there; any other but the current one opens in a new worktree.
+func _on_branch_new_worktree(ref: Dictionary) -> void:
+	var worktree: String = String(ref.get("worktree", ""))
+	if not worktree.is_empty():
+		worktree_open_requested.emit(worktree)
+	elif not bool(ref.get("is_head", false)):
+		_ops.open_in_new_worktree(ref, _branch_button)
 
 
 ## The Sync ▾ menu: one short item per outcome with its shortcut, and what

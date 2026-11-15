@@ -47,9 +47,9 @@ use crate::merge::{
 };
 use crate::new_repo::{self, CloneOptions, CreateOptions, FIRST_COMMIT_MESSAGE};
 use crate::ops::{
-    CheckoutChanges, CheckoutTarget, NewTask, PullMode, PushSpec, RefOp, SyncOp, UpstreamRewrite,
+    CheckoutChanges, CheckoutTarget, PullMode, PushSpec, RefOp, SyncOp, UpstreamRewrite,
     WorktreeOp, AUTO_FETCH_JOB_LABEL, CHECKOUT_JOB_LABEL, CLEANUP_JOB_LABEL, FETCH_JOB_LABEL,
-    NEW_TASK_JOB_LABEL, PULL_JOB_LABEL, PUSH_JOB_LABEL,
+    PULL_JOB_LABEL, PUSH_JOB_LABEL,
 };
 use crate::repo::{
     shelf_message, shelves, Change, CommitDetails, FileChange, FileState, Head, Operation, Ref,
@@ -67,6 +67,7 @@ mod branch_delete;
 mod compare;
 mod file_history;
 mod ignore;
+mod new_worktree;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
 use avatars::{apply_avatar, AvatarBook};
 pub use avatars::{Picture, AVATAR_CACHE_JOB_LABEL, AVATAR_JOB_LABEL};
@@ -94,6 +95,8 @@ pub use ignore::{
     MAX_IGNORE_UNDO, REMOVE_IGNORE_RULE_JOB_LABEL, STOP_IGNORING_JOB_LABEL, UNDO_IGNORE_JOB_LABEL,
     UNTRACK_IGNORED_JOB_LABEL,
 };
+use new_worktree::NewWorktreeState;
+pub use new_worktree::{CreatedWorktree, StaleBase, FETCH_TIMEOUT};
 
 /// Label of the job that resolves a repository when it is opened.
 pub const OPEN_JOB_LABEL: &str = "open repository";
@@ -733,6 +736,7 @@ pub struct RepoState {
     cleanup: Option<Vec<CleanupCandidate>>,
     ignore: IgnoreState,
     branch_delete: BranchDeleteState,
+    new_worktree: NewWorktreeState,
     /// The status plus the ignored paths, while "Show ignored files" is on.
     listed: Option<RepoStatus>,
 }
@@ -802,6 +806,7 @@ impl RepoState {
             cleanup: None,
             ignore: IgnoreState::default(),
             branch_delete: BranchDeleteState::default(),
+            new_worktree: NewWorktreeState::default(),
             listed: None,
         }
     }
@@ -1824,6 +1829,8 @@ pub struct Runtime {
     /// Folders (normalized) of removed worktrees that git could not fully
     /// delete; removing one again deletes the rest.
     leftover_worktrees: Arc<Mutex<HashSet<PathBuf>>>,
+    /// How long a new worktree waits for its base's fetch.
+    fetch_timeout: Duration,
     /// Where Open writes versions from the index and commits.
     versions_dir: Option<PathBuf>,
     avatars: AvatarBook,
@@ -1886,6 +1893,7 @@ impl Runtime {
             scans: HashMap::new(),
             locations: HashMap::new(),
             leftover_worktrees: Arc::default(),
+            fetch_timeout: FETCH_TIMEOUT,
             versions_dir: crate::paths::versions_dir(),
             avatars: AvatarBook::from_env(),
         }
@@ -3556,29 +3564,6 @@ impl Runtime {
         )))
     }
 
-    /// The new-task flow (PLAN §4) as one job: fetch the base's remote, then
-    /// create the branch in a new worktree. A failure rolls back what was
-    /// created. The caller opens the worktree afterwards.
-    pub fn new_task(&self, key: &Path, task: NewTask) -> Option<JobId> {
-        self.repos.get(key).filter(|s| s.is_ready())?;
-        Some(self.scheduler.submit(JobSpec::write(
-            key,
-            NEW_TASK_JOB_LABEL,
-            worktree_refresh(),
-            move |ctx| {
-                let progress = Box::new(ctx.progress_sink());
-                new_task_job(
-                    ctx.backend(),
-                    ctx.repo(),
-                    &task,
-                    progress,
-                    ctx.cancel_token(),
-                )
-                .map(|()| JobOutput::Done)
-            },
-        )))
-    }
-
     /// Finds the worktrees whose branch is merged into the default base or
     /// whose upstream is gone; they arrive as [`RuntimeEvent::CleanupLoaded`].
     pub fn load_cleanup(&mut self, key: &Path) -> Option<JobId> {
@@ -4098,6 +4083,7 @@ impl Runtime {
         if Self::apply_branch_delete_event(state, job, &label, &kind, &repo, out) {
             return;
         }
+        Self::apply_new_worktree_event(state, job, &label, &kind);
         if label == MERGE_PREVIEW_JOB_LABEL {
             if let EventKind::Finished(Ok(JobOutput::MergePreview(mut preview))) = kind {
                 if state.merge_preview_requested.as_deref() != Some(preview.target.as_str()) {
@@ -4710,7 +4696,10 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::BranchDeleteInfo(_)
         | JobOutput::WorktreeDeleteInfo(_)
         | JobOutput::BranchDeleted(_)
-        | JobOutput::BranchRestored(_) => {}
+        | JobOutput::BranchRestored(_)
+        | JobOutput::WorktreeCreated(_)
+        | JobOutput::WorktreeSetupDone(_)
+        | JobOutput::WorktreeUndone(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }
@@ -4850,72 +4839,6 @@ fn folder_error(
 /// Fetches `task`'s remote, then adds the worktree with its new branch. On
 /// failure, removes what `git worktree add` left behind (it may have
 /// created the branch before refusing the folder).
-fn new_task_job(
-    backend: &dyn GitBackend,
-    repo: &Path,
-    task: &NewTask,
-    progress: crate::backend::ProgressSink,
-    cancel: &CancelToken,
-) -> Result<(), GitError> {
-    if let Some(remote) = &task.fetch_remote {
-        let fetch = SyncOp::Fetch {
-            remote: Some(remote.clone()),
-        };
-        backend.sync(repo, &fetch, progress, cancel)?;
-    }
-    let branch_ref = format!("refs/heads/{}", task.branch);
-    if backend.resolve(repo, &branch_ref, cancel)?.is_some() {
-        return Err(GitError::new(
-            "worktree add",
-            GitErrorKind::AlreadyExists,
-            format!("a branch named '{}' already exists", task.branch),
-        ));
-    }
-    let add = WorktreeOp::Add {
-        path: task.path.clone(),
-        branch: task.branch.clone(),
-        start: Some(task.base.clone()),
-    };
-    let added = backend.worktree_op(repo, &add, cancel).and_then(|()| {
-        if !task.track_base {
-            return Ok(());
-        }
-        let track = RefOp::SetUpstream {
-            branch: task.branch.clone(),
-            upstream: Some(task.base.clone()),
-        };
-        backend.ref_op(repo, &track, cancel)
-    });
-    let Err(err) = added else {
-        return Ok(());
-    };
-    // Rolling back must not be cut short by a cancel.
-    let restore = CancelToken::new();
-    // git reports resolved paths (no symlinks or short names): compare those.
-    let target = normalize(&task.path);
-    let registered = backend
-        .worktrees(repo, &restore)
-        .is_ok_and(|list| list.iter().any(|wt| normalize(&wt.path) == target));
-    if registered {
-        let remove = WorktreeOp::Remove {
-            path: task.path.clone(),
-            force: true,
-        };
-        let _ = backend.worktree_op(repo, &remove, &restore);
-    }
-    if backend
-        .resolve(repo, &branch_ref, &restore)
-        .is_ok_and(|b| b.is_some())
-    {
-        let delete = RefOp::DeleteBranch {
-            name: task.branch.clone(),
-            force: true,
-        };
-        let _ = backend.ref_op(repo, &delete, &restore);
-    }
-    Err(err)
-}
-
 /// Reads what the undo strip and the graph's `in_head` need.
 fn submit_head_info(scheduler: &JobScheduler, key: &Path) {
     scheduler.submit(JobSpec::read(key, HEAD_INFO_JOB_LABEL, |ctx| {

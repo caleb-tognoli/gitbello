@@ -77,6 +77,22 @@ pub fn new_worktree_path_error(path: &Path) -> Option<&'static str> {
     }
 }
 
+/// `path` when a new worktree can go there, else the first free one of
+/// `path-2`, `path-3`… (up to `-99`, then `path` itself, which the add refuses).
+pub fn free_worktree_path(path: &Path) -> PathBuf {
+    if new_worktree_path_error(path).is_none() || path.file_name().is_none() {
+        return path.to_path_buf();
+    }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    (2..=99)
+        .map(|n| path.with_file_name(format!("{name}-{n}")))
+        .find(|candidate| new_worktree_path_error(candidate).is_none())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 /// What the worktree strip calls the worktree at `path`: its folder name,
 /// without `main`'s name (less a `.git` suffix) and one `-`, `_` or `.` in
 /// front, ignoring ASCII case (`shop-login` next to `shop` → `login`). The
@@ -257,6 +273,22 @@ mod tests {
         assert!(new_worktree_path_error(&dir).is_some());
         assert!(new_worktree_path_error(&dir.join("f")).is_some());
         assert!(new_worktree_path_error(Path::new("")).is_some());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn taken_folders_get_a_number() {
+        let dir = std::env::temp_dir().join(format!("gitbello frée {}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let wanted = dir.join("feature-x");
+        assert_eq!(free_worktree_path(&wanted), wanted, "missing: as is");
+        fs::create_dir_all(&wanted).unwrap();
+        assert_eq!(free_worktree_path(&wanted), wanted, "empty: as is");
+        fs::write(wanted.join("f"), "x").unwrap();
+        assert_eq!(free_worktree_path(&wanted), dir.join("feature-x-2"));
+        fs::create_dir_all(dir.join("feature-x-2")).unwrap();
+        fs::write(dir.join("feature-x-2").join("f"), "x").unwrap();
+        assert_eq!(free_worktree_path(&wanted), dir.join("feature-x-3"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

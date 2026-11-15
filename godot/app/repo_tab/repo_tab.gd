@@ -40,6 +40,9 @@ func _ready() -> void:
 	_strip.worktree_menu_requested.connect(_on_chip_menu)
 	_strip.list_menu_requested.connect(func(wt: Dictionary, at: Vector2) -> void:
 		_on_chip_menu(wt, at, _strip.all_list()))
+	_strip.new_worktree_requested.connect(func(branch: String) -> void:
+		if _active != null:
+			_active.ops().new_worktree(branch))
 	_strip.worktree_reveal_requested.connect(func(wt: Dictionary) -> void:
 		if _active != null and not bool(wt["prunable"]):
 			_active.ops().show_in_file_manager(String(wt["path"])))

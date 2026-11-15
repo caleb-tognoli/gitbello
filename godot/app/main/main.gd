@@ -950,6 +950,14 @@ func _register_branch_actions() -> void:
 			PackedStringArray(),
 			func() -> bool:
 				return ref_is.call("remote") or (ref_is.call("branch") and not bool(ref.call()["is_head"])))
+	# One click (PLAN §4): the branch in a new worktree, with the setup.
+	Actions.register(&"branch.new_worktree", "Open in new worktree", "Branches",
+			func() -> void: ops.call().open_in_new_worktree(ref.call()), PackedStringArray(),
+			func() -> bool:
+				return (ref_is.call("branch") or ref_is.call("remote")) \
+						and not current_page().session.main_worktree().is_empty() \
+						and not ops.call().new_worktree_spec(ref.call()).is_empty(),
+			_says("The branch is checked out in a worktree already."))
 	Actions.register(&"branch.rename", "Rename branch…", "Branches",
 			func() -> void: ops.call().rename_branch(branch.call()), PackedStringArray(["F2"]),
 			func() -> bool: return not String(branch.call()).is_empty(), _says("There is no branch checked out."))
@@ -1010,6 +1018,11 @@ func _register_branch_actions() -> void:
 	Actions.register(&"commit.checkout", "Check out commit (detached)…", "History",
 			func() -> void: ops.call().checkout_commit(String(target_commit.call()["hash"])),
 			PackedStringArray(), not_head)
+	Actions.register(&"commit.new_worktree", "New worktree here…", "History",
+			func() -> void: ops.call().new_worktree("", String(target_commit.call()["hash"])),
+			PackedStringArray(),
+			func() -> bool:
+				return not target_commit.call().is_empty() and not current_page().session.main_worktree().is_empty())
 	Actions.register(&"commit.cherry_pick", "Cherry-pick commit…", "History",
 			func() -> void:
 				var target: Dictionary = target_commit.call()
@@ -1135,14 +1148,15 @@ func _register_worktree_actions() -> void:
 				return true
 		return false
 	Actions.register(&"task.new", "New worktree…", "Worktrees",
-			func() -> void: ops.call().new_task(), PackedStringArray(["Ctrl+T"]),
+			func() -> void: ops.call().new_worktree(), PackedStringArray(["Ctrl+T"]),
 			func() -> bool: return is_ready.call() and not current_page().session.main_worktree().is_empty())
 	Actions.register(&"worktree.cleanup", "Clean up merged worktrees…", "Worktrees",
 			func() -> void: ops.call().cleanup_worktrees(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and current_page().session.worktrees().size() > 1,
 			_says("There are no other worktrees."))
-	Actions.register(&"worktree.add_existing", "Add worktree for a branch…", "Worktrees",
-			func() -> void: ops.call().add_existing_worktree(), PackedStringArray(), is_ready)
+	Actions.register(&"worktree.setup", "Worktree setup…", "Worktrees",
+			func() -> void: ops.call().edit_worktree_setup(), PackedStringArray(),
+			func() -> bool: return is_ready.call() and not current_page().session.main_worktree().is_empty())
 	Actions.register(&"worktree.prune", "Prune missing worktrees", "Worktrees",
 			func() -> void: ops.call().prune_worktrees(), PackedStringArray(), has_missing,
 			_says("No worktree folder is missing."))

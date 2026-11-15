@@ -33,6 +33,8 @@ const MERGE_MODES: Dictionary[String, String] = {"merge": "no_ff", "squash": "sq
 ## Choice in the upstream dialog that removes the upstream.
 const NO_UPSTREAM: String = "(none)"
 ## What the worktree delete says of an operation in progress there.
+## The command of a worktree setup's errors (core's `SETUP_COMMAND`).
+const SETUP_COMMAND: String = "worktree setup"
 const OPERATION_FACTS: Dictionary[String, String] = {
 	"merge": "merging", "rebase": "rebasing", "cherry_pick": "cherry-picking", "revert": "reverting",
 	"bisect": "bisecting", "am": "applying patches",
@@ -69,8 +71,11 @@ var _switch_then: Callable = Callable()
 ## Worktree deletions started here, to try again with the same choices:
 ## path (forward slashes) -> `{force, branch, remote}`.
 var _worktree_deletes: Dictionary[String, Dictionary] = {}
-## New tasks and added worktrees started here, shown once created: job id -> path.
-var _tasks: Dictionary[int, String] = {}
+## New worktrees started here, shown once created: job id -> `{setup}`
+## (whether to run the repository's setup there).
+var _tasks: Dictionary[int, Dictionary] = {}
+## Setups started here: job id -> the worktree's path.
+var _setups: Dictionary[int, String] = {}
 ## Which flow the form shows (`task`, `cleanup`, ...), for field changes.
 var _form_kind: String = ""
 ## The new-task folder was edited by hand: stop following the branch name.
@@ -78,8 +83,15 @@ var _folder_edited: bool = false
 ## A folder picked for new tasks to go in (its name still follows the
 ## branch), or "" for the template's.
 var _folder_parent: String = ""
-## The remote branch the typed new-task name matches (`origin/<name>`), or "".
-var _remote_match: String = ""
+## The New worktree dialog's rows under the branch field, its From base
+## (a button opening `_base_popover`) and its folder preview line.
+var _branch_list: WorktreeBranchList = null
+var _base: String = ""
+var _base_button: Button = null
+var _base_popover: BasePopover = BasePopover.new()
+var _folder_label: Label = null
+## ✎ and the folder button of the preview line (hidden while the folder is typed).
+var _folder_buttons: HBoxContainer = null
 var _cleanup_requested: bool = false
 var _cleanup_list: Array[Dictionary] = []
 ## Switching with local changes: bring them (OK) or leave them (a button).
@@ -104,6 +116,8 @@ func _ready() -> void:
 	_form = FORM.instantiate() as FormDialog
 	add_child(_form)
 	_form.field_changed.connect(_on_form_field)
+	_base_popover.base_chosen.connect(_on_base_chosen)
+	_form.add_child(_base_popover)
 	_confirm.dialog_autowrap = true
 	_confirm.confirmed.connect(_on_confirmed)
 	_confirm.get_ok_button().theme_type_variation = &"PrimaryButton"
@@ -152,6 +166,7 @@ func set_session(value: RepoSession) -> void:
 		session.worktree_delete_info_ready.disconnect(_on_worktree_info)
 		session.refs_changed.disconnect(_on_refs_for_delete)
 	session = value
+	_base_popover.session = value
 	if _merge_dialog != null:
 		_merge_dialog.session = value
 	if session != null:
@@ -165,6 +180,28 @@ func set_session(value: RepoSession) -> void:
 
 func form() -> FormDialog:
 	return _form
+
+
+## The New worktree dialog's rows, From base, its popover and folder
+## preview line ("" while hidden) (for tests and screenshots).
+func worktree_branch_list() -> WorktreeBranchList:
+	return _branch_list
+
+
+func new_worktree_base() -> String:
+	return _base
+
+
+func base_button() -> Button:
+	return _base_button
+
+
+func base_popover() -> BasePopover:
+	return _base_popover
+
+
+func folder_preview_text() -> String:
+	return _folder_label.text if _folder_label != null and _folder_label.is_visible_in_tree() else ""
 
 
 func confirm_dialog() -> ConfirmationDialog:
@@ -250,8 +287,10 @@ func handles_error(error: Dictionary) -> bool:
 	var previewing: bool = _merge_dialog.visible and (command in ["merge", "rebase", "rebase check"]
 			or command.begins_with("merge-tree") or command.begins_with("merge-base") or command.begins_with("rev-parse")
 			or command.begins_with("rev-list") or command.begins_with("commit-tree"))
+	# A failed worktree setup gets its own toast (see `_on_setup_failed`).
+	var setup: bool = command.begins_with(SETUP_COMMAND)
 	return (kind == "local_changes" and command.begins_with("switch")) \
-			or (kind == "not_fully_merged" and command.begins_with("branch")) or stopped or previewing
+			or (kind == "not_fully_merged" and command.begins_with("branch")) or stopped or previewing or setup
 
 
 # --- Sync ---------------------------------------------------------------------
@@ -1185,35 +1224,322 @@ func show_in_file_manager(path: String = "") -> void:
 
 # --- Worktrees ------------------------------------------------------------------
 
-## The new-task flow (PLAN §4): a branch from a base (the default one
-## first, a remote one fetched first) in a new worktree whose folder follows
-## the branch name, shown once created.
-func new_task() -> void:
-	var bases: PackedStringArray = PackedStringArray()
-	var base: String = session.default_base()
-	if not base.is_empty():
-		bases.append(base)
-	for ref: Dictionary in session.branch_refs():
-		var short: String = String(ref["short_name"])
-		if not short in bases:
-			bases.append(short)
-	if bases.is_empty():
-		bases.append("HEAD")
+## The New worktree dialog (PLAN §4 New task): one branch field whose rows
+## (`WorktreeBranchList`) create a branch from the From base, or check out a
+## local or remote branch; the folder as a preview line that follows the
+## branch (✎ edits it, the folder button picks one; a taken folder gets
+## `-2`…); and Run setup when the repository has one. `branch` and `base`
+## (unless "") fill in the name and the base; a commit's hash shows short.
+func new_worktree(branch: String = "", base: String = "") -> void:
 	_folder_edited = false
 	_folder_parent = ""
-	_remote_match = ""
-	_begin_form("task", "New worktree", "Create", _create_task)
+	_base = base if not base.is_empty() else session.default_base()
+	if _base.is_empty():
+		_base = session.current_branch() if not session.current_branch().is_empty() else "HEAD"
+	_begin_form("task", "New worktree", "Create", _create_worktree)
 	var prefix: String = String(Core.settings()["branch_prefix"])
-	var name_line: LineEdit = _form.add_line("name", "Branch", prefix, true)
-	_form.add_choice("base", "Start from", bases, 0)
-	_form.add_check("track", "", true)
-	_form.add_folder("folder", "Folder", "", "-", _pick_task_folder)
-	_form.validator = _check_task
-	_show_remote_match()
+	var name_line: LineEdit = _form.add_line("name", "Branch", branch if not branch.is_empty() else prefix, true)
+	name_line.gui_input.connect(_on_name_input)
+	_branch_list = WorktreeBranchList.new()
+	_branch_list.session = session
+	_branch_list.choice_changed.connect(_on_worktree_choice)
+	_branch_list.activated.connect(func() -> void: _form.submit())
+	_form.add_control("matches", "", _branch_list)
+	_base_button = Button.new()
+	_base_button.icon = AppTheme.ARROW_DOWN
+	_base_button.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_base_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_base_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_base_button.clip_text = true
+	_base_button.text = _base_label(_base)
+	_base_button.tooltip_text = tr("Where the new branch starts")
+	_base_button.pressed.connect(func() -> void: _base_popover.open_below(_base_button, _base))
+	_form.add_control("base", "From", _base_button)
+	_form.add_folder("folder", "Folder", "", "", _pick_task_folder)
+	_form.set_field_visible("folder", false)
+	_form.add_control("folder_preview", "Folder", _folder_preview())
+	var setup: Dictionary = session.worktree_setup()
+	var summary: String = _setup_summary(setup)
+	if not summary.is_empty():
+		var check: CheckBox = _form.add_check("setup", "", true)
+		check.text = tr("Run setup: %s") % summary
+		check.tooltip_text = check.text
+		check.clip_text = true
+		check.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_form.validator = _check_new_worktree
+	_branch_list.show_for(_typed_name(_form.values()))
 	_form.open()
 	# Typing goes after the prefix instead of replacing it.
 	name_line.deselect()
 	name_line.caret_column = name_line.text.length()
+
+
+## The folder preview: the folder, then ✎ (type it) and the folder button.
+func _folder_preview() -> HBoxContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+	_folder_label = Label.new()
+	_folder_label.theme_type_variation = &"DimLabel"
+	_folder_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_folder_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_folder_label.clip_text = true
+	_folder_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	# Its text starts where the fields' texts above do.
+	var inset: StyleBoxEmpty = StyleBoxEmpty.new()
+	inset.content_margin_left = _form.get_theme_stylebox(&"normal", &"LineEdit").get_margin(SIDE_LEFT)
+	_folder_label.add_theme_stylebox_override(&"normal", inset)
+	row.add_child(_folder_label)
+	_folder_buttons = HBoxContainer.new()
+	row.add_child(_folder_buttons)
+	var edit: Button = Button.new()
+	edit.icon = AppTheme.icon(&"Rename")
+	edit.theme_type_variation = &"ToolbarButton"
+	edit.tooltip_text = tr("Edit the folder")
+	edit.focus_mode = Control.FOCUS_NONE
+	edit.pressed.connect(_edit_task_folder)
+	_folder_buttons.add_child(edit)
+	var browse: Button = Button.new()
+	browse.icon = AppTheme.icon(&"Folder")
+	browse.theme_type_variation = &"ToolbarButton"
+	browse.tooltip_text = tr("Choose a folder")
+	browse.focus_mode = Control.FOCUS_NONE
+	browse.pressed.connect(func() -> void: _form.browse_folder("folder"))
+	_folder_buttons.add_child(browse)
+	return row
+
+
+## ✎: the folder becomes a field, starting from the preview's folder.
+func _edit_task_folder() -> void:
+	var line: LineEdit = _form.field("folder") as LineEdit
+	if not _folder_edited:
+		line.text = _shown_folder(_task_folder(_worktree_branch()))
+	_folder_edited = true
+	_form.set_field_visible("folder", true)
+	line.grab_focus()
+	line.caret_column = line.text.length()
+	_show_task_folder()
+
+
+## The branch the worktree will have: the chosen row's, else the typed name.
+func _worktree_branch() -> String:
+	var choice: Dictionary = _branch_list.choice()
+	return String(choice["branch"]) if not choice.is_empty() else _typed_name(_form.values())
+
+
+## Where the worktree is asked to go (the core takes `-2`… when it is taken).
+func _asked_folder() -> String:
+	if _folder_edited:
+		return _folder_path(String(_form.values().get("folder", "")))
+	return _task_folder(_worktree_branch())
+
+
+## The preview line: the folder the worktree goes in, and why it has a
+## number when the asked one is taken. While the folder is typed, it shows
+## only then.
+func _show_task_folder() -> void:
+	var asked: String = _asked_folder()
+	var free: String = Core.free_worktree_path(asked) if not asked.is_empty() else ""
+	var taken: bool = not asked.is_empty() and not Paths.same(free, asked)
+	_folder_buttons.visible = not _folder_edited
+	# While typed, the field above has the label; this line only says it is taken.
+	_form.set_field_label("folder_preview", "" if _folder_edited else "Folder")
+	_form.set_field_visible("folder_preview", not _folder_edited or taken)
+	if asked.is_empty():
+		_folder_label.text = tr("a folder named after the branch")
+	elif taken:
+		_folder_label.text = "%s  ·  %s" % [_shown_folder(free), tr("%s is taken") % asked.get_file()]
+		_folder_label.tooltip_text = free + "\n" + tr("%s is taken") % asked
+		return
+	else:
+		_folder_label.text = _shown_folder(free)
+	_folder_label.tooltip_text = free
+
+
+## Up and Down in the branch field move through its rows.
+func _on_name_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_down", true, true):
+		_branch_list.move(1)
+	elif event.is_action_pressed("ui_up", true, true):
+		_branch_list.move(-1)
+	elif event.is_action_pressed("ui_page_down", true, true):
+		_branch_list.move(5)
+	elif event.is_action_pressed("ui_page_up", true, true):
+		_branch_list.move(-5)
+	else:
+		return
+	(_form.field("name") as LineEdit).accept_event()
+
+
+## The chosen row changed: From shows only for a new branch, and the folder
+## follows the branch.
+func _on_worktree_choice() -> void:
+	var choice: Dictionary = _branch_list.choice()
+	_form.set_field_visible("base", choice.is_empty() or String(choice["start"]) == "new")
+	_show_task_folder()
+	_form.revalidate()
+
+
+func _on_base_chosen(base: String) -> void:
+	_base = base
+	_base_button.text = _base_label(base)
+	_form.revalidate()
+
+
+## "copy .env*, .vscode/ · npm ci", or "" without a setup.
+static func _setup_summary(setup: Dictionary) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	var copy: PackedStringArray = setup.get("copy", PackedStringArray())
+	if not copy.is_empty():
+		parts.append(TranslationServer.translate("copy %s") % ", ".join(copy))
+	var command: String = String(setup.get("command", ""))
+	if not command.is_empty():
+		parts.append(command)
+	return " · ".join(parts)
+
+
+func _check_new_worktree(values: Dictionary) -> String:
+	var choice: Dictionary = _branch_list.choice()
+	var typed: String = _typed_name(values)
+	if choice.is_empty():
+		var local: Dictionary = _branch_ref("branch", typed)
+		if not local.is_empty() and not String(local["worktree"]).is_empty():
+			return tr("%s is checked out in %s.") % [typed, String(local["worktree"]).get_file()]
+		if typed.is_empty():
+			return tr("Type a branch name.")
+		return tr("Choose a row.")
+	if String(choice["start"]) == "new":
+		var error: String = _check_branch_name({"name": String(choice["branch"])}, "")
+		if not error.is_empty():
+			return error
+	var asked: String = _asked_folder()
+	if asked.is_empty():
+		return tr("Choose a folder.")
+	return tr(Core.new_worktree_path_error(Core.free_worktree_path(asked)))
+
+
+## `base` as the From button shows it: a commit's hash short.
+static func _base_label(base: String) -> String:
+	return ShortHash.of(base) if base.length() == 40 and base.is_valid_hex_number() else base
+
+
+func _create_worktree(values: Dictionary) -> void:
+	var choice: Dictionary = _branch_list.choice()
+	_start_create({"branch": String(choice["branch"]), "start": String(choice["start"]), "base": _base,
+		"upstream": String(choice["upstream"]), "path": _asked_folder()}, bool(values.get("setup", false)))
+
+
+## Starts creating the worktree `spec` describes (see
+## `RepoSession.create_worktree`); once created it shows, with a toast that
+## offers Undo, and the setup runs when `setup` is set.
+func _start_create(spec: Dictionary, setup: bool, origin: Control = null) -> int:
+	var job: int = session.create_worktree(spec)
+	if job >= 0:
+		_tasks[job] = {"setup": setup}
+	var start: String = String(spec["start"])
+	var doing: String = tr("Creating the worktree %s") % String(spec["branch"]) if start == "new" \
+			else tr("Checking out %s") % String(spec["upstream"] if start == "remote" else spec["branch"])
+	return _track(job, doing, "", Callable(), origin)
+
+
+## Opens branch `ref` (a menu's `{type, short, ...}`: a local or remote
+## branch) in a new worktree at once (PLAN §4 One click): at the template's
+## folder (`-2`… when taken), with the setup. A branch it cannot check out
+## there, or a folder the template cannot give, opens the dialog instead.
+func open_in_new_worktree(ref: Dictionary, origin: Control = null) -> void:
+	var spec: Dictionary = new_worktree_spec(ref)
+	var short: String = String(ref.get("short", ""))
+	var shown: String = String(spec.get("branch", WorktreeBranchList.local_name(short, session.remotes())
+			if String(ref.get("type", "")) == "remote" else short))
+	var path: String = session.worktree_path_for(shown) if not spec.is_empty() else ""
+	if path.is_empty() or not Core.new_worktree_path_error(Core.free_worktree_path(path)).is_empty():
+		new_worktree(shown)
+		return
+	spec["path"] = path
+	_start_create(spec, true, origin)
+
+
+## What opening branch `ref` in a new worktree creates (`{branch, start,
+## upstream}`, see `RepoSession.create_worktree`): its local branch checked
+## out, or for a remote branch without one, a local branch tracking it.
+## Empty when the local branch is checked out somewhere already.
+func new_worktree_spec(ref: Dictionary) -> Dictionary:
+	var short: String = String(ref.get("short", ""))
+	var type: String = String(ref.get("type", ""))
+	if session == null or short.is_empty() or not type in ["branch", "remote"] or short.ends_with("/HEAD"):
+		return {}
+	var branch: String = short if type == "branch" else WorktreeBranchList.local_name(short, session.remotes())
+	if branch.is_empty():
+		return {}
+	var local: Dictionary = _branch_ref("branch", branch)
+	if not local.is_empty():
+		return {} if not String(local["worktree"]).is_empty() else {"branch": branch, "start": "existing", "upstream": ""}
+	if type == "branch":
+		return {}
+	return {"branch": branch, "start": "remote", "upstream": short}
+
+
+## Runs the repository's setup in new worktree `path`.
+func run_setup(path: String) -> void:
+	var job: int = session.run_worktree_setup(path)
+	if job >= 0:
+		_setups[job] = path
+		_track(job, tr("Setting up %s") % path.get_file())
+
+
+## The success toast of a create: the folder, what the branch is based on
+## when the fetch fell back (`made`: `created_worktree`), and Undo.
+func _show_created(made: Dictionary) -> void:
+	if feedback == null or feedback.toasts == null:
+		return
+	var path: String = String(made["path"])
+	var text: String = tr("New worktree %s") % path.get_file()
+	var stale: Dictionary = made.get("stale", {})
+	if not stale.is_empty():
+		var fetched: int = int(stale["fetched_at"])
+		text += "  ·  " + (tr("based on %s from %s") % [String(stale["base"]),
+				ago(int(Time.get_unix_time_from_system()) - fetched)] if fetched > 0
+				else tr("based on the last fetched %s") % String(stale["base"]))
+	feedback.toasts.show_success(text, func() -> void: undo_new_worktree(path))
+
+
+## Undoes the create of new worktree `path` (see
+## `RepoSession.undo_new_worktree`): its view closes first, and shows again
+## when the undo is refused.
+func undo_new_worktree(path: String) -> void:
+	if not session.can_undo_new_worktree(path):
+		return
+	close_requested.emit(path)
+	var job: int = session.undo_new_worktree(path)
+	_track(job, tr("Removing the new worktree %s") % path.get_file(), "", func(ok: bool) -> void:
+		if not ok:
+			open_requested.emit(path))
+
+
+## A failed setup: a toast with the command's output (Details), Run again
+## and Open terminal. The worktree stays.
+func _on_setup_failed(path: String, error: Dictionary) -> void:
+	if feedback == null or feedback.toasts == null:
+		return
+	var code: int = int(error.get("exit_code", -1))
+	var message: String = tr("The command exited with code %d.") % code if code >= 0 \
+			else String(error.get("stderr", "")).strip_edges().get_slice("\n", 0)
+	var fixes: Array[Dictionary] = [
+		{"label": "Run again", "run": func() -> void: run_setup(path)},
+		{"label": "Open terminal", "run": func() -> void: open_terminal(path)},
+	]
+	feedback.toasts.show_toast(tr("Setup failed in %s") % path.get_file(), message,
+			"%s\n\n%s" % [String(error.get("command", "")), String(error.get("stderr", ""))], fixes)
+
+
+## Edits what this repository's new worktrees get: files to copy from the
+## main worktree (patterns, one per line) and a command to run there.
+func edit_worktree_setup() -> void:
+	var setup: Dictionary = session.worktree_setup()
+	_begin_form("worktree_setup", "Worktree setup", "Save", func(values: Dictionary) -> void:
+		session.set_worktree_setup(String(values["copy"]).split("\n", false), String(values["command"])))
+	_form.add_note("New worktrees get these from the main worktree. Kept in gitbello, not in the repository.")
+	_form.add_text("copy", "Copy files", "\n".join(setup.get("copy", PackedStringArray())), ".env*\n.vscode/")
+	_form.add_line("command", "Then run", String(setup.get("command", "")), false, "npm ci")
+	_form.open()
 
 
 ## Where the folder field's relative paths start: the main worktree's root.
@@ -1241,41 +1567,24 @@ func _typed_name(values: Dictionary) -> String:
 	return "" if typed == String(Core.settings()["branch_prefix"]) else typed
 
 
-## The remote branch named `name` (`origin/<name>` first), when no local
-## branch has that name; else "".
-func _remote_branch_named(branch: String) -> String:
-	if branch.is_empty() or not _branch_ref("branch", branch).is_empty():
-		return ""
-	var found: String = ""
-	for remote: String in session.remotes():
-		var short_name: String = remote + "/" + branch
-		if not _branch_ref("remote", short_name).is_empty() and (found.is_empty() or remote == "origin"):
-			found = short_name
-	return found
-
-
-## Offers to check out the remote branch the typed name matches; while that
-## is on, the base does not apply.
-func _show_remote_match() -> void:
-	var check: CheckBox = _form.field("track") as CheckBox
-	check.text = tr("Check out %s and track it") % _remote_match
-	check.tooltip_text = check.text
-	# A long branch name is cut short instead of widening the dialog.
-	check.clip_text = true
-	check.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_form.set_field_visible("track", not _remote_match.is_empty())
-	(_form.field("base") as OptionButton).disabled = not _remote_match.is_empty() and check.button_pressed
-
-
 ## A picked empty folder is the worktree's folder; any other is where it
 ## goes, in a folder named after the branch.
 func _pick_task_folder(dir: String) -> String:
 	if Core.new_worktree_path_error(dir).is_empty():
 		_folder_edited = true
+		_after_folder_pick.call_deferred()
 		return _shown_folder(dir)
 	_folder_edited = false
 	_folder_parent = dir
-	return _shown_folder(_task_folder(_typed_name(_form.values())))
+	_after_folder_pick.call_deferred()
+	return _shown_folder(_task_folder(_worktree_branch()))
+
+
+## A picked folder: the field shows while it is the worktree's own folder.
+func _after_folder_pick() -> void:
+	_form.set_field_visible("folder", _folder_edited)
+	_show_task_folder()
+	_form.revalidate()
 
 
 ## The new-task folder for branch `name` (just the picked folder, or "",
@@ -1285,54 +1594,6 @@ func _task_folder(branch: String) -> String:
 		return _folder_parent.path_join("") if not _folder_parent.is_empty() else ""
 	var path: String = session.worktree_path_for(branch)
 	return _folder_parent.path_join(path.get_file()) if not _folder_parent.is_empty() else path
-
-
-func _check_task(values: Dictionary) -> String:
-	var error: String = _check_branch_name(values, "")
-	if not error.is_empty():
-		return error
-	return tr(Core.new_worktree_path_error(_folder_path(String(values.get("folder", "")))))
-
-
-func _create_task(values: Dictionary) -> void:
-	var track: bool = not _remote_match.is_empty() and bool(values["track"])
-	var base: String = _remote_match if track else String(values["base"])
-	var remote: String = ""
-	for remote_name: String in session.remotes():
-		if base.begins_with(remote_name + "/") and remote_name.length() > remote.length():
-			remote = remote_name
-	var folder: String = _folder_path(String(values["folder"]))
-	var branch: String = String(values["name"])
-	var job: int = session.new_task(branch, base, folder, remote, track)
-	if job >= 0:
-		_tasks[job] = folder
-	if track:
-		_track(job, tr("Checking out %s") % base)
-	else:
-		_track(job, tr("Creating the worktree %s") % name)
-
-
-## A worktree for an existing local branch that no worktree has checked out.
-func add_existing_worktree() -> void:
-	var branches: PackedStringArray = PackedStringArray()
-	for ref: Dictionary in session.branch_refs():
-		if String(ref["kind"]) == "branch" and String(ref["worktree"]).is_empty():
-			branches.append(String(ref["short_name"]))
-	if branches.is_empty():
-		notice.emit("No branch to add", "Every local branch is already checked out in a worktree.")
-		return
-	_begin_form("existing", "Add worktree", "Add", func(values: Dictionary) -> void:
-		var branch: String = String(values["branch"])
-		var path: String = _folder_path(String(values["folder"]))
-		var job: int = session.add_worktree(path, branch, "")
-		if job >= 0:
-			_tasks[job] = path
-		_track(job, tr("Adding a worktree for %s") % branch))
-	_form.add_choice("branch", "Branch", branches, 0)
-	_form.add_folder("folder", "Folder", _shown_folder(session.worktree_path_for(branches[0])), "", _shown_folder)
-	_form.validator = func(values: Dictionary) -> String:
-		return tr(Core.new_worktree_path_error(_folder_path(String(values.get("folder", "")))))
-	_form.open()
 
 
 func _on_form_field(key: String) -> void:
@@ -1346,21 +1607,13 @@ func _on_form_field(key: String) -> void:
 	if _form_kind == "cleanup":
 		_show_cleanup_choices()
 		return
-	if _form_kind == "existing" and key == "branch":
-		(_form.field("folder") as LineEdit).text = _shown_folder(session.worktree_path_for(String(_form.values()["branch"])))
-		return
 	if _form_kind != "task":
 		return
 	if key == "folder":
 		_folder_edited = true
+		_show_task_folder()
 	elif key == "name":
-		var typed: String = _typed_name(_form.values())
-		_remote_match = _remote_branch_named(typed)
-		_show_remote_match()
-		if not _folder_edited:
-			(_form.field("folder") as LineEdit).text = _shown_folder(_task_folder(typed))
-	elif key == "track":
-		_show_remote_match()
+		_branch_list.show_for(_typed_name(_form.values()))
 
 
 func open_worktree(path: String) -> void:
@@ -1650,10 +1903,19 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 		if ok:
 			push_tag(tag)
 	elif _tasks.has(job):
-		var path: String = _tasks[job]
+		var task: Dictionary = _tasks[job]
 		_tasks.erase(job)
-		if ok:
-			open_requested.emit(path)
+		var made: Dictionary = session.created_worktree(job) if ok else {}
+		if not made.is_empty():
+			open_requested.emit(String(made["path"]))
+			_show_created(made)
+			if bool(task["setup"]):
+				run_setup(String(made["path"]))
+	elif _setups.has(job):
+		var setup_path: String = _setups[job]
+		_setups.erase(job)
+		if not ok and kind != "cancelled":
+			_on_setup_failed(setup_path, error)
 	elif _merges.has(job):
 		var merge: Dictionary = _merges[job]
 		_merges.erase(job)

@@ -4,9 +4,10 @@ extends PopupPanel
 ## list: a filter, then one row each with its marker, folder and branch, the
 ## changed files and the commits to push and pull in pills (`SyncCounts`),
 ## the shown worktree's row highlighted, then the worktree actions: New
-## worktree and From branch, Clean up and, while a folder is missing, Prune.
+## worktree, Clean up and, while a folder is missing, Prune.
 ## Typing filters by folder or branch; Enter chooses the first match (the
-## shown worktree when there is no filter), Down moves into the rows and Up on
+## shown worktree when there is no filter; with no match, New worktree with
+## the text as the branch name), Down moves into the rows and Up on
 ## the first row back to the filter. Click or Enter on a row emits `chosen`,
 ## right-click or the menu key `menu_requested`; Escape returns focus to where
 ## it was. Each row's tooltip says its path and state.
@@ -15,12 +16,14 @@ extends PopupPanel
 signal chosen(path: String)
 ## Right-click or the menu key on a row; `at_position` is on the screen.
 signal menu_requested(worktree: Dictionary, at_position: Vector2)
+## Enter on a filter that matches nothing: a new worktree named `branch`.
+signal new_requested(branch: String)
 
 const THEME_TYPE: StringName = &"WorktreeList"
 const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.tscn")
 ## The footer's actions: `[id, icon, with its label]`.
-const FOOTER: Array[Array] = [[&"task.new", &"Add", true], [&"worktree.add_existing", &"GitBranch", true],
-	[&"", &"", false], [&"worktree.cleanup", &"Clear", false], [&"worktree.prune", &"StatusWarning", false]]
+const FOOTER: Array[Array] = [[&"task.new", &"Add", true], [&"", &"", false],
+[&"worktree.cleanup", &"Clear", false], [&"worktree.prune", &"StatusWarning", false]]
 
 var _box: VBoxContainer = VBoxContainer.new()
 var _filter: FilterField = FILTER_FIELD.instantiate() as FilterField
@@ -49,7 +52,12 @@ func _ready() -> void:
 	_filter.changed.connect(_apply_filter)
 	_filter.submitted.connect(func(_backwards: bool) -> void:
 		if _target != null:
-			_target.pressed.emit())
+			_target.pressed.emit()
+		elif not _filter.text().strip_edges().is_empty():
+			var branch: String = _filter.text().strip_edges().replace(" ", "-")
+			_chose = true
+			hide()
+			new_requested.emit(branch))
 	_filter.done.connect(func() -> void:
 		if _target != null:
 			_target.grab_focus())
@@ -228,7 +236,8 @@ func _apply_filter() -> void:
 		var row: Button = node as Button
 		row.theme_type_variation = &"WorktreeListRowTarget" if row == _target and not query.is_empty() \
 				else &"WorktreeListRow"
-	_empty.text = tr("No matching worktrees")
+	_empty.text = tr("No matching worktrees") if query.is_empty() \
+			else tr("No match · %s: new worktree") % Shortcuts.display("Enter")
 	_empty.visible = _target == null
 	_scroll.visible = not _empty.visible
 	if _target != null:
@@ -265,8 +274,7 @@ func _update_texts() -> void:
 			button.hide()
 			continue
 		var enabled: bool = action.is_enabled()
-		button.text = (tr("From branch…") if id == &"worktree.add_existing" else action.label) \
-				if bool(button.get_meta(&"labelled")) else ""
+		button.text = action.label if bool(button.get_meta(&"labelled")) else ""
 		button.tooltip_text = Actions.tooltip(id)
 		button.disabled = not enabled
 		# Prune only shows while a folder is missing.

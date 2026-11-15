@@ -252,6 +252,11 @@ pub enum JobOutput {
     /// What deleting a branch would do (`Runtime::load_branch_delete_info`).
     BranchDeleteInfo(Box<crate::runtime::BranchDeleteInfo>),
     WorktreeDeleteInfo(Box<crate::runtime::WorktreeDeleteInfo>),
+    /// A new worktree was created (`Runtime::create_worktree`).
+    WorktreeCreated(Box<crate::runtime::CreatedWorktree>),
+    WorktreeSetupDone(Box<crate::worktree_setup::SetupOutcome>),
+    /// The create of the worktree at this path was undone.
+    WorktreeUndone(PathBuf),
     /// A branch delete finished; what it removed, for undo.
     BranchDeleted(Box<crate::runtime::DeletedBranch>),
     /// The delete was undone.

@@ -18,6 +18,7 @@ use crate::config::ConfigError;
 use crate::git::{CancelToken, GitError, GitErrorKind};
 use crate::repo::{FileState, Head, RepoPaths};
 use crate::runtime::normalize;
+use crate::worktree_setup::WorktreeSetup;
 
 /// File name inside the data dir.
 pub const FILE_NAME: &str = "library.toml";
@@ -38,6 +39,8 @@ pub struct RepoEntry {
     /// The repository's first root commit, once read, to tell whether a
     /// new location holds the same repository.
     pub root_commit: Option<String>,
+    /// What new worktrees of this repository get (PLAN §4 New task).
+    pub setup: WorktreeSetup,
     extra: Table,
 }
 
@@ -50,6 +53,7 @@ impl RepoEntry {
             added_at: now,
             last_opened_at: None,
             root_commit: None,
+            setup: WorktreeSetup::default(),
             extra: Table::new(),
         }
     }
@@ -82,6 +86,20 @@ impl RepoEntry {
             .and_then(|v| v.as_integer())
             .unwrap_or(0);
         let last_opened_at = table.remove("opened").and_then(|v| v.as_integer());
+        let setup = match table.remove("setup") {
+            Some(Value::Table(mut setup)) => {
+                let copy: Vec<String> = match setup.remove("copy") {
+                    Some(Value::Array(items)) => items
+                        .into_iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let command = text(&mut setup, "command").unwrap_or_default();
+                WorktreeSetup::cleaned(&copy, &command)
+            }
+            _ => WorktreeSetup::default(),
+        };
         Some(Self {
             path,
             display_name,
@@ -89,6 +107,7 @@ impl RepoEntry {
             added_at,
             last_opened_at,
             root_commit,
+            setup,
             extra: table,
         })
     }
@@ -111,6 +130,17 @@ impl RepoEntry {
         }
         if let Some(root) = &self.root_commit {
             table.insert("root_commit".into(), Value::String(root.clone()));
+        }
+        if !self.setup.is_empty() {
+            let mut setup = Table::new();
+            if !self.setup.copy.is_empty() {
+                let copy = self.setup.copy.iter().cloned().map(Value::String);
+                setup.insert("copy".into(), Value::Array(copy.collect()));
+            }
+            if !self.setup.command.is_empty() {
+                setup.insert("command".into(), Value::String(self.setup.command.clone()));
+            }
+            table.insert("setup".into(), Value::Table(setup));
         }
         for (key, value) in &self.extra {
             table.entry(key.clone()).or_insert_with(|| value.clone());
@@ -260,6 +290,18 @@ impl RepoLibrary {
         true
     }
 
+    /// Sets what new worktrees of `path` get. Returns whether it changed.
+    pub fn set_setup(&mut self, path: &Path, setup: WorktreeSetup) -> bool {
+        let Some(i) = self.index(path) else {
+            return false;
+        };
+        if self.entries[i].setup == setup {
+            return false;
+        }
+        self.entries[i].setup = setup;
+        true
+    }
+
     /// Records the root commit read for `path`. Returns whether it changed.
     pub fn set_root_commit(&mut self, path: &Path, root: &str) -> bool {
         let Some(i) = self.index(path) else {
@@ -290,6 +332,9 @@ impl RepoLibrary {
             entry.added_at = entry.added_at.min(other.added_at);
             entry.pinned |= other.pinned;
             entry.display_name = entry.display_name.or(other.display_name);
+            if entry.setup.is_empty() {
+                entry.setup = other.setup;
+            }
         }
         entry.path = new;
         // A different repository's root commit is read again.
@@ -565,6 +610,33 @@ mod tests {
         assert_eq!(loaded.entries(), library.entries());
         let recent: Vec<String> = loaded.recent(5).iter().map(|e| e.name()).collect();
         assert_eq!(recent, ["c", "Alpha"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keeps_each_repositorys_worktree_setup() {
+        let dir = temp("setup");
+        let file = dir.join(FILE_NAME);
+        let (mut library, _) = RepoLibrary::load(Some(file.clone()), &[]);
+        library.add(Path::new("/r/a"), 1);
+        library.add(Path::new("/r/b"), 1);
+        let setup = WorktreeSetup::cleaned(&[".env*".into(), ".vscode/".into()], "npm ci");
+        assert!(library.set_setup(Path::new("/r/a"), setup.clone()));
+        assert!(
+            !library.set_setup(Path::new("/r/a"), setup.clone()),
+            "unchanged"
+        );
+        assert!(
+            !library.set_setup(Path::new("/r/x"), setup.clone()),
+            "not listed"
+        );
+        library.save().unwrap();
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(text.contains("command = \"npm ci\""), "{text}");
+        assert_eq!(text.matches("[repo.setup]").count(), 1, "{text}");
+        let (loaded, _) = RepoLibrary::load(Some(file), &[]);
+        assert_eq!(loaded.get(Path::new("/r/a")).unwrap().setup, setup);
+        assert!(loaded.get(Path::new("/r/b")).unwrap().setup.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 

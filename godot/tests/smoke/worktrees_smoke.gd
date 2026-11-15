@@ -1,8 +1,11 @@
 extends SmokeTest
 ## M6, reworked in M6.5 P2: worktrees as chips in one repository tab. A chip
 ## shows its worktree; a branch checked out in another worktree jumps there
-## from the branch list and deleting it offers its worktree too; Ctrl+T runs the new-task flow
-## (the folder follows the branch name) and shows the result; a chip's menu
+## from the branch list and deleting it offers its worktree too; Ctrl+T opens New worktree
+## (create, check out a local or remote branch, the From list, the folder preview, a taken
+## folder, Run setup) and shows the result; one click (a branch's menu, Alt+Enter in the branch
+## list) with Undo, New worktree here…, Enter on an unmatched worktree filter, the setup's
+## settings and a failed setup; a chip's menu
 ## locks, unlocks and removes (on Windows, not while a program runs from the
 ## worktree); cleanup removes merged worktrees with their
 ## branches and closes their views; the Settings dialog saves. Uses fixture
@@ -79,47 +82,86 @@ func run() -> void:
 	strip.chips()[0].chosen.emit()
 	expect(page.active_view() == view, "a click on the first chip goes back")
 
-	# Ctrl+T: a new task; the folder follows the branch name.
+	# Ctrl+T: New worktree. With no name the branches are listed to check
+	# out; a new name offers Create first, and the folder preview follows it.
 	press("Ctrl+T")
-	var form: FormDialog = page.ops().form()
-	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks for the task")
+	var ops: RepoOps = page.ops()
+	var form: FormDialog = ops.form()
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T opens New worktree")
 	await get_tree().process_frame
 	var form_width: int = form.size.x
-	var base: OptionButton = form.field("base") as OptionButton
-	base.item_selected.emit(base.selected)
+	var rows: WorktreeBranchList = ops.worktree_branch_list()
 	expect(form.get_ok_button().disabled, "Create waits for a name")
-	expect(not form.get_ok_button().tooltip_text.is_empty(), "its tooltip says why")
+	expect_eq(form.get_ok_button().tooltip_text, "Type a branch name.", "its tooltip says why")
+	expect(rows.row_labels().has("feature/login") and not rows.row_labels()[0].begins_with("Create"),
+			"with no name, the branches are listed: %s" % [rows.row_labels()])
+	expect(rows.choice().is_empty(), "and none is chosen")
+	expect_eq(ops.new_worktree_base(), "origin/main", "From is the remote's default branch")
 	type_text("task one")
-	var folder: LineEdit = form.field("folder") as LineEdit
-	expect(await wait_until(func() -> bool: return folder.text.ends_with("task-one")),
-			"the folder follows the branch: %s" % folder.text)
+	var name_line: LineEdit = form.field("name") as LineEdit
+	expect(await wait_until(func() -> bool: return name_line.text == "task-one"), "a space becomes a dash: %s" % name_line.text)
+	expect_eq(rows.row_labels()[0], "Create task-one", "a new name offers Create first: %s" % [rows.row_labels()])
+	expect_eq(String(rows.choice().get("start", "")), "new", "and it is chosen")
+	expect(ops.base_button().is_visible_in_tree(), "From shows for a new branch")
+	expect_eq(ops.folder_preview_text(), ".worktrees/task-one",
+			"the folder preview follows the branch, from the repository root")
+	expect(not form.field("folder").is_visible_in_tree(), "the folder is a preview until edited")
+	expect(form.field("setup") == null, "no Run setup without a setup")
 	expect_eq(form.size.x, form_width, "typing the name does not resize the form")
-	expect_eq(folder.text, ".worktrees/task-one",
-			"the default template is shown from the repository root: %s" % folder.text)
-	var task_path: String = repo.path_join(folder.text)
+	expect(not form.get_ok_button().disabled, "Create is enabled: %s" % form.get_ok_button().tooltip_text)
 	# Browse: a folder with things in it is where the worktree goes; an empty
-	# one is the worktree's folder.
+	# one is the worktree's (the folder shows as a field).
 	form.pick_folder("folder", repo)
-	expect_eq(folder.text, "task-one", "a picked folder holds the worktree")
+	await get_tree().process_frame
+	expect_eq(ops.folder_preview_text(), "task-one", "a picked folder holds the worktree")
 	var empty: String = repo.path_join("picked empty")
 	DirAccess.make_dir_absolute(empty)
 	form.pick_folder("folder", empty)
-	expect_eq(folder.text, "picked empty", "a picked empty folder is the worktree's")
-	folder.text = task_path
-	expect_eq(String(form.values()["base"]), "origin/main", "the default base is first")
-	expect(form.field("open_tab") == null, "the new worktree always shows; no switch to ask about")
+	await get_tree().process_frame
+	expect(form.field("folder").is_visible_in_tree(), "a picked empty folder shows in the field")
+	expect_eq((form.field("folder") as LineEdit).text, "picked empty", "it is the worktree's folder")
+	expect_eq(ops.folder_preview_text(), "", "the preview hides while the folder is typed")
+	form.hide()
+
+	# A taken folder gets a number instead of blocking Create; the setup copies
+	# the main worktree's matching files.
+	var task_path: String = repo.path_join(".worktrees/task-one")
+	DirAccess.make_dir_recursive_absolute(task_path)
+	write_file(task_path.path_join("keep.txt"), "someone else's\n")
+	write_file(repo.path_join("notes.local"), "secret\n")
+	expect(session.set_worktree_setup(PackedStringArray(["*.local"]), ""), "a setup is saved")
+	press("Ctrl+T")
+	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T opens it again")
+	rows = ops.worktree_branch_list()
+	type_text("task-one")
+	expect(await wait_until(func() -> bool: return ops.folder_preview_text().contains("task-one-2")),
+			"a taken folder gets a number: %s" % ops.folder_preview_text())
+	expect(ops.folder_preview_text().ends_with("task-one is taken"), "the line says why: %s" % ops.folder_preview_text())
+	expect(not form.get_ok_button().disabled, "a taken folder does not block Create")
+	var setup: CheckBox = form.field("setup") as CheckBox
+	expect(setup != null and setup.button_pressed, "Run setup shows, ticked")
+	expect(setup != null and setup.text == "Run setup: copy *.local", "it says what it does: %s" % (setup.text if setup else ""))
 	press("Enter")
-	expect(await wait_until(func() -> bool: return page.views().size() == 3), "the new task shows as a chip")
+	expect(await wait_until(func() -> bool: return page.views().size() == 3), "the new worktree shows as a chip")
 	expect_eq(main.tab_count(), 1, "no new tab")
-	expect(FileAccess.file_exists(task_path.path_join("README.md")), "the task's worktree has the files")
+	var made_path: String = task_path + "-2"
+	expect(FileAccess.file_exists(made_path.path_join("README.md")), "the worktree is in the numbered folder")
 	expect(await wait_until(func() -> bool: return page.session.current_branch() == "task-one"),
-			"the task's worktree shows, on task-one")
+			"the new worktree shows, on task-one")
+	expect(await wait_until(func() -> bool: return FileAccess.file_exists(made_path.path_join("notes.local"))),
+			"the setup copied the matching file")
 	expect(await wait_until(func() -> bool: return strip.chips().size() == 3), "three chips")
 	expect(FileAccess.get_file_as_string(repo.path_join(".git/info/exclude")).contains("/.worktrees/"),
 			"the nested worktrees are excluded from the main repository's status")
+	DirAccess.remove_absolute(repo.path_join("notes.local"))
+	# Cleanup below removes it as a clean worktree.
+	DirAccess.remove_absolute(made_path.path_join("notes.local"))
+	DirAccess.remove_absolute(task_path.path_join("keep.txt"))
+	DirAccess.remove_absolute(task_path)
+	session.set_worktree_setup(PackedStringArray(), "")
 	strip.chips()[0].chosen.emit()
 
-	# A name that matches a remote branch offers to check it out instead; a
+	# A name that matches a remote branch offers to check it out first; a
 	# loose ref stands in for a branch someone pushed.
 	var main_commit: String = ""
 	for ref: Dictionary in session.branch_refs():
@@ -127,6 +169,7 @@ func run() -> void:
 			main_commit = String(ref["commit"])
 	DirAccess.make_dir_recursive_absolute(repo.path_join(".git/refs/remotes/origin"))
 	write_file(repo.path_join(".git/refs/remotes/origin/remote-only"), main_commit + "\n")
+	write_file(repo.path_join(".git/refs/heads/free-branch"), main_commit + "\n")
 	Core.focus_in(session)
 	expect(await wait_until(func() -> bool:
 		return session.branch_refs().any(func(r: Dictionary) -> bool: return String(r["short_name"]) == "origin/remote-only")),
@@ -136,37 +179,144 @@ func run() -> void:
 			"Remote keeps remote-only branches but not local duplicates")
 	press("Ctrl+T")
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks again")
-	var track: CheckBox = form.field("track") as CheckBox
-	var start: OptionButton = form.field("base") as OptionButton
-	expect(not track.is_visible_in_tree(), "no offer before a name")
+	rows = ops.worktree_branch_list()
+	name_line = form.field("name") as LineEdit
 	type_text("remote-only")
-	expect(await wait_until(func() -> bool: return track.is_visible_in_tree()), "the remote branch is offered")
-	expect(track.button_pressed, "checking it out is on")
-	expect(track.text.contains("origin/remote-only"), "it names the remote branch: %s" % track.text)
-	expect(start.disabled, "the base does not apply while tracking")
-	track.button_pressed = false
-	expect(not start.disabled, "unticked, the base applies again")
-	type_text("x")
-	expect(await wait_until(func() -> bool: return not track.is_visible_in_tree()), "another name drops the offer")
+	expect(await wait_until(func() -> bool: return rows.row_labels().size() >= 2 and rows.row_labels()[0] == "origin/remote-only"),
+			"the remote branch comes first: %s" % [rows.row_labels()])
+	expect_eq(rows.row_labels()[1], "Create remote-only", "then Create")
+	expect_eq(String(rows.choice().get("start", "")), "remote", "checking it out is chosen")
+	expect_eq(String(rows.choice().get("branch", "")), "remote-only", "as a local branch of the same name")
+	expect(not ops.base_button().is_visible_in_tree(), "From hides while checking out")
+	press("Down")
+	expect_eq(String(rows.choice().get("start", "")), "new", "Down chooses Create")
+	expect(ops.base_button().is_visible_in_tree(), "and From shows again")
+	press("Up")
+	expect_eq(String(rows.choice().get("start", "")), "remote", "Up goes back")
+	# An existing local branch is checked out; one in a worktree can't be.
+	name_line.text = ""
+	type_text("free-branch")
+	expect(await wait_until(func() -> bool: return rows.row_labels().size() > 0 and rows.row_labels()[0] == "free-branch"),
+			"a local branch comes first: %s" % [rows.row_labels()])
+	expect_eq(String(rows.choice().get("start", "")), "existing", "and is checked out")
+	expect(not rows.row_labels().has("Create free-branch"), "nothing to create: it exists")
+	name_line.text = ""
+	type_text("feature/login")
+	expect(await wait_until(func() -> bool: return rows.choice().is_empty()), "a branch in a worktree can't be chosen")
+	expect(form.get_ok_button().disabled and form.get_ok_button().tooltip_text.contains("is checked out in"),
+			"Create says where it is: %s" % form.get_ok_button().tooltip_text)
+	# From: branches, remote branches and tags, or any revision typed.
+	name_line.text = ""
+	type_text("from-test")
+	var bases: BasePopover = ops.base_popover()
+	ops.base_button().pressed.emit()
+	expect(await wait_until(func() -> bool: return bases.visible), "From opens its list")
+	expect(bases.row_labels().has("Local") and bases.row_labels().has("Remote") and bases.row_labels().has("origin/main"),
+			"it has sections: %s" % [bases.row_labels()])
+	bases.set_filter("a1b2c3d")
+	expect_eq(bases.row_labels(), PackedStringArray(["Use a1b2c3d"]), "a revision it doesn't list is offered as typed")
+	bases.set_filter("free")
+	bases.choose_selected()
+	expect_eq(ops.new_worktree_base(), "free-branch", "a chosen base is used")
+	expect_eq(ops.base_button().text, "free-branch", "and shown")
 	form.hide()
+	DirAccess.remove_absolute(repo.path_join(".git/refs/heads/free-branch"))
 
 	# A branch prefix from the settings starts the name; typing goes after it.
 	expect(not Core.set_settings({"branch_prefix": "a b/"}).is_empty(), "a prefix git refuses is refused")
 	expect_eq(Core.set_settings({"branch_prefix": "me/"}), "", "the prefix is saved")
 	press("Ctrl+T")
 	expect(await wait_until(func() -> bool: return form.visible), "Ctrl+T asks once more")
-	var name_line: LineEdit = form.field("name") as LineEdit
+	name_line = form.field("name") as LineEdit
 	expect_eq(name_line.text, "me/", "the name starts with the prefix")
-	start = form.field("base") as OptionButton
-	start.item_selected.emit(start.selected)
 	expect(form.get_ok_button().disabled, "the bare prefix is not a name yet")
 	type_text("idea")
 	expect(await wait_until(func() -> bool: return name_line.text == "me/idea"), "typing goes after the prefix: %s" % name_line.text)
-	var shown: LineEdit = form.field("folder") as LineEdit
-	expect(await wait_until(func() -> bool: return shown.text.ends_with("me-idea")), "the folder follows: %s" % shown.text)
-	expect(not shown.text.is_absolute_path(), "shown from the repository's folder: %s" % shown.text)
+	expect(await wait_until(func() -> bool: return ops.folder_preview_text().ends_with("me-idea")),
+			"the folder follows: %s" % ops.folder_preview_text())
 	form.hide()
 	Core.set_settings({"branch_prefix": ""})
+
+	# One click: Open in new worktree on a branch's menu makes it at once, with
+	# a toast that offers Undo; Undo removes it, and the branch stays (the
+	# create only checked it out).
+	var toasts: Toasts = main.toasts()
+	write_file(repo.path_join(".git/refs/heads/one-click"), main_commit + "\n")
+	Core.focus_in(session)
+	expect(await wait_until(func() -> bool: return _has_branch(session, "one-click")), "a free branch is listed")
+	var one_ref: Dictionary = {"type": "branch", "name": "refs/heads/one-click", "short": "one-click",
+		"commit": main_commit, "is_head": false, "upstream": "", "worktree": ""}
+	page.active_view().show_ref_menu(one_ref, Vector2.ZERO)
+	expect(page.press_menu("Open in new worktree"), "a branch's menu offers it: %s" % [page.menu_labels()])
+	var one_path: String = repo.path_join(".worktrees/one-click")
+	expect(await wait_until(func() -> bool: return page.session.current_branch() == "one-click"),
+			"it shows at once, on the branch")
+	expect(FileAccess.file_exists(one_path.path_join("README.md")), "at the template's folder")
+	expect(await wait_until(func() -> bool: return toasts.toast_texts().has("New worktree one-click")),
+			"a toast says so: %s" % [toasts.toast_texts()])
+	expect(toasts.press_fix("Undo", "one-click"), "with Undo: %s" % [toasts.fix_labels()])
+	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "Undo removed the worktree")
+	expect(not DirAccess.dir_exists_absolute(one_path), "and its folder")
+	expect(_has_branch(session, "one-click"), "the branch it only checked out stays")
+	expect(await wait_until(func() -> bool: return Paths.same(page.active_view().worktree_path(), repo)),
+			"the first worktree shows again")
+	# A branch in a worktree already can't open in another.
+	var login_ref: Dictionary = {"type": "branch", "name": "refs/heads/feature/login", "short": "feature/login",
+		"commit": main_commit, "is_head": false, "upstream": "", "worktree": ""}
+	expect(ops.new_worktree_spec(login_ref).is_empty(), "a branch in a worktree has nothing to open")
+
+	# Alt+Enter in the branch list: a remote branch becomes a local branch
+	# tracking it, in a new worktree; Undo deletes that branch too.
+	press("Ctrl+B")
+	expect(await wait_until(func() -> bool: return popover.visible), "the branch list opens")
+	popover.set_filter("origin/remote-only")
+	expect_eq(String(popover.first_ref().get("short", "")), "origin/remote-only", "the remote branch is listed")
+	popover.open_selected_in_worktree()
+	var remote_path: String = repo.path_join(".worktrees/remote-only")
+	expect(await wait_until(func() -> bool: return page.session.current_branch() == "remote-only"),
+			"Alt+Enter opens it in a new worktree, as a local branch")
+	expect(session.branch_refs().any(func(r: Dictionary) -> bool:
+		return String(r["short_name"]) == "remote-only" and String(r["upstream"]) == "origin/remote-only"),
+			"tracking the remote branch")
+	expect(await wait_until(func() -> bool: return toasts.press_fix("Undo", "remote-only")), "Undo is offered")
+	expect(await wait_until(func() -> bool: return not _has_branch(session, "remote-only")),
+			"Undo deleted the branch the create made")
+	expect(await wait_until(func() -> bool: return not DirAccess.dir_exists_absolute(remote_path)), "and the worktree")
+	DirAccess.remove_absolute(repo.path_join(".git/refs/heads/one-click"))
+
+	# History's commit menu: New worktree here… fills in From with the commit.
+	ops = page.ops()
+	ops.new_worktree("", main_commit)
+	expect(await wait_until(func() -> bool: return form.visible), "New worktree here… opens the dialog")
+	expect_eq(ops.new_worktree_base(), main_commit, "From is the commit")
+	expect_eq(ops.base_button().text, ShortHash.of(main_commit), "shown short")
+	form.hide()
+	# Enter on a worktree filter that matches nothing: the dialog, with the
+	# text as the branch name.
+	strip.list_button().pressed.emit()
+	all_list.set_filter("brand new")
+	all_list._filter.submitted.emit(false)
+	expect(await wait_until(func() -> bool: return form.visible), "Enter with no match opens New worktree")
+	expect_eq((form.field("name") as LineEdit).text, "brand-new", "named after the filter")
+	form.hide()
+
+	# The setup's settings, and a failed setup: a toast with the output, Run
+	# again and Open terminal; the worktree stays.
+	ops.edit_worktree_setup()
+	expect(await wait_until(func() -> bool: return form.visible), "Worktree setup opens")
+	(form.field("copy") as TextEdit).text = ".env*\n\n.vscode/\n"
+	(form.field("command") as LineEdit).text = "exit 3"
+	expect(form.submit(), "it saves")
+	var saved: Dictionary = session.worktree_setup()
+	expect_eq(Array(saved["copy"]), [".env*", ".vscode/"], "one pattern per line, blanks dropped")
+	expect_eq(String(saved["command"]), "exit 3", "and the command")
+	ops.run_setup(made_path)
+	expect(await wait_until(func() -> bool: return toasts.toast_texts().has("Setup failed in task-one-2")),
+			"a failed setup says so: %s" % [toasts.toast_texts()])
+	expect("Run again" in toasts.fix_labels() and "Open terminal" in toasts.fix_labels(),
+			"with Run again and Open terminal: %s" % [toasts.fix_labels()])
+	expect(DirAccess.dir_exists_absolute(made_path), "the worktree stays")
+	session.set_worktree_setup(PackedStringArray(), "")
 
 	# Lock, unlock and remove a worktree from its chip's menu.
 	var spare: String = fixtures.path_join("repo-10-spare")
@@ -441,7 +591,7 @@ func _overflow_presentation() -> void:
 		expect(list.rows().size() == 1 and list.rows()[0]["name"] == "detached", "the filter matches what the branch column says")
 		list.set_filter("no such worktree")
 		expect(list.rows().is_empty() and list.target_index() == -1, "nothing matches")
-		expect_eq(list.empty_text(), "No matching worktrees", "and the list says so")
+		expect_eq(list.empty_text(), "No match · Enter: new worktree", "and the list offers a new one")
 		list.set_filter("")
 		expect_eq(list.rows().size(), 6, "clearing the filter shows every worktree")
 	list.hide()

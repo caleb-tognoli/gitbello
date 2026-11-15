@@ -269,7 +269,7 @@ func _ready() -> void:
 	await _settle()
 	await _shot(out, "second_worktree")
 	page.select_chip(0)
-	page.ops().new_task()
+	page.ops().new_worktree()
 	var form: FormDialog = page.ops().form()
 	var name_line: LineEdit = form.field("name") as LineEdit
 	name_line.text = name_line.text + "fix-login"

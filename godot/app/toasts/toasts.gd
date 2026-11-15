@@ -212,13 +212,22 @@ func fix_labels() -> PackedStringArray:
 	return out
 
 
-## Presses the fix button labelled `label` (for tests). Returns whether found.
-func press_fix(label: String) -> bool:
+## Presses the fix button labelled `label` (for tests), of a toast whose
+## title contains `title_part` unless it is empty. Returns whether found.
+func press_fix(label: String, title_part: String = "") -> bool:
 	for button: Button in _action_buttons():
-		if button.text == label:
+		if button.text == label and (title_part.is_empty() or _title_of(button).contains(title_part)):
 			button.pressed.emit()
 			return true
 	return false
+
+
+## The title of the toast `node` is in, or "".
+func _title_of(node: Node) -> String:
+	while node != null and node.get_parent() != _stack:
+		node = node.get_parent()
+	var title: Label = node.find_child("Title", true, false) as Label if node != null else null
+	return title.text if title != null else ""
 
 
 func _action_buttons() -> Array[Button]:

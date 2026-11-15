@@ -153,7 +153,7 @@ func add_folder(key: String, label: String, value: String = "", placeholder: Str
 	browse.icon = AppTheme.icon(&"Folder")
 	browse.tooltip_text = tr("Choose a folder")
 	browse.focus_mode = Control.FOCUS_NONE
-	browse.pressed.connect(_browse.bind(key))
+	browse.pressed.connect(browse_folder.bind(key))
 	row.add_child(browse)
 	_box.add_child(row)
 	if on_pick.is_valid():
@@ -303,6 +303,15 @@ func set_field_visible(key: String, shown: bool) -> void:
 	_shrink_to_content()
 
 
+## Sets the label of field `key` (empty for none).
+func set_field_label(key: String, text: String) -> void:
+	var node: Control = _fields.get(key)
+	while node != null and node.get_parent() != _box:
+		node = node.get_parent() as Control
+	if node != null and node.get_index() > 0 and _box.columns == 2:
+		(_box.get_child(node.get_index() - 1) as Label).text = tr(text)
+
+
 ## Sets folder field `key` from `dir`, as if picked in the dialog.
 func pick_folder(key: String, dir: String) -> void:
 	var line: LineEdit = _fields.get(key) as LineEdit
@@ -313,7 +322,8 @@ func pick_folder(key: String, dir: String) -> void:
 	_validate()
 
 
-func _browse(key: String) -> void:
+## Opens the system's folder dialog for folder field `key` (see `add_folder`).
+func browse_folder(key: String) -> void:
 	var dialog: FileDialog = FileDialog.new()
 	dialog.use_native_dialog = true
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
@@ -764,7 +774,11 @@ func _touch(key: String) -> void:
 
 
 func _on_line_changed(text: String, line: LineEdit) -> void:
-	var key: String = _fields.find_key(line)
+	# A line of an earlier form can still report as it leaves the tree.
+	var found: Variant = _fields.find_key(line)
+	if found == null:
+		return
+	var key: String = String(found)
 	if key in _ref_names and text.contains(" "):
 		var caret: int = line.caret_column
 		line.text = text.replace(" ", "-")

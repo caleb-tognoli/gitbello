@@ -58,6 +58,27 @@ impl CliBackend {
         Ok(out)
     }
 
+    pub(super) fn untracked_by_patterns_impl(
+        &self,
+        toplevel: &Path,
+        patterns: &[String],
+        cancel: &CancelToken,
+    ) -> Result<Vec<PathBuf>, GitError> {
+        if patterns.is_empty() {
+            return Ok(Vec::new());
+        }
+        // `-i` with only these `-x` patterns: untracked files they match,
+        // whether or not the repository ignores them.
+        let output = self
+            .runner
+            .read(toplevel)
+            .args(["ls-files", "-z", "--others", "--ignored", "--directory"])
+            .args(patterns.iter().flat_map(|p| ["-x", p.as_str()]))
+            .cancel_token(cancel)
+            .run()?;
+        Ok(split_paths(&output.stdout))
+    }
+
     pub(super) fn tracked_matching_impl(
         &self,
         toplevel: &Path,

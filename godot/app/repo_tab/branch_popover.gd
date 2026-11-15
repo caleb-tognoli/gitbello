@@ -6,7 +6,8 @@ extends PopupPanel
 ## with the commits to push and pull. Names show their prefix (`feature/`)
 ## muted; sections are plain headers. It opens on the current branch. Enter or a single click chooses a branch; one checked
 ## out in another worktree has a worktree icon and choosing it shows that
-## worktree. Right-click opens the branch's menu. Opened to pick a branch to
+## worktree. Alt+Enter opens the highlighted branch in a new worktree
+## instead. Right-click opens the branch's menu. Opened to pick a branch to
 ## merge, it says so in a header, leaves out the current branch, shows how old
 ## each branch's last commit is and emits `merge_chosen` instead. It fits its
 ## rows, up to the theme's `height`.
@@ -19,6 +20,8 @@ signal menu_requested(ref: Dictionary, at_position: Vector2)
 ## Delete was pressed on a branch or remote branch.
 signal delete_requested(ref: Dictionary)
 signal new_branch_requested()
+## Alt+Enter on a branch: open it in a new worktree.
+signal new_worktree_requested(ref: Dictionary)
 ## A branch to merge into the current one was chosen (see `open_below`).
 signal merge_chosen(ref: Dictionary)
 
@@ -63,6 +66,10 @@ func _ready() -> void:
 	_filter.submitted.connect(func(_backwards: bool) -> void: _choose(_tree.get_selected()))
 	_filter.done.connect(_on_filter_done)
 	box.add_child(_filter)
+	_filter.text_box().gui_input.connect(func(event: InputEvent) -> void:
+		if _is_alt_enter(event):
+			_filter.text_box().accept_event()
+			_open_in_worktree(_tree.get_selected()))
 	_tree.hide_root = true
 	_tree.hide_folding = true
 	_tree.columns = 2
@@ -344,6 +351,8 @@ func _add_ref(parent: TreeItem, ref: Dictionary) -> void:
 		tooltip += "\n" + tr("tracks %s") % String(ref["upstream"])
 	if elsewhere:
 		tooltip += "\n" + tr("Checked out in %s") % worktree
+	elif not _merging and not bool(ref["is_head"]):
+		tooltip += "\n" + tr("%s: open in a new worktree") % Shortcuts.display("Alt+Enter")
 	item.set_tooltip_text(0, tooltip)
 	item.set_icon(0, AppTheme.icon(&"StatusSuccess" if bool(ref["is_head"])
 			else &"GitWorktree" if elsewhere else &"GitBranch"))
@@ -402,6 +411,26 @@ func _choose(item: TreeItem) -> void:
 		branch_chosen.emit(item.get_metadata(0) as Dictionary)
 
 
+## Alt+Enter (either Enter key), pressed.
+static func _is_alt_enter(event: InputEvent) -> bool:
+	var key: InputEventKey = event as InputEventKey
+	return key != null and key.pressed and not key.echo and key.alt_pressed \
+			and key.keycode in [KEY_ENTER, KEY_KP_ENTER]
+
+
+## Alt+Enter on `item`: its branch in a new worktree (not while merging).
+func _open_in_worktree(item: TreeItem) -> void:
+	if _merging or item == null or not item.get_metadata(0) is Dictionary:
+		return
+	hide()
+	new_worktree_requested.emit(item.get_metadata(0) as Dictionary)
+
+
+## Presses Alt+Enter on the selected row (for tests).
+func open_selected_in_worktree() -> void:
+	_open_in_worktree(_tree.get_selected())
+
+
 func _collect(item: TreeItem, out: PackedStringArray) -> void:
 	for child: TreeItem in item.get_children():
 		if child.get_metadata(0) is Dictionary:
@@ -438,6 +467,10 @@ func _on_tree_input(event: InputEvent) -> void:
 			_choose(at)
 		return
 	var item: TreeItem = _tree.get_selected()
+	if _is_alt_enter(event):
+		_tree.accept_event()
+		_open_in_worktree(item)
+		return
 	var key: InputEventKey = event as InputEventKey
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_DELETE \
 			and item != null and item.get_metadata(0) is Dictionary:

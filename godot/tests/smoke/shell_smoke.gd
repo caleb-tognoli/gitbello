@@ -479,8 +479,10 @@ func _check_menus(main: Main) -> void:
 	var repository: PackedStringArray = bar.labels("Repository")
 	expect("Remotes and tags" in repository and "Remotes…" in repository and "Tags…" in repository,
 			"Repository groups Remotes and Tags: %s" % [repository])
-	expect("Worktrees" in repository and "Add worktree for a branch…" in repository,
-			"Repository groups worktree management")
+	expect("Worktrees" in repository and Array(repository).any(func(label: String) -> bool:
+		return label.begins_with("Clean up merged worktrees…")), "Repository groups worktree management: %s" % [repository])
+	expect(not Array(repository).any(func(label: String) -> bool: return label.begins_with("Add worktree for a branch")),
+			"New worktree covers existing branches: no separate entry")
 	expect("Shelves" in repository and "Shelve… (disabled)" in repository,
 			"Shelves moved out of Branch")
 	expect(not "Shelve…" in bar.labels("Branch"), "Branch keeps only branch operations")

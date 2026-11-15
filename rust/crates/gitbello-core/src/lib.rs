@@ -33,6 +33,7 @@ pub mod scan;
 pub mod sidebar;
 pub mod ui_state;
 pub mod watch;
+pub mod worktree_setup;
 pub mod worktrees;
 
 /// Version of the core crate, as reported to the UI and CLI.

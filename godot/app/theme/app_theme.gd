@@ -906,6 +906,8 @@ static func _add_shell(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"narrow_width", &"FormDialog", 360)
 	theme.set_constant(&"label_width", &"FormDialog", 140)
 	theme.set_constant(&"text_height", &"FormDialog", 90)
+	# New worktree's rows under the branch field: about six.
+	theme.set_constant(&"branch_list_height", &"FormDialog", 156)
 	theme.set_constant(&"note_width", &"FormDialog", 380)
 	theme.set_constant(&"separation", &"FormDialog", 8)
 	theme.set_constant(&"section_separation", &"FormDialog", 14)

@@ -43,6 +43,12 @@ pub enum SyncOp {
     Fetch {
         remote: Option<String>,
     },
+    /// `git fetch <remote> <branch>`: one branch, which updates its
+    /// remote-tracking branch through the remote's refspec.
+    FetchBranch {
+        remote: String,
+        branch: String,
+    },
     /// `git pull` of the current branch's upstream; local changes are
     /// stashed around it (`--autostash`).
     Pull {
@@ -290,21 +296,31 @@ impl WorktreeOp {
     }
 }
 
-/// The new-task flow (PLAN §4): a branch from `base` in a new worktree.
+/// Where a new worktree's branch comes from (PLAN §4 New task).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewTask {
+pub enum WorktreeStart {
+    /// A new branch starting at `base`: any revision, such as a branch, a
+    /// remote branch (`origin/main`), a tag or a commit id.
+    NewBranch { base: String },
+    /// An existing local branch no worktree has checked out.
+    Existing,
+    /// A new local branch tracking remote branch `upstream` (`origin/topic`).
+    Remote { upstream: String },
+}
+
+/// The new-worktree flow (PLAN §4 New task): `branch` in a new worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewWorktree {
     pub branch: String,
-    /// Commit-ish to start from, such as `origin/main`.
-    pub base: String,
+    pub start: WorktreeStart,
+    /// The folder wanted; a taken one gets `-2`, `-3`…
+    /// ([`crate::worktrees::free_worktree_path`]).
     pub path: PathBuf,
-    /// Fetched first so the base is current.
-    pub fetch_remote: Option<String>,
-    /// The branch tracks `base`, a remote-tracking branch of the same name
-    /// (checking out a remote branch), instead of starting from it.
-    pub track_base: bool,
 }
 
 pub const NEW_TASK_JOB_LABEL: &str = "new task";
+pub const WORKTREE_SETUP_JOB_LABEL: &str = "worktree setup";
+pub const UNDO_NEW_WORKTREE_JOB_LABEL: &str = "undo new worktree";
 pub const CLEANUP_JOB_LABEL: &str = "clean up worktrees";
 pub const FETCH_JOB_LABEL: &str = "fetch";
 pub const AUTO_FETCH_JOB_LABEL: &str = "auto-fetch";

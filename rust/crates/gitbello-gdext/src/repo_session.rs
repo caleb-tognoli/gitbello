@@ -13,11 +13,14 @@ use gitbello_core::graph::{to_hex, LoadState};
 use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
-use gitbello_core::ops::{CheckoutChanges, CheckoutTarget, NewTask, PullMode, RefOp, WorktreeOp};
+use gitbello_core::ops::{
+    CheckoutChanges, CheckoutTarget, NewWorktree, PullMode, RefOp, WorktreeOp, WorktreeStart,
+};
 use gitbello_core::runtime::{
     BranchDelete, DiffSlot, DiffState, FileHistoryRequest, FileSelection, RepoState,
 };
 use gitbello_core::sidebar::{local_branch_tree, remote_branch_tree};
+use gitbello_core::worktree_setup::WorktreeSetup;
 use gitbello_core::worktrees::{worktree_path, CleanupReason};
 use godot::prelude::*;
 
@@ -1017,28 +1020,125 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// The new-task flow: creates `branch` from `base` in a new worktree at
-    /// `path`, fetching `fetch_remote` first (empty: no fetch); with
-    /// `track_base`, `branch` tracks `base` (a remote branch of the same
-    /// name). Label `new task`.
+    /// Creates a worktree (PLAN §4 New task) from `spec`: `{branch, start,
+    /// base, upstream, path}`. `start` is `new` (create `branch` from `base`:
+    /// a branch, remote branch, tag or commit), `existing` (check out local
+    /// branch `branch`) or `remote` (create `branch` tracking remote branch
+    /// `upstream`). A remote base is fetched first (falling back to the last
+    /// fetch); a taken `path` becomes `path-2`…. The result is read with
+    /// `created_worktree(job)`. Label `new task`.
     #[func]
-    fn new_task(
-        &self,
-        branch: GString,
-        base: GString,
-        path: GString,
-        fetch_remote: GString,
-        track_base: bool,
-    ) -> i64 {
-        let remote = fetch_remote.to_string();
-        let task = NewTask {
-            branch: branch.to_string(),
-            base: base.to_string(),
-            path: PathBuf::from(path.to_string()),
-            fetch_remote: (!remote.is_empty()).then_some(remote),
-            track_base,
+    fn create_worktree(&self, spec: VarDictionary) -> i64 {
+        let text = |key: &str| -> String {
+            spec.get(key)
+                .and_then(|v| v.try_to::<GString>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
         };
-        job_id(runtime_cell::with(|rt| rt.new_task(&self.key, task)).flatten())
+        let start = match text("start").as_str() {
+            "existing" => WorktreeStart::Existing,
+            "remote" => WorktreeStart::Remote {
+                upstream: text("upstream"),
+            },
+            _ => WorktreeStart::NewBranch { base: text("base") },
+        };
+        let request = NewWorktree {
+            branch: text("branch"),
+            start,
+            path: PathBuf::from(text("path")),
+        };
+        job_id(runtime_cell::with(|rt| rt.create_worktree(&self.key, request)).flatten())
+    }
+
+    /// What create `job` made: `{path, branch, created_branch, tip, stale}`;
+    /// `path` is the folder used (`-2`… when the asked one was taken) and
+    /// `stale` is `{base, fetched_at, timed_out, error}` when the base could
+    /// not be fetched and the last fetched one was used (`fetched_at` 0 when
+    /// unknown), else empty. Empty until it finished, or when it failed.
+    #[func]
+    fn created_worktree(&self, job: i64) -> VarDictionary {
+        let Ok(job) = u64::try_from(job) else {
+            return VarDictionary::new();
+        };
+        self.read(|s| {
+            s.created_worktree(job).map(|made| {
+                let stale = made
+                    .stale
+                    .as_ref()
+                    .map_or_else(VarDictionary::new, |stale| {
+                        vdict! {
+                            "base" => &gstr(&stale.base),
+                            "fetched_at" => stale.fetched_at.unwrap_or(0),
+                            "timed_out" => stale.timed_out,
+                            "error" => &gstr(&stale.error),
+                        }
+                    });
+                vdict! {
+                    "path" => &path_str(&made.path),
+                    "branch" => &gstr(&made.branch),
+                    "created_branch" => made.created_branch,
+                    "tip" => &gstr(&made.tip),
+                    "stale" => &stale,
+                }
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// What new worktrees of this repository get: `{copy, command}`
+    /// (patterns of the main worktree's untracked files to copy, and a
+    /// command run there); both empty without a setup.
+    #[func]
+    fn worktree_setup(&self) -> VarDictionary {
+        let setup = runtime_cell::with(|rt| rt.worktree_setup(&self.key)).unwrap_or_default();
+        let copy: PackedStringArray = setup.copy.iter().map(|p| gstr(p)).collect();
+        vdict! {
+            "copy" => &copy,
+            "command" => &gstr(&setup.command),
+        }
+    }
+
+    /// Sets this repository's worktree setup (blank patterns dropped).
+    /// Returns whether it changed.
+    #[func]
+    fn set_worktree_setup(&self, copy: PackedStringArray, command: GString) -> bool {
+        let copy: Vec<String> = copy.as_slice().iter().map(GString::to_string).collect();
+        let setup = WorktreeSetup::cleaned(&copy, &command.to_string());
+        runtime_cell::with(|rt| rt.set_worktree_setup(&self.key, setup)).unwrap_or(false)
+    }
+
+    /// Runs the setup in new worktree `path`; -1 without a setup. Label
+    /// `worktree setup`; a failed command's error holds its output.
+    #[func]
+    fn run_worktree_setup(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.run_worktree_setup(&self.key, &path)).flatten())
+    }
+
+    /// Undoes the create of new worktree `path` (see `created_worktree`):
+    /// stops its setup, then deletes the worktree and the branch the create
+    /// made. Fails, deleting nothing, once the worktree has changes to
+    /// tracked files or its branch has new commits. -1 when this session
+    /// did not create it. Label `undo new worktree`.
+    #[func]
+    fn undo_new_worktree(&self, path: GString) -> i64 {
+        let path = PathBuf::from(path.to_string());
+        job_id(runtime_cell::with(|rt| rt.undo_new_worktree(&self.key, &path)).flatten())
+    }
+
+    /// Whether this session created the worktree at `path` and can undo it.
+    #[func]
+    fn can_undo_new_worktree(&self, path: GString) -> bool {
+        let path = PathBuf::from(path.to_string());
+        self.read(|s| s.can_undo_create(&path)).unwrap_or(false)
+    }
+
+    /// Whether the setup of new worktree `path` is running.
+    #[func]
+    fn worktree_setup_running(&self, path: GString) -> bool {
+        let path = PathBuf::from(path.to_string());
+        self.read(|s| s.setup_running(&path)).unwrap_or(false)
     }
 
     /// Checks out `branch` in a new worktree at `path`; a non-empty `start`
