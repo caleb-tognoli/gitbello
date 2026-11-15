@@ -1,4 +1,4 @@
-//! User configuration (PLAN §3.8), stored as TOML in [`crate::paths::config_file`].
+//! User configuration (ARCHITECTURE §3.8), stored as TOML in [`crate::paths::config_file`].
 //!
 //! Only the fields in use are modelled; keys this version does not know are
 //! kept and written back unchanged, so older and newer versions can share a file.
@@ -15,7 +15,7 @@ use crate::avatars::Providers;
 use crate::diff::viewer::{DiffMode, Viewer};
 use crate::ops::PullMode;
 
-/// PLAN O3: worktrees go in the repository's locally ignored `.worktrees` folder.
+/// ARCHITECTURE D15: worktrees go in the repository's locally ignored `.worktrees` folder.
 pub const DEFAULT_WORKTREE_TEMPLATE: &str = ".worktrees/{branch_slug}";
 const LEGACY_DEFAULT_WORKTREE_TEMPLATE: &str = "{repo_parent}/{repo_name}.worktrees/{branch_slug}";
 pub const DEFAULT_AUTO_FETCH_MINUTES: u32 = 10;
@@ -87,7 +87,7 @@ pub struct Config {
     pub diff_markdown_mode: DiffMode,
     /// Show the minimap beside diffs (else only its strip of change marks).
     pub diff_minimap: bool,
-    /// History rows on one line (no author line), as before M7.10.
+    /// History rows on one line (no author line).
     pub history_compact: bool,
     /// Draw the commit graph beside History's rows.
     pub history_graph: bool,
@@ -97,7 +97,7 @@ pub struct Config {
     pub blame_detect_moves: bool,
     /// Offer to ignore a folder such as `node_modules/` that fills Changes.
     pub ignore_hint: bool,
-    /// Look up profile pictures (M7.10); off draws initials only.
+    /// Look up profile pictures; off draws initials only.
     pub avatars: bool,
     /// The providers profile pictures are asked of.
     pub avatar_providers: Providers,
@@ -275,7 +275,7 @@ const KEYS: &[&str] = &[
     "branch_prefix",
     "auto_fetch_minutes",
     "pull_mode",
-    // Open in editor's command (until M7.8): read and dropped.
+    // Open in editor's command (no longer offered): read and dropped.
     "editor_command",
     "terminal_command",
     "clone_folder",

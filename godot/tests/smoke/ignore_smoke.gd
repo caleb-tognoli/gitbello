@@ -1,5 +1,5 @@
 extends SmokeTest
-## Ignoring changed files (M7.7a) on fixture `repo-14` (app.txt modified,
+## Ignoring changed files on fixture `repo-14` (app.txt modified,
 ## notes.txt untracked, plus build output and logs written here): the Ignore
 ## submenu and its quick rules, Undo, a quick rule on a tracked file opening
 ## the dialog with the untrack choice, and the dialog's folder rules, preview,

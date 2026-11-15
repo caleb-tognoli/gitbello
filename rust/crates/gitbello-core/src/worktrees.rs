@@ -1,4 +1,4 @@
-//! Worktree helpers for the new-task and cleanup flows (PLAN §4): where a
+//! Worktree helpers for the new-task and cleanup flows (UX.md): where a
 //! new task's worktree goes, which branch tasks start from, and which
 //! worktrees cleanup offers to remove.
 

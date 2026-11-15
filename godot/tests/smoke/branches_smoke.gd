@@ -1,5 +1,5 @@
 extends SmokeTest
-## M5, reworked in M6.5 P2: branches, tags and cherry-pick from the keyboard,
+## Branches, tags and cherry-pick from the keyboard,
 ## the branch list (Ctrl+B), dialogs and context menus (a branch row's, a
 ## commit's, a ref label's), including the dirty-tree checkout that stashes,
 ## switches and re-applies, deleting an unmerged branch (one dialog saying

@@ -1,4 +1,4 @@
-//! In-memory log of every git command, for the "Git log" panel (PLAN §3.2).
+//! In-memory log of every git command, for the "Git log" panel (ARCHITECTURE §3.2).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

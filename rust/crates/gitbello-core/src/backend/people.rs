@@ -1,4 +1,4 @@
-//! A person's commit on a remote (PLAN M7.10): one the remote's host
+//! A person's commit on a remote: one the remote's host
 //! knows, so its commit API can give that person's profile picture.
 
 use std::path::Path;

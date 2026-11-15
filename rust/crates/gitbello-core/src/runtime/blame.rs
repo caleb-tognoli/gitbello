@@ -1,4 +1,4 @@
-//! Blame (PLAN M8b): who last changed each line of the file a worktree's
+//! Blame: who last changed each line of the file a worktree's
 //! file history shows, as one of its versions has it.
 //!
 //! The blamed version is one of the history's ([`Runtime::blame_file_version`]);

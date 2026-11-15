@@ -43,7 +43,7 @@ pub enum Access {
     Write,
 }
 
-/// The one place that spawns git (AGENTS rule 2, PLAN §3.2). Clones share the
+/// The one place that spawns git (AGENTS rule 2, ARCHITECTURE §3.2). Clones share the
 /// same command log.
 #[derive(Debug, Clone)]
 pub struct GitRunner {

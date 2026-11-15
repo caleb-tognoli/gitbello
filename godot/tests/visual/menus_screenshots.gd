@@ -1,5 +1,5 @@
 extends Node
-## Menus on `ActionMenu` (M7.17), in numbered shots with the menus drawn in:
+## Menus on `ActionMenu`, in numbered shots with the menus drawn in:
 ## each menu bar menu, History's commit menu on HEAD and on an older commit,
 ## a branch's (with Compare ▸ beside it), the current branch's and a tag's
 ## menus, a graph label's menu (titled), a worktree chip's (with Open in ▸, then Branch ▸), the

@@ -1,4 +1,4 @@
-//! Write operations (PLAN §5, M5 and M6): syncing with remotes, branches,
+//! Write operations: syncing with remotes, branches,
 //! tags, checkout, cherry-pick and worktrees. Plain data for the
 //! [`crate::backend::GitBackend`] methods; the runtime decides what to run
 //! and in which order.
@@ -151,7 +151,7 @@ impl CheckoutTarget {
     }
 }
 
-/// What a checkout does with local changes (PLAN §4 Shelves).
+/// What a checkout does with local changes (UX.md Shelves).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckoutChanges {
     /// Nothing: git switches if the changes do not get in the way.
@@ -296,7 +296,7 @@ impl WorktreeOp {
     }
 }
 
-/// Where a new worktree's branch comes from (PLAN §4 New task).
+/// Where a new worktree's branch comes from (UX.md New task).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeStart {
     /// A new branch starting at `base`: any revision, such as a branch, a
@@ -308,7 +308,7 @@ pub enum WorktreeStart {
     Remote { upstream: String },
 }
 
-/// The new-worktree flow (PLAN §4 New task): `branch` in a new worktree.
+/// The new-worktree flow (UX.md New task): `branch` in a new worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewWorktree {
     pub branch: String,

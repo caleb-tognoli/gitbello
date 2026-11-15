@@ -1,4 +1,4 @@
-//! Per-repository UI state, such as panel widths (PLAN §3.8): a TOML file in
+//! Per-repository UI state, such as panel widths (ARCHITECTURE §3.8): a TOML file in
 //! the app's data dir with one table per repository, keyed by its normalised
 //! path. Nothing is ever written into the repository.
 

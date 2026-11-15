@@ -1,5 +1,5 @@
 extends SmokeTest
-## Required project settings (PLAN §3.7), the shell layout and app branding.
+## Required project settings (ARCHITECTURE §3.7), the shell layout and app branding.
 
 
 func run() -> void:

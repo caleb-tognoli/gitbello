@@ -1,6 +1,6 @@
 class_name WorktreeView
 extends Control
-## One worktree of a repository tab (PLAN §4): the Branch and Sync buttons
+## One worktree of a repository tab (UX.md): the Branch and Sync buttons
 ## and the Changes | History | Shelves switch, the banner of an operation in
 ## progress, and the Changes or History panes. Owns the worktree's
 ## RepoSession and the RepoOps that run its operations, builds the context
@@ -89,11 +89,11 @@ var _history_button: Button = Button.new()
 var _changes_button: Button = Button.new()
 var _shelves_button: Button = Button.new()
 var _shelves_badge: CountBadge = CountBadge.new()
-## Shown while a comparison is open (PLAN M7.12), with a × inside it.
+## Shown while a comparison is open, with a × inside it.
 var _compare_button: Button = Button.new()
 var _compare_tab: ClosableViewTab = null
 var _compare: CompareView = CompareView.new()
-## Shown while a file's history is open (PLAN M8a), with a × inside it.
+## Shown while a file's history is open, with a × inside it.
 var _file_button: Button = Button.new()
 var _file_tab: ClosableViewTab = null
 var _file_view: FileView = FileView.new()
@@ -354,7 +354,7 @@ func _on_closable_closed(tab: ClosableViewTab, which: View) -> void:
 		show_view(tab.opened_from as View)
 
 
-# --- File history (PLAN M8a) ---------------------------------------------------
+# --- File history ---------------------------------------------------
 
 func file_view() -> FileView:
 	return _file_view

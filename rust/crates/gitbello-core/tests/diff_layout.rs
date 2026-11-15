@@ -1,4 +1,4 @@
-//! Opening the gaps between hunks (PLAN §3.10): the old file is read once a
+//! Opening the gaps between hunks (ARCHITECTURE §3.10): the old file is read once a
 //! gap opens, through the runtime on real temporary repositories.
 
 use crate::support;

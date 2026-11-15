@@ -1,4 +1,4 @@
-//! Compare's git reads (PLAN M7.12): resolving the sides, their merge base
+//! Compare's git reads: resolving the sides, their merge base
 //! and counts, and the files that differ with their line counts.
 
 use std::collections::HashMap;

@@ -1,5 +1,5 @@
 extends SmokeTest
-## M6.5 P4 acceptance: shelve a file, leave changes behind on a switch, come
+## Shelve a file, leave changes behind on a switch, come
 ## back and restore them from the offer, preview and restore a shelf from the
 ## Shelved section, and discard a shelf with undo. Uses fixture `repo-11`
 ## (app.txt edited, notes.txt untracked, a stash "work in progress" on main);

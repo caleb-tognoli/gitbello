@@ -1,6 +1,6 @@
 class_name Toasts
 extends VBoxContainer
-## Notifications stacked at the bottom right of the content area (PLAN §4
+## Notifications stacked at the bottom right of the content area (UX.md
 ## Feedback): compact cards with an icon for their kind. Three kinds:
 ## - errors (`show_toast`, mainly classified git errors from `Core.git_error`):
 ##   they stay until dismissed, with "Details" (the full command and stderr)

@@ -1,6 +1,6 @@
 class_name WorktreeBranchList
 extends Tree
-## The New worktree dialog's rows under its branch field (PLAN §4 New task):
+## The New worktree dialog's rows under its branch field (UX.md New task):
 ## what the typed name can make (see `rows`). The field keeps the focus: it
 ## moves the selection with `move`, and the selected row is the choice.
 ## A branch checked out in a worktree is listed muted and can't be chosen.

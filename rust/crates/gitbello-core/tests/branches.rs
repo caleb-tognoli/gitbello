@@ -1,5 +1,5 @@
 //! Branches, tags, checkout (with the dirty-tree stash flow) and
-//! cherry-pick (M5) through the runtime, on temporary repositories.
+//! cherry-pick through the runtime, on temporary repositories.
 
 use crate::support;
 

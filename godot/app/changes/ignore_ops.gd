@@ -1,6 +1,6 @@
 class_name IgnoreOps
 extends Node
-## Ignoring files (M7.7, docs/IGNORE_RULES.md): the quick rules of the
+## Ignoring files (docs/IGNORE_RULES.md): the quick rules of the
 ## Changes menu and the Ignore dialog with its live preview, the file the rule
 ## goes to, and untracking the tracked files it matches. Shared rules go to a
 ## `.gitignore`, local ones to `info/exclude` (every worktree), global ones

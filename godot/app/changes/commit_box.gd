@@ -6,7 +6,7 @@ extends VBoxContainer
 ## until the next attempt. While a merge or cherry-pick is committed, the box
 ## starts with git's message, amend mode is unavailable, the button says what it
 ## finishes and, while it cannot, why under it ("Resolve login.rs first").
-## Under the button, the undo strip offers the last unpushed commit (PLAN §4).
+## Under the button, the undo strip offers the last unpushed commit (UX.md).
 
 ## A commit or amend finished successfully.
 signal committed()

@@ -1,5 +1,5 @@
 extends SmokeTest
-## The Changes view (M4a, reworked in M6.5 P3): checkboxes, commit and amend
+## The Changes view: checkboxes, commit and amend
 ## through History and keyboard shortcuts, on fixture `repo-6` (app.txt modified, notes.txt
 ## untracked). Also checks the diff of the highlighted file, the commit
 ## button's text and reason, hook output on a failed commit, the empty state

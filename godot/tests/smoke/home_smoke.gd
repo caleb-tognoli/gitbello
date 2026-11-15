@@ -1,5 +1,5 @@
 extends SmokeTest
-## Home (PLAN §4 Home, M7.5): the no-tab state and the Home tab, opening from
+## Home (UX.md Home): the no-tab state and the Home tab, opening from
 ## the filter with the keyboard, remove with Undo, a missing folder
 ## relocated, scan, clone rows and Create with a template.
 

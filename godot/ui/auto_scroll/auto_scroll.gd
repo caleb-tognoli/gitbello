@@ -1,6 +1,6 @@
 class_name AutoScroll
 extends CanvasLayer
-## Browser-style middle-click autoscroll (PLAN M7.6) for every `VirtualList`,
+## Browser-style middle-click autoscroll for every `VirtualList`,
 ## `ScrollContainer`, `Tree`, `ItemList` and `TextEdit` in a window.
 ##
 ## A quick middle click (released within `STICKY_MSEC` without leaving the

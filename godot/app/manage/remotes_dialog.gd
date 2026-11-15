@@ -1,6 +1,6 @@
 class_name RemotesDialog
 extends AcceptDialog
-## Repository → Remotes… (PLAN §4): the remotes with their URLs; add one,
+## Repository → Remotes… (UX.md): the remotes with their URLs; add one,
 ## change a URL, rename or remove. The forms and confirmations are RepoOps'.
 
 const THEME_TYPE: StringName = &"ManageDialog"

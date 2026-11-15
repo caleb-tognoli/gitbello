@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-/// A failed git invocation (PLAN §3.2). `kind` lets the UI offer specific fixes.
+/// A failed git invocation (ARCHITECTURE §3.2). `kind` lets the UI offer specific fixes.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("git {command}: {kind}{}", stderr_suffix(.stderr))]
 pub struct GitError {

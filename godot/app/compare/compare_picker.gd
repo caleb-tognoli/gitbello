@@ -1,8 +1,8 @@
 class_name ComparePicker
 extends PopupPanel
-## Picks one side of a comparison (PLAN M7.12): a filter, then Working copy
+## Picks one side of a comparison: a filter, then Working copy
 ## (right side only), the local branches, remote branches, tags and recent
-## commits (recent comparisons have their own popover, M7.12c); branch names
+## commits (recent comparisons have their own popover); branch names
 ## show their prefix muted (`BranchNameLayer`). While the
 ## filter has text, the matching rows come first and the last row uses the
 ## text itself as a revision (`HEAD~3`, a hash, `v1.2^`);

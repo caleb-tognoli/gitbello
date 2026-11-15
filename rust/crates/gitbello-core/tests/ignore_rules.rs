@@ -1,4 +1,4 @@
-//! The ignore rules viewer and "Show ignored files" (M7.7b): every ignore
+//! The ignore rules viewer and "Show ignored files": every ignore
 //! file with what each line decides, removing a rule, untracking, Stop
 //! ignoring, the global excludes file and templates, on real temporary
 //! repositories.

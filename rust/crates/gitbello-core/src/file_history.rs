@@ -1,4 +1,4 @@
-//! A file's history (PLAN M8a): the commits that changed one file, under
+//! A file's history: the commits that changed one file, under
 //! every name it had, each with what it did to the file.
 //!
 //! `git log --follow` is not used: it tracks one name at a time while it

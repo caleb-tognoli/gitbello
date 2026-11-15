@@ -1,6 +1,6 @@
 class_name RefChip
 extends Control
-## One ref as a chip (M7.10). A branch has the branch icon, or the cloud icon
+## One ref as a chip. A branch has the branch icon, or the cloud icon
 ## when its remote branch is at the same commit (`remotes` in the label); a
 ## remote branch the cloud icon with its remote's prefix muted; a tag a
 ## round pill with the tag icon. Several refs of one kind fold into an

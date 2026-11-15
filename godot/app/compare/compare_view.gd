@@ -1,6 +1,6 @@
 class_name CompareView
 extends VBoxContainer
-## Compare (PLAN M7.12, laid out like History in M7.12c): two states of a
+## Compare (laid out like History): two states of a
 ## worktree's repository. A bar on top with the left side (the base) ⇄ the
 ## right side, the commits only on each side and, at the right, the recent
 ## comparisons. Below, like History: the comparison's commits on the left

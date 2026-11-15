@@ -1,5 +1,5 @@
 //! Repository read models and the parsers that build them from git output
-//! (PLAN §3.3). Parsers are pure functions over captured bytes.
+//! (ARCHITECTURE §3.3). Parsers are pure functions over captured bytes.
 
 mod commit;
 mod operation;

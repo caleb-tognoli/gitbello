@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.13: syntax highlighting. Core lists the token kinds; every kind
+## Syntax highlighting. Core lists the token kinds; every kind
 ## resolves, in both themes, to its own colour, its parent's or plain text,
 ## and the theme's colours read on the diff's backgrounds: 4.5:1 on
 ## unchanged lines and 3:1 on added and removed lines, except the shortfalls
@@ -175,7 +175,7 @@ func _check_fixture() -> void:
 	await get_tree().process_frame
 
 
-## P5a: once the diff's line states are found, a line inside a block comment
+## Once the diff's line states are found, a line inside a block comment
 ## opened on the line above is coloured as a comment.
 func _check_states(session: RepoSession, view: DiffView) -> void:
 	expect(await wait_until(func() -> bool: return String(session.diff_info().get("states", "")) == "ready"),

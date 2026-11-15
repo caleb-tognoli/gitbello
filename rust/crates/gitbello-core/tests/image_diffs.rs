@@ -1,4 +1,4 @@
-//! Image diffs (M7.8 P2) on temporary repositories: both sides of every
+//! Image diffs on temporary repositories: both sides of every
 //! kind of diff, the size limit, files that are not what their name says,
 //! SVG text, and the ours/theirs of a conflicted image.
 

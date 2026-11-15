@@ -1,4 +1,4 @@
-//! Ignore rules (M7.7, `docs/IGNORE_RULES.md`): previewing a rule, writing
+//! Ignore rules (`docs/IGNORE_RULES.md`): previewing a rule, writing
 //! it (and untracking what it matches), the rules viewer's model and its
 //! edits, Stop ignoring, and undo.
 

@@ -1,6 +1,6 @@
 class_name Main
 extends PanelContainer
-## App shell (PLAN §4): the menu bar, one tab per repository (its worktrees
+## App shell (UX.md): the menu bar, one tab per repository (its worktrees
 ## are chips inside it), Home (when no tab is open, or in the Home tab the +
 ## opens, always the last tab), the git command log, toasts
 ## and the command palette. Every user operation is an action in `Actions`.
@@ -366,7 +366,7 @@ func page_for(repo_path: String) -> RepoTab:
 
 
 ## Saved tabs are the selected worktree of each repository; tabs saved
-## before M6.5 may be several worktrees of one repository, which open as
+## by older versions may be several worktrees of one repository, which open as
 ## chips of one tab (see `_merge_duplicates`).
 func _restore_tabs() -> void:
 	var saved: PackedStringArray = Core.saved_tabs()
@@ -491,7 +491,7 @@ func _merge_duplicates(page: RepoTab) -> bool:
 
 
 ## Each tab's icon: the spinner while its repository runs a job, else the
-## attention dot (PLAN §4 Repo tabs).
+## attention dot (UX.md Repo tabs).
 func _update_tab_icons() -> void:
 	var spinning: bool = false
 	for i: int in _pages.size():
@@ -820,7 +820,7 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().undo_discard(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard(),
 			_says("No discard to undo"))
-	# Ignore rules (M7.7a): quick rules on the highlighted files, the dialog, undo.
+	# Ignore rules: quick rules on the highlighted files, the dialog, undo.
 	var no_ignore: Callable = _says("Select files without conflicts")
 	for quick: Array in [["file", "Ignore selected files"], ["extension", "Ignore files with this extension"],
 			["folder", "Ignore this folder"]]:
@@ -848,7 +848,7 @@ func _register_change_actions() -> void:
 			func() -> void: changes.call().commit_box().cancel_amend(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().commit_box().is_amend() \
 					and not changes.call().commit_box().is_busy())
-	# Shelves (PLAN §4 Shelves): on the highlighted file, the selected shelf,
+	# Shelves (UX.md Shelves): on the highlighted file, the selected shelf,
 	# or the newest one left on this branch by a switch.
 	Actions.register(&"changes.shelve", "Shelve…", "Shelves",
 			func() -> void: changes.call().shelve_selected(), PackedStringArray(),
@@ -1005,7 +1005,7 @@ func _register_branch_actions() -> void:
 			PackedStringArray(),
 			func() -> bool:
 				return ref_is.call("remote") or (ref_is.call("branch") and not bool(ref.call()["is_head"])))
-	# One click (PLAN §4): the branch in a new worktree, with the setup.
+	# One click (UX.md): the branch in a new worktree, with the setup.
 	Actions.register(&"branch.new_worktree", "Open in new worktree", "Branches",
 			func() -> void: ops.call().open_in_new_worktree(ref.call()), PackedStringArray(),
 			func() -> bool:
@@ -1094,7 +1094,7 @@ func _register_branch_actions() -> void:
 	_register_copy_and_web(is_ready, ref, commit)
 
 
-## Copy ▸ and Open on <host> (M7.17) for a commit, a branch or tag, and the
+## Copy ▸ and Open on <host> for a commit, a branch or tag, and the
 ## file a diff shows.
 func _register_copy_and_web(is_ready: Callable, ref: Callable, commit: Callable) -> void:
 	var session: Callable = func() -> RepoSession: return current_page().session
@@ -1186,7 +1186,7 @@ func _copy(text: String) -> void:
 	_feedback.toasts.show_success(tr("Copied"))
 
 
-## Merge workflows (PLAN §4): merging into the current branch, the operation
+## Merge workflows (UX.md): merging into the current branch, the operation
 ## banner, the conflict resolver and the undo strip.
 func _register_merge_actions() -> void:
 	var page: Callable = func() -> RepoTab: return current_page()
@@ -1284,7 +1284,7 @@ func _register_merge_actions() -> void:
 	_register_edit_undo(is_ready, session)
 
 
-## Edit → Undo (Ctrl+Z, M7.17): takes back the newest file-level change, a
+## Edit → Undo (Ctrl+Z): takes back the newest file-level change, a
 ## discard, an ignore rule, a shelf discard or a conflict choice, whichever
 ## came last (core keeps the order). Undo last commit stays apart.
 func _register_edit_undo(is_ready: Callable, session: Callable) -> void:
@@ -1663,9 +1663,9 @@ func _palette_entries() -> Array[Dictionary]:
 	return entries
 
 
-## Compare (PLAN M7.12): the view, its bar, and the ways in: ref menus,
+## Compare: the view, its bar, and the ways in: ref menus,
 ## History's commits and Branch → Compare….
-## File history (PLAN M8a): opening a file's history from whatever view has
+## File history: opening a file's history from whatever view has
 ## a file in focus, and what a version in it offers.
 func _register_file_history_actions() -> void:
 	var page: Callable = func() -> WorktreeView: return current_view()

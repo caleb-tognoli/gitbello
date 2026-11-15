@@ -1,4 +1,4 @@
-// The image viewer's Difference mode (M7.7): pixels that differ between the
+// The image viewer's Difference mode: pixels that differ between the
 // old and new image in the changed colour, the rest as a faint grey copy of
 // the new image. Both images sit at the top-left of the drawn rect, which
 // spans the larger of the two; a pixel outside one image counts as

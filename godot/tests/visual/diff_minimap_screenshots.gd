@@ -1,5 +1,5 @@
 extends Node
-## Capture of the diff minimap (M7.6): the whole of a long changed file
+## Capture of the diff minimap: the whole of a long changed file
 ## unified and scrolled to the middle, with lines left out of the commit,
 ## side by side, with the minimap off and in a narrow window, in the light
 ## theme, then the resolver on a conflicted file. Pass --repo=<throwaway

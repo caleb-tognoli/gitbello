@@ -1,4 +1,4 @@
-//! Line states (M7.13 P5a) on temporary repositories: after a diff loads,
+//! Line states on temporary repositories: after a diff loads,
 //! a job finds the state each line of both sides starts in, so a line
 //! inside a block comment opened above its hunk is coloured as a comment
 //! in the working copy, staged and commit diffs; the states follow an edit

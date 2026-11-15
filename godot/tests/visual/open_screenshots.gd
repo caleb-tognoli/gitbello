@@ -1,5 +1,5 @@
 extends Node
-## Open in the default app (M7.8 P3), in numbered shots with the menus
+## Open in the default app, in numbered shots with the menus
 ## drawn in: the Changes list's and a text diff's menus, an image side's, a
 ## History file's, Home's row menu and "No local changes" without Open in
 ## editor, and Settings without Editor.

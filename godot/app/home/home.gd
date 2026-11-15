@@ -1,6 +1,6 @@
 class_name Home
 extends PanelContainer
-## The Home page (PLAN §4 Home): find, open and add repositories. Shown when
+## The Home page (UX.md Home): find, open and add repositories. Shown when
 ## no tab is open and in the Home tab. A filter (focused when Home shows),
 ## the Add menu, running clones, the Recent cards and every repository of the
 ## library, sorted, optionally grouped by folder, pinned ones first. Status

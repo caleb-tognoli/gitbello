@@ -1,6 +1,6 @@
 class_name FileView
 extends VBoxContainer
-## One file over time (PLAN M8a): the commits that changed it, under every
+## One file over time: the commits that changed it, under every
 ## name it had, each with its diff of that file. A bar on top names the
 ## file and where its history is read from, and holds the Blame switch. Below,
 ## like History: the versions on the left (the uncommitted changes first,
@@ -9,7 +9,7 @@ extends VBoxContainer
 ## version's commit over the diff of the file in it. Diffs are read-only. Two selected versions
 ## open in Compare; a version can be restored into the working copy (with
 ## Undo), opened, or shown in History. The view is named for the file, not
-## for its history. Blame (M8b) is a switch in the bar: while it is on, the
+## for its history. Blame is a switch in the bar: while it is on, the
 ## diff gives way to the file as the selected version has it (the working
 ## copy on the uncommitted changes) in a `BlameView`, under a strip that says which version that is
 ## and how far git is. Clicking a line's gutter focuses its commit: its

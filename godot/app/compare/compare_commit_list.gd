@@ -1,6 +1,6 @@
 class_name CompareCommitList
 extends CommitList
-## The commits of a comparison (PLAN M7.12c), drawn as History's rows
+## The commits of a comparison, drawn as History's rows
 ## without the graph: an **All changes** row, then "Only on <right> (N)" and
 ## "Only on <left> (N)", each newest first (`RepoSession.compare_commits()`,
 ## fetched for a window around the visible rows). The cursor's commit

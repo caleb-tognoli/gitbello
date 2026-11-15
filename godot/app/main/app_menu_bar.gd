@@ -2,13 +2,13 @@ class_name AppMenuBar
 extends MenuBar
 
 
-## The menu bar (PLAN §4): every entry is an action of the registry, so its
+## The menu bar (UX.md): every entry is an action of the registry, so its
 ## label, shortcut and enabled state match the palette and the shortcuts.
 ## Entries are refreshed each time a menu opens; a disabled one says why in
 ## its tooltip. On macOS it becomes the system's global menu where Godot
 ## supports it (`prefer_global_menu`).
 
-## Menus and their actions, in order (M7.17): &"" is a separator, a String
+## Menus and their actions, in order: &"" is a separator, a String
 ## names a submenu filled by `dynamic_menus`, `[title, ids]` is a submenu of
 ## actions and `[title, ids, labels]` a family whose items show `labels`
 ## (translated when shown) instead of their menu labels.

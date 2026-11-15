@@ -1,5 +1,5 @@
 extends Node
-## The image viewer's zoom (M7.8), in numbered shots driven by the viewer's
+## The image viewer's zoom, in numbered shots driven by the viewer's
 ## input: a small image fitted by whole steps (with a 2x crop of the zoom
 ## bar), the wheel out to 100% and in at a corner, dragged as far as it goes
 ## both ways, a double-click back to fitted, onion skin with the bar and the

@@ -1,6 +1,6 @@
 class_name WorktreeChip
 extends PanelContainer
-## One worktree in a repository tab's strip (PLAN §4): its short folder name
+## One worktree in a repository tab's strip (UX.md): its short folder name
 ## (the repository's name left out), then one marker: a lock, conflict (in
 ## the conflict colour) or missing-folder icon, else a dot when it has
 ## changed files. The branch,

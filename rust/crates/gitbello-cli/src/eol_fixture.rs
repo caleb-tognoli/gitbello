@@ -1,4 +1,4 @@
-//! The line-endings repository `fixture --eol` adds (M7.9): `eol`, for the
+//! The line-endings repository `fixture --eol` adds: `eol`, for the
 //! smoke test and screenshots of the marker rows, the header chip and the
 //! endings-only card. Its local config turns `core.autocrlf` off, so git
 //! compares the endings as written.

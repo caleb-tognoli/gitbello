@@ -1,6 +1,6 @@
 class_name Feedback
 extends Node
-## How running and finished git jobs show (PLAN §4 Feedback). Operations
+## How running and finished git jobs show (UX.md Feedback). Operations
 ## report the jobs they start with `track`:
 ## - started from a control (`Actions.origin()`), the control shows the
 ##   progress and is disabled until the job ends;

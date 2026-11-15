@@ -1,6 +1,6 @@
 class_name ScanDialog
 extends ConfirmationDialog
-## Scan folder… (PLAN §4 Home): finds the repositories under a folder in the
+## Scan folder… (UX.md Home): finds the repositories under a folder in the
 ## background and lists them with check boxes; Add selected puts the checked
 ## ones in the library. Repositories already there are listed greyed out.
 ## Changing the depth scans again.

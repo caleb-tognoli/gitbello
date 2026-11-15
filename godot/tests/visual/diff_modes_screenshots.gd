@@ -1,5 +1,5 @@
 extends Node
-## The diff header's mode picker (M7.8 P1), in numbered shots per theme: a
+## The diff header's mode picker, in numbered shots per theme: a
 ## modified file unified and side by side (two modes), then the untracked
 ## file, a deleted file and a file added in a commit (one mode: no picker),
 ## each with a 2x crop of the header's right end. Pass --repo=<CLI fixture

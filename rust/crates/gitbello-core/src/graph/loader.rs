@@ -1,7 +1,7 @@
 //! Streams `git log` into a [`GraphIndex`] on a background thread.
 //!
 //! Readers (the UI) take short read locks to query slices while loading goes
-//! on. M2 moves this onto the job scheduler; the API stays the same.
+//! on. Loads run as jobs on the job scheduler.
 //!
 //! A load first lists the tips it shows (`rev-list --no-walk`). A reload
 //! given the previous finished load ([`GraphLoader::submit_reload`]) does

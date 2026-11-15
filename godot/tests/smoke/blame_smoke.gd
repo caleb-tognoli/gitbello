@@ -1,5 +1,5 @@
 extends SmokeTest
-## M8b: Blame. Blames a file from Changes (the working copy: every line's
+## Blame. Blames a file from Changes (the working copy: every line's
 ## commit, the uncommitted lines, the strip's counts), focuses a commit by
 ## its gutter (details, tinted lines, the marked version, next change), lets
 ## go of it, blames before a commit (the version under the old name) until

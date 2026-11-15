@@ -1,6 +1,6 @@
 class_name CompareRecentPopover
 extends PopupPanel
-## The repository's recent comparisons (PLAN M7.12c), opened from the
+## The repository's recent comparisons, opened from the
 ## Recent button at the right of Compare's bar: a row each, "left ⇄ right",
 ## newest first. A click or Enter reopens one.
 

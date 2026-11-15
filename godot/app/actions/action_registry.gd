@@ -1,6 +1,6 @@
 class_name ActionRegistry
 extends Node
-## Every user-facing operation (AGENTS rule 10, PLAN §3.7). Menus, context
+## Every user-facing operation (AGENTS rule 10, ARCHITECTURE §3.7). Menus, context
 ## menus, the command palette and shortcuts all read from here. Autoloaded as
 ## `Actions`.
 ##

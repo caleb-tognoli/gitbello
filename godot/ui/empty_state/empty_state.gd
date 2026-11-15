@@ -2,8 +2,8 @@ class_name EmptyState
 extends CenterContainer
 ## What a panel shows when it has nothing to show.
 ##
-## Two forms. The big one: a title, a hint and big suggested actions (PLAN §4:
-## "No local changes" and the welcome screen). Actions come from the
+## Two forms. The big one: a title, a hint and big suggested actions (UX.md:
+## "No local changes"). Actions come from the
 ## registry, so they show only while they can run; plain buttons can be added
 ## for other choices (recent repositories). The compact one (`compact`, made
 ## with `create_compact`): a muted icon over a short title, with at most one

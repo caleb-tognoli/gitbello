@@ -1,5 +1,5 @@
 extends SmokeTest
-## M8a: File history. Opens the history of a renamed file from Changes
+## File history. Opens the history of a renamed file from Changes
 ## (the uncommitted changes first, then every commit under both names, the
 ## side branch's among them), checks the bar, the rows' chips and counts, a
 ## version's details and diff, the rename's diff header, the version menu,

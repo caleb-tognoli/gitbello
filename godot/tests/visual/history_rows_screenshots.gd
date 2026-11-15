@@ -1,5 +1,5 @@
 extends Node
-## Read-only capture of the M7.10 history rows: two-line rows in the dark and
+## Read-only capture of the history rows: two-line rows in the dark and
 ## light themes, a selected row with co-authors, the details of the commit with the most
 ## refs (and the popover of a counted chip there when they fold), a row's
 ## refs popover, that popover with a ref's menu open over it,

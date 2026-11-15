@@ -1,6 +1,6 @@
 class_name GitLogPanel
 extends Tree
-## Every git command gitbello ran, newest last (PLAN §3.2): time, repository,
+## Every git command gitbello ran, newest last (ARCHITECTURE §3.2): time, repository,
 ## command, duration and outcome. Fed by `Core.commands_logged`.
 
 const THEME_TYPE: StringName = &"GitLogPanel"

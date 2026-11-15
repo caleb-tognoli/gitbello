@@ -1,6 +1,6 @@
 class_name PickPainter
 extends RefCounted
-## Draws the commit-selection checkbox (PLAN §4 Changes view) the same way in
+## Draws the commit-selection checkbox (UX.md Changes view) the same way in
 ## file rows, the diff gutter and the check-all box: `all` (filled, a tick),
 ## `partial` (filled, a dash) or `none` (an empty box), dimmed when it
 ## cannot be changed. Colors and the size come from the `PickBox` theme type.

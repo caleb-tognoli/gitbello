@@ -1,5 +1,5 @@
 extends SmokeTest
-## The ignore rules viewer and the rest of M7.7b, on a repository built here
+## The ignore rules viewer, "Show ignored files", templates and the folder hint, on a repository built here
 ## in the fixtures folder: Repository → Ignore rules… with every source and
 ## what each line decides, Stop tracking… and Remove rule with Undo, the Add
 ## rules menu, "Show ignored files" with Stop ignoring, the global target of

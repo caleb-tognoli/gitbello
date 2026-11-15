@@ -108,7 +108,7 @@ fn samples_match_expected_tokens() {
     );
 }
 
-/// Kinds no lexer produces yet (empty since M7.13 P3); a kind produced by
+/// Kinds no lexer produces yet (empty); a kind produced by
 /// a sample must not be listed.
 const NOT_YET_PRODUCED: &[TokenKind] = &[];
 

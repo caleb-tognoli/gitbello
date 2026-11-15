@@ -1,4 +1,4 @@
-//! The repository library (PLAN §3.8, D13): every repository the user added,
+//! The repository library (ARCHITECTURE §3.8, D13): every repository the user added,
 //! with its display name, pin and last-opened time, as a TOML file in the
 //! app's data dir. Keys this version does not know are kept and written back.
 //!
@@ -39,7 +39,7 @@ pub struct RepoEntry {
     /// The repository's first root commit, once read, to tell whether a
     /// new location holds the same repository.
     pub root_commit: Option<String>,
-    /// What new worktrees of this repository get (PLAN §4 New task).
+    /// What new worktrees of this repository get (UX.md New task).
     pub setup: WorktreeSetup,
     extra: Table,
 }
@@ -425,7 +425,7 @@ pub fn library_root(toplevel: &Path, paths: &RepoPaths) -> PathBuf {
     paths.common_dir.clone()
 }
 
-/// What Home shows of a repository without a tab (PLAN §4 Home): read with
+/// What Home shows of a repository without a tab (UX.md Home): read with
 /// [`read_summary`], never fetched or watched.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RepoSummary {

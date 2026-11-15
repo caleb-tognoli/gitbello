@@ -1,5 +1,5 @@
 extends Node
-## Captures Compare (PLAN M7.12c) in numbered shots, dark then light: All
+## Captures Compare in numbered shots, dark then light: All
 ## changes, a commit with its details, the commit and file menus, the
 ## working-copy side, both sides moved (the Include pill off with the left
 ## side's commits dimmed, hovered, then on from a selected commit, each

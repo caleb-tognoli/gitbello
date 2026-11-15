@@ -1,5 +1,5 @@
 extends Node
-## Capture of the minimap's marks (M7.6 P3 step B): a diff with its hunks
+## Capture of the minimap's marks: a diff with its hunks
 ## collapsed (the strip beside the preview), in both themes, then the
 ## resolver on a file with three conflict blocks after the first is chosen.
 ## Each shot is followed by a 3x crop of the minimap column. Pass

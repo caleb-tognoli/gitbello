@@ -1,6 +1,6 @@
 class_name Menus
 extends RefCounted
-## One menu per object (M7.17): a branch, remote branch, tag, worktree,
+## One menu per object: a branch, remote branch, tag, worktree,
 ## commit, file and diff have one definition, used wherever their menu opens.
 ## Entries are `ActionMenu.fill` entries; actions that do not apply where the
 ## menu opens hide themselves (`Action.visible`).

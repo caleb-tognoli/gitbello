@@ -1,4 +1,4 @@
-//! "Open on GitHub" (M7.17): the web pages of a commit, a pushed branch, a
+//! "Open on GitHub": the web pages of a commit, a pushed branch, a
 //! tag and a file at a commit, on the host of the remote they are on.
 
 use super::*;

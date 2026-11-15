@@ -1,4 +1,4 @@
-//! Line and hunk staging, unstaging and discarding (M4b acceptance), applied
+//! Line and hunk staging, unstaging and discarding, applied
 //! with real `git apply` on temporary repositories.
 
 use crate::support;

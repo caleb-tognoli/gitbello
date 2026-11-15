@@ -1,6 +1,6 @@
 class_name SegmentedControl
 extends HBoxContainer
-## An either/or choice as joined buttons (M7.15), such as Rows `Compact |
+## An either/or choice as joined buttons, such as Rows `Compact |
 ## Detailed`: each an icon and a short label, the chosen one filled with the
 ## accent. A click or Left / Right (with a segment focused) chooses; choosing
 ## the chosen one again does nothing. Styles are the `Segmented` and

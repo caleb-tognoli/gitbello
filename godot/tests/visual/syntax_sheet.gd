@@ -1,5 +1,5 @@
 extends Node
-## Syntax sheet (M7.13): every changed file of the `syntax` fixture
+## Syntax sheet: every changed file of the `syntax` fixture
 ## (`gitbello-cli fixture <dir> --syntax`) shown in Changes, unified, in
 ## both themes. Each file is saved as `<theme>/<NN>-<folder>.png`: the top of
 ## its diff with the minimap column beside it, and a long diff's end as
@@ -56,7 +56,7 @@ func _ready() -> void:
 			list.select_only(i)
 			var loaded: Callable = func() -> bool:
 				var info: Dictionary = session.diff_info()
-				# The line states too (P5a), or the shot shows lines lexed alone.
+				# The line states too, or the shot shows lines lexed alone.
 				return (String(info.get("path", "")) == path and String(info.get("state", "")) == "ready"
 						and diff.row_count() > 0 and String(info.get("states", "")) != "loading")
 			if not await _wait(loaded):

@@ -1,4 +1,4 @@
-//! The repository library behind Home (PLAN §4 Home, M7.5): entries from
+//! The repository library behind Home (UX.md Home): entries from
 //! opening, summaries, location checks, folder scans, and the Create,
 //! Initialize folder and Clone flows.
 

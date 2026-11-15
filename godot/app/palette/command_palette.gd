@@ -1,7 +1,7 @@
 class_name CommandPalette
 extends PanelContainer
 ## Fuzzy search over actions plus dynamic entries (tabs, recent repositories)
-## (PLAN §4). Opened with Ctrl+K / Ctrl+Shift+P. Enter runs the selection,
+## (UX.md). Opened with Ctrl+K / Ctrl+Shift+P. Enter runs the selection,
 ## Escape or clicking elsewhere closes it.
 
 signal closed()

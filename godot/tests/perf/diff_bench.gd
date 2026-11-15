@@ -40,7 +40,7 @@ func _ready() -> void:
 	var info: Dictionary = session.diff_info()
 	print("BENCH lines %d" % int(info["line_count"]))
 	print("BENCH load_ms %.1f" % ((Time.get_ticks_usec() - started) / 1000.0))
-	# The line states land after the diff (P5a); builds without them say
+	# The line states land after the diff; builds without them say
 	# nothing.
 	if info.has("states"):
 		while String(session.diff_info().get("states", "")) == "loading" and Time.get_ticks_msec() < deadline:

@@ -1,4 +1,4 @@
-//! Profile pictures (PLAN M7.10): the one network access besides git.
+//! Profile pictures: the one network access besides git.
 //!
 //! An email's picture is looked up from these sources, the first hit
 //! winning: a GitHub noreply address (its user id or login gives the URL);

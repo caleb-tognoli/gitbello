@@ -1,5 +1,5 @@
 extends Node
-## The image viewer (M7.8 P2), in numbered shots per theme: a PNG of another
+## The image viewer, in numbered shots per theme: a PNG of another
 ## size split, onion skin, swipe, difference, at 100% and zoomed in; an SVG;
 ## a deleted and an added (transparent) image alone; an image too wide and
 ## one past 20 MB; a commit's image in History; and a binary image conflict's

@@ -1,4 +1,4 @@
-//! Ignore rules from the Changes view (M7.7a): previews, writing rules to
+//! Ignore rules from the Changes view: previews, writing rules to
 //! `.gitignore` and `info/exclude`, untracking and undo, on real temporary
 //! repositories.
 

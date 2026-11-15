@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.8 P2: image diffs show in the image viewer. A modified PNG offers the
+## Image diffs show in the image viewer. A modified PNG offers the
 ## four image modes (the saved one, Ctrl+Shift+D cycles and saves them, Left/
 ## Right move the onion opacity and the divider), a small image fits by whole
 ## steps, the zoom bar, wheel, double-click and zoom shortcuts step through

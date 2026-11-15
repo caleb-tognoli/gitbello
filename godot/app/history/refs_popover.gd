@@ -1,6 +1,6 @@
 class_name RefsPopover
 extends PopupPanel
-## Every ref of a commit (M7.10), opened from a counted ref chip: one row
+## Every ref of a commit, opened from a counted ref chip: one row
 ## each with its chip (`RefChip`, its whole name up to half the window) and,
 ## for a branch whose remote branch is at the same commit, that remote
 ## branch muted beside it; a line between the branches and the tags. A

@@ -1,7 +1,7 @@
 class_name GraphView
 extends RefCounted
 ## Draws history-graph lanes and nodes for one row from core's lane data
-## (PLAN §3.7, §3.9). Used by the commit list, which owns the scroll container.
+## (ARCHITECTURE §3.7, §3.9). Used by the commit list, which owns the scroll container.
 ##
 ## Geometry is built once per row and cached by the caller; drawing a row is
 ## one `draw_multiline_colors` call plus a circle.

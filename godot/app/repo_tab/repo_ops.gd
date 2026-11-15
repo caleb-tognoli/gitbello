@@ -1,7 +1,7 @@
 class_name RepoOps
 extends Node
 ## Sync, branch, tag, remote, commit and worktree operations of one worktree,
-## with the dialogs they need (PLAN §4): names for new branches and tags,
+## with the dialogs they need (UX.md): names for new branches and tags,
 ## confirmations for deletes, force pushes and cherry-picks, the switch with
 ## local changes (bring them along, or leave them on the branch as a shelf),
 ## shelving, the Sync button's choice, the merge with its preview, finishing
@@ -295,7 +295,7 @@ func handles_error(error: Dictionary) -> bool:
 
 # --- Sync ---------------------------------------------------------------------
 
-## What the Sync button does now (PLAN §4): `publish`, `pull`, `push`, `sync`
+## What the Sync button does now (UX.md): `publish`, `pull`, `push`, `sync`
 ## (pull then push), `force_push` (you rewrote pushed commits of a branch of
 ## your own: amend, rebase), or `fetch`.
 func sync_state() -> String:
@@ -473,7 +473,7 @@ func _here() -> String:
 	return branch if not branch.is_empty() else tr("this commit")
 
 
-# --- Shelves (PLAN §4 Shelves) ----------------------------------------------------
+# --- Shelves (UX.md Shelves) ----------------------------------------------------
 
 ## Asks for a name, then shelves `paths` on the current branch.
 func shelve(paths: PackedStringArray) -> void:
@@ -992,7 +992,7 @@ func _check_remote(values: Dictionary, current: String, needs_url: bool) -> Stri
 	return ""
 
 
-# --- Merges (PLAN §4 Merge with preview) --------------------------------------
+# --- Merges (UX.md Merge with preview) --------------------------------------
 
 ## Opens the merge dialog for `target` (a branch, remote branch or tag by
 ## full name, or a commit), shown as `shown` (see `MergeDialog`).
@@ -1061,7 +1061,7 @@ func _commits(n: int) -> String:
 	return tr("1 commit") if n == 1 else tr("%d commits") % n
 
 
-# --- Operations in progress (PLAN §4 Operation banner) ------------------------
+# --- Operations in progress (UX.md Operation banner) ------------------------
 
 ## Finishes the operation once no conflict is left: commits a merge or
 ## cherry-pick with `summary` and `body` (git's message when empty), or
@@ -1074,7 +1074,7 @@ func skip_operation() -> int:
 	return _track(session.skip_operation(), "Skipping the commit")
 
 
-# --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
+# --- Conflicts (UX.md Conflict resolver) ------------------------------------
 
 ## Resolves block `block` of conflicted `path` (`ours`, `theirs`,
 ## `ours_theirs`, `theirs_ours`).
@@ -1104,7 +1104,7 @@ func recreate_with_base(path: String) -> void:
 				_track(session.recreate_conflicts_with_base(path), tr("Recreating %s") % path.get_file()))
 
 
-# --- Undo commit (PLAN §4 Undo commit strip) ----------------------------------
+# --- Undo commit (UX.md Undo commit strip) ----------------------------------
 
 ## Undoes the commit the strip offers: its changes become local changes.
 ## A merge commit asks first: keep the merged changes, or remove the merge.
@@ -1224,7 +1224,7 @@ func show_in_file_manager(path: String = "") -> void:
 
 # --- Worktrees ------------------------------------------------------------------
 
-## The New worktree dialog (PLAN §4 New task): one branch field whose rows
+## The New worktree dialog (UX.md New task): one branch field whose rows
 ## (`WorktreeBranchList`) create a branch from the From base, or check out a
 ## local or remote branch; the folder as a preview line that follows the
 ## branch (✎ edits it, the folder button picks one; a taken folder gets
@@ -1441,7 +1441,7 @@ func _start_create(spec: Dictionary, setup: bool, origin: Control = null) -> int
 
 
 ## Opens branch `ref` (a menu's `{type, short, ...}`: a local or remote
-## branch) in a new worktree at once (PLAN §4 One click): at the template's
+## branch) in a new worktree at once (UX.md One click): at the template's
 ## folder (`-2`… when taken), with the setup. A branch it cannot check out
 ## there, or a folder the template cannot give, opens the dialog instead.
 func open_in_new_worktree(ref: Dictionary, origin: Control = null) -> void:
@@ -1797,7 +1797,7 @@ func prune_worktrees() -> int:
 	return _track(session.prune_worktrees(), "Pruning worktrees")
 
 
-## The cleanup flow (PLAN §4): lists worktrees whose branch is merged or
+## The cleanup flow (UX.md): lists worktrees whose branch is merged or
 ## whose upstream is gone, with warnings, and removes the chosen ones.
 func cleanup_worktrees() -> void:
 	if session.load_cleanup() < 0:

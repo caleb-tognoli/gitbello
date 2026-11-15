@@ -1,4 +1,4 @@
-//! A new worktree's setup (PLAN §4 New task): untracked files copied from
+//! A new worktree's setup (UX.md New task): untracked files copied from
 //! the main worktree (`.env`, editor settings), then a command such as
 //! installing dependencies. Kept per repository in the library, never in a
 //! committed file, so a cloned repository cannot run commands.

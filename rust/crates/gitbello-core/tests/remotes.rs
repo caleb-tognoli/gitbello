@@ -1,4 +1,4 @@
-//! Remotes (M6.5 P2): listed with their URLs, added, renamed, re-pointed and
+//! Remotes: listed with their URLs, added, renamed, re-pointed and
 //! removed through the runtime, on temporary repositories.
 
 use crate::support;

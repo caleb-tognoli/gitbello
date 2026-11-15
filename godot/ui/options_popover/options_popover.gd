@@ -1,6 +1,6 @@
 class_name OptionsPopover
 extends PopupPanel
-## The options of a filter field or a pane (M7.15): sections (Filter, View)
+## The options of a filter field or a pane: sections (Filter, View)
 ## split by divider lines, each with a title and, for filters, a Clear button; in each, rows of a
 ## muted name and a control: a `SegmentedControl` for an either/or choice,
 ## `ToggleChip`s for on/off options, or a scrolling list of check rows for a

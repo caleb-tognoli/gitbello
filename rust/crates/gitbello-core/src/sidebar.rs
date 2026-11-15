@@ -1,5 +1,5 @@
 //! Display models derived from repository state: tab and row badges, the
-//! branch tree grouped by prefix, and ref labels for graph rows (PLAN §4).
+//! branch tree grouped by prefix, and ref labels for graph rows (UX.md).
 
 use std::collections::{HashMap, HashSet};
 

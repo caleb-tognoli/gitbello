@@ -1,4 +1,4 @@
-//! Ignore rules (M7.7, `docs/IGNORE_RULES.md`): the rules the Changes view
+//! Ignore rules (`docs/IGNORE_RULES.md`): the rules the Changes view
 //! offers for a file, the form `git ls-files -x` previews them in, and the
 //! edits that add a rule to an ignore file or take it back.
 //!

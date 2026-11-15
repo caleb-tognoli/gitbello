@@ -1,4 +1,4 @@
-//! Per-user directories for config and app data (PLAN §3.8).
+//! Per-user directories for config and app data (ARCHITECTURE §3.8).
 //!
 //! Written out by hand instead of using the `directories` crate, whose
 //! Windows dependency cannot be built by the GNU toolchain without extra

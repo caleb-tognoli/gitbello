@@ -1,5 +1,5 @@
 extends SmokeTest
-## M4b: selecting a commit in the history shows its details, files and the
+## Selecting a commit in the history shows its details, files and the
 ## first file's diff; Right and Left move between list, files and diff. The
 ## files sit beside the diff, the layout buttons work like radio buttons and
 ## the details' sizes are saved.
@@ -135,7 +135,7 @@ func run() -> void:
 	await get_tree().process_frame
 
 
-## The history search bindings (P5): "app" matches the two newest of
+## The history search bindings: "app" matches the two newest of
 ## "Improve app", "Add app", "Initial commit".
 func _check_search(session: RepoSession, list: CommitList) -> void:
 	var signals: Array[int] = [0]

@@ -1,4 +1,4 @@
-//! Worktrees (M6, M7.16) through the runtime: add, lock, remove and prune,
+//! Worktrees through the runtime: add, lock, remove and prune,
 //! creating worktrees (bases, fetch fallback, free folders, rollback, setup
 //! and undo), the cleanup flow, missing folders and
 //! badges across open worktrees.

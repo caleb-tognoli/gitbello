@@ -1,5 +1,5 @@
 extends Node
-## M7.16's entry points in the real app, one numbered screenshot per step: a
+## The one-click worktree entry points in the real app, one numbered screenshot per step: a
 ## branch's menu with Open in new worktree, the worktree it makes at once with
 ## its Undo toast, Undo, an offline one click (the toast says which fetch it
 ## is based on), History's commit menu with New worktree here… and the dialog

@@ -1,5 +1,5 @@
 extends SmokeTest
-## TooltipCard (M7.17): the card a tooltip text describes (label, key caps,
+## TooltipCard: the card a tooltip text describes (label, key caps,
 ## facts), plain texts left to Godot's label, `ActionRegistry.tooltip`'s
 ## text, and the hook on a popup built like Godot's tooltip (a real hover is
 ## in `tests/visual/tooltip_screenshots.tscn`: headless Godot shows no tooltips).

@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.10: two-line history rows. Initials and their colours, the relative
+## Two-line history rows. Initials and their colours, the relative
 ## dates, the author line with co-authors, the ref chips (the current
 ## branch by name, the others counted per kind, the merged remote branch,
 ## the popover of all refs and its menus over it), the details' people

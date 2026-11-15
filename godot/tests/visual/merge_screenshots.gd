@@ -1,5 +1,5 @@
 extends Node
-## Merge workflow, end to end (M7), one numbered screenshot per step: the
+## Merge workflow, end to end, one numbered screenshot per step: the
 ## branch list in merge mode, the preview dialog (conflicts, clean,
 ## fast-forward, local changes in the way), the banner and the resolver
 ## (unified, base, side by side, keyboard and buttons), the commit that

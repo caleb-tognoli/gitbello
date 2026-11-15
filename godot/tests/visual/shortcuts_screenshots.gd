@@ -1,5 +1,5 @@
 extends Node
-## Walks Settings → Keyboard (M7.11) in numbered shots, driven by input events
+## Walks Settings → Keyboard in numbered shots, driven by input events
 ## sent to the windows: Ctrl+/ opens it, hovering a row and an unbound row,
 ## recording a shortcut, a conflict and Reassign, the filter, key search, the
 ## Changed filter, a folded section, Settings' search pointing at shortcuts,

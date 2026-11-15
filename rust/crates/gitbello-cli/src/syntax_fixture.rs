@@ -1,4 +1,4 @@
-//! The syntax repository `fixture --syntax` adds (M7.13): `syntax`, for the
+//! The syntax repository `fixture --syntax` adds: `syntax`, for the
 //! syntax sheet. Each core sample is committed in an older form (some lines
 //! missing, some replaced by their neighbour) and the working tree holds the
 //! sample itself, so every file's diff has context, added and removed lines.

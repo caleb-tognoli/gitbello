@@ -1,6 +1,6 @@
 class_name TagsDialog
 extends AcceptDialog
-## Repository → Tags… (PLAN §4): the tags with their commits; tag HEAD, push
+## Repository → Tags… (UX.md): the tags with their commits; tag HEAD, push
 ## or delete one. The forms and confirmations are RepoOps'.
 
 const THEME_TYPE: StringName = &"ManageDialog"

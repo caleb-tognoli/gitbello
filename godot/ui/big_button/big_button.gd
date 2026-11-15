@@ -1,6 +1,6 @@
 class_name BigButton
 extends Button
-## A large header button (Branch, Sync; PLAN §4): an icon and a caption, an
+## A large header button (Branch, Sync; UX.md): an icon and a caption, an
 ## optional ▾ part on the right that asks for a menu instead of pressing, and
 ## a busy state that shows a running job (spinner, a short caption and a
 ## progress line, with git's progress in the tooltip), and optional commit

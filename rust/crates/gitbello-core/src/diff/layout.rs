@@ -1,5 +1,5 @@
 //! The rows a diff view shows: the diff's lines plus the unchanged lines of
-//! the file the user expanded between its hunks (PLAN §3.10). Those lines
+//! the file the user expanded between its hunks (ARCHITECTURE §3.10). Those lines
 //! come from the old file, which is where git takes context lines from too.
 //! Rows are kept as runs, so a large diff costs a few entries, not one per
 //! line.

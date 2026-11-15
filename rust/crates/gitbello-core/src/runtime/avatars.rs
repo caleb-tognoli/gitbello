@@ -1,4 +1,4 @@
-//! Profile pictures (PLAN M7.10): what the UI asked for, read from the
+//! Profile pictures: what the UI asked for, read from the
 //! cache first and looked up when the cache has nothing (or something old),
 //! a few lookups at a time, as background jobs.
 

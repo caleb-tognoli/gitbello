@@ -1,4 +1,4 @@
-//! File history (PLAN M8a): the history a worktree shows of one file, the
+//! File history: the history a worktree shows of one file, the
 //! version selected in it and that version's diff ([`DiffSlot::File`]).
 //!
 //! A history read from HEAD follows it: when HEAD moves, the history loads

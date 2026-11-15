@@ -1,4 +1,4 @@
-//! HTTP through the system `curl` (PLAN M7.10, decided 2026-11-07): the
+//! HTTP through the system `curl` (ARCHITECTURE D16): the
 //! only network access besides git. Windows 10+ and macOS ship curl and Git
 //! for Windows bundles one; without it avatars stay initials.
 

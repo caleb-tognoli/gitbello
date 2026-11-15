@@ -1,4 +1,4 @@
-//! Blame's git reads (PLAN M8b): the text to blame, the blocks
+//! Blame's git reads: the text to blame, the blocks
 //! `git blame --incremental` reports, and the last commit that changed
 //! some paths before a revision.
 

@@ -1,4 +1,4 @@
-//! The `GitBackend` trait and its git CLI implementation (PLAN §3.3).
+//! The `GitBackend` trait and its git CLI implementation (ARCHITECTURE §3.3).
 //!
 //! Reads, plus the writes of the milestones so far (staging, commits,
 //! discards, sync, branches, tags, cherry-picks and merges).
@@ -617,7 +617,7 @@ pub trait GitBackend: Send + Sync {
         Err(unsupported("ignore rules"))
     }
 
-    /// Compare (PLAN M7.12): resolves both sides of `request` in the
+    /// Compare: resolves both sides of `request` in the
     /// worktree `toplevel`, their merge base and commit counts, and the
     /// files that differ (with line counts). An unknown revision fails with
     /// [`GitErrorKind::NotFound`].
@@ -653,7 +653,7 @@ pub trait GitBackend: Send + Sync {
         Err(unsupported("restore from a revision"))
     }
 
-    /// The path log (PLAN M8a): the commits reachable from `start` that
+    /// The path log: the commits reachable from `start` that
     /// changed any of `paths` (literal, relative to `toplevel`), newest
     /// first, each handed to `sink` as it is read with what it did to them
     /// against its first parent. An unborn `start` has none. A cancel ends
@@ -693,7 +693,7 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<Vec<(PathBuf, String)>, GitError> {
         Err(unsupported("restore under another name"))
     }
-    /// The text blame reads (PLAN M8b): the file `path` of commit `rev`,
+    /// The text blame reads: the file `path` of commit `rev`,
     /// or of the working tree without one. Larger than `limit` bytes and a
     /// working tree without the file are answers, not errors.
     fn blame_source(

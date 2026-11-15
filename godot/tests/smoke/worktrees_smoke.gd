@@ -1,5 +1,5 @@
 extends SmokeTest
-## M6, reworked in M6.5 P2: worktrees as chips in one repository tab. A chip
+## Worktrees as chips in one repository tab. A chip
 ## shows its worktree; a branch checked out in another worktree jumps there
 ## from the branch list and deleting it offers its worktree too; Ctrl+T opens New worktree
 ## (create, check out a local or remote branch, the From list, the folder preview, a taken

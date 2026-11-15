@@ -1,6 +1,6 @@
 class_name TooltipCard
 extends VBoxContainer
-## The one tooltip card (M7.17): a label with its shortcut drawn as key caps
+## The one tooltip card: a label with its shortcut drawn as key caps
 ## on the right, then muted lines with a fact (the target, what a push sends,
 ## why it is disabled); rows add icon + text lines (`line`).
 ##

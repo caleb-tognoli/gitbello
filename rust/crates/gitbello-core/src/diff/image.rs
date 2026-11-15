@@ -1,4 +1,4 @@
-//! Images in diffs (PLAN M7.8 P2): which files the image viewer shows, the
+//! Images in diffs: which files the image viewer shows, the
 //! bytes of their old and new sides, and their sizes in pixels read from the
 //! file headers. The UI decodes the bytes; core only checks that they look
 //! like the format their name says.

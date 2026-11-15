@@ -1,5 +1,5 @@
 extends Node
-## Captures File history (PLAN M8a) in numbered shots, dark then light: the
+## Captures File history in numbered shots, dark then light: the
 ## uncommitted changes, a commit with its details, the rename (its chip and
 ## the old → new diff), a version's menu, the filter (its matches, then no
 ## match), two versions selected, those versions in Compare (filtered to the

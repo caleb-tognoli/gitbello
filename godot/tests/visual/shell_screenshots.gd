@@ -72,7 +72,7 @@ func _ready() -> void:
 		return
 	Actions.run_action(&"view.theme_light")
 	await _shot(out, "light")
-	# Two more accent colours (P1 review), then back to the default.
+	# Two more accent colours, then back to the default.
 	Core.set_settings({"accent": "#2bb3a8"})
 	ThemeManager.apply(main)
 	await _shot(out, "accent_teal_light")
@@ -99,7 +99,7 @@ func _ready() -> void:
 	Actions.run_action(&"view.theme_light")
 	await _shot(out, "changes_light")
 	Actions.run_action(&"view.theme_dark")
-	# M6.5 P3: a file left out, then a line left out of the highlighted file.
+	# A file left out, then a line left out of the highlighted file.
 	var changes: ChangesView = page.changes()
 	changes.list().grab_focus()
 	changes.list().select_only(changes.list().row_count() - 1)
@@ -203,7 +203,7 @@ func _ready() -> void:
 	Actions.run_action(&"changes.cancel_amend")
 	page.show_view(WorktreeView.View.HISTORY)
 
-	# M6.5 P2: the branch list and a branch's menu, the new-branch form, a
+	# The branch list and a branch's menu, the new-branch form, a
 	# busy Sync button, a progress toast, the busy overlay, the operation
 	# banner and a toast with fixes (fetching changes only the fixture repo).
 	var view: WorktreeView = page.active_view()
@@ -252,7 +252,7 @@ func _ready() -> void:
 	await _shot_window(main.tags_dialog(), out, "tags")
 	main.tags_dialog().hide()
 
-	# M6: a worktree chip's menu, the new-task form, cleanup and settings.
+	# A worktree chip's menu, the new-task form, cleanup and settings.
 	page.strip().worktree_menu_requested.emit(page.session.worktrees()[1],
 			page.strip().get_screen_position() + Vector2(160.0, 30.0))
 	await _shot_window(page.context_menu(), out, "worktree_menu")
@@ -288,7 +288,7 @@ func _ready() -> void:
 	await _shot_window(main.settings_window(), out, "settings_interface")
 	main.settings_window().hide()
 
-	# M6.5 P4: the switch with changes, then changes left on main and the
+	# The switch with changes, then changes left on main and the
 	# Shelved section (only the fixture repo changes).
 	page.show_view(WorktreeView.View.CHANGES)
 	page.session.create_branch("topic", "HEAD", false)
@@ -310,7 +310,7 @@ func _ready() -> void:
 	await _settle()
 	await _shot(out, "shelves")
 
-	# M6.5 P3: no local changes (discarding touches only the fixture repo).
+	# No local changes (discarding touches only the fixture repo).
 	page.session.discard_paths(page.session.change_paths(0, page.session.change_count()))
 	deadline = Time.get_ticks_msec() + WAIT_MS
 	while Time.get_ticks_msec() < deadline and page.session.change_count() > 0:

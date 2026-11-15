@@ -1,6 +1,6 @@
 class_name ToggleChip
 extends Button
-## An on/off option in a pill (M7.15): an icon and a short label, outlined
+## An on/off option in a pill: an icon and a short label, outlined
 ## while off and filled with the accent while on. Give it a white icon
 ## (`AppTheme.tintable_icon`) so the theme's icon colours apply as they are.
 ## `tint` colours the icon while off, such as a file status's colour.

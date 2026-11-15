@@ -1,4 +1,4 @@
-//! Open (M7.8 P3): one version of a diff's file, as a file another app can
+//! Open: one version of a diff's file, as a file another app can
 //! open. The working copy is opened where it is; a version from the index or
 //! a commit is written under the versions folder (`<hash>/<file name>`,
 //! named by its bytes so opening it again reuses the file), which the app

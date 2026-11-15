@@ -1,4 +1,4 @@
-//! Background jobs (PLAN §3.4).
+//! Background jobs (ARCHITECTURE §3.4).
 //!
 //! - A small pool of worker threads runs jobs; results go out as [`Event`]s on
 //!   one channel that the UI drains without blocking.
@@ -112,7 +112,7 @@ impl RefreshSet {
     }
 
     /// The cheap refresh to run for the active tab when the window regains
-    /// focus, as a fallback for missed file events (PLAN §3.6).
+    /// focus, as a fallback for missed file events (ARCHITECTURE §3.6).
     pub fn on_focus() -> Self {
         [
             RefreshKind::Status,

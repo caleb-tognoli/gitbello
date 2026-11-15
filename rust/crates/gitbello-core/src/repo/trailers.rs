@@ -1,4 +1,4 @@
-//! `Co-authored-by:` trailers (M7.10): the co-authors shown beside a commit's
+//! `Co-authored-by:` trailers: the co-authors shown beside a commit's
 //! author in the history rows and the commit details.
 
 /// The trailer key, matched without case as git does.

@@ -1,6 +1,6 @@
 class_name VirtualList
 extends Control
-## Draws only the visible rows of a list of any length (PLAN §3.7).
+## Draws only the visible rows of a list of any length (ARCHITECTURE §3.7).
 ##
 ## Subclasses override `_get_row_count()`, `_draw_row()` and optionally
 ## `_prepare_rows()`, then call `refresh()` when the row count changes.

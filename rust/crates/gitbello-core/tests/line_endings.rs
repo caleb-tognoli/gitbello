@@ -1,4 +1,4 @@
-//! Line endings in diffs (M7.9) on temporary repositories: a converted
+//! Line endings in diffs on temporary repositories: a converted
 //! file's marker rows and summary in Changes and in a commit, none of it
 //! where `.gitattributes` normalizes endings, Restore line endings with its
 //! undo, and the scan that finds the files whose only changes are endings.

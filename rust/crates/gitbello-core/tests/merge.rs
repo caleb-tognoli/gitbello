@@ -1,4 +1,4 @@
-//! Merge workflows (M7) through the runtime, on temporary repositories:
+//! Merge workflows through the runtime, on temporary repositories:
 //! previews, merges, the conflict resolver, finishing operations and the
 //! undo strip.
 

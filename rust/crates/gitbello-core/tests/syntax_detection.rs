@@ -1,4 +1,4 @@
-//! Syntax detection in the diff job (M7.13) on temporary repositories: a
+//! Syntax detection in the diff job on temporary repositories: a
 //! script without an extension is found by its shebang when the diff does
 //! not hold its first line, read from the working tree in Changes and from
 //! the blob in History; a known extension needs no read, and a binary file

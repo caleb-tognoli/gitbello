@@ -1,6 +1,6 @@
 class_name AvatarPainter
 extends RefCounted
-## Draws a person as a round avatar (M7.10): their initials on a colour
+## Draws a person as a round avatar: their initials on a colour
 ## chosen from their email, from the `Avatar` theme type's palette
 ## (`color_0`… with `text_0`…, `colors` of them), or their profile picture
 ## once `AvatarPictures` has it.

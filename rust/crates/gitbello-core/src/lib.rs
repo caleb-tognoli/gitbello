@@ -41,7 +41,7 @@ pub mod worktrees;
 /// Version of the core crate, as reported to the UI and CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Short greeting used by the M0 hello-world path through gdext.
+/// Short greeting used by the hello-world path through gdext.
 pub fn greeting(name: &str) -> String {
     format!("Hello, {name}, from gitbello-core {VERSION}")
 }

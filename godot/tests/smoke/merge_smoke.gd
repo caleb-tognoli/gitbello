@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7: a conflicting merge from the branch list to the merge commit with the
+## A conflicting merge from the branch list to the merge commit with the
 ## keyboard only (Ctrl+Shift+B, the preview dialog, the banner, the resolver,
 ## Ctrl+Enter), the undo strip removing the merge again, and the resolver
 ## side by side with Abort. GDScript only writes files; the app runs git.

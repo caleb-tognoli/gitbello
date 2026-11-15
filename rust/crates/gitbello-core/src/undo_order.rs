@@ -1,4 +1,4 @@
-//! Which file-level undo is the newest (M7.17): Edit → Undo (Ctrl+Z) takes
+//! Which file-level undo is the newest: Edit → Undo (Ctrl+Z) takes
 //! back the latest of a discard, an ignore rule, a shelf discard and a
 //! conflict choice. Each kind keeps its own stack in the repository's state;
 //! this records the order the entries were pushed in.

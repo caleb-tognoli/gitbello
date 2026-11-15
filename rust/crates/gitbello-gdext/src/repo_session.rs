@@ -27,7 +27,7 @@ use godot::prelude::*;
 use crate::convert::{self, gstr, path_str, to_i64};
 use crate::runtime_cell;
 
-/// One open repository or worktree tab (PLAN §3.5). Created by
+/// One open repository or worktree tab (ARCHITECTURE §3.5). Created by
 /// `Core.open_session(path)`; the `Core` autoload delivers its signals.
 ///
 /// Queries return small data; the graph is read in slices.
@@ -558,7 +558,7 @@ impl RepoSession {
         self.checkout(Some(CheckoutTarget::Detach(oid.to_string())), &changes)
     }
 
-    // --- Shelves (PLAN §4 Shelves) ---------------------------------------------
+    // --- Shelves (UX.md Shelves) ---------------------------------------------
 
     /// Every shelf, newest first: `{oid, branch, name, auto, made_here, time}`
     /// (stashes made elsewhere included, `made_here` false; `branch` empty
@@ -834,7 +834,7 @@ impl RepoSession {
         }
     }
 
-    // --- Merge workflows (PLAN §4, M7) ---------------------------------------
+    // --- Merge workflows (UX.md) ---------------------------------------
 
     /// Works out what merging `target` (branch, remote branch, tag or commit)
     /// into HEAD would do; `merge_preview_ready(target)` follows.
@@ -1056,7 +1056,7 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Creates a worktree (PLAN §4 New task) from `spec`: `{branch, start,
+    /// Creates a worktree (UX.md New task) from `spec`: `{branch, start,
     /// base, upstream, path}`. `start` is `new` (create `branch` from `base`:
     /// a branch, remote branch, tag or commit), `existing` (check out local
     /// branch `branch`) or `remote` (create `branch` tracking remote branch
@@ -1721,7 +1721,7 @@ impl RepoSession {
         .unwrap_or(-1)
     }
 
-    // --- Compare (M7.12) ----------------------------------------------------
+    // --- Compare ----------------------------------------------------
 
     /// Opens a comparison of `left` (any revision) with `right` (a revision,
     /// or the working copy when `working`), replacing any other; `mode` is
@@ -1906,7 +1906,7 @@ impl RepoSession {
             .unwrap_or_default()
     }
 
-    // --- File history (M8a) ------------------------------------------------
+    // --- File history ------------------------------------------------
 
     /// Opens the history of `path` (repository-relative), replacing any
     /// other. `start` is the revision it is read from, or "" for HEAD,
@@ -2015,7 +2015,7 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.restore_file_version(&self.key, &oid)).flatten())
     }
 
-    // --- Blame (M8b) --------------------------------------------------------
+    // --- Blame --------------------------------------------------------
 
     /// Blames the open file history's file as version `oid` has it (the
     /// working copy for ""), with `git blame`'s `-w` and `-M` as asked.
@@ -2359,7 +2359,7 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.undo_discard(&self.key)).flatten())
     }
 
-    // --- Ignore rules (M7.7a, docs/IGNORE_RULES.md) ---------------------------
+    // --- Ignore rules (docs/IGNORE_RULES.md) ---------------------------
 
     /// The rules offered for `paths`, relative to the `.gitignore` in `dir`
     /// ("" for the root), narrowest first. See `convert::ignore_suggestions`.
@@ -2426,7 +2426,7 @@ impl RepoSession {
         job_id(runtime_cell::with(|rt| rt.undo_ignore(&self.key)).flatten())
     }
 
-    // --- Ignore rules viewer (M7.7b) ------------------------------------------
+    // --- Ignore rules viewer ------------------------------------------
 
     /// Works out every ignore file, its lines and what each decides;
     /// `ignore_rules_ready(job)` follows.

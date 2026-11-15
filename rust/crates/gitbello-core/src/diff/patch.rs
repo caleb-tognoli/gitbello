@@ -1,4 +1,4 @@
-//! Patches for partial staging (PLAN §3.10): the selected `+`/`-` lines of a
+//! Patches for partial staging (ARCHITECTURE §3.10): the selected `+`/`-` lines of a
 //! diff become a patch for `git apply`, with hunk headers recomputed.
 //!
 //! - **Stage** applies an unstaged diff's selected lines to the index.

@@ -1,4 +1,4 @@
-//! Compare (PLAN M7.12): the comparison a worktree shows, the commit it is
+//! Compare: the comparison a worktree shows, the commit it is
 //! narrowed to, its file filter and the diff of the selected file
 //! ([`DiffSlot::Compare`]). A working-copy side follows the status and ref
 //! sides follow the refs; Restore writes a side's files into the worktree.

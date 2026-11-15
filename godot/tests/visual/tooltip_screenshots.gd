@@ -1,5 +1,5 @@
 extends Node
-## Tooltip cards (M7.17), in numbered shots with the tooltip drawn in: real
+## Tooltip cards, in numbered shots with the tooltip drawn in: real
 ## hovers (pushed mouse moves) over the view switch, the branch and Sync
 ## buttons, the commit button (greyed, with why), a diff's mode and whole-file
 ## buttons, History's next-match button and a worktree chip; the palette's

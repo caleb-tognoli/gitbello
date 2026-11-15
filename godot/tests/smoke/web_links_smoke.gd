@@ -1,5 +1,5 @@
 extends SmokeTest
-## Copy ▸ and Open on <host> (M7.17) on fixture `history`, given an `origin`
+## Copy ▸ and Open on <host> on fixture `history`, given an `origin`
 ## on github.com that is never contacted (its tracking ref is made locally):
 ## the commit's Copy entries, Open on GitHub for a commit, a pushed branch, a
 ## tag and a file, hidden for a branch never pushed. Skipped without

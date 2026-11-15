@@ -1,5 +1,5 @@
 extends SmokeTest
-## M5, reworked in M6.5 P2: the Sync button. The fixture's remote has a
+## The Sync button. The fixture's remote has a
 ## commit `repo-8` has not fetched, so after a fetch `main` has diverged:
 ## Sync (with the default ff-only pulls) offers merge or rebase on a toast,
 ## the rebase choice pulls then pushes, showing its progress on the button,

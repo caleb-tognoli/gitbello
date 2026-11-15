@@ -1,4 +1,4 @@
-//! The new-worktree flow (PLAN §4 New task): creating a worktree for a new,
+//! The new-worktree flow (UX.md New task): creating a worktree for a new,
 //! existing or remote branch, its setup, and undoing a create.
 
 use std::collections::{HashMap, HashSet};
@@ -122,7 +122,7 @@ impl RepoState {
 }
 
 impl Runtime {
-    /// The new-worktree flow (PLAN §4 New task) as one job: fetch the
+    /// The new-worktree flow (UX.md New task) as one job: fetch the
     /// remote branch it starts from (falling back to the one last fetched
     /// when that fails or takes over [`FETCH_TIMEOUT`]), then add the
     /// worktree in the first free folder. A failure rolls back what was

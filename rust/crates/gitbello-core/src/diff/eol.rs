@@ -1,4 +1,4 @@
-//! Line endings in a diff (PLAN M7.9): the marker rows a diff view shows
+//! Line endings in a diff: the marker rows a diff view shows
 //! after a line without a final newline and, after the last line, when
 //! endings changed, and what a file's changes add up to (`CRLF → LF`, only
 //! endings changed, the final newline added or removed).

@@ -1,6 +1,6 @@
 class_name RelativeDate
 extends RefCounted
-## Commit dates as History shows them (M7.10): relative up to 30 days
+## Commit dates as History shows them: relative up to 30 days
 ## ("3 h ago", "12 days ago"), then a short date this year ("Mar 4"), then
 ## `YYYY-MM-DD`. `exact` is the full local time for tooltips.
 

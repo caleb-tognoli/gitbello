@@ -1,4 +1,4 @@
-//! Web pages of a remote (M7.17): "Open on GitHub" for a commit, a pushed
+//! Web pages of a remote: "Open on GitHub" for a commit, a pushed
 //! branch or tag and a file at a commit. Hosts are recognised by name only
 //! (github.com, gitlab.com, bitbucket.org, Azure DevOps, codeberg.org and
 //! gitea.com): a self-hosted server gets no link rather than a wrong one.

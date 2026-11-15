@@ -1,4 +1,4 @@
-//! The file-history repository `fixture --history` adds (M8a): `history`,
+//! The file-history repository `fixture --history` adds: `history`,
 //! for the smoke test and screenshots of a file's history.
 //!
 //! `src/login/auth.rs` was `src/auth.rs` until `main` moved it; `side`,

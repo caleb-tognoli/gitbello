@@ -1,4 +1,4 @@
-//! The app's core runtime (PLAN §3.5): config, git, jobs, the watcher and the
+//! The app's core runtime (ARCHITECTURE §3.5): config, git, jobs, the watcher and the
 //! cached state of every open repository.
 //!
 //! The UI owns one `Runtime`, calls [`Runtime::poll`] once per frame (cheap
@@ -105,7 +105,7 @@ pub const OPEN_JOB_LABEL: &str = "open repository";
 pub const CREATE_REPOSITORY_JOB_LABEL: &str = "create repository";
 pub const CLONE_REPOSITORY_JOB_LABEL: &str = "clone repository";
 pub const INIT_REPOSITORY_JOB_LABEL: &str = "initialize folder";
-/// Labels of the Home jobs (PLAN §4 Home).
+/// Labels of the Home jobs (UX.md Home).
 pub const SCAN_JOB_LABEL: &str = "scan for repositories";
 pub const LOCATION_JOB_LABEL: &str = "check location";
 pub const SUMMARY_JOB_LABEL: &str = "read repository summary";
@@ -141,7 +141,7 @@ pub const COMMIT_JOB_LABEL: &str = "commit";
 pub const DISCARD_JOB_LABEL: &str = "discard";
 pub const UNDO_DISCARD_JOB_LABEL: &str = "undo discard";
 
-/// Labels of the line-ending jobs (PLAN M7.9).
+/// Labels of the line-ending jobs.
 pub const RESTORE_ENDINGS_JOB_LABEL: &str = "restore line endings";
 pub const ENDINGS_SCAN_JOB_LABEL: &str = "scan line endings";
 
@@ -149,7 +149,7 @@ pub const ENDINGS_SCAN_JOB_LABEL: &str = "scan line endings";
 /// reads the diffs of, at most, after a status refresh.
 pub const ENDINGS_SCAN_MAX_FILES: usize = 200;
 
-/// Labels of the shelf jobs (PLAN §4 Shelves).
+/// Labels of the shelf jobs (UX.md Shelves).
 pub const SHELVE_JOB_LABEL: &str = "shelve";
 pub const RESTORE_SHELF_JOB_LABEL: &str = "restore shelf";
 pub const RESTORE_SHELF_FILE_JOB_LABEL: &str = "restore shelf file";
@@ -159,7 +159,7 @@ pub const DISCARD_SHELF_JOB_LABEL: &str = "discard shelf";
 pub const UNDO_SHELF_DISCARD_JOB_LABEL: &str = "undo shelf discard";
 pub const SHELF_FILES_JOB_LABEL: &str = "read shelf";
 
-/// Labels of the merge workflow jobs (PLAN §4, M7).
+/// Labels of the merge workflow jobs (UX.md).
 pub const MERGE_PREVIEW_JOB_LABEL: &str = "preview merge";
 pub const MERGE_JOB_LABEL: &str = "merge";
 pub const REBASE_CHECK_JOB_LABEL: &str = "check rebase";
@@ -905,7 +905,7 @@ impl RepoState {
         self.stashes.as_deref()
     }
 
-    /// The stash list as shelves, newest first (PLAN §4 Shelves).
+    /// The stash list as shelves, newest first (UX.md Shelves).
     pub fn shelves(&self) -> &[Shelf] {
         &self.shelves
     }
@@ -1290,7 +1290,7 @@ impl RepoState {
         })
     }
 
-    /// The commit selection (PLAN §3.10).
+    /// The commit selection (ARCHITECTURE §3.10).
     pub fn selection(&self) -> &Selection {
         &self.selection
     }
@@ -2041,7 +2041,7 @@ impl Runtime {
         ))
     }
 
-    // --- Repository library (PLAN §4 Home) --------------------------------
+    // --- Repository library (UX.md Home) --------------------------------
 
     /// Loads the library from `path` (`None` keeps it in memory), importing
     /// the config's old recent list the first time. Returns a load problem.
@@ -2729,7 +2729,7 @@ impl Runtime {
     }
 
     /// Commits the selection (or amends HEAD with it) with `message`, through
-    /// a temporary index (PLAN §3.10). `None` when it cannot be committed.
+    /// a temporary index (ARCHITECTURE §3.10). `None` when it cannot be committed.
     pub fn commit(&self, key: &Path, message: String, amend: bool) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
         let state = self.repos.get(key).filter(|s| s.can_commit(amend))?;
@@ -2898,7 +2898,7 @@ impl Runtime {
 
     /// Checks out `target`, doing `changes` with local changes: keep them,
     /// bring them along (stash, switch, re-apply) or leave them on the
-    /// current branch as an automatic shelf (PLAN §4 Shelves).
+    /// current branch as an automatic shelf (UX.md Shelves).
     pub fn checkout(
         &self,
         key: &Path,
@@ -3712,7 +3712,7 @@ impl Runtime {
         })
     }
 
-    /// Starts the next due auto-fetch (PLAN §3.6): one repository at a
+    /// Starts the next due auto-fetch (ARCHITECTURE §3.6): one repository at a
     /// time, never while a write to it is queued or running.
     fn run_auto_fetch(&mut self) {
         let Some(interval) = self.auto_fetch_interval() else {

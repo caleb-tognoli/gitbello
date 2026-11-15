@@ -1,4 +1,4 @@
-//! Open (M7.8 P3) on temporary repositories: the version of a file a diff
+//! Open on temporary repositories: the version of a file a diff
 //! shows, from a commit, its parent (a deleted file), the index, HEAD or the
 //! working tree, and the runtime's job and event.
 

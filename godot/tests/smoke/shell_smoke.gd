@@ -1,5 +1,5 @@
 extends SmokeTest
-## The shell (M3, reworked in M6.5 P2): five repositories open in tabs with
+## The shell: five repositories open in tabs with
 ## live attention dots and worktree chips that update after changes made
 ## outside the app; worktrees of an open repository open as its chips; the
 ## menu bar, the palette, the theme, and tabs restored on launch. Uses the
@@ -235,7 +235,7 @@ func _check_window_titles(main: Main) -> void:
 	main.tab_bar().current_tab = 0
 
 
-## Home's Recent cards (M7.5 replaced the welcome screen): ordered as the
+## Home's Recent cards: ordered as the
 ## library's recent list, names told apart, full path as tooltip, long names
 ## cut with an ellipsis instead of widening the card.
 func _check_home_recent() -> void:

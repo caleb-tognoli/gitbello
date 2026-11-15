@@ -1,6 +1,6 @@
 class_name BranchPopover
 extends PopupPanel
-## The Branch button's list (PLAN §4): a filter, then Recent (the current
+## The Branch button's list (UX.md): a filter, then Recent (the current
 ## branch and the ones last checked out), the other local branches and the
 ## remote branches no local branch tracks, each listed once (see `sections`),
 ## with the commits to push and pull. Names show their prefix (`feature/`)

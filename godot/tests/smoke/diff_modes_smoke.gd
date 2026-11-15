@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.8 P1: each diff offers its modes (`diff_info`'s `viewer` and `modes`),
+## Each diff offers its modes (`diff_info`'s `viewer` and `modes`),
 ## the header picker shows only for two or more, a file without the saved
 ## mode falls back without saving, Ctrl+Shift+D cycles and saves per viewer,
 ## and every panel follows. Deletes a file in `repo-15` (throwaway fixture).

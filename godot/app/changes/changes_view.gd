@@ -1,14 +1,14 @@
 class_name ChangesView
 extends HSplitContainer
-## Working-copy changes of one worktree (PLAN §4 Changes view): one list of
+## Working-copy changes of one worktree (UX.md Changes view): one list of
 ## changed files with commit checkboxes, the commit box under it, and the diff
 ## of the highlighted file with line checkboxes. Above the list, a filter
 ## (text and options, like GitHub Desktop's) narrows the files shown; the
 ## check-all box then covers the files shown only. The checkboxes are the commit
-## selection kept in core (PLAN §3.10). With no changes, suggested actions
+## selection kept in core (ARCHITECTURE §3.10). With no changes, suggested actions
 ## take the diff's place. The Shelves view reuses the preview pane with a
 ## dedicated shelf browser and details, without commit controls. A conflicted
-## file shows the resolver in the diff's place (PLAN §4 Conflict resolver).
+## file shows the resolver in the diff's place (UX.md Conflict resolver).
 ## Keyboard: arrows move, Space or Enter toggle the checkbox of the
 ## highlighted file or diff lines (a hunk header takes its hunk), Right and
 ## Left move between the list and the diff, Delete discards, Ctrl+Z undoes the
@@ -50,13 +50,13 @@ var _confirm: ConfirmationDialog = ConfirmationDialog.new()
 ## Runs when the user confirms the discard dialog.
 var _pending_discard: Callable = Callable()
 var _menu: ActionMenu = ActionMenu.new()
-## The quick rules and the Ignore dialog (M7.7a).
+## The quick rules and the Ignore dialog.
 var _ignore: IgnoreOps = IgnoreOps.new()
 ## The quick rules of the Ignore submenu, by item id.
 const IGNORE_KINDS: Array[String] = ["file", "extension", "folder"]
 ## Their icons in the Ignore submenu.
 const IGNORE_ICONS: Dictionary[String, StringName] = {"file": &"TextFile", "extension": &"Filter", "folder": &"Folder"}
-## Suggests ignoring a folder of build output or downloads (M7.7b).
+## Suggests ignoring a folder of build output or downloads.
 var _hint_bar: PanelContainer = PanelContainer.new()
 var _hint_button: Button = Button.new()
 var _hint_close: Button = Button.new()
@@ -765,7 +765,7 @@ func begin_amend(target: Dictionary) -> void:
 	focus_message()
 
 
-# --- Conflicts (PLAN §4 Conflict resolver) ------------------------------------
+# --- Conflicts (UX.md Conflict resolver) ------------------------------------
 
 ## Whether the diff pane shows a conflicted file's resolver (or the diff of
 ## the side that changed a file the other side deleted, under its choices).
@@ -949,7 +949,7 @@ func _apply_filter() -> void:
 		_clear_diff()
 
 
-## With no changes, suggested actions replace the diff (PLAN §4 empty state).
+## With no changes, suggested actions replace the diff (UX.md empty state).
 func _update_empty() -> void:
 	if _shelves_mode:
 		_empty.hide()

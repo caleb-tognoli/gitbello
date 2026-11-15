@@ -1,4 +1,4 @@
-//! Fetch, pull, push and auto-fetch (M5) through the runtime, against a
+//! Fetch, pull, push and auto-fetch through the runtime, against a
 //! local bare remote that a second checkout pushes to.
 
 use crate::support;

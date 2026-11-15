@@ -1,4 +1,4 @@
-//! Find in the history (PLAN M6.5 P5): which loaded commits match a query
+//! Find in the history: which loaded commits match a query
 //! by subject, author name or email (ignoring case), or by hash prefix.
 //!
 //! It reads only what the graph index holds, so there is no git call. A

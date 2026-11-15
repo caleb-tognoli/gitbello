@@ -1,5 +1,5 @@
 extends Node
-## The ignore rules viewer and the rest of M7.7b, one numbered screenshot per
+## The ignore rules viewer, "Show ignored files", templates and the folder hint, one numbered screenshot per
 ## step, actions included: the folder hint, its close menu and what Ignore
 ## does; Repository → Ignore rules… on each file (chips), a chip's menu, the
 ## Add form, its ▾ templates and template rules before and after adding, Stop tracking

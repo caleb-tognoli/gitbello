@@ -11,7 +11,7 @@ const RECORD_SEP: u8 = 0;
 /// Separator between the co-author trailer values (`%x1e`).
 const COAUTHOR_SEP: char = '\x1e';
 
-/// Arguments for the graph log (PLAN §3.3). Fields: hash, parents, author name,
+/// Arguments for the graph log (ARCHITECTURE §3.3). Fields: hash, parents, author name,
 /// author email, author time, subject, `Co-authored-by` trailer values.
 pub const LOG_ARGS: &[&str] = &[
     "log",

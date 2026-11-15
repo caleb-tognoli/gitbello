@@ -1,5 +1,5 @@
 extends Node
-## Saves screenshots of Home (PLAN §4 Home, M7.5) for visual review: an empty
+## Saves screenshots of Home (UX.md Home) for visual review: an empty
 ## library, a full one (dark and light), folder groups, a missing folder, a
 ## clone running and failing, the Home tab, the Add menu, the forms and a scan.
 ## Usage: godot --path godot res://tests/visual/home_screenshots.tscn --

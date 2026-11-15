@@ -1,4 +1,4 @@
-//! The diff minimap (PLAN M7.6): rows of a diff or of the resolver drawn as
+//! The diff minimap: rows of a diff or of the resolver drawn as
 //! small blocks, one per character, on their row's background, rendered
 //! here into RGBA tiles so the UI only wraps them in textures. An overview
 //! gives the marks of the whole diff in a few buckets, for the strip beside

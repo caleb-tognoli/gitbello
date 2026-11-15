@@ -1,6 +1,6 @@
 class_name ChangeList
 extends VirtualList
-## The changed files of a worktree, one list with commit checkboxes (PLAN §4
+## The changed files of a worktree, one list with commit checkboxes (UX.md
 ## Changes view): conflicted files first, then the rest by path. Rows come
 ## from `RepoSession.change_rows()` (the files the filter shows) for a window
 ## around the visible range only.

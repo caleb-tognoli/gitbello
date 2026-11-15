@@ -1,4 +1,4 @@
-//! File history (PLAN M8a) on real repositories: the path log, the names a
+//! File history on real repositories: the path log, the names a
 //! file had, its versions and their diffs, and restoring a version.
 
 use crate::support;

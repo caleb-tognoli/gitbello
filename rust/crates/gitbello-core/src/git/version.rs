@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Oldest git that gitbello supports (PLAN D5).
+/// Oldest git that gitbello supports (ARCHITECTURE D5).
 pub const MIN_GIT_VERSION: GitVersion = GitVersion::new(2, 40, 0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

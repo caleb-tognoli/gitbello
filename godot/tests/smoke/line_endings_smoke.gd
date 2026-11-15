@@ -1,10 +1,10 @@
 extends SmokeTest
-## M7.9 P1: line endings in diffs. A diff whose endings changed ends with a
+## Line endings in diffs. A diff whose endings changed ends with a
 ## "Line endings: LF → CRLF (3 lines)" row after its last line, a last line
 ## without a newline is followed by a "No newline at end of file" row
 ## (neither selectable nor copied), and a file whose only changes are its
 ## endings or final newline shows a card with Show diff, in Changes and in
-## History. P2: those files carry an `EOL` chip and pass the "Line endings
+## History. Those files carry an `EOL` chip and pass the "Line endings
 ## only" filter; Restore line endings (card, action) puts their endings back
 ## and Undo brings the edits back. Uses the `eol` fixture (it restores a file
 ## and undoes it). Skipped without `--fixtures`.
@@ -29,7 +29,7 @@ func run() -> void:
 	var view: DiffView = panel.view()
 	expect(await wait_until(func() -> bool: return session.change_count() == 5), "five changed files")
 
-	# P2: the files whose only changes are endings, found after the status.
+	# The files whose only changes are endings, found after the status.
 	var endings_only: PackedStringArray = PackedStringArray(["both.txt", "crlf.txt", "nonl.txt"])
 	expect(await wait_until(func() -> bool: return _chipped(changes) == endings_only),
 			"EOL chips on %s" % [_chipped(changes)])

@@ -1,5 +1,5 @@
 extends Node
-## Captures Blame (PLAN M8b) in numbered shots: a focused commit in the
+## Captures Blame in numbered shots: a focused commit in the
 ## middle of the file, dark then light; then, dark: the working copy
 ## without a focus, a focused commit's details, the blame's menu, the
 ## options, Blame before this commit (the version under the old name),

@@ -1,4 +1,4 @@
-//! The path log's git reads (PLAN M8a): the commits that changed some
+//! The path log's git reads: the commits that changed some
 //! paths, where a name a commit added came from, writing a file of a
 //! commit into the working tree under another name, and the line counts of
 //! a file's uncommitted changes.

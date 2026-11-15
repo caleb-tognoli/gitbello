@@ -1,6 +1,6 @@
 class_name AvatarPictures
 extends RefCounted
-## Profile pictures for `AvatarPainter` (M7.10): asked of the core once per
+## Profile pictures for `AvatarPainter`: asked of the core once per
 ## email (`RepoSession.request_avatar`, which reads its cache and looks them
 ## up in the background), then kept as round textures. Until one arrives,
 ## and when there is none or Settings → Interface → "Show profile pictures"

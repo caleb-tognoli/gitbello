@@ -1,4 +1,4 @@
-//! Compare (PLAN M7.12): two states of a repository side by side. The left
+//! Compare: two states of a repository side by side. The left
 //! side is the base and the right side what is compared, so diffs read
 //! left → right. Either side is any revision git resolves; the right side can
 //! also be the working copy (tracked changes and untracked files).
@@ -134,7 +134,7 @@ impl ResolvedSide {
     }
 }
 
-/// Since the fork, whatever the sides (M7.12c: the view has no mode switch;
+/// Since the fork, whatever the sides (the view has no mode switch;
 /// the full difference is asked for explicitly). Unrelated histories fall
 /// back to exact when the comparison loads.
 pub fn default_mode(_left: SideKind, _right: SideKind) -> CompareMode {

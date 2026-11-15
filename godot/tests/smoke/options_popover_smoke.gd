@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.15 P1: the theme's check icons (one look for check boxes, menus, trees
+## The theme's check icons (one look for check boxes, menus, trees
 ## and switches) and `OptionsPopover` with its segmented choices, toggle
 ## chips and check rows: values, defaults and the count, the Clear link,
 ## shortcuts in tooltips, live changes, the keys, Escape giving the focus

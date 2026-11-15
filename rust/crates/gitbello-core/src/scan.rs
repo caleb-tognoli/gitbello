@@ -1,4 +1,4 @@
-//! Finding repositories under a folder (PLAN §4 Home, Scan folder…).
+//! Finding repositories under a folder (UX.md Home, Scan folder…).
 //!
 //! A plain walk of the file system, without git: a folder with a `.git`
 //! folder is a repository, a `.git` file points at a linked worktree's or a

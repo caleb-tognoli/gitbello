@@ -31,7 +31,7 @@ use crate::runtime_cell;
 
 /// Root of the native runtime, instanced once by the `Core` autoload
 /// (`res://app/core/core.tscn`). Owns the core `Runtime`, drains its events
-/// each frame and routes them to `RepoSession`s (PLAN §3.5).
+/// each frame and routes them to `RepoSession`s (ARCHITECTURE §3.5).
 #[derive(GodotClass)]
 #[class(base = Node)]
 pub struct AppCore {
@@ -476,7 +476,7 @@ impl AppCore {
     #[signal]
     fn avatar_changed(email: GString);
 
-    /// Emitted in response to `ping` (M0 boundary check).
+    /// Emitted in response to `ping` (boundary check).
     #[signal]
     fn pong(message: GString);
 
@@ -608,7 +608,7 @@ impl AppCore {
         runtime_cell::with(|rt| rt.close(&key));
     }
 
-    /// Refresh after the window regains focus (PLAN §3.6).
+    /// Refresh after the window regains focus (ARCHITECTURE §3.6).
     #[func]
     fn focus_in(&self, session: Gd<RepoSession>) {
         let key = session.bind().key().to_path_buf();
@@ -904,7 +904,7 @@ impl AppCore {
             .map_or_else(GString::new, |e| gstr(&e.to_string()))
     }
 
-    /// The repository's recent comparisons, newest first (PLAN M7.12):
+    /// The repository's recent comparisons, newest first:
     /// `convert::recent_comparison` each.
     #[func]
     fn compare_recent(&self, repo: GString) -> Array<VarDictionary> {

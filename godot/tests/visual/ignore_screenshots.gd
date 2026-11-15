@@ -1,5 +1,5 @@
 extends Node
-## Ignoring changed files (M7.7a), one numbered screenshot per step: the
+## Ignoring changed files, one numbered screenshot per step: the
 ## files' menu with its Ignore submenu, the dialog on a folder rule with its
 ## preview, a quick rule on a tracked file opening the dialog with the
 ## untrack choice, the list and toast after untracking, and the dialog in the

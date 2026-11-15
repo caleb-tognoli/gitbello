@@ -1,6 +1,6 @@
 class_name BasePopover
 extends PopupPanel
-## Where a new worktree's branch starts (PLAN §4 New task): a filter over
+## Where a new worktree's branch starts (UX.md New task): a filter over
 ## the local branches, remote branches and tags, in sections. Text that names
 ## none of them offers itself first ("Use a1b2c3d"), for a commit or any other
 ## revision git knows. Enter or a click chooses.

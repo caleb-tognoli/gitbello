@@ -1,6 +1,6 @@
 class_name ImageDiffView
 extends Control
-## The old and new image of a diff (M7.8 P2), in one of the image modes:
+## The old and new image of a diff, in one of the image modes:
 ## `split` (old | new, each in its half with a caption), `onion` (new over old
 ## with an opacity slider), `swipe` (a divider dragged across shows old on
 ## its left and new on its right), `difference` (changed pixels highlighted,

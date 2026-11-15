@@ -1,5 +1,5 @@
 extends SmokeTest
-## `ActionMenu` (M7.17): actions that do not apply are left out, those that
+## `ActionMenu`: actions that do not apply are left out, those that
 ## cannot run are greyed with their reason, checkable ones are checks or
 ## radio items, shortcuts show, separators never lead, trail or double, and
 ## submenus left empty are dropped.

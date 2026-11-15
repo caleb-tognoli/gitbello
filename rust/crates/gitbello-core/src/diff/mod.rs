@@ -1,4 +1,4 @@
-//! Diffs of one file (PLAN §3.10): `git diff` output parsed into hunks and
+//! Diffs of one file (ARCHITECTURE §3.10): `git diff` output parsed into hunks and
 //! lines. Line text stays in one byte buffer, raw (CRLF and invalid UTF-8
 //! kept), so the UI reads slices and later milestones can build patches.
 

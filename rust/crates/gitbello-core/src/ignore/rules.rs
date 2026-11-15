@@ -1,4 +1,4 @@
-//! The ignore rules viewer's model (M7.7b, `docs/IGNORE_RULES.md` §2): every
+//! The ignore rules viewer's model (`docs/IGNORE_RULES.md` §2): every
 //! file git reads ignore rules from, its lines, and what each line decides,
 //! worked out from `git ls-files --directory` and `git check-ignore -v`.
 

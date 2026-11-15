@@ -1,4 +1,4 @@
-//! Merge workflows (PLAN §4, M7): the merge preview, the operation in
+//! Merge workflows (UX.md): the merge preview, the operation in
 //! progress, conflicted files with their conflict blocks, and the commit
 //! the undo strip offers. Plain data and pure parsers; the backend runs git
 //! and the runtime decides when.

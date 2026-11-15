@@ -1,4 +1,4 @@
-//! The commit selection (M6.5 P3 acceptance, PLAN §3.10): seeding from the
+//! The commit selection (ARCHITECTURE §3.10): seeding from the
 //! index, partly included files, renames, deletions, untracked files, amend,
 //! hooks and discards, through the runtime on real temporary repositories.
 

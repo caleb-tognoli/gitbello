@@ -1,4 +1,4 @@
-//! Blame (PLAN M8b): for each line of a file, the commit that last changed
+//! Blame: for each line of a file, the commit that last changed
 //! it (`git blame --incremental`).
 //!
 //! git reports blame in blocks, in the order it finds them (newest commits

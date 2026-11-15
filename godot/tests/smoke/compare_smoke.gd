@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.12: Compare, in M7.12c's History-like layout. Opens branch against
+## Compare, in its History-like layout. Opens branch against
 ## branch (since the fork), swaps (an ancestor on the right: nothing since
 ## the fork, the full difference shows the change), reopens a recent
 ## comparison from the Recent popover, compares with the working copy and

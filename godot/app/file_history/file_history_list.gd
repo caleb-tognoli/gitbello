@@ -1,6 +1,6 @@
 class_name FileHistoryList
 extends CommitList
-## The commits that changed one file (PLAN M8a), drawn as History's rows
+## The commits that changed one file, drawn as History's rows
 ## without the graph (`RepoSession.file_history_rows()`, fetched for a
 ## window around the visible rows). After the author line each row says what
 ## the commit did to the file: a chip when it added, renamed or deleted it,

@@ -1,4 +1,4 @@
-//! The image repositories `fixture --images` adds (M7.8): `images` and
+//! The image repositories `fixture --images` adds: `images` and
 //! `images-conflict`, for the image viewer's smoke test and screenshots.
 //!
 //! `images` commits `logo.png` (64×64), `icon.svg`, `old.png` and

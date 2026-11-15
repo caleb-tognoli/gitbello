@@ -1,6 +1,6 @@
 class_name ActionMenu
 extends PopupMenu
-## A menu filled from the action registry (M7.17): the menu bar, context
+## A menu filled from the action registry: the menu bar, context
 ## menus and menu buttons all use it, so an action looks and behaves the same
 ## wherever it is listed.
 ##

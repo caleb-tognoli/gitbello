@@ -1,6 +1,6 @@
 class_name RepoTab
 extends Control
-## One repository tab (PLAN §4): the strip of worktree chips and the view of
+## One repository tab (UX.md): the strip of worktree chips and the view of
 ## the selected worktree. A worktree's view (and session) is made the first
 ## time its chip is chosen. What the shell asks of "the current tab" (its
 ## session, operations, views and menus) is the selected worktree's.
@@ -11,7 +11,7 @@ signal state_changed()
 signal notice(title: String, message: String)
 
 const WORKTREE_VIEW: PackedScene = preload("res://app/repo_tab/worktree_view.tscn")
-## The tab's attention dot, most important first (PLAN §4 Repo tabs).
+## The tab's attention dot, most important first (UX.md Repo tabs).
 enum Attention { NONE, SYNC, CHANGES, CONFLICT }
 
 ## The selected worktree's session.
@@ -184,7 +184,7 @@ func title() -> String:
 	return session.display_name() if session != null else ""
 
 
-## The most important state across the worktrees (PLAN §4): a conflict or an
+## The most important state across the worktrees (UX.md): a conflict or an
 ## operation in progress, then changed files, then commits to pull or push.
 func attention() -> Attention:
 	var level: Attention = Attention.NONE

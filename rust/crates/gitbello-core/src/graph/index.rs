@@ -1,4 +1,4 @@
-//! Compact, append-only index of the commit graph (PLAN §3.9).
+//! Compact, append-only index of the commit graph (ARCHITECTURE §3.9).
 //!
 //! Rows are stored column-wise in flat vectors. Lane layouts are not stored per
 //! row: the lane state is checkpointed every [`CHECKPOINT_INTERVAL`] rows and a
@@ -99,7 +99,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Heap usage, split as in the PLAN §3.9 memory target.
+/// Heap usage, split as in the ARCHITECTURE §3.9 memory target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IndexMemory {
     /// Commit table, parents, checkpoints and build state.

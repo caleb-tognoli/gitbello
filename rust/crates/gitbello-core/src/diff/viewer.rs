@@ -1,4 +1,4 @@
-//! How a diff can be shown (PLAN M7.8): which viewer draws it and the modes
+//! How a diff can be shown: which viewer draws it and the modes
 //! that viewer offers for it, in the order the cycle shortcut goes through
 //! them. A file with one side only offers one mode, and the UI shows no
 //! picker for fewer than two.

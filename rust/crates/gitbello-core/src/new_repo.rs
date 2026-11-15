@@ -1,4 +1,4 @@
-//! Options of the Create, Initialize folder and Clone flows (PLAN §4 Home)
+//! Options of the Create, Initialize folder and Clone flows (UX.md Home)
 //! and the starter files they write.
 
 use std::fs;

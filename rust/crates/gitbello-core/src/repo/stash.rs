@@ -1,4 +1,4 @@
-//! `git stash list`, and shelves (PLAN §4 Shelves): stashes tied to a
+//! `git stash list`, and shelves (UX.md Shelves): stashes tied to a
 //! branch, identified by their commit.
 
 use std::collections::HashSet;

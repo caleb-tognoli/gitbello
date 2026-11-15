@@ -1,7 +1,7 @@
 class_name CommitHeader
 extends PanelContainer
-## A commit's details above its files (PLAN M4b, M7.10; shared with Compare
-## in M7.12c): the summary, the people (a card each with avatar, name and
+## A commit's details above its files (shared with Compare and
+## File history): the summary, the people (a card each with avatar, name and
 ## email for the author, every co-author and a different committer), date,
 ## hash, a merge's parents, the commit's refs as chips and the full message.
 ## Fill it with `show_info` from a `commit_info`-shaped dictionary.
@@ -41,7 +41,7 @@ var _shown_oid: String = ""
 @onready var _refs: HFlowContainer = %Refs
 @onready var _body_separator: Control = %BodySeparator
 @onready var _body: RichTextLabel = %Body
-## Above the summary while two commits are selected (PLAN M7.12).
+## Above the summary while two commits are selected.
 var _pair_button: Button = Button.new()
 ## The refs of a counted chip; made in `_ready` so a header never in the
 ## tree does not leak it.

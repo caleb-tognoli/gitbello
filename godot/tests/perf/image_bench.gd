@@ -1,5 +1,5 @@
 extends Node
-## Image diff benchmark (read-only, M7.8): for each `--file`, the unstaged
+## Image diff benchmark (read-only): for each `--file`, the unstaged
 ## image diff's load (git, both sides' bytes), the time to the first picture
 ## (both sides decoded on worker threads and shown), the longest frame
 ## meanwhile (the main thread's longest block) and the same file shown again

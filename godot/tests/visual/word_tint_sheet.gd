@@ -1,5 +1,5 @@
 extends Node
-## Comparison sheet of the changed-word tint (M7.6 P3 step B): the same diff
+## Comparison sheet of the changed-word tint: the same diff
 ## and its minimap at several `AppTheme.word_tint_percent` values, in both
 ## themes. Each intensity is saved as `<theme>-<percent>.png` (the top of the
 ## diff with the top of its minimap column beside it, `ZOOM` times larger),

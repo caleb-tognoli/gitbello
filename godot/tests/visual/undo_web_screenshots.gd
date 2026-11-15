@@ -1,5 +1,5 @@
 extends "res://tests/visual/menus_screenshots.gd"
-## Edit → Undo, Copy ▸ and Open on <host> (M7.17 P2b), in numbered shots with
+## Edit → Undo, Copy ▸ and Open on <host>, in numbered shots with
 ## the menus drawn in: Edit with nothing to undo, after a discard (and the
 ## Changes list's menu showing Ctrl+Z on it), after an ignore rule, after
 ## Ctrl+Z took the rule back; History's commit menu with Copy ▸ beside it and

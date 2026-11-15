@@ -1,6 +1,6 @@
 class_name WorktreeStrip
 extends PanelContainer
-## The row of worktree chips at the top of a repository tab (PLAN §4): a
+## The row of worktree chips at the top of a repository tab (UX.md): a
 ## worktree icon that opens the worktree list (a filter, every worktree and
 ## the worktree actions), the main worktree, a thin line, then the linked
 ## ones by folder name. The main worktree's chip stays put; when the linked

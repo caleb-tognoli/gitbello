@@ -1,5 +1,5 @@
 extends Node
-## M7.15 P1 shots, dark then light: the options popover at its defaults,
+## Options popover shots, dark then light: the options popover at its defaults,
 ## with filters on (Clear showing) and a segment focused from the keyboard,
 ## then the check boxes, radio buttons, switches and a menu's check items in
 ## the new check style. Each popover shot has a 2x crop. Needs no repository

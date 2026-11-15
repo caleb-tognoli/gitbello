@@ -2,7 +2,7 @@ class_name ThemeManager
 extends RefCounted
 ## Picks light or dark (following the OS unless the user chose one), the
 ## accent colour, the colours of added and removed lines and the UI scale for
-## HiDPI screens (PLAN §3.7), and applies the theme `AppTheme` builds from
+## HiDPI screens (ARCHITECTURE §3.7), and applies the theme `AppTheme` builds from
 ## them.
 
 const BASE_DPI: float = 96.0

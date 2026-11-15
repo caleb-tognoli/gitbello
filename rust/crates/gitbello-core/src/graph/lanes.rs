@@ -1,4 +1,4 @@
-//! Lane assignment for the history graph (PLAN §3.9).
+//! Lane assignment for the history graph (ARCHITECTURE §3.9).
 //!
 //! Commits arrive in topological order (children before parents). Each active
 //! lane waits for one commit; a commit takes the first lane waiting for it, or a

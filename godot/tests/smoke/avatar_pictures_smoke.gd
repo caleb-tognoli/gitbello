@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.10: profile pictures. A picture is cut to a round texture; one seeded
+## Profile pictures. A picture is cut to a round texture; one seeded
 ## in the scratch cache shows in an avatar asked through a session (no
 ## network: the smoke run points every source at a closed local port), and
 ## "Show profile pictures" off brings back initials until it is on again;

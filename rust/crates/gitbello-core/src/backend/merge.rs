@@ -1,4 +1,4 @@
-//! The merge workflows' git calls (PLAN §4, M7): merge preview and merge,
+//! The merge workflows' git calls (UX.md): merge preview and merge,
 //! the operation in progress, conflicted files, and undoing a commit.
 
 use std::fs;

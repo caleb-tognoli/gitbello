@@ -1,7 +1,7 @@
 class_name AppTheme
 extends RefCounted
 ## Builds the interface theme from a light or dark palette and an accent
-## colour (PLAN §3.7), in the style of spritesheetbelli: chrome on a surface
+## colour (ARCHITECTURE §3.7), in the style of spritesheetbelli: chrome on a surface
 ## colour, lists and content sunk into the background, raised buttons and
 ## fields. Icons are Godot editor SVGs drawn for dark backgrounds; the light
 ## theme swaps their greys for darker ones (see `LIGHT_ICON_COLORS`).
@@ -74,7 +74,7 @@ static var _large: Dictionary[String, DPITexture] = {}
 ## the added or removed colour: the diff's word background, and the
 ## minimap's word blocks over its row tint. A variable so that
 ## `tests/visual/word_tint_sheet.tscn` can compare intensities; 40 keeps the
-## syntax hues readable on it (M7.13 P6).
+## syntax hues readable on it.
 static var word_tint_percent: int = 40
 
 
@@ -1027,7 +1027,7 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"label_gap", &"CommitList", 4)
 	theme.set_constant(&"outgoing_icon_size", &"CommitList", 14)
 	theme.set_color(&"outgoing_color", &"CommitList", p.accent)
-	# Two-line rows (M7.10): the subject, then avatars and "Author +N · when".
+	# Two-line rows: the subject, then avatars and "Author +N · when".
 	theme.set_constant(&"two_line_row_height", &"CommitList", 50)
 	theme.set_constant(&"line_gap", &"CommitList", 3)
 	theme.set_font_size(&"meta_font_size", &"CommitList", 12)
@@ -1052,7 +1052,7 @@ static func _add_history(theme: Theme, p: Palette) -> void:
 	_add_commit_details(theme, p)
 
 
-## Ref chips (`RefChip`, M7.10): branches square-cornered, tags round pills,
+## Ref chips (`RefChip`): branches square-cornered, tags round pills,
 ## each with its icon; a remote branch's "origin/" in a lighter ink.
 static func _add_ref_chips(theme: Theme, p: Palette) -> void:
 	theme.set_font_size(&"font_size", &"RefChip", 12)
@@ -1095,7 +1095,7 @@ static func _add_commit_details(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"v_separation", &"DetailsRow", 4)
 	_variation(theme, &"DetailsGroup", &"HBoxContainer")
 	theme.set_constant(&"separation", &"DetailsGroup", 6)
-	# The people (M7.10): a card each, avatar beside name (and role) over email.
+	# The people: a card each, avatar beside name (and role) over email.
 	_variation(theme, &"DetailsPeople", &"HFlowContainer")
 	theme.set_constant(&"h_separation", &"DetailsPeople", 20)
 	theme.set_constant(&"v_separation", &"DetailsPeople", 8)
@@ -1176,7 +1176,7 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_color(&"chip_bg", &"ChangeList", Color(p.text_muted, 0.16))
 	theme.set_font_size(&"chip_font_size", &"ChangeList", 10)
 	theme.set_constant(&"chip_radius", &"ChangeList", 3)
-	# The image viewer (M7.8): a checkerboard behind transparent pixels, each
+	# The image viewer: a checkerboard behind transparent pixels, each
 	# image's outline, the swipe divider and the difference highlight.
 	var checker_light: Color = p.background.lerp(Color.WHITE, 0.12 if p.light else 0.06)
 	var checker_dark: Color = p.background.lerp(Color.BLACK, 0.06 if p.light else 0.12)
@@ -1255,7 +1255,7 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"current_height", &"MarkStrip", 4)
 	# How long a jump (a minimap click, the next change) eases, in ms
 	theme.set_constant(&"ease_msec", &"DiffView", 120)
-	# The diff's minimap (M7.6): rows in stronger tints than the diff's, text
+	# The diff's minimap: rows in stronger tints than the diff's, text
 	# as faint blocks, a box for the visible rows and a strip of change marks
 	theme.set_color(&"background", &"DiffMinimap", p.background)
 	theme.set_color(&"border_color", &"DiffMinimap", p.border)
@@ -1300,12 +1300,12 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"left_out_percent", &"DiffMinimap", 40)
 
 
-## The shell of M6.5 P2: menu strip, header buttons, worktree chips, the
+## The shell: menu strip, header buttons, worktree chips, the
 ## branch list, the operation banner, the busy overlay, toasts and panes.
 static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	_variation(theme, &"MenuStrip", &"PanelContainer")
 	theme.set_stylebox(&"panel", &"MenuStrip", _box(p.background, 0, Vector4(4, 2, 4, 0)))
-	# The repo tabs' attention dots (PLAN §4 Repo tabs)
+	# The repo tabs' attention dots (UX.md Repo tabs)
 	theme.set_color(&"conflict_color", &"RepoTabs", p.error)
 	theme.set_color(&"changes_color", &"RepoTabs", p.modified)
 	theme.set_color(&"sync_color", &"RepoTabs", p.accent)
@@ -1465,7 +1465,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"panel", &"DetailsHeader", details)
 	theme.set_constant(&"min_left_width", &"Panes", 300)
 	theme.set_constant(&"default_left_width", &"Panes", 440)
-	# An operation in progress: the only red element (PLAN §4)
+	# An operation in progress: the only red element (UX.md)
 	_variation(theme, &"OperationBanner", &"PanelContainer")
 	var banner: StyleBoxFlat = _box(p.background.blend(Color(p.error, 0.18)), 0, Vector4(12, 6, 8, 6))
 	banner.border_color = p.error
@@ -1512,7 +1512,7 @@ static func _add_shell_p2(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"bottom_margin", &"Toasts", 40)
 
 
-## The Changes view of M6.5 P3: commit checkboxes, the list header, the
+## The Changes view: commit checkboxes, the list header, the
 ## commit panel and empty states with suggested actions.
 static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"size", &"PickBox", 14)
@@ -1553,7 +1553,7 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	compare_bar.border_color = p.border
 	compare_bar.border_width_bottom = 1
 	theme.set_stylebox(&"panel", &"CompareBar", compare_bar)
-	# File history (M8a): a row says what its commit did to the file, as a
+	# File history: a row says what its commit did to the file, as a
 	# chip in the change's colour and the lines added and removed; the bar's
 	# "as of …" names a start other than the current branch.
 	for entry: Array in [[&"added", p.added], [&"renamed", p.renamed], [&"deleted", p.removed]]:
@@ -1565,7 +1565,7 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"chip_radius", &"FileHistory", 3)
 	theme.set_constant(&"chip_padding", &"FileHistory", 4)
 	theme.set_constant(&"mark_gap", &"FileHistory", 6)
-	# Blame (M8b): the gutter before the file's lines names each run's
+	# Blame: the gutter before the file's lines names each run's
 	# commit; a bar in the commit's age, from faint (the file's oldest) to
 	# the accent (its newest); the focused commit's lines tinted.
 	theme.set_font_size(&"meta_font_size", &"BlameView", 12)
@@ -1693,7 +1693,7 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"separation", &"AboutRow", 18)
 	theme.set_constant(&"logo_size", &"AboutDialog", 72)
 	theme.set_constant(&"text_width", &"AboutDialog", 380)
-	# M6.5 P4: the Shelved section and the offer to restore left changes
+	# The Shelved section and the offer to restore left changes
 	_variation(theme, &"OfferBar", &"PanelContainer")
 	var offer: StyleBoxFlat = _box(p.background.blend(Color(p.accent, 0.18)), 0, Vector4(10, 6, 8, 6))
 	offer.border_color = p.accent
@@ -1743,7 +1743,7 @@ static func _add_changes_p3(theme: Theme, p: Palette) -> void:
 
 
 
-## Home (PLAN §4 Home, M7.5): the filter and Add on top, the Recent cards,
+## Home (UX.md Home): the filter and Add on top, the Recent cards,
 ## and the repository rows, flat until hovered.
 ## The Keyboard page of Settings: rows of actions with their shortcuts as key
 ## caps, in chips that record a new shortcut when clicked.
@@ -1931,7 +1931,7 @@ static func _add_loading(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"line_height", T, 3)
 
 
-## Check boxes, radio buttons and switches everywhere (M7.15): the commit
+## Check boxes, radio buttons and switches everywhere: the commit
 ## pick box's look (`PickBox`), drawn as icons in the theme's colours so
 ## `CheckBox`, `CheckButton`, `PopupMenu` and `Tree` match. Filled with the
 ## accent and a readable tick when on, an outline in the muted text colour
@@ -1996,8 +1996,7 @@ static func _check_icon(kind: String, color: String, mark: String, alpha: float)
 	return _checks[svg]
 
 
-## The options popover of filter fields and panes (M7.15,
-## `OptionsPopover`): sections with a muted title and a Clear link, rows of
+## The options popover of filter fields and panes (`OptionsPopover`): sections with a muted title and a Clear link, rows of
 ## a muted name and a control, segmented either/or choices filled with the
 ## accent where chosen, and toggle chips that fill when on.
 static func _add_options(theme: Theme, p: Palette) -> void:

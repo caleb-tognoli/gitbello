@@ -1,6 +1,6 @@
 class_name IgnoreHiddenList
 extends VirtualList
-## What one line of an ignore file decides, in the rules viewer (M7.7b): the
+## What one line of an ignore file decides, in the rules viewer: the
 ## tracked files it matches first (they stay tracked), then the untracked
 ## paths it hides, a folder whose contents are all ignored as one row. Rows
 ## come from `RepoSession.ignore_hidden()` for a window around the visible

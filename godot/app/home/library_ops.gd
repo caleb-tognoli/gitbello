@@ -1,6 +1,6 @@
 class_name LibraryOps
 extends Node
-## The Home flows (PLAN §4 Home): Clone, Add existing folder, Scan folder,
+## The Home flows (UX.md Home): Clone, Add existing folder, Scan folder,
 ## Create and Initialize folder, and the actions on a library entry. Clones
 ## run in the background and show as rows on Home (`clones()`); Create and
 ## Initialize keep their form open with progress and errors.

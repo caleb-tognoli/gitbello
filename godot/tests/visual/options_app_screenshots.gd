@@ -1,5 +1,5 @@
 extends Node
-## M7.15 in the app, numbered, dark then light: Changes' options (at
+## The options popovers in the app, numbered, dark then light: Changes' options (at
 ## their defaults, then two filters on with the count and Clear), History's
 ## (then All branches and Compact chosen), File history's rows, and Blame's
 ## with an option on and its count. Then, dark: the shelves' branch filter

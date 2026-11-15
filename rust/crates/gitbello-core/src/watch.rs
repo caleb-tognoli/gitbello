@@ -1,4 +1,4 @@
-//! File watching (PLAN §3.6).
+//! File watching (ARCHITECTURE §3.6).
 //!
 //! The watcher only decides *which* refreshes a change needs; status and the
 //! other reads do the real work. Changes are debounced per repository, object

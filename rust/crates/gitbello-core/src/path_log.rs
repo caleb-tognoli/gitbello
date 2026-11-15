@@ -1,4 +1,4 @@
-//! The path-limited log (PLAN M8a): the commits that changed some paths,
+//! The path-limited log: the commits that changed some paths,
 //! each with what it did to them (`git log -z -M --raw --numstat -- <paths>`).
 //!
 //! It knows nothing of renames across names or of a single file: a file's

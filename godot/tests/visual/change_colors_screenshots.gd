@@ -1,6 +1,6 @@
 extends Node
 ## Capture of the added and removed colour settings and of History's strip
-## of search matches (M7.6 P3 step C): Settings → Interface, a diff with the
+## of search matches: Settings → Interface, a diff with the
 ## theme's colours and then with chosen ones, in both themes, and a search
 ## over a long history with its strip, followed by a 3x crop of the strip.
 ## Pass --repo=<throwaway repo with an uncommitted change to `--file`>

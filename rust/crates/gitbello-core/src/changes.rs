@@ -1,4 +1,4 @@
-//! The Changes view's model (PLAN §4, §3.10): one list of changed files and
+//! The Changes view's model (UX.md; ARCHITECTURE §3.10): one list of changed files and
 //! the commit selection, gitbello's own record of what the next commit
 //! takes. The selection is seeded from the index and written to a temporary
 //! index only at commit time.
@@ -99,7 +99,7 @@ impl ChangeList {
     }
 }
 
-/// Which changed files the Changes list shows (PLAN §4, like GitHub
+/// Which changed files the Changes list shows (UX.md; like GitHub
 /// Desktop's filter): paths containing `text`, ignoring case (a rename's
 /// source path counts too), then narrowed by the options. Among the pick
 /// options and among the kinds, any checked one lets a file through; with
@@ -373,7 +373,7 @@ struct Entry {
     seen_index: Option<String>,
 }
 
-/// The commit selection of one worktree (PLAN §3.10). Conflicted files have
+/// The commit selection of one worktree (ARCHITECTURE §3.10). Conflicted files have
 /// no entry: they cannot be committed until resolved.
 #[derive(Debug, Clone, Default)]
 pub struct Selection {

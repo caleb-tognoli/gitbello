@@ -1,7 +1,7 @@
 class_name MergeDialog
 extends ConfirmationDialog
 ## Merging a branch, remote branch, tag or commit into the current branch,
-## or rebasing the current branch onto it (PLAN §4 Merge with preview).
+## or rebasing the current branch onto it (UX.md Merge with preview).
 ## Rows: `source ▾ → here` (the source chip picks another branch and checks
 ## again), badges with what the preview found, the strategy (Merge | Squash
 ## | Fast-forward | Rebase), the merge commit's message, then Conflicts and

@@ -1,4 +1,4 @@
-//! Shelves (M6.5 P4 acceptance, PLAN §4 Shelves): stashes tied to a branch,
+//! Shelves (UX.md Shelves): stashes tied to a branch,
 //! found by commit, through the runtime on real temporary repositories.
 
 use crate::support;

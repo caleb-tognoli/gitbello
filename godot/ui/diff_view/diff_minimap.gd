@@ -1,6 +1,6 @@
 class_name DiffMinimap
 extends Control
-## The scroll column of a `DiffView` (PLAN M7.6): a VS Code-style minimap of
+## The scroll column of a `DiffView`: a VS Code-style minimap of
 ## the rows shown, rendered by core in tiles, beside a strip with the marks
 ## of the whole diff.
 ##

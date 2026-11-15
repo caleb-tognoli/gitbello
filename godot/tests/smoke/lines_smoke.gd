@@ -1,5 +1,5 @@
 extends SmokeTest
-## M6.5 P3 acceptance (was M4b): commit part of a file with the keyboard
+## Commit part of a file with the keyboard
 ## only, through the line checkboxes; a hunk header toggles its hunk; discard
 ## a line and undo it. Uses fixture `repo-7`; GDScript only edits README.md,
 ## the app runs git. Skipped without `--fixtures`.

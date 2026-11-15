@@ -2,8 +2,8 @@ class_name CommitList
 extends VirtualList
 ## History rows driven by `RepoSession.graph_rows()` (a subclass can supply
 ## other rows of the same shape through `_fetch_rows`, without the graph:
-## Compare's commits, M7.12c). Only a window around the visible rows is
-## fetched. Rows have two lines (M7.10): the subject, then
+## Compare's commits). Only a window around the visible rows is
+## fetched. Rows have two lines: the subject, then
 ## the author's avatar with the co-authors' after it, "Author +N · 3 h ago"
 ## and the ref chips on the right: the current branch by name, and the
 ## other refs of each kind by name when alone or as one chip with their

@@ -1,9 +1,9 @@
 extends Node
-## Line endings in diffs (M7.9 P1), in numbered shots: the "Line endings"
+## Line endings in diffs, in numbered shots: the "Line endings"
 ## row unified and side by side, the "No newline at end of file" row both
 ## ways, the cards of endings-only, final-newline-only and both, Show diff,
 ## and History's card, then the same in the light theme, with 2x crops of
-## the marker rows. P2: the list's `EOL` chips (2x crop), the "Line endings
+## the marker rows. Then the list's `EOL` chips (2x crop), the "Line endings
 ## only" filter, the list menu with Restore line endings and the toast after
 ## restoring from the card (then undone). Pass --repo=<the CLI's `eol`
 ## fixture> --out=<directory> and set GITBELLO_CONFIG to a scratch config
@@ -64,7 +64,7 @@ func _ready() -> void:
 			await _shot("%s-card-%s" % [theme, path.get_basename()], panel)
 		panel.card_action.emit("eol_show_diff")
 		await _shot("%s-show-diff" % theme, panel)
-		# P2: the filter, the list menu, Restore line endings and its toast.
+		# The filter, the list menu, Restore line endings and its toast.
 		var filter: FilterField = changes.filter_field()
 		filter.set_option("endings_only", true)
 		filter.options_button().pressed.emit()

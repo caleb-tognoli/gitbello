@@ -1,6 +1,6 @@
 class_name MarkStrip
 extends Control
-## A thin strip of marks over the whole length of a list (PLAN M7.6), beside
+## A thin strip of marks over the whole length of a list, beside
 ## its scroll bar: one bucket of flags per pixel from `overview_source`, a
 ## stronger mark at `current` (the selected match), and a click or drag
 ## emits `jumped` with the fraction of the list there. `runs` merges equal

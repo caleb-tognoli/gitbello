@@ -1,6 +1,6 @@
 class_name CommitDetails
 extends VSplitContainer
-## The selected commit (PLAN M4b, laid out in M6.5): its `CommitHeader`
+## The selected commit: its `CommitHeader`
 ## (summary, people, date, hash, refs and message) on top, then its files
 ## beside the diff of the selected file. The top part's height (this split)
 ## and the files' width (`files_split()`) are dragged by the user.

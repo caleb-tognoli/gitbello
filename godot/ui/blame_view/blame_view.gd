@@ -1,6 +1,6 @@
 class_name BlameView
 extends DiffView
-## A file's lines with who last changed each (PLAN M8b): the diff view's
+## A file's lines with who last changed each: the diff view's
 ## text, selection, minimap and number gutter, with a gutter before it that
 ## names each run of lines' commit.
 ##

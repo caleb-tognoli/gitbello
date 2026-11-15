@@ -1,4 +1,4 @@
-//! "Open terminal here" (PLAN §3.8, and the §3.13 fallback): user command
+//! "Open terminal here" (ARCHITECTURE §3.8): user command
 //! templates such as `wt -d {path}`, split into arguments and started without
 //! a shell, in the folder they open.
 

@@ -1,5 +1,5 @@
 extends SmokeTest
-## M7.8 P3: Open hands a file to its default app. Changes opens the working
+## Open hands a file to its default app. Changes opens the working
 ## copy (a deleted file, its last version), History the commit's version,
 ## an image side its own version, all from the file lists', the diff's and
 ## the image viewer's context menus. Open in editor is gone. The default app

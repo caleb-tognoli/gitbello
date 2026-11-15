@@ -1,4 +1,4 @@
-//! Compare (PLAN M7.12) on real repositories: sides, modes, counts, files
+//! Compare on real repositories: sides, modes, counts, files
 //! and their diffs, through the backend and the runtime.
 
 use crate::support;

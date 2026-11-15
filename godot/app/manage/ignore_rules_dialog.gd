@@ -1,6 +1,6 @@
 class_name IgnoreRulesDialog
 extends AcceptDialog
-## Repository → Ignore rules… (M7.7b, docs/IGNORE_RULES.md §2): a chip per
+## Repository → Ignore rules… (docs/IGNORE_RULES.md §2): a chip per
 ## file git reads ignore rules from (the root and nested `.gitignore` files,
 ## `info/exclude` as "My computer" and the global file as "Global setting")
 ## with how many paths each hides; under it, the chosen file's lines (comments

@@ -1,4 +1,4 @@
-//! The diff minimap (M7.6) over runtime state on temporary repositories: a
+//! The diff minimap over runtime state on temporary repositories: a
 //! partly picked diff and a conflicted file in the resolver.
 
 use crate::support;
