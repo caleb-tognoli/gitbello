@@ -88,7 +88,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return view.diff_panel().view().row_count() > 0), "and shows")
 	expect(not view.details_header().visible, "no commit details for the uncommitted changes")
 	expect(not Actions.is_enabled(&"file_history.restore"), "nothing to restore from your own files")
-	expect_eq(Actions.get_action(&"file_history.restore").reason.call(), tr("These are already your files."),
+	expect_eq(Actions.get_action(&"file_history.restore").reason.call(), tr("Already your files"),
 			"and it says why")
 	# Its row says what the edit is: the lines, counted after the status.
 	expect(await wait_until(func() -> bool:
@@ -188,9 +188,9 @@ func run() -> void:
 	# The version menu and Open.
 	list.context_menu_requested.emit(rename, Vector2(10, 10))
 	expect(view.version_menu().visible, "a version's menu opens")
-	for label: String in ["Compare versions", "Restore version", "Open version",
-			"Open in History", "Copy commit hash"]:
-		expect(_menu_has(view.version_menu(), tr(label)), "the menu has %s" % label)
+	for id: StringName in [&"file_history.compare_versions", &"file_history.restore", &"file_history.open_version",
+			&"file_history.show_in_history", &"file_history.copy_hash"]:
+		expect(id in view.version_menu().action_ids(), "the menu has %s" % id)
 	expect(_menu_disabled(view.version_menu(), tr("Compare versions")), "Compare needs two versions")
 	view.version_menu().hide()
 	var before: int = _opened.size()
@@ -303,7 +303,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return list.cursor == 0), "the deletion is selected")
 	expect_eq(String(list.version_at(0)["code"]), "D", "the newest commit deleted it")
 	expect(not Actions.is_enabled(&"file_history.restore"), "a deletion has no version to restore")
-	expect_eq(Actions.get_action(&"file_history.restore").reason.call(), tr("This commit deleted the file."),
+	expect_eq(Actions.get_action(&"file_history.restore").reason.call(), tr("Deleted in this commit"),
 			"and it says why")
 	list.select_only(1)
 	expect(Actions.is_enabled(&"file_history.restore"), "the addition can be restored")

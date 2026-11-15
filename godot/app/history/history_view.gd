@@ -103,9 +103,9 @@ func _ready() -> void:
 	_details.file_list().gui_input.connect(_on_files_key)
 	_details.parent_requested.connect(_on_parent_requested)
 	_details.label_menu_requested.connect(label_menu_requested.emit)
-	for entry: Array in [[&"ChevronUp", "Previous match (Shift+Enter)", false], [&"ChevronDown", "Next match (Enter)", true]]:
-		var button: Button = _search.add_button(entry[0], entry[1])
-		button.pressed.connect(step_match.bind(entry[2]))
+	for entry: Array in [[&"ChevronUp", false], [&"ChevronDown", true]]:
+		var button: Button = _search.add_button(entry[0], _match_tip(entry[1]))
+		button.pressed.connect(step_match.bind(entry[1]))
 		button.hide()
 		_match_buttons.append(button)
 	_search.changed.connect(_on_search_text)
@@ -114,14 +114,14 @@ func _ready() -> void:
 	_options = _search.add_options()
 	_options.add_section("Filter", &"", &"Filter")
 	_options.add_segmented("scope", "Branches", [
-		{"id": "current", "icon": "GitBranch", "label": "Current", "tooltip": "Show current branch history",
+		{"id": "current", "icon": "GitBranch", "label": "Current", "tooltip": "Current branch only",
 			"action": "history.current_branch"},
-		{"id": "all", "icon": "GitBranches", "label": "All", "tooltip": "Show all branches history",
+		{"id": "all", "icon": "GitBranches", "label": "All", "tooltip": "Every branch",
 			"action": "history.all_branches"},
 	], "current")
 	_options.add_section("View", &"", &"RowsTwoLine")
 	_options.add_segmented("rows", "Rows", ROWS_CHOICES, "detailed")
-	_options.add_chips("", [{"id": "graph", "icon": "GitGraph", "label": "Show graph", "tooltip": "Show history graph",
+	_options.add_chips("", [{"id": "graph", "icon": "GitGraph", "label": "Show graph", "tooltip": "Branch lines beside the commits",
 		"action": "history.toggle_graph", "value": true, "default": true, "counted": false}])
 	_options.about_to_popup.connect(_update_scope)
 	_search.option_changed.connect(_on_option)
@@ -183,7 +183,13 @@ func _notification(what: int) -> void:
 		_update_header()
 		_update_empty()
 		for i: int in _match_buttons.size():
-			_match_buttons[i].tooltip_text = tr("Previous match (Shift+Enter)") if i == 0 else tr("Next match (Enter)")
+			_match_buttons[i].tooltip_text = _match_tip(i == 1)
+
+
+## The tooltip of the previous (`next` false) or next match button.
+func _match_tip(next: bool) -> String:
+	return TooltipCard.text_for(tr("Next match"), "Enter") if next \
+			else TooltipCard.text_for(tr("Previous match"), "Shift+Enter")
 
 
 func set_session(value: RepoSession) -> void:

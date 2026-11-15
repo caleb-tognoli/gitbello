@@ -32,7 +32,9 @@ pub mod runtime;
 pub mod scan;
 pub mod sidebar;
 pub mod ui_state;
+pub mod undo_order;
 pub mod watch;
+pub mod web_links;
 pub mod worktree_setup;
 pub mod worktrees;
 

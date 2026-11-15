@@ -210,7 +210,9 @@ impl Runtime {
     /// [`UNDO_IGNORE_JOB_LABEL`].
     pub fn undo_ignore(&mut self, key: &Path) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
-        let undo = self.repos.get_mut(key)?.ignore.undo.pop()?;
+        let state = self.repos.get_mut(key)?;
+        let undo = state.ignore.undo.pop()?;
+        state.undo_popped(UndoKind::IgnoreRule);
         let global = undo.everywhere;
         let job = self.scheduler.submit(JobSpec::write(
             key,
@@ -446,6 +448,7 @@ impl Runtime {
             state.ignore.undo.push(undo.as_ref().clone());
             let excess = state.ignore.undo.len().saturating_sub(MAX_IGNORE_UNDO);
             state.ignore.undo.drain(..excess);
+            state.undo_pushed(UndoKind::IgnoreRule);
         }
         false
     }

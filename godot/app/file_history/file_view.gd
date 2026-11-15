@@ -37,13 +37,10 @@ const COMMIT_HEADER: PackedScene = preload("res://app/history/commit_header.tscn
 const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.tscn")
 ## The diff slot of the session this view shows.
 const SLOT: String = "file"
-## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file", &"",
-	&"diff.toggle_minimap"]
 ## A version's context menu.
 const VERSION_MENU_ACTIONS: Array[StringName] = [&"file_history.compare_versions", &"",
-	&"file_history.restore", &"file_history.open_version", &"", &"file_history.show_in_history", &"",
-	&"file_history.copy_hash"]
+	&"file_history.open_version", &"file_history.show_in_history", &"file_history.copy_hash", &"",
+	&"file_history.restore"]
 ## The blame's slot for the minimap and the next and previous change.
 const BLAME_SLOT: String = "blame"
 ## A blamed line's context menu.
@@ -119,8 +116,8 @@ var _empty: EmptyState = EmptyState.create_compact()
 var _details: VSplitContainer = VSplitContainer.new()
 var _details_header: CommitHeader = COMMIT_HEADER.instantiate() as CommitHeader
 var _diff_panel: DiffPanel = DIFF_PANEL.instantiate() as DiffPanel
-var _menu: PopupMenu = PopupMenu.new()
-var _version_menu: PopupMenu = PopupMenu.new()
+var _menu: ActionMenu = ActionMenu.new()
+var _version_menu: ActionMenu = ActionMenu.new()
 ## The diff, or the blame under its strip.
 var _lower: VBoxContainer = VBoxContainer.new()
 var _blame_box: VBoxContainer = VBoxContainer.new()
@@ -136,7 +133,7 @@ var _blame_loading: LoadingIndicator = LoadingIndicator.new()
 var _blame_message: Label = Label.new()
 ## Instead of the blame: no version selected, or an empty file.
 var _blame_empty: EmptyState = EmptyState.create_compact()
-var _blame_menu: PopupMenu = PopupMenu.new()
+var _blame_menu: ActionMenu = ActionMenu.new()
 
 
 func _ready() -> void:
@@ -178,12 +175,8 @@ func _ready() -> void:
 	_lower.add_child(_diff_panel)
 	_wire_diff()
 	_build_blame()
-	for entry: Array in [[_menu, DIFF_MENU_ACTIONS], [_version_menu, VERSION_MENU_ACTIONS],
-			[_blame_menu, BLAME_MENU_ACTIONS]]:
-		var menu: PopupMenu = entry[0]
-		var ids: Array[StringName] = entry[1]
+	for menu: ActionMenu in [_menu, _version_menu, _blame_menu]:
 		add_child(menu)
-		menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(ids[id]))
 	# Compact rows follow History's setting.
 	add_to_group(HistoryView.GROUP)
 	add_to_group(GROUP)
@@ -661,11 +654,11 @@ func can_restore() -> bool:
 ## Why Restore is off.
 func restore_reason() -> String:
 	if on_working_row():
-		return tr("These are already your files.")
+		return tr("Already your files")
 	var commit: Dictionary = current_version()
 	if not commit.is_empty() and not bool(commit.get("exists", false)):
-		return tr("This commit deleted the file.")
-	return tr("Select one version of the file.")
+		return tr("Deleted in this commit")
+	return tr("Select one version")
 
 
 ## Writes the file as the version under the cursor has it into the working
@@ -726,20 +719,8 @@ func _show_version_menu(row: int, at_position: Vector2) -> void:
 
 
 ## Fills `menu` with `ids` and opens it.
-func _show_actions(menu: PopupMenu, ids: Array[StringName], at: Vector2) -> void:
-	menu.clear()
-	for i: int in ids.size():
-		if ids[i] == &"":
-			menu.add_separator()
-			continue
-		menu.add_icon_item(Actions.icon(ids[i]), Actions.get_action(ids[i]).label, i)
-		menu.set_item_disabled(menu.item_count - 1, not Actions.is_enabled(ids[i]))
-		if ids[i] == &"diff.toggle_minimap":
-			menu.set_item_as_checkable(menu.item_count - 1, true)
-			menu.set_item_checked(menu.item_count - 1, Core.diff_minimap())
-	menu.position = Vector2i(at)
-	menu.reset_size()
-	menu.popup()
+func _show_actions(menu: ActionMenu, ids: Array, at: Vector2) -> void:
+	menu.open(ids, at)
 
 
 # --- Blame ----------------------------------------------------------------------
@@ -778,9 +759,10 @@ func toggle_blame() -> void:
 ## What depends on Blame: its switch and the diff or the blame.
 func _apply_mode() -> void:
 	_blame_button.text = tr("Blame")
-	_blame_button.icon = AppTheme.icon(&"User")
+	_blame_button.icon = AppTheme.icon(&"Blame")
 	_blame_button.set_pressed_no_signal(_blame)
-	_blame_button.tooltip_text = _with_shortcut(tr("Who last changed each line"), &"file_history.blame")
+	_blame_button.tooltip_text = TooltipCard.text_for(tr("Blame"), Actions.shortcut_text(&"file_history.blame"),
+			PackedStringArray([tr("Who last changed each line")]))
 	_blame_button.visible = has_history()
 	_diff_panel.visible = not is_blame()
 	_blame_box.visible = is_blame()
@@ -790,8 +772,7 @@ func _apply_mode() -> void:
 
 
 static func _with_shortcut(text: String, action: StringName) -> String:
-	var shortcut: String = Actions.shortcut_label(action)
-	return text if shortcut.is_empty() else "%s (%s)" % [text, shortcut]
+	return TooltipCard.text_for(text, Actions.shortcut_text(action))
 
 
 ## Forgets the blame shown (another file, or Blame was turned off).
@@ -906,13 +887,13 @@ func _update_blame_bar() -> void:
 	var commit: Dictionary = current_version()
 	if on_working_row():
 		_blame_version.text = tr("Working copy")
-		_blame_version.tooltip_text = tr("The file as it is on disk, uncommitted lines included")
+		_blame_version.tooltip_text = tr("On disk, uncommitted lines included")
 	elif commit.is_empty():
 		_blame_version.text = ""
 		_blame_version.tooltip_text = ""
 	else:
 		_blame_version.text = tr("As of %s") % ("%s  %s" % [ShortHash.of(String(commit["oid"])), String(commit["subject"])])
-		_blame_version.tooltip_text = tr("The file as this commit left it")
+		_blame_version.tooltip_text = tr("As this commit left it")
 	var lines: int = int(_blame_info.get("lines", 0))
 	if not _blame_note.is_empty():
 		_blame_status.text = _blame_note
@@ -986,10 +967,10 @@ func can_blame_before() -> bool:
 func blame_before_reason() -> String:
 	var line: Dictionary = blame_target()
 	if line.is_empty():
-		return tr("Select a line of the blame.")
+		return tr("Select a blame line")
 	if bool(line.get("working", false)):
-		return tr("This line is not committed yet.")
-	return tr("This commit added the file.")
+		return tr("Line not committed yet")
+	return tr("Added in this commit")
 
 
 ## Blames the file as it was before the blamed line's commit: selects the
@@ -1035,10 +1016,10 @@ func can_show_blame_changes() -> bool:
 func show_blame_changes_reason() -> String:
 	var line: Dictionary = blame_target()
 	if line.is_empty():
-		return tr("Select a line of the blame.")
+		return tr("Select a blame line")
 	if bool(line.get("working", false)):
-		return tr("This line is not committed yet.")
-	return tr("That commit is not among the versions listed.")
+		return tr("Line not committed yet")
+	return tr("Commit not in this history")
 
 
 ## Blame off, on the blamed line's commit: what it changed in the file.
@@ -1133,7 +1114,7 @@ func _on_diff_key(event: InputEvent) -> void:
 
 
 func _show_diff_menu(_row: int, at_position: Vector2) -> void:
-	_show_actions(_menu, DIFF_MENU_ACTIONS, _diff_panel.view().get_screen_position() + at_position)
+	_show_actions(_menu, Menus.diff([], false), _diff_panel.view().get_screen_position() + at_position)
 
 
 ## Focuses the versions (the blame when they are hidden).
@@ -1206,7 +1187,7 @@ func loading_indicator() -> LoadingIndicator:
 	return _loading
 
 
-func version_menu() -> PopupMenu:
+func version_menu() -> ActionMenu:
 	return _version_menu
 
 
@@ -1223,7 +1204,7 @@ func options_popover() -> OptionsPopover:
 	return _options
 
 
-func diff_menu() -> PopupMenu:
+func diff_menu() -> ActionMenu:
 	return _menu
 
 
@@ -1247,7 +1228,7 @@ func blame_message_text() -> String:
 	return _blame_message.text if _blame_message.visible else ""
 
 
-func blame_menu() -> PopupMenu:
+func blame_menu() -> ActionMenu:
 	return _blame_menu
 
 

@@ -91,7 +91,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return button.text == "Force push"),
 			"an amended pushed commit makes Sync a force push: %s" % button.text)
 	expect(button.counts().ahead == 1 and button.counts().behind == 1, "the counts stay on the button")
-	expect(button.tooltip_text.begins_with("You rewrote 1 pushed commit."), "the tooltip says why: %s" % button.tooltip_text)
+	expect(button.tooltip_text.contains("Replaces 1 rewritten commit on"), "the tooltip says why: %s" % button.tooltip_text)
 	expect(Actions.run_action(&"sync.sync", button), "Sync runs the force push")
 	await _confirm_force_push(ops, session)
 	expect(await wait_until(func() -> bool: return button.text == "Fetch" and not button.is_busy()),

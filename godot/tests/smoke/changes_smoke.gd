@@ -201,7 +201,7 @@ func run() -> void:
 	session.pick_all(false)
 	expect(await wait_until(func() -> bool: return session.picked_count() == 0), "nothing is checked")
 	expect(not Actions.is_enabled(&"changes.discard_checked"), "Discard selected needs checked files")
-	expect_eq(Actions.disabled_reason(&"changes.discard_checked"), "Check files first.", "and says so")
+	expect_eq(Actions.disabled_reason(&"changes.discard_checked"), "No checked files", "and says so")
 	session.pick_all(true)
 	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "both are checked again")
 	view.diff_view().context_menu_requested.emit(0, Vector2.ZERO)

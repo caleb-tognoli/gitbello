@@ -42,7 +42,8 @@ var _rebuild_queued: bool = false
 var _summaries_queued: bool = false
 
 var _filter: FilterField = preload("res://ui/filter_field/filter_field.tscn").instantiate() as FilterField
-var _add: MenuButton = MenuButton.new()
+var _add: Button = Button.new()
+var _add_menu: ActionMenu = ActionMenu.new()
 var _scroll: ScrollContainer = ScrollContainer.new()
 ## The scrolled content, kept clear of the scroll bar by `_fit_cards`.
 var _scroll_box: MarginContainer = MarginContainer.new()
@@ -58,7 +59,7 @@ var _list: VBoxContainer = VBoxContainer.new()
 ## Instead of the list when the filter matches no repository.
 var _no_match: EmptyState = EmptyState.create_compact()
 ## The context menu of rows and cards (right-click or ⋯), for `_menu_row`.
-var _menu: PopupMenu = PopupMenu.new()
+var _menu: ActionMenu = ActionMenu.new()
 var _menu_row: Dictionary = {}
 var _empty: EmptyState = preload("res://ui/empty_state/empty_state.tscn").instantiate() as EmptyState
 var _body: MarginContainer = MarginContainer.new()
@@ -78,9 +79,11 @@ func _ready() -> void:
 	_add.theme_type_variation = &"PrimaryButton"
 	_add.icon = AppTheme.icon(&"Add")
 	_add.flat = false
-	_add.get_popup().id_pressed.connect(func(id: int) -> void: Actions.run_action(ADD_ACTIONS[id], _add))
-	_add.about_to_popup.connect(_fill_add_menu)
+	_add.pressed.connect(open_add_menu)
+	_add_menu.origin = _add
+	_add_menu.tooltip_for = func(id: StringName) -> String: return Actions.shortcut_label(id)
 	top.add_child(_add)
+	add_child(_add_menu)
 	column.add_child(top)
 
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -129,7 +132,6 @@ func _ready() -> void:
 	_empty.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.add_child(column)
 	add_child(_body)
-	_menu.id_pressed.connect(func(id: int) -> void: _on_row_menu(id, _menu_row))
 	add_child(_menu)
 
 	var saved: Dictionary = Core.repo_ui_state(STATE_KEY)
@@ -169,8 +171,18 @@ func filter_field() -> FilterField:
 	return _filter
 
 
-func add_menu() -> MenuButton:
+func add_menu() -> ActionMenu:
+	return _add_menu
+
+
+func add_button() -> Button:
 	return _add
+
+
+## Opens the Add menu under its button.
+func open_add_menu() -> void:
+	_add_menu.fill(ADD_ACTIONS)
+	_add_menu.open_at(_add.get_screen_position() + Vector2(0.0, _add.size.y))
 
 
 ## Paths of the rows listed now, in order (tests).
@@ -567,23 +579,6 @@ func _clone_row(clone: Dictionary) -> PanelContainer:
 
 # --- Menus and keys ---------------------------------------------------------
 
-func _fill_add_menu() -> void:
-	var popup: PopupMenu = _add.get_popup()
-	popup.clear()
-	for i: int in ADD_ACTIONS.size():
-		var id: StringName = ADD_ACTIONS[i]
-		if id == &"":
-			popup.add_separator()
-			continue
-		var action: ActionRegistry.Action = Actions.get_action(id)
-		if action == null:
-			continue
-		popup.add_icon_item(Actions.icon(id), action.label, i)
-		var shortcut: String = Actions.shortcut_label(id)
-		if not shortcut.is_empty():
-			popup.set_item_tooltip(popup.item_count - 1, shortcut)
-
-
 enum RowItem { OPEN, PIN, RENAME, RELOCATE, SHOW, TERMINAL, COPY, REMOVE }
 
 
@@ -591,31 +586,25 @@ enum RowItem { OPEN, PIN, RENAME, RELOCATE, SHOW, TERMINAL, COPY, REMOVE }
 ## right corner with `from_right`, under the ⋯ button).
 func show_menu(row: Dictionary, at: Vector2, from_right: bool = false) -> void:
 	_menu_row = row
-	_fill_row_menu(row)
+	_menu.fill(Menus.home_row())
 	_menu.reset_size()
 	_menu.position = Vector2i(at) - Vector2i(_menu.size.x if from_right else 0, 0)
 	_menu.popup()
 
 
-func row_menu() -> PopupMenu:
+func row_menu() -> ActionMenu:
 	return _menu
 
 
-func _fill_row_menu(row: Dictionary) -> void:
-	var popup: PopupMenu = _menu
-	popup.clear()
-	var add: Callable = func(icon_name: StringName, text: String, id: RowItem) -> void:
-		popup.add_icon_item(AppTheme.icon(icon_name), tr(text), id)
-	add.call(&"FolderAdd", "Open", RowItem.OPEN)
-	add.call(&"Pin", "Unpin" if bool(row["pinned"]) else "Pin", RowItem.PIN)
-	add.call(&"Rename", "Rename…", RowItem.RENAME)
-	add.call(&"Folder", "Change location…", RowItem.RELOCATE)
-	popup.add_separator()
-	add.call(&"Folder", "Show in file manager", RowItem.SHOW)
-	add.call(&"Terminal", "Open terminal", RowItem.TERMINAL)
-	add.call(&"ActionCopy", "Copy path", RowItem.COPY)
-	popup.add_separator()
-	add.call(&"Remove", "Remove from list", RowItem.REMOVE)
+## The library entry the row menu was opened on.
+func menu_row() -> Dictionary:
+	return _menu_row
+
+
+## Runs a row menu entry on the menu's row (for the `home.row_*` actions).
+func run_menu_item(item: RowItem) -> void:
+	if not _menu_row.is_empty():
+		_on_row_menu(item, _menu_row)
 
 
 func _on_row_menu(id: int, row: Dictionary) -> void:

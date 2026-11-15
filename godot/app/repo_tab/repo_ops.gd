@@ -584,23 +584,23 @@ func _rename_branch(values: Dictionary, old: String) -> void:
 func branch_delete_block(branch: String) -> String:
 	var ref: Dictionary = _branch_ref("branch", branch)
 	if ref.is_empty():
-		return tr("There is no branch checked out.")
+		return tr("No branch checked out")
 	var holder: String = String(ref.get("worktree", ""))
 	if bool(ref["is_head"]) or (not holder.is_empty() and Paths.same(holder, session.toplevel())):
 		if not _this_worktree().is_empty() and not bool(_this_worktree()["is_main"]):
 			return ""
 		var base: String = base_branch()
 		if base.is_empty():
-			return tr("There is no main branch to switch to.")
+			return tr("No main branch")
 		if base == branch:
-			return tr("Switch to another branch to delete %s.") % branch
+			return tr("Switch away from %s first") % branch
 		var base_holder: String = String(_branch_ref("branch", base).get("worktree", ""))
 		if not base_holder.is_empty() and not Paths.same(base_holder, session.toplevel()):
-			return tr("%s is checked out in another worktree.") % base
+			return tr("%s is checked out in another worktree") % base
 		return ""
 	var wt: Dictionary = _worktree_at(holder)
 	if not wt.is_empty() and bool(wt["is_main"]):
-		return tr("%s is checked out in the main worktree.") % branch
+		return tr("%s is checked out in the main worktree") % branch
 	return ""
 
 
@@ -1863,7 +1863,7 @@ func _check_cleanup(values: Dictionary) -> String:
 	for i: int in _cleanup_list.size():
 		if bool(values.get("wt%d" % i, false)):
 			return ""
-	return tr("Select a worktree.")
+	return tr("Select a worktree")
 
 
 func _run_cleanup(values: Dictionary) -> void:

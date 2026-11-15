@@ -49,19 +49,18 @@ var ops: RepoOps = null
 var _confirm: ConfirmationDialog = ConfirmationDialog.new()
 ## Runs when the user confirms the discard dialog.
 var _pending_discard: Callable = Callable()
-var _menu: PopupMenu = PopupMenu.new()
-var _menu_actions: Array[StringName] = []
+var _menu: ActionMenu = ActionMenu.new()
 ## The quick rules and the Ignore dialog (M7.7a).
 var _ignore: IgnoreOps = IgnoreOps.new()
-## Stands in the menu's action list for the Ignore submenu.
-const IGNORE_MENU: StringName = &"changes.ignore_menu"
 ## The quick rules of the Ignore submenu, by item id.
 const IGNORE_KINDS: Array[String] = ["file", "extension", "folder"]
+## Their icons in the Ignore submenu.
+const IGNORE_ICONS: Dictionary[String, StringName] = {"file": &"TextFile", "extension": &"Filter", "folder": &"Folder"}
 ## Suggests ignoring a folder of build output or downloads (M7.7b).
 var _hint_bar: PanelContainer = PanelContainer.new()
 var _hint_button: Button = Button.new()
 var _hint_close: Button = Button.new()
-var _hint_menu: PopupMenu = PopupMenu.new()
+var _hint_menu: ActionMenu = ActionMenu.new()
 ## The diff shows a shelved file (not a change): keep it over status reloads.
 var _showing_shelf: bool = false
 var _shelves_mode: bool = false
@@ -74,8 +73,7 @@ var _jump_to_block: bool = false
 ## row, rows, text]`, or [].
 var _choice: Array = []
 ## Both ▾ of a conflict header: ours then theirs, or theirs then ours.
-var _both_menu: PopupMenu = PopupMenu.new()
-var _both_block: int = -1
+var _both_menu: ActionMenu = ActionMenu.new()
 ## `open_first_conflict` waits (until this tick count) for the status that
 ## lists the conflicts; 0 when not waiting.
 var _want_conflict_until: int = 0
@@ -184,10 +182,6 @@ func _ready() -> void:
 	_diff_panel.conflict_changes_requested.connect(func(on: bool) -> void: session.show_conflict_changes(on))
 	_diff_view.undo_choice_requested.connect(func() -> void: Actions.run_action(&"conflict.undo"))
 	_diff_panel.open_side_requested.connect(func(side: String) -> void: session.open_version("changes", side))
-	_both_menu.add_item("Ours first", 0)
-	_both_menu.add_item("Theirs first", 1)
-	_both_menu.id_pressed.connect(func(id: int) -> void:
-		resolve_block(_both_block, "ours_theirs" if id == 0 else "theirs_ours"))
 	add_child(_both_menu)
 	_diff_panel.clear("No file selected")
 	_confirm.confirmed.connect(func() -> void:
@@ -196,7 +190,6 @@ func _ready() -> void:
 		_pending_discard = Callable())
 	add_child(_confirm)
 	add_child(_menu)
-	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_menu_actions[id]))
 	add_child(_ignore)
 	_shelves.menu_requested.connect(_show_shelf_menu)
 	_shelves.shelf_selected.connect(_on_shelf_selected)
@@ -412,7 +405,7 @@ func _on_shelf_selected(shelf: Dictionary) -> void:
 		return
 	_shelf_title.text = String(shelf["name"])
 	_shelf_title.tooltip_text = tr("%s\nClick to rename") % shelf["name"]
-	(%RestoreShelf as Button).tooltip_text = tr("Restore into %s; remove the shelf after success") % session.current_branch()
+	(%RestoreShelf as Button).tooltip_text = tr("Restore into %s, then remove the shelf") % session.current_branch()
 	(%DiscardShelf as Button).tooltip_text = Actions.tooltip(&"shelf.discard")
 	var branch: String = String(shelf["branch"])
 	_shelf_branch.text = branch if not branch.is_empty() else tr("No branch")
@@ -520,23 +513,11 @@ func _listed_changes() -> int:
 
 
 func _show_header_menu(at: Vector2) -> void:
-	_menu.clear()
-	_menu_actions.assign([&"changes.shelve_checked", &"changes.shelve_listed", &"",
-		&"changes.discard_checked", &"changes.discard_listed"])
-	for index: int in _menu_actions.size():
-		var id: StringName = _menu_actions[index]
-		if id == &"":
-			_menu.add_separator()
-			continue
-		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, index)
-		_menu.set_item_disabled(index, not Actions.is_enabled(id))
-		_menu.set_item_tooltip(index, Actions.tooltip(id))
-	_menu.position = Vector2i(at)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open([&"changes.shelve_checked", &"changes.shelve_listed", &"",
+		&"changes.discard_checked", &"changes.discard_listed"], at)
 
 
-func context_menu() -> PopupMenu:
+func context_menu() -> ActionMenu:
 	return _menu
 
 
@@ -585,17 +566,7 @@ func _show_shelf_file(oid: String, path: String) -> void:
 
 
 func _show_shelf_menu(_shelf: Dictionary, at: Vector2) -> void:
-	_menu.clear()
-	_menu_actions.clear()
-	for id: StringName in [&"shelf.restore", &"shelf.rename", &"shelf.discard"]:
-		if Actions.is_enabled(id):
-			_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
-			_menu_actions.append(id)
-	if _menu.item_count == 0:
-		return
-	_menu.position = Vector2i(at)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open([&"shelf.restore", &"shelf.rename", &"", &"shelf.discard"], at)
 
 
 func _show_shelf_file_menu(row: int, at: Vector2) -> void:
@@ -603,20 +574,8 @@ func _show_shelf_file_menu(row: int, at: Vector2) -> void:
 	if path.is_empty():
 		return
 	_shelf_files.choose_path(path)
-	_menu.clear()
-	_menu_actions.clear()
-	for id: StringName in [&"shelf.restore_file", &"shelf.discard_file", &"", &"diff.open_file",
-			&"file_history.open"]:
-		if id == &"":
-			_menu.add_separator()
-			_menu_actions.append(&"")
-			continue
-		_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
-		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(id))
-		_menu_actions.append(id)
-	_menu.position = Vector2i(_shelf_files.get_screen_position() + at)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open(Menus.file_at_commit([&"shelf.restore_file", &"", &"shelf.discard_file"]),
+		_shelf_files.get_screen_position() + at)
 
 
 ## Re-reads the list from the session (after every status change).
@@ -880,15 +839,13 @@ func _on_block_action(block: int, action: String) -> void:
 	if action != "both":
 		resolve_block(block, action)
 		return
-	_both_block = block
 	var names: PackedStringArray = _diff_view.side_names
-	_both_menu.set_item_text(0, tr("%s first") % names[0])
-	_both_menu.set_item_text(1, tr("%s first") % names[1])
+	_both_menu.fill([
+		ActionMenu.item(tr("%s first") % names[0], resolve_block.bind(block, "ours_theirs")),
+		ActionMenu.item(tr("%s first") % names[1], resolve_block.bind(block, "theirs_ours"))])
 	# Under the header's Both ▾ button.
 	var button: Rect2 = _diff_view.block_button_rect(_diff_view.find_block_header(-1, true, block), "both")
-	_both_menu.position = Vector2i(_diff_view.get_screen_position() + button.position + Vector2(0.0, button.size.y))
-	_both_menu.reset_size()
-	_both_menu.popup()
+	_both_menu.open_at(_diff_view.get_screen_position() + button.position + Vector2(0.0, button.size.y))
 
 
 ## Show base: shows the base between the sides, or (markers without one)
@@ -1047,76 +1004,41 @@ func _on_selection_changed() -> void:
 
 ## Context menu for the list or the diff: the actions that apply right now.
 func _show_menu(_row: int, at_position: Vector2, source: Control) -> void:
-	_menu.clear(true)
-	_menu_actions.clear()
 	# The files' menu acts on the highlighted file: open it, resolve it, ignore
 	# it, then shelve or discard it. The checked files' actions are in the
 	# header's.
-	var ids: Array[StringName] = [&"diff.open_file", &"changes.show_file", &"changes.copy_path",
-		&"file_history.open", &"",
-		&"conflict.file_ours", &"conflict.file_theirs", &"conflict.reopen", &"",
-		IGNORE_MENU, &"changes.restore_line_endings", &"", &"changes.shelve", &"changes.discard",
-		&"changes.undo_discard"]
+	var ids: Array = Menus.changed_file(_ignore_menu())
 	if source == _diff_view:
-		ids = [&"diff.copy", &"diff.select_all", &"", &"changes.restore_line_endings", &"changes.discard",
-			&"changes.undo_discard"]
+		ids = Menus.diff([&"changes.restore_line_endings", &"changes.discard", &"changes.undo_discard"])
 		if has_conflict_blocks():
-			ids = [&"conflict.use_ours", &"conflict.use_theirs", &"conflict.use_both", &"conflict.use_both_reversed",
-				&"", &"conflict.undo", &"", &"diff.copy", &"diff.select_all"]
-		ids.append_array([&"", &"diff.open_file", &"file_history.open", &"", &"diff.toggle_minimap"])
+			ids = Menus.conflict_block()
 	elif _highlights_ignored():
 		# An ignored file is not a change: it can only be opened or brought back.
-		ids = [&"diff.open_file", &"changes.show_file", &"changes.copy_path", &"",
-			&"changes.stop_ignoring", &"changes.undo_ignore"]
-	for id: StringName in ids:
-		if id == &"":
-			if _menu.item_count > 0 and not _menu.is_item_separator(_menu.item_count - 1):
-				_menu.add_separator()
-				_menu_actions.append(&"")
-			continue
-		if id == IGNORE_MENU:
-			_add_ignore_menu()
-			continue
-		if not Actions.is_enabled(id):
-			continue
-		var action: ActionRegistry.Action = Actions.get_action(id)
-		_menu.add_icon_item(Actions.icon(id), action.label, _menu_actions.size())
-		if id == &"diff.toggle_minimap":
-			_menu.set_item_as_checkable(_menu.item_count - 1, true)
-			_menu.set_item_checked(_menu.item_count - 1, Core.diff_minimap())
-		_menu_actions.append(id)
-	if _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
-		_menu.remove_item(_menu.item_count - 1)
-		_menu_actions.pop_back()
-	if _menu.item_count == 0:
-		return
-	_menu.position = Vector2i(source.get_screen_position() + at_position)
-	_menu.reset_size()
-	_menu.popup()
+		ids = Menus.ignored_file()
+	var count: int = _list.highlighted_rows().size()
+	if source != _diff_view and count > 1:
+		ids.push_front(ActionMenu.title(tr("%d files") % count))
+	_menu.open(ids, source.get_screen_position() + at_position)
 
 
 ## The Ignore ▸ submenu of the files' menu: the quick rules for the
-## highlighted files, then the dialog.
-func _add_ignore_menu() -> void:
+## highlighted files, then the dialog. Left out when the files cannot be
+## ignored.
+func _ignore_menu() -> Variant:
 	if not can_ignore():
-		return
-	var paths: PackedStringArray = ignore_paths()
-	var sub: PopupMenu = PopupMenu.new()
-	for i: int in IGNORE_KINDS.size():
-		var label: String = _ignore.quick_label(paths, IGNORE_KINDS[i])
-		if not label.is_empty():
-			sub.add_item(label, i)
-	if sub.item_count > 0:
-		sub.add_separator()
-	sub.add_item(Actions.get_action(&"changes.ignore").label, IGNORE_KINDS.size())
-	sub.id_pressed.connect(func(id: int) -> void:
-		if id < IGNORE_KINDS.size():
-			ignore_quick(IGNORE_KINDS[id])
-		else:
-			Actions.run_action(&"changes.ignore"))
-	_menu.add_submenu_node_item(tr("Ignore"), sub, _menu_actions.size())
-	_menu.set_item_icon(_menu.item_count - 1, AppTheme.icon(&"GitIgnore"))
-	_menu_actions.append(&"")
+		return &""
+	return ActionMenu.dynamic(tr("Ignore"), func() -> Array:
+		var paths: PackedStringArray = ignore_paths()
+		var items: Array = []
+		for kind: String in IGNORE_KINDS:
+			var label: String = _ignore.quick_label(paths, kind)
+			if not label.is_empty():
+				items.append({"label": label, "run": ignore_quick.bind(kind), "icon": IGNORE_ICONS[kind]})
+		if not items.is_empty():
+			items.append({})
+		items.append({"label": Actions.get_action(&"changes.ignore").menu_label,
+			"run": func() -> void: Actions.run_action(&"changes.ignore"), "icon": &"GitIgnore"})
+		return items, &"GitIgnore")
 
 
 ## The highlighted files that rules can ignore (none while one is conflicted
@@ -1203,7 +1125,7 @@ func hint_bar() -> Control:
 	return _hint_bar
 
 
-func hint_menu() -> PopupMenu:
+func hint_menu() -> ActionMenu:
 	return _hint_menu
 
 
@@ -1226,13 +1148,12 @@ func _update_hint() -> void:
 	var count: int = int(hint["count"])
 	var folder: String = String(hint["folder"]) + "/"
 	_hint_button.text = tr("Ignore %s") % folder
-	_hint_button.tooltip_text = (tr("1 new file is in %s, which usually holds build output or downloads.") % folder
-			if count == 1 else tr("%d new files are in %s, which usually holds build output or downloads.") % [count, folder])
+	_hint_button.tooltip_text = (tr("1 new file in %s, usually build output or downloads") % folder
+			if count == 1 else tr("%d new files in %s, usually build output or downloads") % [count, folder])
 	_hint_close.tooltip_text = tr("Keep %s") % folder
-	_hint_menu.clear()
-	_hint_menu.add_icon_item(AppTheme.icon(&"Close"), tr("Don't suggest %s again") % folder, 0)
-	_hint_menu.add_icon_item(AppTheme.icon(&"Tools"), tr("Never suggest folders to ignore"), 1)
-	_hint_menu.set_item_tooltip(1, tr("Turn it back on in Settings → General"))
+	_hint_menu.fill([ActionMenu.item(tr("Don't suggest %s again") % folder, dismiss_ignore_hint, &"Close"),
+		ActionMenu.item(tr("Never suggest folders to ignore"), disable_ignore_hint, &"Tools")])
+	_hint_menu.set_item_tooltip(1, tr("Back on in Settings → General"))
 
 
 func _build_hint_bar() -> void:
@@ -1252,11 +1173,6 @@ func _build_hint_bar() -> void:
 	_hint_close.icon = AppTheme.icon(&"Close")
 	_hint_close.pressed.connect(open_hint_menu)
 	row.add_child(_hint_close)
-	_hint_menu.id_pressed.connect(func(id: int) -> void:
-		if id == 0:
-			dismiss_ignore_hint()
-		else:
-			disable_ignore_hint())
 	_hint_bar.add_child(_hint_menu)
 	_files.add_child(_hint_bar)
 	_files.move_child(_hint_bar, _offer_bar.get_index() + 1)
@@ -1296,20 +1212,13 @@ func ignore_ops() -> IgnoreOps:
 
 
 ## The Ignore ▸ submenu of the last files' menu, or null (for tests).
-func ignore_menu() -> PopupMenu:
-	for i: int in _menu.item_count:
-		if _menu.get_item_submenu_node(i) != null:
-			return _menu.get_item_submenu_node(i)
-	return null
+func ignore_menu() -> ActionMenu:
+	return _menu.submenu(tr("Ignore"))
 
 
 ## The context menu's labels, for tests.
 func menu_labels() -> PackedStringArray:
-	var out: PackedStringArray = PackedStringArray()
-	for i: int in _menu.item_count:
-		if not _menu.is_item_separator(i):
-			out.append(_menu.get_item_text(i))
-	return out
+	return _menu.top_labels()
 
 
 func _on_current_changed(path: String) -> void:
@@ -1394,7 +1303,7 @@ func _on_diff_changed() -> void:
 	_diff_view.pickable = bool(info.get("pickable", false))
 	if bool(info.get("as_staged", false)):
 		var notes: PackedStringArray = info.get("notes", PackedStringArray())
-		notes.append("Included content is preserved from when amend started. Check the file to include its current contents." if _commit_box.is_amend() else "Staged in part outside gitbello: committed as staged")
+		notes.append("Included as when amend started; check it again for its current contents" if _commit_box.is_amend() else "Staged in part outside gitbello: committed as staged")
 		info["notes"] = notes
 	if String(info.get("kind", "")) == "conflict":
 		_diff_view.side_names = _side_names(info.get("conflict", {}))

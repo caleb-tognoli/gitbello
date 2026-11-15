@@ -18,7 +18,7 @@ func run() -> void:
 	var info: Button = null
 	for node: Node in main.toasts().find_children("*", "Button", true, false):
 		var button: Button = node as Button
-		if button.tooltip_text == "Show error details":
+		if button.tooltip_text == "Details":
 			info = button
 	expect(info != null, "classified error exposes the existing Info button")
 	if info == null:

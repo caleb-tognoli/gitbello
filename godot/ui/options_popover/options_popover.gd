@@ -354,9 +354,7 @@ func _refresh_texts() -> void:
 static func _set_text(object: Object, property: StringName, key: String, action: StringName) -> void:
 	var text: String = String(TranslationServer.translate(key)) if not key.is_empty() else ""
 	if action != &"":
-		var shortcut: String = Actions.shortcut_label(action)
-		if not shortcut.is_empty():
-			text = "%s (%s)" % [text, shortcut]
+		text = TooltipCard.text_for(text, Actions.shortcut_text(action))
 	object.set(property, text)
 
 

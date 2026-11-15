@@ -117,7 +117,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
 		_apply_theme()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED and is_node_ready():
-		_slider.tooltip_text = tr("Opacity of the new image")
+		_slider.tooltip_text = tr("New image opacity")
 		_update_bar()
 		queue_redraw()
 
@@ -134,7 +134,7 @@ func _apply_theme() -> void:
 	blank.fill(Color.WHITE)
 	_blank = ImageTexture.create_from_image(blank)
 	_material.set_shader_parameter(&"changed_color", get_theme_color(&"changed_color", THEME_TYPE))
-	_slider.tooltip_text = tr("Opacity of the new image")
+	_slider.tooltip_text = tr("New image opacity")
 	for id: StringName in [&"fit", &"zoom_out", &"zoom_in"]:
 		_bar_buttons[id].icon = AppTheme.icon({&"fit": &"ZoomFit", &"zoom_out": &"ZoomOut", &"zoom_in": &"ZoomIn"}[id])
 	_place_slider()
@@ -752,9 +752,7 @@ func _update_bar() -> void:
 	_bar_buttons[&"zoom_in"].disabled = shown >= MAX_ZOOM - ZoomLevels.EPSILON
 	for entry: Array in [[&"fit", "Fit to the view", &"image.zoom_fit"], [&"zoom_out", "Zoom out", &"image.zoom_out"],
 			[&"actual", "Actual size", &"image.zoom_actual"], [&"zoom_in", "Zoom in", &"image.zoom_in"]]:
-		var shortcut: String = Actions.shortcut_label(entry[2])
-		_bar_buttons[entry[0]].tooltip_text = tr(String(entry[1])) if shortcut.is_empty() \
-				else "%s (%s)" % [tr(String(entry[1])), shortcut]
+		_bar_buttons[entry[0]].tooltip_text = TooltipCard.text_for(tr(String(entry[1])), Actions.shortcut_text(entry[2]))
 
 
 func _place_bar() -> void:

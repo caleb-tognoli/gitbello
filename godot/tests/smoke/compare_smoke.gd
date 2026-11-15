@@ -165,10 +165,9 @@ func run() -> void:
 			login = {"type": "branch", "name": String(ref["name"]), "short": "feature/login",
 				"commit": String(ref["commit"]), "is_head": false, "upstream": "", "worktree": ""}
 	worktree.show_ref_menu(login, Vector2(100, 100))
-	var labels: PackedStringArray = worktree.menu_labels()
-	expect(labels.has(tr("Compare with current branch")) and labels.has(tr("Compare with…")),
-			"the branch menu offers Compare: %s" % ", ".join(labels))
-	expect(worktree.press_menu(tr("Compare with current branch")), "Compare with current branch runs")
+	var ids: Array[StringName] = worktree.menu_ids()
+	expect(&"compare.with_current" in ids and &"compare.with" in ids, "the branch menu offers Compare: %s" % [ids])
+	expect(worktree.press_menu_id(&"compare.with_current"), "Compare with current branch runs")
 	expect(await _compared(session), "main ⇄ feature/login compares")
 	expect_eq(compare.bar_button("left").text, "main", "the current branch is the base")
 	expect_eq(compare.bar_button("right").text, "feature/login", "the branch is compared")

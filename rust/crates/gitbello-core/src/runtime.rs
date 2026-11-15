@@ -57,6 +57,7 @@ use crate::repo::{
 };
 use crate::scan::{self, ScanHit};
 use crate::sidebar::{labels_by_commit, Badge, RefLabel};
+use crate::undo_order::{UndoKind, UndoOrder};
 use crate::watch::{RepoWatcher, WatchTarget, DEFAULT_DEBOUNCE};
 use crate::worktrees::{cleanup_candidates, default_base, CleanupCandidate};
 
@@ -68,6 +69,7 @@ mod compare;
 mod file_history;
 mod ignore;
 mod new_worktree;
+mod web_pages;
 use amend::{apply_amend, refresh_amend, selection_write, AmendSession};
 use avatars::{apply_avatar, AvatarBook};
 pub use avatars::{Picture, AVATAR_CACHE_JOB_LABEL, AVATAR_JOB_LABEL};
@@ -698,6 +700,8 @@ pub struct RepoState {
     blame: Option<BlameState>,
     /// Backups of recent discards, newest last.
     discards: Vec<Vec<(PathBuf, String)>>,
+    /// The order the file-level undos above were pushed in (Edit → Undo).
+    undo_order: UndoOrder,
     /// Modified files whose only unstaged changes are line endings or the
     /// final newline (the line-endings scan after each status).
     endings_only: HashSet<PathBuf>,
@@ -785,6 +789,7 @@ impl RepoState {
             file_diff: None,
             blame: None,
             discards: Vec::new(),
+            undo_order: UndoOrder::default(),
             endings_only: HashSet::new(),
             endings_inputs: None,
             history_scope: crate::graph::HistoryScope::default(),
@@ -1381,6 +1386,34 @@ impl RepoState {
         !self.discards.is_empty()
     }
 
+    /// The newest file-level undo (a discard, an ignore rule, a shelf
+    /// discard or a conflict choice), for Edit → Undo; `None` when there is
+    /// nothing to undo.
+    pub fn newest_undo(&self) -> Option<UndoKind> {
+        self.undo_order.newest(|kind| self.undo_len(kind))
+    }
+
+    fn undo_len(&self, kind: UndoKind) -> usize {
+        match kind {
+            UndoKind::Discard => self.discards.len(),
+            UndoKind::IgnoreRule => self.ignore.undo.len(),
+            UndoKind::ShelfDiscard => self.dropped_shelves.len(),
+            UndoKind::ConflictChoice => self.conflict_undo.len(),
+        }
+    }
+
+    /// Records an undo entry of `kind` just pushed, forgetting entries the
+    /// stacks dropped on their own.
+    pub(crate) fn undo_pushed(&mut self, kind: UndoKind) {
+        self.undo_order.pushed(kind);
+        let lens = UndoKind::ALL.map(|k| self.undo_len(k));
+        self.undo_order.trim(|k| lens[k.index()]);
+    }
+
+    pub(crate) fn undo_popped(&mut self, kind: UndoKind) {
+        self.undo_order.popped(kind);
+    }
+
     /// Names of the configured remotes (empty until refs are read).
     pub fn remotes(&self) -> &[String] {
         self.remotes.as_deref().unwrap_or(&[])
@@ -1558,10 +1591,7 @@ impl RepoState {
             });
         }
         if amend {
-            return status
-                .oid
-                .is_none()
-                .then_some("There is no commit to amend");
+            return status.oid.is_none().then_some("No commits yet");
         }
         (self.selection.picked_count() == 0).then_some("Nothing included")
     }
@@ -2683,7 +2713,9 @@ impl Runtime {
     /// Writes back the files of the most recent discard.
     pub fn undo_discard(&mut self, key: &Path) -> Option<JobId> {
         let toplevel = self.toplevel_of(key)?;
-        let files = self.repos.get_mut(key)?.discards.pop()?;
+        let state = self.repos.get_mut(key)?;
+        let files = state.discards.pop()?;
+        state.undo_popped(UndoKind::Discard);
         Some(self.scheduler.submit(JobSpec::write(
             key,
             UNDO_DISCARD_JOB_LABEL,
@@ -3401,6 +3433,7 @@ impl Runtime {
         let toplevel = self.toplevel_of(key)?;
         let state = self.repos.get_mut(key)?;
         let undo = state.conflict_undo.pop()?;
+        state.undo_popped(UndoKind::ConflictChoice);
         let reopen = !state.is_unmerged(&undo.path);
         let shown = state.conflict.as_ref().map(|c| c.path.as_path()) == Some(&undo.path)
             || state.diff.as_ref().map(|d| d.target.path.as_path()) == Some(&undo.path);
@@ -4131,6 +4164,7 @@ impl Runtime {
             });
             let excess = state.conflict_undo.len().saturating_sub(MAX_CONFLICT_UNDO);
             state.conflict_undo.drain(..excess);
+            state.undo_pushed(UndoKind::ConflictChoice);
         }
         if let EventKind::Finished(Ok(JobOutput::CommitUndone(message))) = &kind {
             out.push(RuntimeEvent::CommitUndone {
@@ -4294,15 +4328,18 @@ impl Runtime {
                 new_oid: None,
                 subject: subject.clone(),
             });
+            state.undo_pushed(UndoKind::ShelfDiscard);
         }
         if let EventKind::Finished(Ok(JobOutput::ShelfChanged { change, remember })) = &kind {
             if *remember {
                 state.dropped_shelves.push(change.clone());
+                state.undo_pushed(UndoKind::ShelfDiscard);
             }
         }
         if let EventKind::Finished(Ok(JobOutput::ShelfUndone(change))) = &kind {
             if state.dropped_shelves.last() == Some(change) {
                 state.dropped_shelves.pop();
+                state.undo_popped(UndoKind::ShelfDiscard);
             }
         }
         let common = state.paths.as_ref().map(|p| p.common_dir.clone());
@@ -4399,6 +4436,7 @@ impl Runtime {
                 state.discards.push(backups.clone());
                 let excess = state.discards.len().saturating_sub(MAX_DISCARD_UNDO);
                 state.discards.drain(..excess);
+                state.undo_pushed(UndoKind::Discard);
             }
         }
         let state = match kind {

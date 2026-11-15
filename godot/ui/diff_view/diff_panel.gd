@@ -123,7 +123,7 @@ var _side_bar_icon: TextureRect = TextureRect.new()
 var _side_bar_text: Label = Label.new()
 var _side_bar_buttons: HBoxContainer = HBoxContainer.new()
 ## The image viewer's context menu (Open) and the side it was opened on.
-var _image_menu: PopupMenu = PopupMenu.new()
+var _image_menu: ActionMenu = ActionMenu.new()
 var _image_menu_side: String = ""
 var _columns: Control = Control.new()
 ## Conflict blocks of the file shown (0 when it is no conflict).
@@ -221,7 +221,6 @@ func _build_image_views() -> void:
 	_image_view.view_changed.connect(func() -> void: _sharpen(_image_view))
 	_image_view.side_menu_requested.connect(_show_image_menu)
 	add_child(_image_menu)
-	_image_menu.id_pressed.connect(func(_id: int) -> void: open_side_requested.emit(_image_menu_side))
 	set_process(false)
 	_preview.interactive = false
 	_preview.mode = "split"
@@ -270,9 +269,7 @@ func _build_conflict_bar() -> void:
 		button.theme_type_variation = &"IconToggle"
 		button.focus_mode = Control.FOCUS_NONE
 		button.icon = Actions.icon(entry[0])
-		var action: ActionRegistry.Action = Actions.get_action(entry[0])
-		var shortcut: String = Actions.shortcut_label(entry[0])
-		button.tooltip_text = action.label if shortcut.is_empty() else "%s (%s)" % [action.label, shortcut]
+		button.tooltip_text = Actions.tooltip(entry[0], false)
 		var forward: bool = entry[1]
 		button.pressed.connect(func() -> void: conflict_step_requested.emit(forward))
 		if forward:
@@ -441,14 +438,17 @@ func _notification(what: int) -> void:
 
 func _update_layout_tooltips() -> void:
 	_retry.text = tr("Retry")
-	var shortcut: String = Actions.shortcut_label(&"diff.cycle_mode")
+	var shortcut: String = Actions.shortcut_text(&"diff.cycle_mode")
+	var cycle: ActionRegistry.Action = Actions.get_action(&"diff.cycle_mode")
 	for child: Node in _switch.get_children():
 		var button: Button = child as Button
 		var entry: Array = MODES.get("%s:%s" % [_viewer, String(button.get_meta(&"mode"))], [])
 		if entry.is_empty():
 			continue
-		var tip: String = "%s\n%s" % [tr(String(entry[1])), tr(String(entry[2]))]
-		button.tooltip_text = tip if shortcut.is_empty() else tr("%s\n%s switches") % [tip, shortcut]
+		var tip: String = TooltipCard.text_for(tr(String(entry[1])), "", PackedStringArray([tr(String(entry[2]))]))
+		if not shortcut.is_empty() and cycle != null:
+			tip += "\n%s%s%s" % [cycle.menu_label, TooltipCard.SHORTCUT_SEPARATOR, shortcut]
+		button.tooltip_text = tip
 
 
 func view() -> DiffView:
@@ -1169,15 +1169,12 @@ func _touch(id: String) -> void:
 ## The image viewer's context menu over `side` (OLD or NEW) at `at`: Open.
 func _show_image_menu(side: int, at: Vector2) -> void:
 	_image_menu_side = "old" if side == ImageDiffView.OLD else "new"
-	_image_menu.clear()
-	_image_menu.add_icon_item(Actions.icon(&"diff.open_file"), tr("Open"), 0)
-	_image_menu.position = Vector2i(_image_view.get_screen_position() + at)
-	_image_menu.reset_size()
-	_image_menu.popup()
+	_image_menu.open([ActionMenu.item(tr("Open"), func() -> void: open_side_requested.emit(_image_menu_side),
+		&"ExternalLink")], _image_view.get_screen_position() + at)
 
 
 ## The image viewer's context menu (for tests).
-func image_menu() -> PopupMenu:
+func image_menu() -> ActionMenu:
 	return _image_menu
 
 
@@ -1283,9 +1280,8 @@ func base_button() -> Button:
 func _show_whole_button(shown: bool, pressed: bool) -> void:
 	_whole_button.visible = shown
 	_whole_button.set_pressed_no_signal(pressed)
-	var shortcut: String = Actions.shortcut_label(&"diff.toggle_whole_file")
 	var tip: String = tr("Show only the changes") if pressed else tr("Show the whole file")
-	_whole_button.tooltip_text = tip if shortcut.is_empty() else "%s (%s)" % [tip, shortcut]
+	_whole_button.tooltip_text = TooltipCard.text_for(tip, Actions.shortcut_text(&"diff.toggle_whole_file"))
 
 
 func show_message(text: String, offer_full: bool = false) -> void:

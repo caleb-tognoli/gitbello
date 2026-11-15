@@ -2,55 +2,51 @@ class_name AppMenuBar
 extends MenuBar
 
 
-class MenuPopup:
-	extends PopupMenu
-	signal menu_key(event: InputEvent)
-
-	func _unhandled_key_input(event: InputEvent) -> void:
-		menu_key.emit(event)
-
 ## The menu bar (PLAN §4): every entry is an action of the registry, so its
 ## label, shortcut and enabled state match the palette and the shortcuts.
 ## Entries are refreshed each time a menu opens; a disabled one says why in
 ## its tooltip. On macOS it becomes the system's global menu where Godot
 ## supports it (`prefer_global_menu`).
 
-## Menus and their actions, in order; &"" is a separator, a String names a
-## submenu filled by `dynamic_menus`, and an Array is a static action submenu.
+## Menus and their actions, in order (M7.17): &"" is a separator, a String
+## names a submenu filled by `dynamic_menus`, `[title, ids]` is a submenu of
+## actions and `[title, ids, labels]` a family whose items show `labels`
+## (translated when shown) instead of their menu labels.
 const MENUS: Array[Array] = [
-	["File", [&"home.open", &"", &"repo.add_existing", "Open recent", &"repo.clone", &"repo.scan",
-		["New repository", [&"repo.create", &"repo.init"]], &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
-	["Edit", [&"diff.copy", &"diff.select_all", &"",
-		["Undo", [&"changes.undo_discard", &"changes.undo_ignore", &"shelf.undo_discard", &"conflict.undo", &"commit.undo"]], &"",
+	["File", [&"home.open", &"", &"repo.add_existing", "Open recent", &"repo.clone", &"repo.scan", &"repo.create",
+		&"repo.init", &"", &"tab.close", &"", &"app.settings", &"", &"app.quit"]],
+	["Edit", [&"edit.undo", &"", &"diff.copy", &"diff.select_all", &"",
 		&"view.find", &"history.next_match", &"history.previous_match"]],
-	["Repository", [&"sync.fetch", &"sync.pull", &"sync.push", &"", &"task.new",
-		["Worktrees", [&"worktree.setup", &"worktree.cleanup", &"worktree.prune"]], &"",
-		&"repo.open_terminal", &"repo.show_in_file_manager", &"",
-		["Remotes and tags", [&"repo.remotes", &"repo.tags"]], &"repo.ignore_rules",
-		["Shelves", [&"changes.shelve", &"shelf.restore_left"]], &"",
-		&"operation.continue", &"operation.open_resolver", &"operation.abort", &"", &"repo.refresh"]],
+	["View", [&"view.changes", &"view.history", &"view.shelves", &"view.compare", &"view.file_history", &"",
+		["Diff", [&"diff.toggle_whole_file", &"diff.toggle_minimap", &"", &"diff.cycle_mode"]],
+		["History", [&"history.current_branch", &"history.all_branches", &"", &"history.compact_rows",
+			&"history.detailed_rows", &"", &"history.toggle_graph"]], &"",
+		&"app.command_palette", &"view.toggle_git_log"]],
+	["Repository", [&"sync.fetch", &"sync.pull", ["Pull with", [&"sync.pull_merge", &"sync.pull_rebase",
+			&"sync.pull_ff_only"], {&"sync.pull_merge": "Merge", &"sync.pull_rebase": "Rebase",
+			&"sync.pull_ff_only": "Fast-forward only"}], &"sync.push", &"sync.force_push", &"",
+		&"repo.remotes", &"repo.tags", &"repo.ignore_rules", &"", &"changes.shelve", &"shelf.restore_left", &"",
+		["Open in", [&"repo.open_terminal", &"repo.show_in_file_manager"], {&"repo.open_terminal": "Terminal",
+			&"repo.show_in_file_manager": "File manager"}], &"",
+		&"operation.continue", &"operation.skip", &"operation.open_resolver", &"operation.abort", &"",
+		&"repo.refresh"]],
 	["Branch", [&"branch.switch", &"branch.new", &"", &"branch.merge", &"branch.compare", &"", &"branch.rename",
 		&"branch.set_upstream"]],
-	["View", [&"view.changes", &"view.history", &"view.shelves", &"view.compare", &"view.file_history", &"",
-		["Selected file", [&"file_history.open"]], &"",
-		&"diff.toggle_whole_file",
-		&"diff.toggle_minimap", &"", &"history.compact_rows", &"history.detailed_rows", &"history.toggle_graph", &"",
-		&"app.command_palette", &"view.toggle_git_log"]],
-	["Help", [&"app.keyboard_shortcuts", &"app.about"]],
+	["Commit", [&"changes.commit", &"commit.amend", &"commit.undo", &"", &"commit.cherry_pick", &"commit.checkout",
+		&"", &"tag.new", &"", ["Copy", [&"commit.copy_hash", &"commit.copy_short_hash", &"commit.copy_subject",
+			&"commit.copy_message"], {&"commit.copy_hash": "Hash", &"commit.copy_short_hash": "Short hash",
+			&"commit.copy_subject": "Subject", &"commit.copy_message": "Message"}], &"commit.open_web"]],
+	["Worktree", [&"task.new", &"worktree.setup", &"",
+		["Open in", [&"worktree.open_terminal", &"worktree.show_in_file_manager"], {
+			&"worktree.open_terminal": "Terminal", &"worktree.show_in_file_manager": "File manager"}],
+		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.cleanup",
+		&"worktree.prune", &"worktree.remove"]],
+	["Help", [&"app.keyboard_shortcuts", &"app.whats_new", &"app.report_issue", &"app.open_config_folder", &"",
+		&"app.about"]],
 ]
-const RADIO_ACTIONS: Array[StringName] = [&"view.changes", &"view.history", &"view.shelves", &"view.compare",
-	&"view.file_history", &"history.compact_rows", &"history.detailed_rows"]
-const CHECK_ACTIONS: Array[StringName] = [&"diff.toggle_whole_file",
-	&"diff.toggle_minimap", &"history.toggle_graph", &"view.toggle_git_log"]
-const OPERATION_ACTIONS: Array[StringName] = [&"operation.continue", &"operation.open_resolver", &"operation.abort"]
 
 ## Submenu name -> `func() -> Array[Dictionary]` of `{label, run: Callable}`.
 var dynamic_menus: Dictionary[String, Callable] = {}
-## Action id -> current checked state, supplied by the shell.
-var checked_states: Dictionary[StringName, Callable] = {}
-
-## Per menu: item index -> action id.
-var _items: Dictionary[PopupMenu, Array] = {}
 var _focus_before_menu: Control = null
 var _keyboard_menu_open: bool = false
 
@@ -59,12 +55,10 @@ func _ready() -> void:
 	prefer_global_menu = true
 	flat = true
 	for entry: Array in MENUS:
-		var menu_popup: MenuPopup = MenuPopup.new()
+		var menu_popup: ActionMenu = ActionMenu.new()
 		menu_popup.name = String(entry[0])
 		add_child(menu_popup)
-		_items[menu_popup] = []
 		menu_popup.about_to_popup.connect(_fill.bind(menu_popup, entry[1]))
-		menu_popup.id_pressed.connect(_on_id.bind(menu_popup))
 		menu_popup.menu_key.connect(_on_popup_input)
 	_translate_titles()
 	# Filled once the shell has registered its actions, then on each opening.
@@ -104,7 +98,7 @@ func _handle_menu_key(event: InputEvent) -> void:
 	var keycode: Key = key.keycode if key.keycode != KEY_NONE else key.physical_keycode
 	var letter: String = OS.get_keycode_string(keycode).to_lower()
 	for i: int in get_menu_count():
-		if tr(String(MENUS[i][0])).left(1).to_lower() == letter:
+		if mnemonic(i) == letter:
 			_open_menu(i)
 			get_viewport().set_input_as_handled()
 			return
@@ -148,52 +142,46 @@ func _translate_titles() -> void:
 	for i: int in get_menu_count():
 		var title: String = tr(String(MENUS[i][0]))
 		set_menu_title(i, title)
-		var shortcut: String = "Alt+" + title.left(1).to_upper()
+		var shortcut: String = "Alt+" + mnemonic(i).to_upper()
 		set_menu_tooltip(i, "" if is_native_menu() or OS.has_feature("macos") else shortcut)
 
 
+## The letter that opens menu `index` with Alt: the first letter of its title
+## that no menu before it uses (Repository and Ramo both start with R in
+## Italian), lower case.
+func mnemonic(index: int) -> String:
+	var used: PackedStringArray = PackedStringArray()
+	for i: int in index + 1:
+		var title: String = tr(String(MENUS[i][0])).to_lower()
+		var letter: String = ""
+		for c: String in title:
+			if c != " " and not c in used:
+				letter = c
+				break
+		if i == index:
+			return letter
+		used.append(letter)
+	return ""
+
+
 ## The menu named `title`, or null (for tests).
-func menu(title: String) -> PopupMenu:
-	return get_node_or_null(title) as PopupMenu
+func menu(title: String) -> ActionMenu:
+	return get_node_or_null(title) as ActionMenu
 
 
 ## Labels of menu `title` and its submenus (for tests): disabled ones end
 ## with " (disabled)".
 func labels(title: String) -> PackedStringArray:
-	var out: PackedStringArray = PackedStringArray()
 	_fill_title(title)
-	var popup: PopupMenu = menu(title)
-	if popup != null:
-		_collect_labels(popup, out)
-	return out
-
-
-func _collect_labels(popup: PopupMenu, out: PackedStringArray) -> void:
-	for i: int in popup.item_count:
-		if popup.is_item_separator(i):
-			continue
-		out.append(popup.get_item_text(i) + (" (disabled)" if popup.is_item_disabled(i) else ""))
-		var sub: PopupMenu = popup.get_item_submenu_node(i)
-		if sub != null:
-			_collect_labels(sub, out)
+	var popup: ActionMenu = menu(title)
+	return popup.labels(true) if popup != null else PackedStringArray()
 
 
 ## Runs the entry labelled `label` in menu `title` or a submenu (for tests).
 func press(title: String, label: String) -> bool:
 	_fill_title(title)
-	var popup: PopupMenu = menu(title)
-	return popup != null and _press_label(popup, label)
-
-
-func _press_label(popup: PopupMenu, label: String) -> bool:
-	for i: int in popup.item_count:
-		if popup.get_item_text(i) == label and not popup.is_item_disabled(i):
-			_on_id(popup.get_item_id(i), popup)
-			return true
-		var sub: PopupMenu = popup.get_item_submenu_node(i)
-		if sub != null and _press_label(sub, label):
-			return true
-	return false
+	var popup: ActionMenu = menu(title)
+	return popup != null and popup.press(label)
 
 
 func _fill_title(title: String) -> void:
@@ -204,80 +192,40 @@ func _fill_title(title: String) -> void:
 
 func _refresh_all() -> void:
 	for entry: Array in MENUS:
-		var popup: PopupMenu = menu(String(entry[0]))
+		var popup: ActionMenu = menu(String(entry[0]))
 		if popup != null:
 			_fill(popup, entry[1])
 
 
-func _fill(popup: PopupMenu, ids: Array) -> void:
-	popup.clear(true)
-	var items: Array = []
+func _fill(popup: ActionMenu, ids: Array) -> void:
+	popup.fill(_entries(ids))
+
+
+## The menu's entries for `ActionMenu.fill`: a String names a submenu filled
+## by `dynamic_menus`, an Array is a static submenu.
+## Icons of the submenus, by title.
+const SUB_ICONS: Dictionary[String, StringName] = {
+	"Open recent": &"Clock", "Diff": &"Panels2", "History": &"RowsTwoLine",
+	"Open in": &"ExternalLink", "Copy": &"ActionCopy",
+}
+
+
+func _entries(ids: Array) -> Array:
+	var out: Array = []
 	for id: Variant in ids:
-		if id is StringName and id == &"":
-			if popup.item_count > 0 and not popup.is_item_separator(popup.item_count - 1):
-				popup.add_separator()
-			continue
 		if id is String:
-			_add_submenu(popup, String(id))
-			continue
-		if id is Array:
-			_add_action_submenu(popup, String(id[0]), id[1])
-			continue
-		var action: ActionRegistry.Action = Actions.get_action(id)
-		if action == null:
-			continue
-		if id in OPERATION_ACTIONS and not Actions.is_enabled(&"operation.abort"):
-			continue
-		var index: int = popup.item_count
-		if id in RADIO_ACTIONS:
-			popup.add_radio_check_item(action.label, items.size())
-		elif id in CHECK_ACTIONS:
-			popup.add_check_item(action.label, items.size())
+			var title: String = String(id)
+			var fill: Callable = func() -> Array:
+				return dynamic_menus[title].call() if dynamic_menus.has(title) else []
+			out.append(ActionMenu.dynamic(tr(title), fill, SUB_ICONS.get(title, &"")))
+		elif id is Array and (id as Array).size() > 2:
+			var item_labels: Dictionary = {}
+			for action: Variant in id[2]:
+				item_labels[action] = tr(String(id[2][action]))
+			out.append(ActionMenu.family(tr(String(id[0])), _entries(id[1]), item_labels,
+					SUB_ICONS.get(String(id[0]), &"")))
+		elif id is Array:
+			out.append(ActionMenu.sub(tr(String(id[0])), _entries(id[1]), SUB_ICONS.get(String(id[0]), &"")))
 		else:
-			popup.add_icon_item(Actions.icon(id), action.label, items.size())
-		if checked_states.has(id):
-			popup.set_item_checked(index, bool(checked_states[id].call()))
-		var shortcuts: PackedStringArray = Actions.shown_shortcuts(id)
-		if not shortcuts.is_empty():
-			var event: InputEventKey = Shortcuts.parse(shortcuts[0])
-			if event != null:
-				var shortcut: Shortcut = Shortcut.new()
-				shortcut.events = [event]
-				popup.set_item_shortcut(index, shortcut)
-				# Shown only: the registry handles the keys.
-				popup.set_item_shortcut_disabled(index, true)
-		popup.set_item_disabled(index, not action.is_enabled())
-		popup.set_item_tooltip(index, action.disabled_reason())
-		items.append(id)
-	while popup.item_count > 0 and popup.is_item_separator(popup.item_count - 1):
-		popup.remove_item(popup.item_count - 1)
-	_items[popup] = items
-
-
-func _add_action_submenu(popup: PopupMenu, title: String, ids: Array) -> void:
-	var sub: MenuPopup = MenuPopup.new()
-	_fill(sub, ids)
-	sub.id_pressed.connect(_on_id.bind(sub))
-	sub.menu_key.connect(_on_popup_input)
-	popup.add_submenu_node_item(tr(title), sub)
-
-
-func _add_submenu(popup: PopupMenu, title: String) -> void:
-	var sub: MenuPopup = MenuPopup.new()
-	var entries: Array[Dictionary] = []
-	if dynamic_menus.has(title):
-		entries.assign(dynamic_menus[title].call())
-	for i: int in entries.size():
-		sub.add_item(String(entries[i]["label"]), i)
-		if entries[i].has("tooltip"):
-			sub.set_item_tooltip(i, String(entries[i]["tooltip"]))
-	sub.id_pressed.connect(func(index: int) -> void: (entries[index]["run"] as Callable).call())
-	sub.menu_key.connect(_on_popup_input)
-	popup.add_submenu_node_item(tr(title), sub)
-	popup.set_item_disabled(popup.item_count - 1, entries.is_empty())
-
-
-func _on_id(id: int, popup: PopupMenu) -> void:
-	var items: Array = _items.get(popup, [])
-	if id >= 0 and id < items.size():
-		Actions.run_action(items[id])
+			out.append(id)
+	return out

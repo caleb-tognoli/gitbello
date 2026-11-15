@@ -20,9 +20,9 @@ const GLOBAL: int = 2
 const TARGET_IDS: PackedStringArray = ["shared", "local", "global"]
 ## The Where choices' icons and tooltips, by target.
 const WHERE: Array[Array] = [
-	[&"GitIgnore", "Shared with everyone in .gitignore"],
-	[&"User", "Only you, in every worktree of this repository (.git/info/exclude)"],
-	[&"Tools", "Every repository on this computer (your global ignore file)"],
+	[&"GitIgnore", ".gitignore, shared with everyone"],
+	[&"User", "Only you, every worktree (.git/info/exclude)"],
+	[&"Tools", "Every repository here (global ignore file)"],
 ]
 ## Paths listed in the preview note.
 const SAMPLE: int = 3

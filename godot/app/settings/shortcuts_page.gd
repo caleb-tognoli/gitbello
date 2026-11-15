@@ -379,7 +379,7 @@ func _add_row(action: ActionRegistry.Action) -> void:
 	clear.pressed.connect(func() -> void:
 		cancel()
 		Actions.set_shortcut(id, "none"))
-	var revert: Button = _slot_button(main, &"Reload", "Revert to the default")
+	var revert: Button = _slot_button(main, &"Reload", "Back to the default")
 	revert.pressed.connect(func() -> void:
 		cancel()
 		Actions.set_shortcut(id, ""))
@@ -592,9 +592,9 @@ func _translate() -> void:
 	search.placeholder = tr("Press a shortcut…") if _key_mode else tr("Filter shortcuts")
 	if key_search != null:
 		key_search.tooltip_text = tr("Search by keys")
-	changed_filter.tooltip_text = tr("Show only the shortcuts you changed")
+	changed_filter.tooltip_text = tr("Changed shortcuts only")
 	reset_all.text = tr("Reset All…")
-	reset_all.tooltip_text = tr("Restore every shortcut to its default")
+	reset_all.tooltip_text = tr("Every shortcut back to its default")
 	_confirm.title = tr("Reset shortcuts")
 	_confirm.dialog_text = tr("Restore every shortcut to its default?")
 	_confirm.ok_button_text = tr("Reset")

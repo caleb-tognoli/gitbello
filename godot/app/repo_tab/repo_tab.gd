@@ -280,6 +280,14 @@ func press_menu(label: String) -> bool:
 	return _active.press_menu(label)
 
 
+func menu_ids() -> Array[StringName]:
+	return _active.menu_ids()
+
+
+func press_menu_id(id: StringName) -> bool:
+	return _active.press_menu_id(id)
+
+
 # --- Internals ------------------------------------------------------------------
 
 func _add_view(opened: RepoSession) -> WorktreeView:
@@ -384,7 +392,27 @@ func _refresh_strip() -> void:
 func _on_chip_menu(wt: Dictionary, at_position: Vector2, host: Window = null) -> void:
 	if _active == null:
 		return
-	var ref: Dictionary = {
+	var ref: Dictionary = worktree_ref(wt)
+	if host != null:
+		_active.show_ref_menu_over(host, ref, at_position)
+	else:
+		_active.show_ref_menu(ref, at_position)
+
+
+## The selected worktree as a menu target (see `worktree_ref`): what the menu
+## bar's Worktree items act on. {} before the worktrees are read.
+func current_worktree_ref() -> Dictionary:
+	if _active == null:
+		return {}
+	for wt: Dictionary in worktrees():
+		if String(wt["path"]) == _active.worktree_path():
+			return worktree_ref(wt)
+	return {}
+
+
+## A worktree of `worktrees()` as the target of its menu's actions.
+static func worktree_ref(wt: Dictionary) -> Dictionary:
+	return {
 		"type": "worktree",
 		"name": "worktree:" + String(wt["path"]),
 		"short": String(wt["name"]),
@@ -399,7 +427,3 @@ func _on_chip_menu(wt: Dictionary, at_position: Vector2, host: Window = null) ->
 		"changed": maxi(0, int(wt["changed"])),
 		"upstream": "",
 	}
-	if host != null:
-		_active.show_ref_menu_over(host, ref, at_position)
-	else:
-		_active.show_ref_menu(ref, at_position)

@@ -41,6 +41,8 @@ pub struct AppCore {
     config_warning: String,
     library_warning: String,
     ui_state: UiState,
+    /// The folder holding the config file (a scratch one under GITBELLO_CONFIG).
+    config_folder: Option<PathBuf>,
 }
 
 #[godot_api]
@@ -53,6 +55,7 @@ impl INode for AppCore {
             config_warning: String::new(),
             library_warning: String::new(),
             ui_state: UiState::default(),
+            config_folder: None,
         }
     }
 
@@ -67,6 +70,10 @@ impl INode for AppCore {
             None => paths::data_dir(),
         };
         self.ui_state = UiState::load(ui_dir.as_ref().map(|dir| dir.join(ui_state::FILE_NAME)));
+        self.config_folder = config_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
         let (config, warning) = Runtime::load_config(config_path.as_deref());
         if let Some(warning) = warning {
             self.config_warning = warning.to_string();
@@ -496,6 +503,16 @@ impl AppCore {
     #[func]
     fn config_warning(&self) -> GString {
         gstr(&self.config_warning)
+    }
+
+    /// The folder of the config file (Help → Open config folder); empty when
+    /// there is none.
+    #[func]
+    fn config_folder(&self) -> GString {
+        self.config_folder
+            .as_deref()
+            .map(path_str)
+            .unwrap_or_default()
     }
 
     #[func]

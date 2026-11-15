@@ -102,7 +102,7 @@ func _add_running(session: RepoSession, path: String, branch: String) -> int:
 
 func _details(toasts: Toasts, step: String) -> void:
 	for node: Node in toasts.find_children("*", "Button", true, false):
-		if (node as Button).tooltip_text == "Show error details":
+		if (node as Button).tooltip_text == "Details":
 			(node as Button).pressed.emit()
 			break
 	await _frames(4)

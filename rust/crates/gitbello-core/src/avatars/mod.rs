@@ -30,6 +30,7 @@ use json::Json;
 use crate::backend::GitBackend;
 use crate::git::CancelToken;
 use crate::repo::Remote;
+use crate::web_links::split_remote_url;
 
 /// The size asked of every source, in pixels: the largest avatar (the
 /// commit details' 30 px) on a 2x screen, with room to spare.
@@ -293,31 +294,6 @@ impl RemoteHosts {
 fn is_gitlab_host(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
     host.split('.').next() == Some("gitlab") || host.contains(".gitlab.")
-}
-
-/// `(scheme, host[:port], path)` of a remote URL: `scheme://[user@]host/path`
-/// or scp-like `[user@]host:path` (scheme `ssh`). Local paths give `None`.
-fn split_remote_url(url: &str) -> Option<(String, String, String)> {
-    let url = url.trim();
-    if let Some((scheme, rest)) = url.split_once("://") {
-        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let host = authority.rsplit('@').next().unwrap_or(authority);
-        if host.is_empty() || scheme == "file" {
-            return None;
-        }
-        return Some((
-            scheme.to_ascii_lowercase(),
-            host.to_ascii_lowercase(),
-            path.into(),
-        ));
-    }
-    let (authority, path) = url.split_once(':')?;
-    if authority.contains('/') || authority.len() < 2 {
-        // `./x:y` or a Windows drive (`C:\repo`).
-        return None;
-    }
-    let host = authority.rsplit('@').next().unwrap_or(authority);
-    Some(("ssh".into(), host.to_ascii_lowercase(), path.into()))
 }
 
 /// One email to find a picture for.

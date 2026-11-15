@@ -39,7 +39,7 @@ func _ready() -> void:
 	_filter.changed.connect(_rebuild)
 	_filter.done.connect(focus_list)
 	_filter.submitted.connect(func(_backwards: bool) -> void: focus_list())
-	_branch_button = _filter.add_button(&"GitBranch", "Filter shelves by branch")
+	_branch_button = _filter.add_button(&"GitBranch", "Filter by branch")
 	_branch_button.focus_mode = Control.FOCUS_ALL
 	_branch_button.add_child(_branch_badge)
 	_branch_button.pressed.connect(func() -> void: Actions.run_action(&"shelf.filter_branches", _branch_button))

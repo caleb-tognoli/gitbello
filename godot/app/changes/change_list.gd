@@ -219,7 +219,7 @@ func _get_tooltip(at_position: Vector2) -> String:
 					int(data["ignored_line"]), String(data["ignored_pattern"])]
 		return tip + "\n" + tr("Ignored")
 	if bool(data.get("conflicted", false)):
-		tip += "\n" + tr("Conflicted: resolve it before committing.")
+		tip += "\n" + tr("Conflicted: resolve before committing")
 	elif bool(data.get("resolved", false)):
 		tip += "\n" + tr("Conflicts resolved")
 	elif rename.is_empty() and not FileRowPainter.code_name(String(data.get("code", ""))).is_empty():
@@ -229,10 +229,10 @@ func _get_tooltip(at_position: Vector2) -> String:
 	if bool(data.get("amending", false)):
 		tip += "\n" + (tr("Already in the original commit") if bool(data.get("in_original_commit", false)) else tr("Additional working changes"))
 	if bool(data.get("as_staged", false)):
-		tip += "\n" + (tr("Included content is preserved from when amend started. Check the file to include its current contents.") if bool(data.get("amending", false)) else tr("Staged in part outside gitbello: committed as staged."))
+		tip += "\n" + (tr("Included as when amend started; check it again for its current contents") if bool(data.get("amending", false)) else tr("Staged in part outside gitbello: committed as staged"))
 	if bool(data.get("locked", false)) and not bool(data.get("conflicted", false)):
 		tip += "\n" + (tr("Part of the commit being finished") if String(data.get("pick", "none")) != "none"
-				else tr("Not part of the commit being finished; it stays a local change"))
+				else tr("Not in the commit being finished: stays a local change"))
 	return tip
 
 

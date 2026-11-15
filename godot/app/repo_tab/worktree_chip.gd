@@ -119,7 +119,7 @@ func _details() -> Array[Array]:
 	var out: Array[Array] = [[&"", String(worktree["name"])],
 		[&"GitCommit" if detached else &"GitBranch", _branch_text()], [&"Folder", String(worktree["path"])]]
 	if bool(worktree["prunable"]):
-		out.append([&"StatusWarning", tr("The folder is missing.")])
+		out.append([&"StatusWarning", tr("Folder missing")])
 		return out
 	var changed: int = int(worktree["changed"])
 	if changed < 0:

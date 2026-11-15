@@ -344,7 +344,7 @@ func _check_palette(main: Main) -> void:
 			func() -> bool: return available[0])
 	Actions.register(&"test.palette_probe_b", "Paletteprobe b", "Tests",
 			func() -> void: ran[0] += 1, PackedStringArray(), func() -> bool: return false,
-			func() -> String: return "Open a repository first.")
+			func() -> String: return "No repository")
 	Actions.register(&"test.palette_probe_c", "Paletteprobe c", "Tests", func() -> void: ran[0] += 1)
 	Actions.register(&"test.palette_probe_d", "Paletteprobe d", "Tests",
 			func() -> void: ran[0] += 1, PackedStringArray(), func() -> bool: return false)
@@ -371,7 +371,7 @@ func _check_palette(main: Main) -> void:
 			expect_eq(item.get_text(1), "Open a repository", "an unavailable match shows a compact hint")
 			expect(not item.is_selectable(0) and not item.is_selectable(1), "neither column of an unavailable match is selectable")
 			expect_eq(item.get_custom_color(0), palette.get_theme_color(&"font_color", &"DimLabel"), "unavailable commands use muted theme text")
-			expect(item.get_tooltip_text(1).contains("Open a repository first."), "the full reason remains in the tooltip")
+			expect(item.get_tooltip_text(1).contains("No repository"), "the full reason remains in the tooltip")
 			expect_eq(item.get_text_overrun_behavior(1), TextServer.OVERRUN_NO_TRIMMING, "hints are never ellipsized")
 			expect_eq(item.get_autowrap_mode(1), TextServer.AUTOWRAP_WORD_SMART, "long hints can wrap")
 		elif item.get_text(0) == "Tests: Paletteprobe d":
@@ -456,17 +456,18 @@ func _check_palette(main: Main) -> void:
 
 func _check_menus(main: Main) -> void:
 	var bar: AppMenuBar = main.menu_bar()
-	for title: String in ["File", "Edit", "Repository", "Branch", "View", "Help"]:
+	for title: String in ["File", "Edit", "View", "Repository", "Branch", "Commit", "Worktree", "Help"]:
 		expect(bar.menu(title) != null, "menu %s exists" % title)
 	expect_eq(bar.get_theme_font_size(&"font_size"), 13, "compact top-level menu font")
 	expect_eq(bar.menu("File").get_theme_font_size(&"font_size"), 14, "readable dropdown menu font")
 	var normal: StyleBox = bar.get_theme_stylebox(&"normal")
 	expect_eq(normal.get_minimum_size().y, 6.0, "compact top-level vertical padding")
 	var file: PackedStringArray = bar.labels("File")
-	expect(file.find("Open repository…") < file.find("Open recent") \
-			and file.find("Open recent") < file.find("Clone repository…"), "Open recent follows Open: %s" % [file])
-	expect("New repository" in file and "Create repository…" in file and "Initialize folder…" in file,
-			"New repository groups creation commands: %s" % [file])
+	expect(file.find(Actions.get_action(&"repo.add_existing").menu_label) < file.find("Open recent") \
+			and file.find("Open recent") < file.find(Actions.get_action(&"repo.clone").menu_label),
+			"Open recent follows Open: %s" % [file])
+	var file_ids: Array[StringName] = bar.menu("File").action_ids()
+	expect(&"repo.create" in file_ids and &"repo.init" in file_ids, "File creates repositories: %s" % [file_ids])
 	expect(not "Add existing folder…" in file, "Open uses the repository-oriented label")
 	main.tab_bar().current_tab = 1
 	for entry: Dictionary in main._recent_entries():
@@ -477,21 +478,25 @@ func _check_menus(main: Main) -> void:
 	expect_eq(main.tab_count(), 5, "Recent does not duplicate an open repository")
 
 	var repository: PackedStringArray = bar.labels("Repository")
-	expect("Remotes and tags" in repository and "Remotes…" in repository and "Tags…" in repository,
-			"Repository groups Remotes and Tags: %s" % [repository])
-	expect("Worktrees" in repository and Array(repository).any(func(label: String) -> bool:
-		return label.begins_with("Clean up merged worktrees…")), "Repository groups worktree management: %s" % [repository])
-	expect(not Array(repository).any(func(label: String) -> bool: return label.begins_with("Add worktree for a branch")),
-			"New worktree covers existing branches: no separate entry")
-	expect("Shelves" in repository and "Shelve… (disabled)" in repository,
-			"Shelves moved out of Branch")
-	expect(not "Shelve…" in bar.labels("Branch"), "Branch keeps only branch operations")
-	expect(not "Continue the operation in progress" in repository and not "Abort the operation in progress…" in repository,
+	var repository_ids: Array[StringName] = bar.menu("Repository").action_ids()
+	for id: StringName in [&"repo.remotes", &"repo.tags", &"repo.ignore_rules", &"changes.shelve",
+			&"repo.open_terminal", &"repo.show_in_file_manager"]:
+		expect(id in repository_ids, "Repository has %s: %s" % [id, repository_ids])
+	expect("Shelve… (disabled)" in repository, "Shelve is greyed without changes: %s" % [repository])
+	bar.labels("Worktree")
+	var worktree_ids: Array[StringName] = bar.menu("Worktree").action_ids()
+	expect(&"task.new" in worktree_ids and &"worktree.setup" in worktree_ids and &"worktree.cleanup" in worktree_ids,
+			"Worktree has the worktree management: %s" % [worktree_ids])
+	expect(Actions.get_action(&"worktree.add_existing") == null, "New worktree covers existing branches: no separate entry")
+	bar.labels("Branch")
+	expect(not &"changes.shelve" in bar.menu("Branch").action_ids(), "Branch keeps only branch operations")
+	expect(not &"operation.continue" in repository_ids and not &"operation.abort" in repository_ids,
 			"operation-only commands are hidden while idle")
 	expect("Push" in repository, "Push is enabled with commits to push: %s" % [repository])
-	expect("Undo" in bar.labels("Edit") and "Undo last discard (disabled)" in bar.labels("Edit"),
-			"Edit groups explicit undo operations")
-	expect(Actions.disabled_reason(&"changes.undo_discard") != "", "a disabled action says why")
+	var edit_labels: PackedStringArray = bar.labels("Edit")
+	expect(bar.menu("Edit").action_ids()[0] == &"edit.undo" and (tr("Undo") + " (disabled)") in edit_labels,
+			"Edit starts with one Undo: %s" % [edit_labels])
+	expect_eq(Actions.disabled_reason(&"edit.undo"), tr("Nothing to undo"), "a disabled action says why")
 	var view_labels: PackedStringArray = bar.labels("View")
 	expect(not "Theme: System" in view_labels and not "Theme: Dark" in view_labels and not "Theme: Light" in view_labels,
 			"theme choices live outside View")
@@ -509,16 +514,17 @@ func _check_menus(main: Main) -> void:
 	var changes_index: int = _menu_item(view, "Changes")
 	expect(changes_index >= 0 and view.is_item_radio_checkable(changes_index) and view.is_item_checked(changes_index),
 			"the current view has a selected radio mark")
-	var minimap_index: int = _menu_item(view, "Diff minimap")
-	expect(minimap_index >= 0 and view.is_item_checkable(minimap_index) \
-			and view.is_item_checked(minimap_index) == Core.diff_minimap(), "the minimap toggle reflects its state")
-	var log_index: int = _menu_item(view, "Git command log")
+	var diff_menu: ActionMenu = bar.menu("View").submenu(tr("Diff"))
+	var minimap_index: int = _menu_item(diff_menu, "Minimap") if diff_menu != null else -1
+	expect(minimap_index >= 0 and diff_menu.is_item_checkable(minimap_index) \
+			and diff_menu.is_item_checked(minimap_index) == Core.diff_minimap(), "the minimap toggle reflects its state")
+	var log_index: int = _menu_item(view, "Git log")
 	var log_shown: bool = main.git_log().visible
 	expect(log_index >= 0 and view.is_item_checkable(log_index) and view.is_item_checked(log_index) == log_shown,
 			"Git log toggle reflects its state")
 	Actions.run_action(&"view.toggle_git_log")
 	bar.labels("View")
-	log_index = _menu_item(view, "Git command log")
+	log_index = _menu_item(view, "Git log")
 	expect(view.is_item_checked(log_index) == (not log_shown), "Git log checkmark updates")
 	Actions.run_action(&"view.toggle_git_log")
 	expect(bar.press("View", "History"), "View → History")

@@ -397,6 +397,42 @@ impl RepoSession {
             .unwrap_or_default()
     }
 
+    /// `{host, url}`: the web page of ref `full_name` (a pushed branch, a
+    /// remote branch or a tag) on its remote's host; empty when there is
+    /// none (no remote on a known host, a branch never pushed).
+    #[func]
+    fn ref_web_page(&self, full_name: GString) -> VarDictionary {
+        let page = self
+            .read(|s| s.ref_web_page(&full_name.to_string()))
+            .flatten();
+        web_page(page)
+    }
+
+    /// `{host, url}`: the page of commit `oid`, or of file `path` (repository
+    /// relative, `/`) as it is at `oid` when `path` is not empty.
+    #[func]
+    fn commit_web_page(&self, oid: GString, path: GString) -> VarDictionary {
+        let path = path.to_string();
+        let page = self
+            .read(|s| {
+                s.commit_web_page(
+                    &oid.to_string(),
+                    (!path.is_empty()).then_some(path.as_str()),
+                )
+            })
+            .flatten();
+        web_page(page)
+    }
+
+    /// The newest file-level undo, for Edit → Undo: `discard`, `ignore_rule`,
+    /// `shelf_discard`, `conflict_choice`, or empty when there is none.
+    #[func]
+    fn newest_undo(&self) -> GString {
+        self.read(|s| s.newest_undo().map(|k| gstr(k.id())))
+            .flatten()
+            .unwrap_or_default()
+    }
+
     /// Local then remote branches: `{name, short_name, commit, is_head,
     /// upstream, ahead, behind, gone, worktree, committed_at, checked_out_at,
     /// kind}` (kind `branch` or `remote`; `committed_at` and `checked_out_at`,
@@ -3065,4 +3101,11 @@ fn path_list(paths: &PackedStringArray) -> Vec<PathBuf> {
         .iter()
         .map(|p| PathBuf::from(p.to_string()))
         .collect()
+}
+
+fn web_page(page: Option<(gitbello_core::web_links::WebHost, String)>) -> VarDictionary {
+    match page {
+        Some((host, url)) => vdict! { "host" => host.name(), "url" => url },
+        None => VarDictionary::new(),
+    }
 }

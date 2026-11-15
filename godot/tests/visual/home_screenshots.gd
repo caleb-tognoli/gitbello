@@ -96,9 +96,9 @@ func _ready() -> void:
 	Actions.run_action(&"home.open")
 	await _shot(out, "11-home_tab_clone_failed")
 
-	home.add_menu().show_popup()
-	await _shot_window(home.add_menu().get_popup(), out, "12-add_menu")
-	home.add_menu().get_popup().hide()
+	home.open_add_menu()
+	await _shot_window(home.add_menu(), out, "12-add_menu")
+	home.add_menu().hide()
 
 	ops.create()
 	await _shot_window(ops.form(), out, "13-create_form")

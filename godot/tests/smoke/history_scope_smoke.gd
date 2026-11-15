@@ -36,7 +36,7 @@ func run() -> void:
 	var scope: SegmentedControl = options.control("scope") as SegmentedControl
 	expect_eq(scope.ids(), PackedStringArray(["current", "all"]), "branches: Current | All")
 	expect_eq(scope.choice_button("current").text, "Current", "the first choice is current")
-	expect(scope.choice_button("all").tooltip_text.begins_with("Show all branches history"), "its tooltip says what it shows")
+	expect(scope.choice_button("all").tooltip_text.begins_with("Every branch"), "its tooltip says what it shows")
 	expect(options.control("rows") is SegmentedControl, "rows: Compact | Detailed")
 	expect(options.control("graph") is ToggleChip, "the graph is a chip")
 	expect_eq(options.value("scope"), "current", "only current branch is selected")

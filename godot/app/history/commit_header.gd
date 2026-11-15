@@ -53,7 +53,7 @@ func _ready() -> void:
 	add_child(_refs_popover)
 	_refs_popover.menu_requested.connect(label_menu_requested.emit)
 	_copy_hash.pressed.connect(func() -> void: Actions.run_action(copy_action, _copy_hash))
-	_copy_hash.tooltip_text = tr("Copy the full hash")
+	_copy_hash.tooltip_text = tr("Copy hash")
 	_pair_button.text = "Compare commits"
 	_pair_button.theme_type_variation = &"ToolbarButton"
 	_pair_button.focus_mode = Control.FOCUS_NONE
@@ -76,7 +76,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_apply_theme()
 	elif what == NOTIFICATION_TRANSLATION_CHANGED:
-		_copy_hash.tooltip_text = tr("Copy the full hash")
+		_copy_hash.tooltip_text = tr("Copy hash")
 
 
 ## Shows `text` in place of a commit (or nothing).

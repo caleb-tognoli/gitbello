@@ -345,3 +345,33 @@ fn paths_with_spaces_and_non_ascii() {
     );
     assert!(shown.contains(&"dir é/keep.log".to_owned()), "{shown:?}");
 }
+
+#[test]
+fn edit_undo_takes_back_the_newest_file_level_change() {
+    use gitbello_core::undo_order::UndoKind;
+    let repo = project();
+    repo.write("src/main.c", "int main; // edited\n");
+    let (mut rt, key) = open(&repo);
+    let newest = |rt: &Runtime| rt.repo(&key).and_then(|s| s.newest_undo());
+    assert_eq!(newest(&rt), None);
+
+    let job = rt.discard_files(&key, vec![PathBuf::from("src/main.c")]);
+    succeed(&mut rt, &key, job);
+    assert_eq!(newest(&rt), Some(UndoKind::Discard));
+
+    let job = rt.add_ignore_rule(&key, shared("*.log"), Untrack::Keep);
+    succeed(&mut rt, &key, job);
+    assert_eq!(newest(&rt), Some(UndoKind::IgnoreRule));
+
+    // Undoing the rule uncovers the discard before it.
+    let job = rt.undo_ignore(&key);
+    succeed(&mut rt, &key, job);
+    assert_eq!(newest(&rt), Some(UndoKind::Discard));
+    let job = rt.undo_discard(&key);
+    succeed(&mut rt, &key, job);
+    assert_eq!(newest(&rt), None);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("src/main.c")).unwrap(),
+        "int main; // edited\n"
+    );
+}

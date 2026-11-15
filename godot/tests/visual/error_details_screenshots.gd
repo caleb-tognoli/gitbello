@@ -85,7 +85,7 @@ func _info(toasts: Toasts, last: bool = false) -> Button:
 	var result: Button = null
 	for node: Node in toasts.find_children("*", "Button", true, false):
 		var button: Button = node as Button
-		if button.tooltip_text == "Show error details":
+		if button.tooltip_text == "Details":
 			result = button
 			if not last:
 				return result

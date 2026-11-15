@@ -23,28 +23,6 @@ signal worktree_delete_requested(path: String, force: bool, branch: String, remo
 
 enum View { HISTORY, CHANGES, SHELVES, COMPARE, FILE }
 
-## Context menu entries per ref type; &"" is a separator.
-const REF_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
-		&"compare.with", &"", &"branch.new", &"tag.new", &"", &"branch.rename", &"branch.set_upstream", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
-		&"compare.with", &"", &"branch.new", &"tag.new", &"", &"branch.delete_remote"],
-	"tag": [&"commit.checkout", &"branch.merge", &"", &"compare.with_current", &"compare.with", &"",
-		&"branch.new", &"", &"tag.push", &"tag.delete"],
-	"worktree": [&"worktree.open_terminal", &"worktree.show_in_file_manager",
-		&"worktree.copy_path", &"", &"worktree.lock", &"worktree.unlock", &"", &"worktree.remove"],
-}
-## A ref label in the graph offers fewer actions than the branch list.
-const LABEL_MENUS: Dictionary[String, Array] = {
-	"branch": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
-		&"compare.with", &"", &"branch.delete"],
-	"remote": [&"branch.checkout", &"branch.new_worktree", &"branch.merge", &"", &"compare.with_current",
-		&"compare.with", &"", &"branch.delete_remote"],
-	"tag": [&"branch.merge", &"", &"compare.with_current", &"compare.with", &"", &"tag.push", &"tag.delete"],
-}
-const COMMIT_MENU: Array[StringName] = [&"history.compare_selected", &"", &"commit.amend", &"commit.checkout",
-	&"commit.new_worktree", &"branch.new", &"tag.new", &"", &"commit.cherry_pick", &"commit.merge", &"", &"commit.compare_working",
-	&"commit.compare_with", &"", &"commit.copy_hash"]
 const SYNC_MENU: Array[StringName] = [&"sync.fetch", &"", &"sync.pull_merge", &"sync.pull_rebase", &"",
 	&"sync.push", &"sync.force_push"]
 ## Jobs that change the worktree's files: its panes dim while they run.
@@ -93,8 +71,7 @@ var view: View = View.HISTORY
 var feedback: Feedback = null
 
 var _ops: RepoOps = RepoOps.new()
-var _menu: PopupMenu = PopupMenu.new()
-var _menu_actions: Array[StringName] = []
+var _menu: ActionMenu = ActionMenu.new()
 ## What the open context menu is about; actions see it through `ref_target`
 ## and `commit_target` while the menu builds and runs.
 var _menu_ref: Dictionary = {}
@@ -103,8 +80,7 @@ var _menu_active: bool = false
 ## The popup list the context menu shows over, which closes when an entry
 ## runs (see `show_ref_menu_over`), or null.
 var _menu_host: Window = null
-var _sync_menu: PopupMenu = PopupMenu.new()
-var _sync_ids: Array[StringName] = []
+var _sync_menu: ActionMenu = ActionMenu.new()
 var _popover: BranchPopover = BranchPopover.new()
 var _switch: HBoxContainer = HBoxContainer.new()
 ## The switch's buttons, in order, with the view action each runs.
@@ -213,14 +189,16 @@ func _ready() -> void:
 			keep: Dictionary) -> void:
 		worktree_delete_requested.emit(path, force, branch, remote, keep))
 	add_child(_menu)
-	_menu.id_pressed.connect(_on_menu_id)
+	_menu.auto_run = false
+	_menu.chosen.connect(_on_menu_chosen)
 	_menu.popup_hide.connect(func() -> void:
 		if _menu.get_parent() != self:
 			_menu.reparent(self)
 		# After the entry's `id_pressed`, which closes the host.
 		(func() -> void: _menu_host = null).call_deferred())
 	add_child(_sync_menu)
-	_sync_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(_sync_ids[id], _sync_button))
+	_sync_menu.origin = _sync_button
+	_sync_menu.tooltip_for = _sync_explanation
 	add_child(_popover)
 	_popover.branch_chosen.connect(_on_branch_chosen)
 	_popover.delete_requested.connect(_on_branch_delete_key)
@@ -566,7 +544,7 @@ func _build_banner_text() -> void:
 	_banner_label.add_sibling(_banner_text)
 	_banner_label.reparent(_banner_text)
 	_banner_step.theme_type_variation = &"StepPill"
-	_banner_step.tooltip_text = "Commit being applied, of all the commits to apply"
+	_banner_step.tooltip_text = "Commit applied / commits to apply"
 	_banner_step.mouse_filter = Control.MOUSE_FILTER_PASS
 	_banner_subject.theme_type_variation = &"DimLabel"
 	_banner_subject.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -627,88 +605,114 @@ func commit_target() -> Dictionary:
 
 ## Shows the menu of `ref` (a branch, remote branch, tag or worktree) at a
 ## screen position.
-func show_ref_menu(ref: Dictionary, at_position: Vector2, menus: Dictionary = REF_MENUS) -> void:
+## With `titled`, the menu starts with the ref's name, for menus whose
+## target is not obvious (graph labels, the worktree list).
+func show_ref_menu(ref: Dictionary, at_position: Vector2, titled: bool = false) -> void:
 	_menu_ref = ref
 	_menu_commit = {}
-	show_menu(menus.get(String(ref["type"]), []), at_position)
+	var entries: Array = Menus.ref(String(ref["type"]))
+	if String(ref["type"]) == "worktree":
+		entries = Menus.worktree(_branch_scope(String(ref.get("branch", ""))))
+	if titled:
+		entries.push_front(ActionMenu.title(String(ref["short"])))
+	show_menu(entries, at_position)
+
+
+## Sets the menus' target to local branch `branch` around a call (see
+## `ActionMenu.scope`): a worktree's Branch ▸. Invalid when it is not a
+## branch here (detached, or not read yet).
+func _branch_scope(branch: String) -> Callable:
+	var target: Dictionary = branch_ref(branch)
+	if target.is_empty():
+		return Callable()
+	return func(body: Callable) -> Variant:
+		var before: Dictionary = _menu_ref
+		_menu_ref = target
+		var result: Variant = body.call()
+		_menu_ref = before
+		return result
+
+
+## Local branch `branch` (short name) as a menu target, or {}.
+func branch_ref(branch: String) -> Dictionary:
+	if branch.is_empty():
+		return {}
+	for candidate: Dictionary in session.branch_refs():
+		if String(candidate["kind"]) == "branch" and String(candidate["short_name"]) == branch:
+			return _ref_of(candidate, "branch")
+	return {}
+
+
+func _ref_of(candidate: Dictionary, type: String) -> Dictionary:
+	return {"type": type, "name": String(candidate["name"]), "short": String(candidate["short_name"]),
+		"commit": String(candidate["commit"]), "is_head": bool(candidate["is_head"]),
+		"upstream": String(candidate["upstream"]), "worktree": String(candidate["worktree"])}
 
 
 ## Shows `ref`'s menu over `host`, a popup list (such as the worktree list)
 ## that closes when one of its entries runs.
-func show_ref_menu_over(host: Window, ref: Dictionary, at_position: Vector2,
-		menus: Dictionary = REF_MENUS) -> void:
+func show_ref_menu_over(host: Window, ref: Dictionary, at_position: Vector2, titled: bool = true) -> void:
 	_menu.reparent(host)
 	_menu_host = host
-	show_ref_menu.call_deferred(ref, at_position, menus)
+	show_ref_menu.call_deferred(ref, at_position, titled)
 
 
-## Shows a context menu of the enabled actions among `ids` at a screen position.
+## Shows a context menu of `ids` at a screen position (see `ActionMenu`).
 func show_menu(ids: Array, at_position: Vector2) -> void:
-	_menu.clear()
-	_menu_actions.clear()
 	_menu_active = true
-	for id: StringName in ids:
-		if id == &"":
-			if _menu.item_count > 0 and not _menu.is_item_separator(_menu.item_count - 1):
-				_menu.add_separator()
-		elif Actions.is_enabled(id):
-			_menu.add_icon_item(Actions.icon(id), Actions.get_action(id).label, _menu_actions.size())
-			_menu_actions.append(id)
+	var shown: int = _menu.fill(ids)
 	_menu_active = false
-	while _menu.item_count > 0 and _menu.is_item_separator(_menu.item_count - 1):
-		_menu.remove_item(_menu.item_count - 1)
-	if _menu_actions.is_empty():
+	if shown == 0:
 		# Nothing to show over a popup list after all.
 		_menu_host = null
 		if _menu.get_parent() != self:
 			_menu.reparent(self)
 		return
-	_menu.position = Vector2i(at_position)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open_at(at_position)
 
 
 func close_menu() -> void:
 	_menu.hide()
 
 
-func context_menu() -> PopupMenu:
+func context_menu() -> ActionMenu:
 	return _menu
 
 
 ## Labels in the open (or last) context menu, for tests.
 func menu_labels() -> PackedStringArray:
-	var out: PackedStringArray = PackedStringArray()
-	for i: int in _menu.item_count:
-		if not _menu.is_item_separator(i):
-			out.append(_menu.get_item_text(i))
-	return out
+	return _menu.labels()
+
+
+## The action ids in the open (or last) context menu, for tests.
+func menu_ids() -> Array[StringName]:
+	return _menu.action_ids()
+
+
+## Runs action `id` from the context menu (for tests).
+func press_menu_id(id: StringName) -> bool:
+	return _menu.press_id(id)
 
 
 ## Runs the context menu entry labelled `label` (for tests).
 func press_menu(label: String) -> bool:
-	for i: int in _menu.item_count:
-		if _menu.get_item_text(i) == label:
-			_menu.hide()
-			_on_menu_id(_menu.get_item_id(i))
-			return true
-	return false
+	return _menu.press(label)
 
 
-func _on_menu_id(id: int) -> void:
+func _on_menu_chosen(id: StringName) -> void:
 	var host: Window = _menu_host
 	_menu_host = null
 	if is_instance_valid(host) and host.visible:
 		host.hide()
 	_menu_active = true
-	Actions.run_action(_menu_actions[id])
+	Actions.run_action(id)
 	_menu_active = false
 
 
 func _on_commit_menu(at_position: Vector2) -> void:
 	_menu_ref = {}
 	_menu_commit = _history.selected_commit()
-	show_menu(COMMIT_MENU, at_position)
+	show_menu(Menus.commit(), at_position)
 
 
 ## A ref chip's menu, over the popup `over` (a refs popover) when given.
@@ -717,10 +721,7 @@ func _on_label_menu(label: Dictionary, at_position: Vector2, over: Window) -> vo
 	var ref: Dictionary = {}
 	for candidate: Dictionary in session.branch_refs():
 		if String(candidate["name"]) == String(label["name"]):
-			ref = {"type": "branch" if kind == "branch" else "remote", "name": String(candidate["name"]),
-				"short": String(candidate["short_name"]), "commit": String(candidate["commit"]),
-				"is_head": bool(candidate["is_head"]), "upstream": String(candidate["upstream"]),
-				"worktree": String(candidate["worktree"])}
+			ref = _ref_of(candidate, "branch" if kind == "branch" else "remote")
 	if kind == "tag":
 		for tag: Dictionary in session.tags():
 			if String(tag["name"]) == String(label["short"]):
@@ -732,9 +733,9 @@ func _on_label_menu(label: Dictionary, at_position: Vector2, over: Window) -> vo
 		_on_commit_menu(at_position)
 		return
 	if over != null:
-		show_ref_menu_over(over, ref, at_position, LABEL_MENUS)
+		show_ref_menu_over(over, ref, at_position)
 	else:
-		show_ref_menu(ref, at_position, LABEL_MENUS)
+		show_ref_menu(ref, at_position, true)
 
 
 ## A branch from the list: switch to it, or show the worktree that has it.
@@ -774,40 +775,16 @@ func _on_branch_new_worktree(ref: Dictionary) -> void:
 ## The Sync ▾ menu: one short item per outcome with its shortcut, and what
 ## it does to which branch in the tooltip. While a job runs: Cancel.
 func _open_sync_menu() -> void:
-	_sync_menu.clear()
-	_sync_ids.clear()
-	var ids: Array[StringName] = SYNC_MENU
-	if _sync_button.is_busy():
-		ids = [&"sync.cancel"]
-	for id: StringName in ids:
-		if id == &"":
-			_sync_menu.add_separator()
-			continue
-		var action: ActionRegistry.Action = Actions.get_action(id)
-		if action == null:
-			continue
-		var index: int = _sync_menu.item_count
-		var label: String = tr("Cancel") if id == &"sync.cancel" else action.label
-		if id == &"sync.push" and _ops.sync_state() == "publish":
-			label = tr("Publish branch")
-		_sync_menu.add_icon_item(Actions.icon(id), label, _sync_ids.size())
-		var shortcuts: PackedStringArray = Actions.shortcuts(id)
-		var event: InputEventKey = Shortcuts.parse(shortcuts[0]) if not shortcuts.is_empty() else null
-		if event != null:
-			var shortcut: Shortcut = Shortcut.new()
-			shortcut.events = [event]
-			_sync_menu.set_item_shortcut(index, shortcut)
-			# Shown only: the registry handles the keys.
-			_sync_menu.set_item_shortcut_disabled(index, true)
-		_sync_menu.set_item_disabled(index, not action.is_enabled())
-		var why: String = action.disabled_reason()
-		_sync_menu.set_item_tooltip(index, why if not why.is_empty() else _sync_explanation(id))
-		_sync_ids.append(id)
+	_sync_menu.label_overrides = {&"sync.cancel": tr("Cancel")}
+	if _ops.sync_state() == "publish":
+		_sync_menu.label_overrides[&"sync.push"] = tr("Publish branch")
+	var ids: Array = [&"sync.cancel"]
+	if not _sync_button.is_busy():
+		ids = SYNC_MENU
+	_sync_menu.fill(ids)
 	var rect: Rect2 = _sync_button.get_global_rect()
-	_sync_menu.position = Vector2i(get_window().position) + Vector2i((rect.position + Vector2(0.0, rect.size.y)) \
-			* get_window().content_scale_factor)
-	_sync_menu.reset_size()
-	_sync_menu.popup()
+	var below: Vector2 = (rect.position + Vector2(0.0, rect.size.y)) * get_window().content_scale_factor
+	_sync_menu.open_at(Vector2(get_window().position) + below)
 
 
 ## What a Sync menu item does, with the branch and remote names.
@@ -818,22 +795,22 @@ func _sync_explanation(id: StringName) -> String:
 	var ahead: int = int(session.badge().get("ahead", 0))
 	match id:
 		&"sync.fetch":
-			return tr("Check %s for new commits. Your files don't change.") % remote
+			return tr("New commits from %s; files untouched") % remote
 		&"sync.pull_merge":
-			return tr("Merge the new commits from %s into %s.") % [upstream, branch]
+			return tr("Merge %s into %s") % [upstream, branch]
 		&"sync.pull_rebase":
-			return tr("Bring in the new commits from %s, then replay your commits on top of them.") % upstream
+			return tr("Replay your commits on %s") % upstream
 		&"sync.push":
 			if upstream.is_empty():
-				return tr("Publish %s to %s and track it.") % [branch, remote]
+				return tr("Push %s to %s and track it") % [branch, remote]
 			if ahead == 1:
-				return tr("Send 1 commit to %s.") % upstream
-			return tr("Send %d commits to %s.") % [ahead, upstream]
+				return tr("1 commit to %s") % upstream
+			return tr("%d commits to %s") % [ahead, upstream]
 		&"sync.force_push":
-			return tr("Replace %s with your %s. Refused if it has commits you haven't fetched.") % [
+			return tr("Replace %s with your %s; refused if it has unfetched commits") % [
 					upstream if not upstream.is_empty() else remote, branch]
 		&"sync.cancel":
-			return tr("Stop the running git operation.")
+			return tr("Stop the running git command")
 	return ""
 
 
@@ -1083,24 +1060,33 @@ func _update_header() -> void:
 	_sync_button.show_state(caption, AppTheme.icon(SYNC_ICONS[state]), session.is_ready() and session.can_fetch())
 	var counted: bool = state in ["publish", "push", "pull", "sync", "force_push"]
 	_sync_button.set_counts(ahead if counted else 0, behind if counted else 0)
-	var tooltip: String = {
-		"publish": tr("Push %s and set its upstream") % session.current_branch(),
-		"push": tr("Push your commits to %s") % session.default_remote(),
-		"pull": tr("Pull the new commits from %s") % session.default_remote(),
-		"sync": tr("Pull the new commits, then push yours"),
-		"force_push": tr("You rewrote 1 pushed commit. Replace it on %s.") % _ops.upstream_name() if behind == 1
-				else tr("You rewrote %d pushed commits. Replace them on %s.") % [behind, _ops.upstream_name()],
-		"fetch": tr("Fetch from %s") % session.default_remote(),
-	}[state]
-	if state == "publish" and ahead > 0:
-		tooltip += "
-" + (tr("1 commit not on any remote") if ahead == 1 				else tr("%d commits not on any remote") % ahead)
+	# The card: what the button does with its shortcut, then counts and target.
+	var upstream: String = _ops.upstream_name()
+	var remote: String = session.default_remote()
+	var facts: PackedStringArray = PackedStringArray()
+	match state:
+		"publish":
+			facts.append(tr("To %s, set as upstream") % remote)
+			if ahead > 0:
+				facts.append(tr("1 commit not on any remote") if ahead == 1 else tr("%d commits not on any remote") % ahead)
+		"push":
+			facts.append(tr("1 commit to %s") % upstream if ahead == 1 else tr("%d commits to %s") % [ahead, upstream])
+		"pull":
+			facts.append(tr("1 commit from %s") % upstream if behind == 1 else tr("%d commits from %s") % [behind, upstream])
+		"sync":
+			facts.append(tr("%d to pull, %d to push") % [behind, ahead])
+		"force_push":
+			facts.append(tr("Replaces 1 rewritten commit on %s") % upstream if behind == 1
+					else tr("Replaces %d rewritten commits on %s") % [behind, upstream])
+		"fetch":
+			facts.append(tr("From %s") % remote)
 	if feedback != null:
 		var seconds: int = feedback.seconds_since_fetch(session.repo_path())
 		if seconds >= 0:
-			tooltip += "\n" + tr("Fetched %s") % _ago(seconds)
+			facts.append(tr("Fetched %s") % _ago(seconds))
 	if not session.can_fetch() and session.is_ready():
-		tooltip = tr("This repository has no remote. Add one with Repository → Remotes…")
+		facts = PackedStringArray([tr("No remote (Repository → Remotes…)")])
+	var tooltip: String = TooltipCard.text_for(caption, Actions.shortcut_text(&"sync.sync"), facts)
 	_sync_button.tooltip_text = tooltip
 
 

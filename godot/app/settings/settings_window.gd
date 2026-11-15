@@ -102,7 +102,7 @@ func _init() -> void:
 	min_size = Vector2i(820, 520)
 	_reset_all = add_button("Reset All…", false, &"reset")
 	_reset_all.icon = AppTheme.icon(&"Reload")
-	_reset_all.tooltip_text = "Restore every setting to its default"
+	_reset_all.tooltip_text = "Every setting back to its default"
 	custom_action.connect(_on_custom_action)
 
 	var content: VBoxContainer = VBoxContainer.new()
@@ -271,7 +271,7 @@ func _add_row(category: String, definition: Array) -> void:
 	var revert: Button = Button.new()
 	revert.icon = AppTheme.icon(&"Reload")
 	revert.theme_type_variation = &"ToolbarButton"
-	revert.tooltip_text = "Revert to the default"
+	revert.tooltip_text = "Back to the default"
 	revert.pressed.connect(func() -> void: _set_value(key, DEFAULTS[key]))
 	var revert_slot: CenterContainer = CenterContainer.new()
 	revert_slot.custom_minimum_size = Vector2(32, 34)
@@ -531,7 +531,7 @@ func _translate() -> void:
 	ok_button_text = tr("Close")
 	search.placeholder = tr("Filter settings")
 	_reset_all.text = tr("Reset All…")
-	_reset_all.tooltip_text = tr("Restore every setting to its default")
+	_reset_all.tooltip_text = tr("Every setting back to its default")
 	_reset.title = tr("Reset settings")
 	_reset.dialog_text = tr("Restore every setting to its default?")
 	_reset.ok_button_text = tr("Reset")
@@ -544,7 +544,7 @@ func _translate() -> void:
 		var label: Label = row.label
 		label.text = tr(row.text)
 		label.tooltip_text = tr(row.details)
-		(row.revert as Button).tooltip_text = tr("Revert to the default")
+		(row.revert as Button).tooltip_text = tr("Back to the default")
 		var control: Control = row.control
 		control.tooltip_text = label.tooltip_text
 		if control is OptionButton:

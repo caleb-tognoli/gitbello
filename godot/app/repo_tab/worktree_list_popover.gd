@@ -411,5 +411,5 @@ func _tooltip(wt: Dictionary) -> String:
 		var reason: String = String(wt["lock_reason"])
 		lines.append(tr("Locked") + (": " + reason if not reason.is_empty() else ""))
 	if bool(wt["prunable"]):
-		lines.append(tr("The folder is missing."))
+		lines.append(tr("Folder missing"))
 	return "\n".join(lines)

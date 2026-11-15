@@ -204,8 +204,8 @@ func run() -> void:
 	expect(popover.visible, "right-click keeps the branch list open behind its context menu")
 	expect(page.context_menu().visible, "right-click shows the branch context menu")
 	expect(page.context_menu().get_parent() == popover, "the branch menu belongs to the branch popup window")
-	expect("Delete branch…" in page.menu_labels(), "the branch menu offers delete: %s" % [page.menu_labels()])
-	expect(page.press_menu("Delete branch…"), "delete chosen from the menu")
+	expect(&"branch.delete" in page.menu_ids(), "the branch menu offers delete: %s" % [page.menu_ids()])
+	expect(page.press_menu_id(&"branch.delete"), "delete chosen from the menu")
 	expect(await wait_until(func() -> bool: return form.visible), "delete asks first")
 	# Its one commit was picked onto main, so its change is there: merged.
 	expect(await wait_until(func() -> bool: return form.item_facts("branch") == PackedStringArray(["merged"])),
@@ -222,8 +222,8 @@ func run() -> void:
 	list.grab_focus()
 	list.select_only(0)
 	history.commit_menu_requested.emit(Vector2.ZERO)
-	expect("New tag…" in page.menu_labels(), "the commit menu offers a tag: %s" % [page.menu_labels()])
-	expect(page.press_menu("New tag…"), "new tag chosen")
+	expect(&"tag.new" in page.menu_ids(), "the commit menu offers a tag: %s" % [page.menu_ids()])
+	expect(page.press_menu_id(&"tag.new"), "new tag chosen")
 	expect(await wait_until(func() -> bool: return form.visible), "the tag form opens")
 	(form.field("name") as LineEdit).text = "v2.0"
 	(form.field("message") as TextEdit).text = "Second release"
@@ -232,8 +232,8 @@ func run() -> void:
 	# The tag's label in the graph has its own menu.
 	history.label_menu_requested.emit({"name": "refs/tags/v2.0", "short": "v2.0", "kind": "tag", "is_head": false},
 			Vector2.ZERO, null)
-	expect("Push tag" in page.menu_labels(), "the tag menu offers push: %s" % [page.menu_labels()])
-	expect(page.press_menu("Delete tag…"), "delete tag chosen")
+	expect(&"tag.push" in page.menu_ids(), "the tag menu offers push: %s" % [page.menu_ids()])
+	expect(page.press_menu_id(&"tag.delete"), "delete tag chosen")
 	expect(await wait_until(func() -> bool: return form.visible), "tag delete asks first")
 	var on_remote: CheckBox = form.field("remote") as CheckBox
 	expect(on_remote == null or not on_remote.button_pressed, "deleting it on the remote is offered, off")
@@ -253,7 +253,7 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.current_branch() == "main" and not _has_branch(session, "short-lived")),
 			"switched to main and deleted it")
 	expect(not Actions.is_enabled(&"branch.delete"), "main itself cannot be deleted while checked out")
-	expect(Actions.disabled_reason(&"branch.delete").contains("Switch to another branch"),
+	expect(Actions.disabled_reason(&"branch.delete").contains("Switch away from"),
 			"and says why: %s" % Actions.disabled_reason(&"branch.delete"))
 
 	while main.tab_count() > 0:

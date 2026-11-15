@@ -80,9 +80,9 @@ const EXPANDER_ICONS: Dictionary[String, StringName] = {
 	"up": &"ExpandUp", "down": &"ExpandDown", "all": &"ExpandAll",
 }
 const EXPANDER_TIPS: Dictionary[String, String] = {
-	"up": "Show more lines above",
-	"down": "Show more lines below",
-	"all": "Show the hidden lines",
+	"up": "More lines above",
+	"down": "More lines below",
+	"all": "All hidden lines",
 }
 ## Width of the bar that marks a conflict side's lines in the gutter.
 const CONFLICT_BAR_WIDTH: float = 3.0
@@ -1588,7 +1588,7 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 	var over_undo: bool = choice_undo_rect().has_point(motion.position)
 	if over_undo != _choice_hover:
 		_choice_hover = over_undo
-		tooltip_text = tr("Undo this choice (%s)") % Actions.shortcut_label(&"conflict.undo") if over_undo else ""
+		tooltip_text = Actions.tooltip(&"conflict.undo") if over_undo else ""
 		queue_redraw()
 	if over_undo:
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -1623,8 +1623,7 @@ func _block_tip(action: String) -> String:
 	var tip: String = tr(BLOCK_TIPS.get(action, ""))
 	if action != "both":
 		tip = tip % (side_names[0 if action == "ours" else 1] if side_names.size() == 2 else action)
-	var shortcut: String = Actions.shortcut_label(BLOCK_ACTIONS.get(action, &""))
-	return tip if shortcut.is_empty() else "%s (%s)" % [tip, shortcut]
+	return TooltipCard.text_for(tip, Actions.shortcut_text(BLOCK_ACTIONS.get(action, &"")))
 
 
 func _set_hover(expander: Array) -> void:

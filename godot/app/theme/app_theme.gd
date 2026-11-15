@@ -520,6 +520,23 @@ static func _add_panels(theme: Theme, p: Palette) -> void:
 	theme.set_stylebox(&"panel", &"PopupPanel", _box(p.surface, 6, Vector4(12, 10, 12, 10), p.border, 1))
 	theme.set_stylebox(&"panel", &"TooltipPanel", _box(p.raised, 4, Vector4(8, 6, 8, 6), p.border, 1))
 	theme.set_color(&"font_color", &"TooltipLabel", p.text)
+	# TooltipCard: label and key caps, then muted facts
+	_variation(theme, &"TooltipCard", &"VBoxContainer")
+	theme.set_constant(&"separation", &"TooltipCard", 3)
+	_variation(theme, &"TooltipCardRow", &"HBoxContainer")
+	theme.set_constant(&"separation", &"TooltipCardRow", 12)
+	_variation(theme, &"TooltipCardTitle", &"TooltipLabel")
+	_variation(theme, &"TooltipCardFact", &"TooltipLabel")
+	theme.set_color(&"font_color", &"TooltipCardFact", p.text_muted)
+	_variation(theme, &"TooltipCardKeys", &"HBoxContainer")
+	theme.set_constant(&"separation", &"TooltipCardKeys", 2)
+	_variation(theme, &"TooltipKeyCap", &"PanelContainer")
+	var tooltip_cap: StyleBoxFlat = _box(p.surface, 3, Vector4(4, 0, 4, 1), p.border, 1)
+	tooltip_cap.border_width_bottom = 2
+	theme.set_stylebox(&"panel", &"TooltipKeyCap", tooltip_cap)
+	_variation(theme, &"TooltipKeyCapLabel", &"Label")
+	theme.set_color(&"font_color", &"TooltipKeyCapLabel", p.text_muted)
+	theme.set_font_size(&"font_size", &"TooltipKeyCapLabel", 11)
 	# Labels
 	_variation(theme, &"DimLabel", &"Label")
 	theme.set_color(&"font_color", &"DimLabel", p.text_muted)

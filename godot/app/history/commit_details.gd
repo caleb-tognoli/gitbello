@@ -6,12 +6,6 @@ extends VSplitContainer
 ## and the files' width (`files_split()`) are dragged by the user.
 
 const THEME_TYPE: StringName = &"CommitDetails"
-## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file",
-	&"file_history.open", &"", &"diff.toggle_minimap"]
-## The file list's context menu: its actions, by item id.
-const FILE_MENU_ACTIONS: Array[StringName] = [&"diff.open_file", &"file_history.open"]
-
 var session: RepoSession = null:
 	set = set_session
 ## Formats unix times (the commit list's local-time format).
@@ -26,8 +20,8 @@ signal parent_requested(source: String, oid: String, origin: LinkButton)
 ## at `at_position` (screen), over the popup `over` (or null).
 signal label_menu_requested(label: Dictionary, at_position: Vector2, over: Window)
 
-var _menu: PopupMenu = PopupMenu.new()
-var _file_menu: PopupMenu = PopupMenu.new()
+var _menu: ActionMenu = ActionMenu.new()
+var _file_menu: ActionMenu = ActionMenu.new()
 var _shown_oid: String = ""
 var _requested_oid: String = ""
 
@@ -98,10 +92,8 @@ func _ready() -> void:
 		if session != null:
 			session.open_version("commit", side))
 	add_child(_menu)
-	_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(DIFF_MENU_ACTIONS[id]))
 	_files.context_menu_requested.connect(_show_file_menu)
 	add_child(_file_menu)
-	_file_menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(FILE_MENU_ACTIONS[id]))
 	show_placeholder()
 
 
@@ -289,39 +281,21 @@ func _on_diff_changed() -> void:
 ## The diff's context menu: Copy (when text is selected), Select all and
 ## the minimap toggle.
 func _show_diff_menu(_row: int, at_position: Vector2) -> void:
-	_menu.clear()
-	for i: int in DIFF_MENU_ACTIONS.size():
-		if DIFF_MENU_ACTIONS[i] == &"":
-			_menu.add_separator()
-			continue
-		_menu.add_icon_item(Actions.icon(DIFF_MENU_ACTIONS[i]), Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
-		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
-		if DIFF_MENU_ACTIONS[i] == &"diff.toggle_minimap":
-			_menu.set_item_as_checkable(_menu.item_count - 1, true)
-			_menu.set_item_checked(_menu.item_count - 1, Core.diff_minimap())
-	_menu.position = Vector2i(_diff_panel.view().get_screen_position() + at_position)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open(Menus.diff(), _diff_panel.view().get_screen_position() + at_position)
 
 
 ## The diff's context menu, for tests.
-func diff_menu() -> PopupMenu:
+func diff_menu() -> ActionMenu:
 	return _menu
 
 
 ## The file list's context menu (the right-clicked file is selected): Open.
 func _show_file_menu(_row: int, at_position: Vector2) -> void:
-	_file_menu.clear()
-	for i: int in FILE_MENU_ACTIONS.size():
-		_file_menu.add_icon_item(Actions.icon(FILE_MENU_ACTIONS[i]), Actions.get_action(FILE_MENU_ACTIONS[i]).label, i)
-		_file_menu.set_item_disabled(_file_menu.item_count - 1, not Actions.is_enabled(FILE_MENU_ACTIONS[i]))
-	_file_menu.position = Vector2i(_files.get_screen_position() + at_position)
-	_file_menu.reset_size()
-	_file_menu.popup()
+	_file_menu.open(Menus.file_at_commit(), _files.get_screen_position() + at_position)
 
 
 ## The file list's context menu, for tests.
-func file_menu() -> PopupMenu:
+func file_menu() -> ActionMenu:
 	return _file_menu
 
 

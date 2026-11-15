@@ -15,15 +15,10 @@ const THEME_TYPE: StringName = &"IgnoreRulesDialog"
 ## The toolbar's buttons: id, label, icon, tooltip. Add's ▾ ("add_more")
 ## follows Add; Stop tracking… only shows for a rule matching tracked files.
 const BUTTONS: Array[Array] = [
-	["add", "Add", &"Add", "Add a rule"],
-	["add_more", "", &"ChevronDown", "Add the rules of a template"],
-	["remove", "Remove", &"Remove", "Remove the selected rule"],
-	["untrack", "Stop tracking…", &"GitIgnore", "Stop tracking the files this rule matches; they stay on your disk."],
-]
-## The chip menu's items: id, label, icon.
-const CHIP_MENU: Array[Array] = [
-	[0, "Open file", &"ExternalLink"],
-	[1, "Show in file manager", &"Folder"],
+	["add", "Add", &"Add", "New rule in this file"],
+	["add_more", "", &"ChevronDown", "Rules from a template"],
+	["remove", "Remove", &"Remove", "The selected rule"],
+	["untrack", "Stop tracking…", &"GitIgnore", "Files this rule matches; they stay on disk"],
 ]
 
 var _ops: IgnoreOps = null
@@ -31,21 +26,17 @@ var _session: RepoSession = null
 ## The source chips, scrolling sideways when they do not fit.
 var _chip_row: ScrollRow = ScrollRow.new()
 var _chips: HBoxContainer = _chip_row.content()
-var _chip_menu: PopupMenu = PopupMenu.new()
+var _chip_menu: ActionMenu = ActionMenu.new()
 var _lines: Tree = Tree.new()
 var _recap: HBoxContainer = HBoxContainer.new()
 var _hidden: IgnoreHiddenList = IgnoreHiddenList.new()
 var _buttons: Dictionary[String, Button] = {}
 ## Add's ▾ menu.
-var _add_menu: PopupMenu = PopupMenu.new()
-## The add menu's templates, by item id - 1.
-var _templates: PackedStringArray = PackedStringArray()
+var _add_menu: ActionMenu = ActionMenu.new()
 var _source_rows: Array[Dictionary] = []
 var _line_rows: Array[Dictionary] = []
 var _source: int = -1
 var _line: int = -1
-## The source whose chip menu is open.
-var _menu_source: int = -1
 ## Tree rows are being filled by code: their selection is not the user's.
 var _filling: bool = false
 var _mono: Font = null
@@ -81,7 +72,6 @@ func _ready() -> void:
 		action_button.pressed.connect(press.bind(String(entry[0])))
 		(pair if String(entry[0]).begins_with("add") else toolbar).add_child(action_button)
 		_buttons[String(entry[0])] = action_button
-	_add_menu.id_pressed.connect(_on_add)
 	add_child(_add_menu)
 	_lines.hide_root = true
 	_lines.columns = 2
@@ -97,7 +87,6 @@ func _ready() -> void:
 	_hidden.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_hidden.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_child(_hidden)
-	_chip_menu.id_pressed.connect(_on_chip_menu)
 	add_child(_chip_menu)
 	visibility_changed.connect(func() -> void:
 		if not visible and _session != null:
@@ -200,7 +189,7 @@ func button(id: String) -> Button:
 
 
 ## Add's ▾ menu, filled (for tests).
-func add_menu() -> PopupMenu:
+func add_menu() -> ActionMenu:
 	_fill_add_menu()
 	return _add_menu
 
@@ -215,7 +204,7 @@ func chip_row() -> ScrollRow:
 	return _chip_row
 
 
-func chip_menu() -> PopupMenu:
+func chip_menu() -> ActionMenu:
 	return _chip_menu
 
 
@@ -245,7 +234,7 @@ func press(id: String) -> void:
 		"add_more":
 			_fill_add_menu()
 			var under: Button = _buttons["add_more"]
-			_add_menu.popup(Rect2i(Vector2i(under.get_screen_position() + Vector2(0.0, under.size.y)), Vector2i.ZERO))
+			_add_menu.open_at(under.get_screen_position() + Vector2(0.0, under.size.y))
 		"remove":
 			if _is_rule(line):
 				_ops.remove_rule(_source, _line, String(line["text"]))
@@ -312,22 +301,11 @@ func _update_chips() -> void:
 
 
 func _open_chip_menu(at_position: Vector2, index: int) -> void:
-	_menu_source = index
-	_chip_menu.clear()
-	var exists: bool = bool(_source_rows[index]["exists"])
-	for entry: Array in CHIP_MENU:
-		_chip_menu.add_icon_item(AppTheme.icon(entry[2]), tr(String(entry[1])), int(entry[0]))
-		_chip_menu.set_item_disabled(_chip_menu.item_count - 1, not exists)
-	_chip_menu.popup(Rect2i(Vector2i(at_position), Vector2i.ZERO))
-
-
-func _on_chip_menu(id: int) -> void:
-	if _menu_source < 0 or _menu_source >= _source_rows.size():
-		return
-	if id == 0:
-		open_source(_menu_source)
-	elif id == 1:
-		OS.shell_show_in_file_manager(String(_source_rows[_menu_source]["path"]))
+	var missing: bool = not bool(_source_rows[index]["exists"])
+	var path: String = String(_source_rows[index]["path"])
+	_chip_menu.open([ActionMenu.item(tr("Open file"), open_source.bind(index), &"ExternalLink", missing),
+		ActionMenu.item(tr("Show in file manager"), OS.shell_show_in_file_manager.bind(path), &"Folder", missing)],
+		at_position)
 
 
 ## "Hides 3 paths" and "1 tracked file matches", for a source's tooltip.
@@ -476,21 +454,17 @@ func _fill_recap(line: Dictionary) -> void:
 ## Add's ▾ menu: the templates, one whose rules are all in the root
 ## `.gitignore` disabled.
 func _fill_add_menu() -> void:
-	_add_menu.clear()
-	_templates = Core.gitignore_templates()
-	_add_menu.add_separator(tr("Templates"))
-	for i: int in _templates.size():
-		var template: String = _templates[i]
-		_add_menu.add_icon_item(AppTheme.icon(&"FileList"), template, i + 1)
-		if _session == null or _session.ignore_template_lines(template).is_empty():
-			_add_menu.set_item_disabled(_add_menu.item_count - 1, true)
-			_add_menu.set_item_tooltip(_add_menu.item_count - 1, tr("The root .gitignore has every rule of this template."))
+	var entries: Array = [ActionMenu.title(tr("Templates"))]
+	for template: String in Core.gitignore_templates():
+		var complete: bool = _session == null or _session.ignore_template_lines(template).is_empty()
+		entries.append(ActionMenu.item(template, _on_add.bind(template), &"FileList", complete,
+			tr("The root .gitignore has every rule of this template.") if complete else ""))
+	_add_menu.fill(entries)
 
 
-func _on_add(id: int) -> void:
+func _on_add(template: String) -> void:
 	if _ops == null:
 		return
-	var template: String = _templates[id - 1] if id - 1 < _templates.size() else ""
 	var missing: String = _session.ignore_template_lines(template)
 	if not missing.is_empty():
 		_ops.open_pattern(missing, "Add template rules")

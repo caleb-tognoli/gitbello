@@ -24,12 +24,6 @@ const FILTER_FIELD: PackedScene = preload("res://ui/filter_field/filter_field.ts
 const LIST_HEADER: PackedScene = preload("res://ui/list_header/list_header.tscn")
 const DIFF_PANEL: PackedScene = preload("res://ui/diff_view/diff_panel.tscn")
 const COMMIT_HEADER: PackedScene = preload("res://app/history/commit_header.tscn")
-## The diff's context menu: its actions, by item id.
-const DIFF_MENU_ACTIONS: Array[StringName] = [&"diff.copy", &"diff.select_all", &"", &"diff.open_file",
-	&"file_history.open", &"", &"diff.toggle_minimap"]
-## The file list's context menu.
-const FILE_MENU_ACTIONS: Array[StringName] = [&"compare.restore_left", &"compare.restore_right", &"",
-	&"diff.open_file", &"file_history.open"]
 ## The commit list's context menu.
 const COMMIT_MENU_ACTIONS: Array[StringName] = [&"compare.cherry_pick", &"", &"compare.copy_hash"]
 ## Icons of the sides, by `compare_info` side kind.
@@ -86,9 +80,9 @@ var _picker: ComparePicker = ComparePicker.new()
 ## Which side the picker is choosing: `left` or `right`.
 var _picking: String = ""
 var _loading: LoadingIndicator = LoadingIndicator.new()
-var _menu: PopupMenu = PopupMenu.new()
-var _file_menu: PopupMenu = PopupMenu.new()
-var _commit_menu: PopupMenu = PopupMenu.new()
+var _menu: ActionMenu = ActionMenu.new()
+var _file_menu: ActionMenu = ActionMenu.new()
+var _commit_menu: ActionMenu = ActionMenu.new()
 
 
 func _ready() -> void:
@@ -127,12 +121,8 @@ func _ready() -> void:
 	add_child(_recent)
 	_recent.chosen.connect(func(recent: Dictionary) -> void:
 		open(String(recent["left"]), String(recent["right"]), bool(recent["working"]), String(recent["mode"])))
-	for entry: Array in [[_menu, DIFF_MENU_ACTIONS], [_file_menu, FILE_MENU_ACTIONS],
-			[_commit_menu, COMMIT_MENU_ACTIONS]]:
-		var menu: PopupMenu = entry[0]
-		var ids: Array[StringName] = entry[1]
+	for menu: ActionMenu in [_menu, _file_menu, _commit_menu]:
 		add_child(menu)
-		menu.id_pressed.connect(func(id: int) -> void: Actions.run_action(ids[id]))
 	_apply_theme()
 	_update_bar()
 
@@ -530,7 +520,7 @@ func _update_details_split() -> void:
 ## What a failed comparison says.
 func _error_text(error: Dictionary) -> String:
 	if String(error.get("kind", "")) == "unknown_revision":
-		return tr("Unknown revision: %s. Pick another side.") % _unknown_side()
+		return tr("Unknown revision: %s") % _unknown_side()
 	return tr("Could not compare: %s") % String(error.get("stderr", error.get("message", "")))
 
 
@@ -621,14 +611,14 @@ func can_cherry_pick() -> bool:
 func cherry_pick_reason() -> String:
 	var commits: Array[Dictionary] = selected_commits()
 	if commits.is_empty():
-		return tr("Select commits in the comparison.")
+		return tr("Select commits")
 	if session != null and not session.operation().is_empty():
-		return tr("Finish the operation in progress first.")
+		return tr("Finish the operation in progress first")
 	for commit: Dictionary in commits:
 		if bool(commit["in_head"]):
-			return tr("%s is already in the current branch.") % ("“%s”" % String(commit["subject"]))
+			return tr("%s is already in the current branch") % ("“%s”" % String(commit["subject"]))
 		if commits.size() > 1 and int(commit["parents"]) > 1:
-			return tr("A merge commit can only be cherry-picked alone.")
+			return tr("Cherry-pick a merge commit alone")
 	return ""
 
 
@@ -711,25 +701,16 @@ func restore_side_name(which: String) -> String:
 
 
 func _show_file_menu(_row: int, at_position: Vector2) -> void:
-	_show_actions(_file_menu, FILE_MENU_ACTIONS, _files.get_screen_position() + at_position, {
+	_show_actions(_file_menu, Menus.file_at_commit([&"compare.restore_left", &"compare.restore_right"]), _files.get_screen_position() + at_position, {
 		&"compare.restore_left": tr("Restore from %s") % restore_side_name("left"),
 		&"compare.restore_right": tr("Restore from %s") % restore_side_name("right"),
 	})
 
 
 ## Fills `menu` with `ids` (labels from `labels` where given) and opens it.
-func _show_actions(menu: PopupMenu, ids: Array[StringName], at: Vector2, labels: Dictionary) -> void:
-	menu.clear()
-	for i: int in ids.size():
-		if ids[i] == &"":
-			menu.add_separator()
-			continue
-		var label: String = String(labels.get(ids[i], Actions.get_action(ids[i]).label))
-		menu.add_icon_item(Actions.icon(ids[i]), label, i)
-		menu.set_item_disabled(menu.item_count - 1, not Actions.is_enabled(ids[i]))
-	menu.position = Vector2i(at)
-	menu.reset_size()
-	menu.popup()
+func _show_actions(menu: ActionMenu, ids: Array, at: Vector2, labels: Dictionary) -> void:
+	menu.label_overrides.assign(labels)
+	menu.open(ids, at)
 
 
 # --- The bar --------------------------------------------------------------------
@@ -740,7 +721,7 @@ func _update_bar() -> void:
 	_swap_button.icon = AppTheme.icon(&"Swap")
 	_swap_button.disabled = not can_swap()
 	_swap_button.tooltip_text = Actions.tooltip(&"compare.swap") if can_swap() \
-			else tr("The working copy stays on the right.")
+			else tr("Working copy stays on the right")
 	_recent_button.icon = AppTheme.icon(&"History")
 	_recent_button.tooltip_text = Actions.tooltip(&"compare.recent")
 	_show_side(_left_button, "left")
@@ -812,19 +793,7 @@ func _on_diff_key(event: InputEvent) -> void:
 
 
 func _show_diff_menu(_row: int, at_position: Vector2) -> void:
-	_menu.clear()
-	for i: int in DIFF_MENU_ACTIONS.size():
-		if DIFF_MENU_ACTIONS[i] == &"":
-			_menu.add_separator()
-			continue
-		_menu.add_icon_item(Actions.icon(DIFF_MENU_ACTIONS[i]), Actions.get_action(DIFF_MENU_ACTIONS[i]).label, i)
-		_menu.set_item_disabled(_menu.item_count - 1, not Actions.is_enabled(DIFF_MENU_ACTIONS[i]))
-		if DIFF_MENU_ACTIONS[i] == &"diff.toggle_minimap":
-			_menu.set_item_as_checkable(_menu.item_count - 1, true)
-			_menu.set_item_checked(_menu.item_count - 1, Core.diff_minimap())
-	_menu.position = Vector2i(_diff_panel.view().get_screen_position() + at_position)
-	_menu.reset_size()
-	_menu.popup()
+	_menu.open(Menus.diff(), _diff_panel.view().get_screen_position() + at_position)
 
 
 ## Focuses the commit list.
@@ -902,9 +871,9 @@ func loading_indicator() -> LoadingIndicator:
 	return _loading
 
 
-func file_menu() -> PopupMenu:
+func file_menu() -> ActionMenu:
 	return _file_menu
 
 
-func commit_menu() -> PopupMenu:
+func commit_menu() -> ActionMenu:
 	return _commit_menu

@@ -14,6 +14,8 @@ const CHIP_SHORTCUTS: int = 9
 const VIEW_SHORTCUTS: int = 5
 ## Repositories File → Open recent lists.
 const RECENT_MENU: int = 12
+## Where Help → What's new and Report an issue go.
+const PROJECT_URL: String = "https://github.com/caleb-tognoli/gitbello"
 
 var _pages: Array[RepoTab] = []
 var _current: int = -1
@@ -50,6 +52,7 @@ func _ready() -> void:
 	window.min_size = MIN_WINDOW_SIZE
 	window.content_scale_factor = ThemeManager.ui_scale(window)
 	ThemeManager.apply(self)
+	TooltipCard.install(get_tree())
 	if DisplayServer.has_method(&"set_system_theme_change_callback"):
 		DisplayServer.set_system_theme_change_callback(_on_system_theme_changed)
 	window.files_dropped.connect(_on_files_dropped)
@@ -94,21 +97,45 @@ func _ready() -> void:
 	_home.refresh_texts()
 	_update_localized_actions()
 	_menu_bar.dynamic_menus["Open recent"] = _recent_entries
-	_menu_bar.checked_states = {
-		&"view.changes": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.CHANGES,
-		&"view.history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.HISTORY,
-		&"view.shelves": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.SHELVES,
-		&"view.compare": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.COMPARE,
-		&"view.file_history": func() -> bool: return current_page() != null and current_page().view == WorktreeView.View.FILE,
-		&"diff.toggle_minimap": func() -> bool: return Core.diff_minimap(),
-		&"history.compact_rows": func() -> bool: return Core.history_compact(),
-		&"history.detailed_rows": func() -> bool: return not Core.history_compact(),
-		&"history.toggle_graph": func() -> bool: return Core.history_graph(),
-		&"diff.toggle_whole_file": func() -> bool:
-			var panel: DiffPanel = _shown_diff_panel()
-			return panel != null and panel.whole_file_button().button_pressed,
-		&"view.toggle_git_log": func() -> bool: return _git_log.visible,
-	}
+	var view_is: Callable = func(view: WorktreeView.View) -> bool:
+		return current_page() != null and current_page().view == view
+	Actions.set_checked(&"view.changes", view_is.bind(WorktreeView.View.CHANGES), true)
+	Actions.set_checked(&"view.history", view_is.bind(WorktreeView.View.HISTORY), true)
+	Actions.set_checked(&"view.shelves", view_is.bind(WorktreeView.View.SHELVES), true)
+	Actions.set_checked(&"view.compare", view_is.bind(WorktreeView.View.COMPARE), true)
+	Actions.set_checked(&"view.file_history", view_is.bind(WorktreeView.View.FILE), true)
+	Actions.set_checked(&"diff.toggle_minimap", func() -> bool: return Core.diff_minimap())
+	Actions.set_checked(&"history.compact_rows", func() -> bool: return Core.history_compact(), true)
+	Actions.set_checked(&"history.detailed_rows", func() -> bool: return not Core.history_compact(), true)
+	Actions.set_checked(&"history.toggle_graph", func() -> bool: return Core.history_graph())
+	var all_branches: Callable = func() -> bool:
+		var page: RepoTab = current_page()
+		return page != null and page.session != null and page.session.is_ready() \
+				and bool(page.session.history_info().get("all_branches", false))
+	Actions.set_checked(&"history.all_branches", all_branches, true)
+	Actions.set_checked(&"history.current_branch", func() -> bool:
+		return current_page() != null and not all_branches.call(), true)
+	Actions.set_checked(&"diff.toggle_whole_file", func() -> bool:
+		var panel: DiffPanel = _shown_diff_panel()
+		return panel != null and panel.whole_file_button().button_pressed)
+	Actions.set_checked(&"view.toggle_git_log", func() -> bool: return _git_log.visible)
+	# Why some menu items are greyed.
+	for entry: Array in [[&"branch.checkout", "Already checked out"],
+			[&"diff.copy", "Select text"], [&"diff.select_all", "Select a file"],
+			[&"diff.toggle_whole_file", "Select a file"],
+			[&"commit.checkout", "Already checked out"],
+			[&"commit.merge", "Already in the current branch"]]:
+		Actions.get_action(entry[0]).reason = _says(entry[1])
+	Actions.get_action(&"commit.cherry_pick").reason = func() -> String:
+		var page: RepoTab = current_page()
+		if page != null and page.session.is_ready() and not page.session.operation().is_empty():
+			return "Finish the operation in progress first"
+		return "Already checked out"
+	# The operation's actions apply only while a merge, rebase or cherry-pick
+	# is in progress (Abort is enabled exactly then).
+	for id: StringName in [&"operation.continue", &"operation.open_resolver", &"operation.abort",
+			&"operation.skip"]:
+		Actions.set_visible(id, func() -> bool: return Actions.is_enabled(&"operation.abort"))
 	_menu_strip.visible = not _menu_bar.is_native_menu()
 
 	if not L10n.runtime_error(Core.start_error()).is_empty():
@@ -505,11 +532,29 @@ func _apply_theme() -> void:
 
 # --- Actions ----------------------------------------------------------------
 
+## Home's row menu acts on the library entry it was opened on, so these are
+## left out of the palette.
+func _register_home_row_actions() -> void:
+	var pinned: Callable = func() -> bool: return bool(_home.menu_row().get("pinned", false))
+	for entry: Array in [[&"home.row_open", "Open", Home.RowItem.OPEN],
+			[&"home.row_pin", "Pin", Home.RowItem.PIN], [&"home.row_unpin", "Unpin", Home.RowItem.PIN],
+			[&"home.row_rename", "Rename…", Home.RowItem.RENAME],
+			[&"home.row_relocate", "Change location…", Home.RowItem.RELOCATE],
+			[&"home.row_show", "Show in file manager", Home.RowItem.SHOW],
+			[&"home.row_terminal", "Open terminal", Home.RowItem.TERMINAL],
+			[&"home.row_copy_path", "Copy path", Home.RowItem.COPY],
+			[&"home.row_remove", "Remove from list", Home.RowItem.REMOVE]]:
+		var item: Home.RowItem = entry[2]
+		Actions.register(entry[0], entry[1], "Home", func() -> void: _home.run_menu_item(item)).hidden = true
+	Actions.set_visible(&"home.row_pin", func() -> bool: return not pinned.call())
+	Actions.set_visible(&"home.row_unpin", pinned)
+
+
 func _register_actions() -> void:
 	var has_repo: Callable = func() -> bool: return current_page() != null
 	var can_close_tab: Callable = func() -> bool: return not _pages.is_empty()
 	var many_tabs: Callable = func() -> bool: return _pages.size() > 1
-	var no_repo: Callable = func() -> String: return "Open a repository first."
+	var no_repo: Callable = func() -> String: return "No repository"
 	Actions.register(&"app.command_palette", "Command palette", "App",
 			_palette.open, PackedStringArray(["Ctrl+Shift+P", "Ctrl+K"]))
 	Actions.register(&"app.keyboard_shortcuts", "Keyboard shortcuts…", "App",
@@ -517,7 +562,15 @@ func _register_actions() -> void:
 	Actions.register(&"app.quit", "Quit", "App",
 			func() -> void: get_tree().quit(), PackedStringArray(["Ctrl+Q"]))
 	Actions.register(&"app.about", "About gitbello", "App", _show_about)
+	Actions.register(&"app.whats_new", "What's new", "App", func() -> void: OS.shell_open(PROJECT_URL + "/releases"))
+	Actions.register(&"app.report_issue", "Report an issue", "App",
+			func() -> void: OS.shell_open(PROJECT_URL + "/issues/new"))
+	Actions.register(&"app.open_config_folder", "Open config folder", "App",
+			func() -> void: OS.shell_open(Core.config_folder()), PackedStringArray(),
+			func() -> bool: return not Core.config_folder().is_empty() and DirAccess.dir_exists_absolute(Core.config_folder()),
+			_says("No config folder yet"))
 	Actions.register(&"home.open", "Home", "App", open_home, PackedStringArray(["Ctrl+N"]))
+	_register_home_row_actions()
 	Actions.register(&"repo.clone", "Clone repository…", "Repository", func() -> void: _library.clone())
 	Actions.register(&"repo.add_existing", "Open repository…", "Repository", _library.add_existing,
 			PackedStringArray(["Ctrl+O"]))
@@ -552,7 +605,7 @@ func _register_actions() -> void:
 	Actions.register(&"view.shelves", "Shelves", "View",
 			func() -> void: current_page().show_view(WorktreeView.View.SHELVES), PackedStringArray(),
 			func() -> bool: return current_page() != null and not current_page().session.shelves().is_empty(),
-			_says("This repository has no shelves."))
+			_says("No shelves"))
 	# Alt+number follows the switch as it shows: Shelves, Compare and File
 	# history come and go, so the third button is not always the same view.
 	for i: int in VIEW_SHORTCUTS:
@@ -605,7 +658,7 @@ func _register_actions() -> void:
 				var page: RepoTab = current_page()
 				page.session.open_version(_diff_slot(page), "shown"),
 			PackedStringArray(), func() -> bool: return _open_panel() != null,
-			_says("Select a file first."))
+			_says("Select a file"))
 	Actions.register(&"diff.copy", "Copy", "Edit",
 			func() -> void: _focused_diff().copy_selection(), PackedStringArray(["Ctrl+C"]),
 			func() -> bool: return _focused_diff() != null and _focused_diff().has_selection())
@@ -625,7 +678,7 @@ func _register_actions() -> void:
 			func() -> bool:
 				var field: FilterField = _focused_filter_field()
 				return field != null and field.options_popover() != null,
-			_says("Focus a filter or search field first."))
+			_says("Focus a filter or search field"))
 	Actions.register(&"history.toggle_graph", "Show history graph", "View", _toggle_history_graph)
 	Actions.register(&"diff.next_change", "Next change", "View",
 			func() -> void: _jump_to_change(true), PackedStringArray(["F7"]),
@@ -646,7 +699,7 @@ func _register_actions() -> void:
 				var page: RepoTab = current_page()
 				if page == null or page.session == null or not page.session.is_ready():
 					return false
-				return _view_diff_panel(page).can_retry(), _says("There is no failed diff to retry."))
+				return _view_diff_panel(page).can_retry(), _says("No failed diff"))
 	for choice: String in ["system", "light", "dark"]:
 		Actions.register(StringName("view.theme_" + choice), "Theme: %s" % choice.capitalize(), "View",
 				_set_theme.bind(choice))
@@ -669,24 +722,24 @@ func _register_change_actions() -> void:
 	var changes: Callable = func() -> ChangesView: return current_page().changes()
 	var has_file: Callable = func() -> bool:
 		return in_changes.call() and not current_page().changes().current_path().is_empty()
-	var no_file: Callable = _says("Select a changed file first.")
+	var no_file: Callable = _says("Select a changed file")
 	var has_listed: Callable = func() -> bool:
 		return in_changes.call() and current_page().session.shown_change_count() > 0
 	Actions.register(&"changes.shelve_listed", "Shelve all…", "Changes",
 			func() -> void: changes.call().shelve_listed(), PackedStringArray(), has_listed,
-			_says("No changed files are listed."))
+			_says("No changed files"))
 	Actions.register(&"changes.discard_listed", "Discard all…", "Changes",
 			func() -> void: changes.call().discard_listed(), PackedStringArray(), has_listed,
-			_says("No changed files are listed."))
+			_says("No changed files"))
 	# "Selected" files are the checked ones the list shows.
 	var has_checked: Callable = func() -> bool:
 		return in_changes.call() and not current_page().session.shown_picked_paths().is_empty()
 	Actions.register(&"changes.shelve_checked", "Shelve selected…", "Changes",
 			func() -> void: changes.call().shelve_checked(), PackedStringArray(), has_checked,
-			_says("Check files first."))
+			_says("No checked files"))
 	Actions.register(&"changes.discard_checked", "Discard selected…", "Changes",
 			func() -> void: changes.call().discard_checked(), PackedStringArray(), has_checked,
-			_says("Check files first."))
+			_says("No checked files"))
 	Actions.register(&"changes.clear_filters", "Clear all filters", "Changes",
 			func() -> void: changes.call().filter_field().clear_filters(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().filter_field().is_active())
@@ -716,7 +769,7 @@ func _register_change_actions() -> void:
 		var page: RepoTab = current_page()
 		return page != null and page.session != null and page.view == WorktreeView.View.HISTORY \
 				and page.history().has_matches()
-	var no_matches: Callable = _says("Search the history first.")
+	var no_matches: Callable = _says("No search")
 	var next: ActionRegistry.Action = Actions.register(&"history.next_match", "Next search match", "History",
 			func() -> void: current_page().history().step_match(true), PackedStringArray(["F3"]), in_history,
 			no_matches)
@@ -735,9 +788,9 @@ func _register_change_actions() -> void:
 	var history_ready: Callable = func() -> bool:
 		var page: RepoTab = current_page()
 		return page != null and page.view == WorktreeView.View.HISTORY and page.session.is_ready()
-	Actions.register(&"history.current_branch", "Show current branch history", "History",
+	Actions.register(&"history.current_branch", "Current branch only", "History",
 			func() -> void: current_page().history().set_all_branches(false), PackedStringArray(), history_ready)
-	Actions.register(&"history.all_branches", "Show all branches history", "History",
+	Actions.register(&"history.all_branches", "Every branch", "History",
 			func() -> void: current_page().history().set_all_branches(true), PackedStringArray(), history_ready)
 	var current_commit: ActionRegistry.Action = Actions.register(&"history.go_to_current_commit", "Go to current commit", "History",
 			func() -> void: current_page().history().go_to_current_commit(), PackedStringArray(["F"]),
@@ -760,13 +813,15 @@ func _register_change_actions() -> void:
 	Actions.register(&"changes.restore_line_endings", "Restore line endings", "Changes",
 			func() -> void: changes.call().restore_line_endings(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_restore_line_endings(),
-			_says("No line endings to restore."))
+			_says("No line endings to restore"))
+	Actions.set_visible(&"changes.restore_line_endings", func() -> bool:
+		return in_changes.call() and current_page().changes().can_restore_line_endings())
 	Actions.register(&"changes.undo_discard", "Undo last discard", "Changes",
-			func() -> void: changes.call().undo_discard(), PackedStringArray(["Ctrl+Z"]),
+			func() -> void: changes.call().undo_discard(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_discard(),
-			_says("There is no discard to undo."))
+			_says("No discard to undo"))
 	# Ignore rules (M7.7a): quick rules on the highlighted files, the dialog, undo.
-	var no_ignore: Callable = _says("Select changed files that are not conflicted first.")
+	var no_ignore: Callable = _says("Select files without conflicts")
 	for quick: Array in [["file", "Ignore selected files"], ["extension", "Ignore files with this extension"],
 			["folder", "Ignore this folder"]]:
 		var kind: String = quick[0]
@@ -780,15 +835,15 @@ func _register_change_actions() -> void:
 	Actions.register(&"changes.stop_ignoring", "Stop ignoring", "Changes",
 			func() -> void: changes.call().stop_ignoring(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_stop_ignoring(),
-			_says("Select one ignored file first (Show ignored files in the filter)."))
+			_says("Select an ignored file (Show ignored files)"))
 	Actions.register(&"changes.ignore_hint", "Ignore the suggested folder", "Changes",
 			func() -> void: changes.call().ignore_hint_folder(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().has_ignore_hint(),
-			_says("There is no folder to suggest."))
+			_says("No folder to suggest"))
 	Actions.register(&"changes.undo_ignore", "Undo last ignore rule", "Changes",
 			func() -> void: changes.call().undo_ignore(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_undo_ignore(),
-			_says("There is no ignore rule to undo."))
+			_says("No ignore rule to undo"))
 	Actions.register(&"changes.cancel_amend", "Cancel", "Changes",
 			func() -> void: changes.call().commit_box().cancel_amend(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and changes.call().commit_box().is_amend() \
@@ -798,11 +853,11 @@ func _register_change_actions() -> void:
 	Actions.register(&"changes.shelve", "Shelve…", "Shelves",
 			func() -> void: changes.call().shelve_selected(), PackedStringArray(),
 			func() -> bool: return in_changes.call() and current_page().changes().can_shelve(),
-			_says("Select a changed file first."))
+			_says("Select a changed file"))
 	var has_shelf: Callable = func() -> bool:
 		return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES \
 				and not current_page().changes().selected_shelf().is_empty()
-	var no_shelf: Callable = _says("Select a shelf in the Shelves view first.")
+	var no_shelf: Callable = _says("Select a shelf")
 	var in_shelves: Callable = func() -> bool:
 		return repo_ready.call() and current_page().view == WorktreeView.View.SHELVES
 	var toggle_group: ActionRegistry.Action = Actions.register(&"shelf.toggle_branch_group", "Expand or collapse shelf branch", "Shelves",
@@ -834,25 +889,25 @@ func _register_change_actions() -> void:
 				and not current_page().changes().selected_shelf_file().is_empty()
 	Actions.register(&"shelf.restore_file", "Restore file", "Shelves",
 			func() -> void: current_page().ops().restore_shelf_file(changes.call().selected_shelf(), changes.call().selected_shelf_file()),
-			PackedStringArray(), has_shelf_file, _says("Select a shelved file first."))
+			PackedStringArray(), has_shelf_file, _says("Select a shelved file"))
 	Actions.register(&"shelf.discard_file", "Discard file", "Shelves",
 			func() -> void: current_page().ops().discard_shelf_file(changes.call().selected_shelf(), changes.call().selected_shelf_file()),
-			PackedStringArray(), has_shelf_file, _says("Select a shelved file first."))
+			PackedStringArray(), has_shelf_file, _says("Select a shelved file"))
 	Actions.register(&"shelf.undo_discard", "Undo shelf discard", "Shelves",
 			func() -> void: current_page().ops().undo_shelf_discard(), PackedStringArray(),
 			func() -> bool: return repo_ready.call() and current_page().session.can_undo_shelf_discard(),
-			_says("There is no shelf discard to undo."))
+			_says("No shelf discard to undo"))
 	Actions.register(&"shelf.restore_left", "Restore changes left on this branch", "Shelves",
 			func() -> void: current_page().ops().restore_shelf(changes.call().left_shelf()),
 			PackedStringArray(),
 			func() -> bool: return repo_ready.call() and not current_page().changes().left_shelf().is_empty(),
-			_says("No changes were left on this branch."))
+			_says("No changes left here"))
 	var commit: ActionRegistry.Action = Actions.register(&"changes.commit", "Commit", "Changes",
 			func() -> void: changes.call().commit(), PackedStringArray(["Ctrl+Enter"]),
 			func() -> bool: return in_changes.call() and current_page().changes().commit_box().can_commit(),
 			func() -> String:
 				var page: RepoTab = current_page()
-				return page.changes().commit_box().block_reason() if page != null and page.session != null 						else "Open a repository first.")
+				return page.changes().commit_box().block_reason() if page != null and page.session != null 						else "No repository")
 	commit.in_text_fields = true
 
 
@@ -865,15 +920,15 @@ func _register_sync_actions() -> void:
 	var ops: Callable = func() -> RepoOps: return current_page().ops()
 	var no_remote: Callable = func() -> String:
 		if not is_ready.call():
-			return "Open a repository first."
-		return "This repository has no remote. Add one with Repository → Remotes…" \
+			return "No repository"
+		return "No remote (Repository → Remotes…)" \
 				if session.call().remotes().is_empty() else ""
 	var pull_reason: Callable = func() -> String:
 		var why: String = String(no_remote.call())
-		return why if not why.is_empty() else "The current branch does not follow a remote branch."
+		return why if not why.is_empty() else "No upstream branch"
 	var push_reason: Callable = func() -> String:
 		var why: String = String(no_remote.call())
-		return why if not why.is_empty() else "There is no branch checked out."
+		return why if not why.is_empty() else "No branch checked out"
 	var can_pull: Callable = func() -> bool: return is_ready.call() and session.call().can_pull()
 	var can_push: Callable = func() -> bool: return is_ready.call() and session.call().can_push()
 	Actions.register(&"sync.sync", "Sync", "Sync", func() -> void: ops.call().sync(), PackedStringArray(["Ctrl+Shift+Y"]),
@@ -937,7 +992,7 @@ func _register_branch_actions() -> void:
 			func() -> void:
 				var start: Array = _start_point(ref.call(), commit.call())
 				ops.call().new_branch(start[0], start[1]),
-			PackedStringArray(["Ctrl+Shift+N"]), has_head, _says("There is no commit to start a branch from yet."))
+			PackedStringArray(["Ctrl+Shift+N"]), has_head, _says("No commits yet"))
 	Actions.register(&"branch.checkout", "Check out", "Branches",
 			func() -> void:
 				var target: Dictionary = ref.call()
@@ -957,17 +1012,17 @@ func _register_branch_actions() -> void:
 				return (ref_is.call("branch") or ref_is.call("remote")) \
 						and not current_page().session.main_worktree().is_empty() \
 						and not ops.call().new_worktree_spec(ref.call()).is_empty(),
-			_says("The branch is checked out in a worktree already."))
+			_says("Already in a worktree"))
 	Actions.register(&"branch.rename", "Rename branch…", "Branches",
 			func() -> void: ops.call().rename_branch(branch.call()), PackedStringArray(["F2"]),
-			func() -> bool: return not String(branch.call()).is_empty(), _says("There is no branch checked out."))
+			func() -> bool: return not String(branch.call()).is_empty(), _says("No branch checked out"))
 	# The menu's branch, else the checked-out one. Deleting the branch checked
 	# out here switches to the base's branch first; one checked out in a
 	# linked worktree goes with its worktree (see `RepoOps.branch_delete_block`).
 	var delete_block: Callable = func() -> String:
 		var target: String = branch.call()
 		if target.is_empty():
-			return tr("There is no branch checked out.")
+			return tr("No branch checked out")
 		return ops.call().branch_delete_block(target)
 	Actions.register(&"branch.delete", "Delete branch…", "Branches",
 			func() -> void: ops.call().delete_branch(branch.call()), PackedStringArray(),
@@ -981,7 +1036,7 @@ func _register_branch_actions() -> void:
 	Actions.register(&"branch.set_upstream", "Set upstream…", "Branches",
 			func() -> void: ops.call().set_upstream(branch.call()), PackedStringArray(),
 			func() -> bool: return not String(branch.call()).is_empty() and not current_page().session.remotes().is_empty(),
-			_says("There is no remote to follow."))
+			_says("No remote branches"))
 	Actions.register(&"tag.new", "New tag…", "Tags",
 			func() -> void:
 				var start: Array = _start_point(ref.call(), commit.call())
@@ -1014,7 +1069,10 @@ func _register_branch_actions() -> void:
 						and String(commit.call().get("hash", "")) == String(current_page().session.status().get("oid", "")) \
 						and not _feedback.is_busy(current_page().session) \
 						and current_page().changes().commit_box().can_amend(),
-			_says("Select the current HEAD commit in History to amend it."))
+			_says("Select HEAD in History"))
+	Actions.set_visible(&"commit.amend", func() -> bool:
+		return is_ready.call() and not commit.call().is_empty() \
+				and String(commit.call().get("hash", "")) == String(current_page().session.status().get("oid", "")))
 	Actions.register(&"commit.checkout", "Check out commit (detached)…", "History",
 			func() -> void: ops.call().checkout_commit(String(target_commit.call()["hash"])),
 			PackedStringArray(), not_head)
@@ -1033,6 +1091,99 @@ func _register_branch_actions() -> void:
 			func() -> void: ops.call().copy_hash(String(target_commit.call()["hash"])),
 			PackedStringArray(),
 			func() -> bool: return not target_commit.call().is_empty())
+	_register_copy_and_web(is_ready, ref, commit)
+
+
+## Copy ▸ and Open on <host> (M7.17) for a commit, a branch or tag, and the
+## file a diff shows.
+func _register_copy_and_web(is_ready: Callable, ref: Callable, commit: Callable) -> void:
+	var session: Callable = func() -> RepoSession: return current_page().session
+	var has_commit: Callable = func() -> bool: return not commit.call().is_empty()
+	Actions.register(&"commit.copy_short_hash", "Copy short commit hash", "History",
+			func() -> void: _copy(ShortHash.of(String(commit.call()["hash"]))), PackedStringArray(), has_commit)
+	Actions.register(&"commit.copy_subject", "Copy commit subject", "History",
+			func() -> void: _copy(String(commit.call()["subject"])), PackedStringArray(), has_commit)
+	# The message is the loaded commit's: the menu's commit is the selected one.
+	var message: Callable = func() -> String:
+		if not has_commit.call():
+			return ""
+		var info: Dictionary = session.call().commit_info()
+		if String(info.get("oid", "")) != String(commit.call()["hash"]):
+			return ""
+		var body: String = String(info["body"]).strip_edges()
+		return String(info["summary"]) + ("\n\n" + body if not body.is_empty() else "")
+	Actions.register(&"commit.copy_message", "Copy commit message", "History",
+			func() -> void: _copy(message.call()), PackedStringArray(),
+			func() -> bool: return not message.call().is_empty(), _says("Commit still loading"))
+	var ref_name: Callable = func() -> String:
+		var target: Dictionary = ref.call()
+		return String(target.get("short", "")) if String(target.get("type", "")) != "worktree" else ""
+	Actions.register(&"branch.copy_name", "Copy branch name", "Branches",
+			func() -> void: _copy(ref_name.call()), PackedStringArray(),
+			func() -> bool: return not ref_name.call().is_empty())
+	Actions.set_visible(&"branch.copy_name", func() -> bool: return not ref_name.call().is_empty())
+	# Open on <host>: shown only where the remote is on a known host.
+	var commit_page: Callable = func() -> Dictionary:
+		return session.call().commit_web_page(String(commit.call()["hash"]), "") if has_commit.call() else {}
+	_register_web(&"commit.open_web", "Open commit on the web", "History", commit_page)
+	var ref_page: Callable = func() -> Dictionary:
+		var full: String = _ref_full_name(ref.call())
+		return session.call().ref_web_page(full) if is_ready.call() and not full.is_empty() else {}
+	_register_web(&"branch.open_web", "Open branch on the web", "Branches", ref_page)
+	var file_page: Callable = func() -> Dictionary:
+		var page: RepoTab = current_page()
+		var panel: DiffPanel = _open_panel()
+		if panel == null:
+			return {}
+		var oid: String = ""
+		match page.view:
+			WorktreeView.View.HISTORY:
+				oid = String(page.session.commit_info().get("oid", ""))
+			WorktreeView.View.FILE:
+				oid = page.active_view().file_view().target_commit()
+		return page.session.commit_web_page(oid, panel.shown_path()) if not oid.is_empty() else {}
+	_register_web(&"diff.open_web", "Open file on the web", "View", file_page)
+	Actions.register(&"diff.copy_path", "Copy file path", "View",
+			func() -> void: _copy(_open_panel().shown_path()), PackedStringArray(),
+			func() -> bool: return _open_panel() != null, _says("Select a file"))
+
+
+## An action that opens the page `page` returns (`{host, url}`), labelled
+## "Open on <host>" and shown only when there is one.
+func _register_web(id: StringName, label: String, category: String, page: Callable) -> void:
+	var action: ActionRegistry.Action = Actions.register(id, label, category,
+			func() -> void: OS.shell_open(String(page.call()["url"])), PackedStringArray(),
+			func() -> bool: return page.call().has("url"))
+	action.visible = func() -> bool: return page.call().has("url")
+	action.dynamic_label = func() -> String:
+		var found: Dictionary = page.call()
+		return tr("Open on %s") % String(found["host"]) if found.has("host") else ""
+
+
+## The full name (`refs/heads/x`) of a ref menu's target, "" for a worktree.
+static func _ref_full_name(target: Dictionary) -> String:
+	var full: String = String(target.get("name", ""))
+	if full.begins_with("refs/"):
+		return full
+	var short: String = String(target.get("short", ""))
+	match String(target.get("type", "")):
+		"branch":
+			return "refs/heads/" + short
+		"remote":
+			return "refs/remotes/" + short
+		"tag":
+			return "refs/tags/" + short
+	return ""
+
+
+## Puts text on the clipboard; tests replace it to record what was copied.
+static var clipboard: Callable = func(text: String) -> void: DisplayServer.clipboard_set(text)
+
+
+## Puts `text` on the clipboard and says so.
+func _copy(text: String) -> void:
+	clipboard.call(text)
+	_feedback.toasts.show_success(tr("Copied"))
 
 
 ## Merge workflows (PLAN §4): merging into the current branch, the operation
@@ -1061,8 +1212,11 @@ func _register_merge_actions() -> void:
 				return has_head.call() and (target.is_empty() or (String(target["type"]) in ["branch", "remote", "tag"]
 						and not bool(target.get("is_head", false)))),
 			func() -> String:
-				return "Finish the operation in progress first." if is_ready.call() and not idle.call() \
-						else "There is no commit to merge into yet.")
+				if is_ready.call() and not idle.call():
+					return "Finish the operation in progress first"
+				if bool(ref.call().get("is_head", false)):
+					return "Already checked out"
+				return "No commits yet")
 	Actions.register(&"commit.merge", "Merge / Rebase commit…", "History",
 			func() -> void:
 				var target: Dictionary = page.call().commit_target()
@@ -1079,17 +1233,17 @@ func _register_merge_actions() -> void:
 			func() -> bool: return not String(operation.call()).is_empty() and String(operation.call()) != "bisect" \
 					and int(conflicts.call()) == 0,
 			func() -> String:
-				return "Resolve the conflicts first." if int(conflicts.call()) > 0 else "Nothing is in progress.")
+				return "Resolve conflicts first" if int(conflicts.call()) > 0 else "Nothing in progress")
 	Actions.register(&"operation.skip", "Skip this commit of the rebase", "Repository",
 			func() -> void: ops.call().skip_operation(), PackedStringArray(),
 			func() -> bool: return String(operation.call()) == "rebase")
 	Actions.register(&"operation.open_resolver", "Open the conflict resolver", "Repository",
 			func() -> void: current_view().open_resolver(), PackedStringArray(),
-			func() -> bool: return int(conflicts.call()) > 0, _says("There are no conflicts."))
+			func() -> bool: return int(conflicts.call()) > 0, _says("No conflicts"))
 	# The resolver: the block at the diff's cursor, else the first one.
 	var blocks: Callable = func() -> bool:
 		return is_ready.call() and page.call().view == WorktreeView.View.CHANGES and changes.call().has_conflict_blocks()
-	var no_blocks: Callable = _says("Select a conflicted file first.")
+	var no_blocks: Callable = _says("Select a conflicted file")
 	for entry: Array in [[&"conflict.use_ours", "Use ours for this conflict", "ours", "Alt+O"],
 			[&"conflict.use_theirs", "Use theirs for this conflict", "theirs", "Alt+T"],
 			[&"conflict.use_both", "Use both (ours, then theirs)", "ours_theirs", "Alt+B"],
@@ -1103,9 +1257,9 @@ func _register_merge_actions() -> void:
 	Actions.register(&"conflict.previous", "Previous conflict", "Conflicts",
 			func() -> void: changes.call().step_conflict(false), PackedStringArray(["Shift+F8"]), blocks, no_blocks)
 	Actions.register(&"conflict.undo", "Undo last conflict choice", "Conflicts",
-			func() -> void: ops.call().undo_block_choice(), PackedStringArray(["Ctrl+Z"]),
+			func() -> void: ops.call().undo_block_choice(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and session.call().can_undo_block_choice(),
-			_says("There is no conflict choice to undo."))
+			_says("No conflict choice to undo"))
 	# Whole files, from the changed files' menu.
 	var row: Callable = func() -> Dictionary:
 		if not is_ready.call() or page.call().view != WorktreeView.View.CHANGES:
@@ -1118,13 +1272,41 @@ func _register_merge_actions() -> void:
 		Actions.register(entry[0], entry[1], "Conflicts",
 				func() -> void: ops.call().resolve_file(String(row.call()["path"]), choice), PackedStringArray(),
 				func() -> bool: return bool(row.call().get("conflicted", false)))
+		Actions.set_visible(entry[0], func() -> bool: return bool(row.call().get("conflicted", false)))
 	Actions.register(&"conflict.reopen", "Reopen conflicts…", "Conflicts",
 			func() -> void: ops.call().reopen_conflicts(String(row.call()["path"])), PackedStringArray(),
 			func() -> bool: return bool(row.call().get("resolved", false)))
+	Actions.set_visible(&"conflict.reopen", func() -> bool: return bool(row.call().get("resolved", false)))
 	Actions.register(&"commit.undo", "Undo last commit", "Changes",
 			func() -> void: ops.call().undo_commit(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and not session.call().undoable_commit().is_empty(),
-			_says("There is no unpushed commit to undo."))
+			_says("No unpushed commit"))
+	_register_edit_undo(is_ready, session)
+
+
+## Edit → Undo (Ctrl+Z, M7.17): takes back the newest file-level change, a
+## discard, an ignore rule, a shelf discard or a conflict choice, whichever
+## came last (core keeps the order). Undo last commit stays apart.
+func _register_edit_undo(is_ready: Callable, session: Callable) -> void:
+	var kinds: Dictionary[String, StringName] = {
+		"discard": &"changes.undo_discard", "ignore_rule": &"changes.undo_ignore",
+		"shelf_discard": &"shelf.undo_discard", "conflict_choice": &"conflict.undo"}
+	var labels: Dictionary[String, String] = {
+		"discard": "Undo discard", "ignore_rule": "Undo ignore rule",
+		"shelf_discard": "Undo shelf discard", "conflict_choice": "Undo conflict choice"}
+	var newest: Callable = func() -> String:
+		return String(session.call().newest_undo()) if is_ready.call() else ""
+	var undo: ActionRegistry.Action = Actions.register(&"edit.undo", "Undo", "Edit",
+			func() -> void: Actions.get_action(kinds[newest.call()]).run.call(),
+			PackedStringArray(["Ctrl+Z"]),
+			func() -> bool: return kinds.has(newest.call()),
+			_says("Nothing to undo"))
+	undo.dynamic_label = func() -> String: return labels.get(newest.call(), "")
+	# Each kind's own action shows Ctrl+Z while it is the one Undo takes back.
+	for kind: String in kinds:
+		var kind_name: String = kind
+		Actions.get_action(kinds[kind]).shortcut_from = func() -> StringName:
+			return &"edit.undo" if newest.call() == kind_name else &""
 
 
 ## Worktree actions: the new-task and cleanup flows, and a chip's show,
@@ -1134,8 +1316,13 @@ func _register_worktree_actions() -> void:
 		var page: RepoTab = current_page()
 		return page != null and page.session != null and page.session.is_ready()
 	var ops: Callable = func() -> RepoOps: return current_page().ops()
+	# The menu's worktree, else (the menu bar, the palette) the selected one.
 	var worktree: Callable = func() -> Dictionary:
-		var target: Dictionary = current_page().ref_target() if is_ready.call() else {}
+		if not is_ready.call():
+			return {}
+		var target: Dictionary = current_page().ref_target()
+		if target.is_empty():
+			return current_page().current_worktree_ref()
 		return target if String(target.get("type", "")) == "worktree" else {}
 	var openable: Callable = func() -> bool:
 		var wt: Dictionary = worktree.call()
@@ -1153,13 +1340,13 @@ func _register_worktree_actions() -> void:
 	Actions.register(&"worktree.cleanup", "Clean up merged worktrees…", "Worktrees",
 			func() -> void: ops.call().cleanup_worktrees(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and current_page().session.worktrees().size() > 1,
-			_says("There are no other worktrees."))
+			_says("No other worktrees"))
 	Actions.register(&"worktree.setup", "Worktree setup…", "Worktrees",
 			func() -> void: ops.call().edit_worktree_setup(), PackedStringArray(),
 			func() -> bool: return is_ready.call() and not current_page().session.main_worktree().is_empty())
 	Actions.register(&"worktree.prune", "Prune missing worktrees", "Worktrees",
 			func() -> void: ops.call().prune_worktrees(), PackedStringArray(), has_missing,
-			_says("No worktree folder is missing."))
+			_says("No missing worktrees"))
 	Actions.register(&"worktree.open", "Show worktree", "Worktrees",
 			func() -> void: current_page().show_worktree(String(worktree.call()["path"])), PackedStringArray(),
 			func() -> bool: return openable.call() and not bool(worktree.call()["is_head"]))
@@ -1185,6 +1372,12 @@ func _register_worktree_actions() -> void:
 			func() -> bool:
 				var wt: Dictionary = worktree.call()
 				return openable.call() and not bool(wt["is_main"]))
+	# The main worktree cannot be locked or deleted; Lock and Unlock show by turns.
+	var not_main: Callable = func() -> bool: return not bool(worktree.call().get("is_main", false))
+	Actions.set_visible(&"worktree.remove", not_main)
+	Actions.set_visible(&"worktree.lock", func() -> bool:
+		return not_main.call() and not bool(worktree.call().get("locked", false)))
+	Actions.set_visible(&"worktree.unlock", func() -> bool: return bool(worktree.call().get("locked", false)))
 
 
 func _update_localized_actions() -> void:
@@ -1484,13 +1677,13 @@ func _register_file_history_actions() -> void:
 		return has_open.call() and page.call().view == WorktreeView.View.FILE
 	var target: Callable = func() -> Dictionary:
 		return page.call().file_history_target() if is_ready.call() else {}
-	var no_history: Callable = _says("No file history is open.")
+	var no_history: Callable = _says("No file history open")
 	Actions.register(&"file_history.open", "File history", "File history",
 			func() -> void:
 				var file: Dictionary = target.call()
 				page.call().open_file_history(String(file["path"]), String(file["start"]), String(file["start_name"])),
 			PackedStringArray(["Ctrl+Shift+H"]),
-			func() -> bool: return not target.call().is_empty(), _says("Select a file first."))
+			func() -> bool: return not target.call().is_empty(), _says("Select a file"))
 	# Blame is the File history's switch: there it turns it on and off;
 	# anywhere else it opens the file's history with it on.
 	Actions.register(&"file_history.blame", "Blame", "File history",
@@ -1503,19 +1696,19 @@ func _register_file_history_actions() -> void:
 				page.call().open_file_history(String(file["path"]), String(file["start"]), String(file["start_name"]),
 						true, int(file["line"])),
 			PackedStringArray(["Ctrl+Alt+B"]),
-			func() -> bool: return shown.call() or not target.call().is_empty(), _says("Select a file first."))
+			func() -> bool: return shown.call() or not target.call().is_empty(), _says("Select a file"))
 	var blaming: Callable = func() -> bool:
 		return shown.call() and page.call().file_view().is_blame()
 	Actions.register(&"blame.before", "Blame before this commit", "Blame",
 			func() -> void: page.call().file_view().blame_before(), PackedStringArray(),
 			func() -> bool: return blaming.call() and page.call().file_view().can_blame_before(),
 			func() -> String:
-				return page.call().file_view().blame_before_reason() if blaming.call() else tr("No blame is open."))
+				return page.call().file_view().blame_before_reason() if blaming.call() else tr("No blame open"))
 	Actions.register(&"blame.show_changes", "Show changes", "Blame",
 			func() -> void: page.call().file_view().show_blame_changes(), PackedStringArray(),
 			func() -> bool: return blaming.call() and page.call().file_view().can_show_blame_changes(),
 			func() -> String:
-				return page.call().file_view().show_blame_changes_reason() if blaming.call() else tr("No blame is open."))
+				return page.call().file_view().show_blame_changes_reason() if blaming.call() else tr("No blame open"))
 	Actions.register(&"blame.toggle_ignore_whitespace", "Ignore whitespace in blame", "Blame",
 			func() -> void:
 				Core.set_blame_ignore_whitespace(not Core.blame_ignore_whitespace())
@@ -1532,25 +1725,25 @@ func _register_file_history_actions() -> void:
 	Actions.register(&"file_history.compare_versions", "Compare versions", "File history",
 			func() -> void: page.call().file_view().compare_versions(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().file_view().can_compare_versions(),
-			_says("Ctrl+click a second version in the file's history to compare two versions."))
+			_says("Ctrl+click a second version"))
 	Actions.register(&"file_history.restore", "Restore version", "File history",
 			func() -> void: page.call().file_view().restore(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().file_view().can_restore(),
 			func() -> String:
-				return page.call().file_view().restore_reason() if shown.call() else tr("No file history is open."))
+				return page.call().file_view().restore_reason() if shown.call() else tr("No file history open"))
 	Actions.register(&"file_history.open_version", "Open version", "File history",
 			func() -> void: page.call().file_view().open_version(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().file_view().can_open_version(),
-			_says("Select a version of the file."))
+			_says("Select a version"))
 	Actions.register(&"file_history.show_in_history", "Open in History", "File history",
 			func() -> void: page.call().file_view().show_in_history(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().file_view().can_show_in_history(),
-			_says("Select one commit in the file's history."))
+			_says("Select one version"))
 	Actions.register(&"file_history.copy_hash", "Copy commit hash", "File history",
 			func() -> void: page.call().ops().copy_hash(page.call().file_view().target_commit()),
 			PackedStringArray(),
 			func() -> bool: return shown.call() and not page.call().file_view().target_commit().is_empty(),
-			_says("Select a commit in the file's history."))
+			_says("Select a version"))
 
 
 func _register_compare_actions() -> void:
@@ -1563,7 +1756,7 @@ func _register_compare_actions() -> void:
 		return is_ready.call() and page.call().compare().has_comparison()
 	var shown: Callable = func() -> bool:
 		return comparing.call() and page.call().view == WorktreeView.View.COMPARE
-	var no_comparison: Callable = _says("No comparison is open.")
+	var no_comparison: Callable = _says("No comparison open")
 	var ref: Callable = func() -> Dictionary:
 		var target: Dictionary = page.call().ref_target() if is_ready.call() else {}
 		return target if String(target.get("type", "")) in ["branch", "remote", "tag"] else {}
@@ -1579,11 +1772,11 @@ func _register_compare_actions() -> void:
 	Actions.register(&"compare.swap", "Swap sides", "Compare",
 			func() -> void: page.call().compare().swap(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_swap(),
-			_says("The working copy stays on the right."))
+			_says("Working copy stays on the right"))
 	Actions.register(&"compare.full_difference", "Include the left side's commits", "Compare",
 			func() -> void: page.call().compare().toggle_full_difference(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_toggle_full_difference(),
-			_says("The files already show every difference."))
+			_says("Every difference already shown"))
 	Actions.register(&"compare.pick_left", "Change the left side…", "Compare",
 			func() -> void: page.call().compare().pick_side("left"), PackedStringArray(), shown, no_comparison)
 	Actions.register(&"compare.pick_right", "Change the right side…", "Compare",
@@ -1591,51 +1784,51 @@ func _register_compare_actions() -> void:
 	Actions.register(&"compare.all_changes", "All changes", "Compare",
 			func() -> void: page.call().compare().focus_commit(""), PackedStringArray(),
 			func() -> bool: return shown.call() and not page.call().compare().focused_commit().is_empty(),
-			_says("All changes is already selected."))
+			_says("All changes already selected"))
 	Actions.register(&"compare.restore_left", "Restore file from the left side", "Compare",
 			func() -> void: page.call().compare().restore("left"), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_restore("left"),
-			_says("Select a file in the comparison."))
+			_says("Select a file"))
 	Actions.register(&"compare.restore_right", "Restore file from the right side", "Compare",
 			func() -> void: page.call().compare().restore("right"), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_restore("right"),
 			func() -> String:
-				return tr("The working copy is already your files.") \
+				return tr("Already your files") \
 						if shown.call() and bool(page.call().compare().shown_request().get("working", false)) \
-						else tr("Select a file in the comparison."))
+						else tr("Select a file"))
 	Actions.register(&"compare.cherry_pick", "Cherry-pick selected commits…", "Compare",
 			func() -> void: page.call().compare().cherry_pick(), PackedStringArray(),
 			func() -> bool: return shown.call() and page.call().compare().can_cherry_pick(),
-			func() -> String: return page.call().compare().cherry_pick_reason() if shown.call() else tr("No comparison is open."))
+			func() -> String: return page.call().compare().cherry_pick_reason() if shown.call() else tr("No comparison open"))
 	Actions.register(&"compare.copy_hash", "Copy commit hash", "Compare",
 			func() -> void:
 				var commits: Array[Dictionary] = page.call().compare().selected_commits()
 				page.call().ops().copy_hash(String(commits[-1]["oid"])),
 			PackedStringArray(),
 			func() -> bool: return shown.call() and not page.call().compare().selected_commits().is_empty(),
-			_says("Select a commit in the comparison."))
+			_says("Select a commit"))
 	Actions.register(&"branch.compare", "Compare…", "Branches",
 			func() -> void: page.call().open_compare(page.call().current_side(), "", true, "", "right"),
-			PackedStringArray(["Ctrl+Shift+C"]), has_head, _says("There is no commit to compare yet."))
+			PackedStringArray(["Ctrl+Shift+C"]), has_head, _says("No commits yet"))
 	Actions.register(&"compare.with_current", "Compare with current branch", "Compare",
 			func() -> void:
 				page.call().open_compare(page.call().current_side(), String(ref.call()["name"]), false),
 			PackedStringArray(),
 			func() -> bool:
 				return has_head.call() and not ref.call().is_empty() and not bool(ref.call().get("is_head", false)),
-			_says("Pick a branch or tag other than the current one."))
+			_says("Pick another branch or tag"))
 	Actions.register(&"compare.with", "Compare with…", "Compare",
 			func() -> void:
 				page.call().open_compare(page.call().current_side(), String(ref.call()["name"]), false, "", "left"),
 			PackedStringArray(),
 			func() -> bool: return has_head.call() and not ref.call().is_empty(),
-			_says("Pick a branch or tag first."))
+			_says("Pick a branch or tag"))
 	Actions.register(&"commit.compare_working", "Compare with working copy", "History",
 			func() -> void: page.call().open_compare(String(commit.call()["hash"]), "", true),
 			PackedStringArray(),
 			func() -> bool:
 				return not commit.call().is_empty() and page.call().history().selected_pair().is_empty(),
-			_says("Select a commit in History."))
+			_says("Select a commit in History"))
 	Actions.register(&"commit.compare_with", "Compare with…", "History",
 			func() -> void:
 				page.call().open_compare(page.call().current_side(), String(commit.call()["hash"]), false, "", "left"),
@@ -1643,7 +1836,7 @@ func _register_compare_actions() -> void:
 			func() -> bool:
 				return has_head.call() and not commit.call().is_empty() \
 						and page.call().history().selected_pair().is_empty(),
-			_says("Select a commit in History."))
+			_says("Select a commit in History"))
 	Actions.register(&"history.compare_selected", "Compare commits", "History",
 			func() -> void:
 				var pair: PackedStringArray = page.call().history().selected_pair()
@@ -1652,4 +1845,10 @@ func _register_compare_actions() -> void:
 			func() -> bool:
 				return is_ready.call() and page.call().view == WorktreeView.View.HISTORY \
 						and not page.call().history().selected_pair().is_empty(),
-			_says("Ctrl+click a second commit in History to compare two commits."))
+			_says("Ctrl+click a second commit"))
+	# Two selected commits compare with each other; one compares with the rest.
+	var pair_selected: Callable = func() -> bool:
+		return page.call() != null and not page.call().history().selected_pair().is_empty()
+	Actions.set_visible(&"history.compare_selected", pair_selected)
+	for id: StringName in [&"commit.compare_working", &"commit.compare_with"]:
+		Actions.set_visible(id, func() -> bool: return not pair_selected.call())

@@ -100,7 +100,7 @@ func _ready() -> void:
 	# Row 1: source ▾ → here, then the badges, wrapping as needed.
 	var chips: HBoxContainer = _from
 	_source_button.theme_type_variation = &"RefChipButton"
-	_source_button.tooltip_text = tr("Merge another branch")
+	_source_button.tooltip_text = tr("Pick another branch")
 	_source_button.pressed.connect(func() -> void: _popover.open_below(_source_button, true))
 	_source_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_source_row.add_child(_source_icon)
@@ -455,7 +455,7 @@ func _rebase_reason(p: Dictionary) -> String:
 	if bool(p.get("can_ff", false)):
 		return tr("%s has no commits of its own: fast-forward instead") % _here()
 	if not bool(p.get("can_rebase", false)):
-		return tr("There is nothing to rebase")
+		return tr("Nothing to rebase")
 	return ""
 
 

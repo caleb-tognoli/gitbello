@@ -32,7 +32,9 @@ var _error: String = ""
 ## `func(values: Dictionary) -> void`, called with the submitted values.
 var _on_submit: Callable = Callable()
 ## The ▾ joined to OK (see `set_menu`), what its entries run and their labels.
-var _menu_button: MenuButton = MenuButton.new()
+var _menu_button: Button = Button.new()
+var _menu: ActionMenu = ActionMenu.new()
+var _menu_entries: Array = []
 var _menu_runs: Array[Callable] = []
 var _menu_labels: PackedStringArray = PackedStringArray()
 ## OK and the ▾, joined.
@@ -55,8 +57,9 @@ func _ready() -> void:
 	_menu_button.icon = AppTheme.ARROW_DOWN
 	_menu_button.flat = false
 	_menu_button.theme_type_variation = &"SplitMenuButton"
-	_menu_button.tooltip_text = "More ways to do this"
-	_menu_button.get_popup().id_pressed.connect(_on_menu_id)
+	_menu_button.tooltip_text = "More options"
+	_menu_button.pressed.connect(_open_menu)
+	add_child(_menu)
 	_arrange_buttons()
 	# Height the dialog gains goes to a list's row (see `add_list`).
 	_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -220,25 +223,19 @@ func _fit_lists() -> void:
 ## tooltip}` entries; `run` gets the values like `on_submit`, a disabled
 ## entry shows its tooltip after the label. An empty list hides it.
 func set_menu(entries: Array) -> void:
-	var entries_menu: PopupMenu = _menu_button.get_popup()
-	entries_menu.clear()
 	_menu_runs.clear()
 	_menu_labels.clear()
+	_menu_entries.clear()
 	for entry: Dictionary in entries:
 		var label: String = String(entry["label"])
 		var disabled: bool = bool(entry.get("disabled", false))
 		var tooltip: String = tr(String(entry.get("tooltip", "")))
 		var shown: String = "%s  ·  %s" % [tr(label), tooltip] if disabled and not tooltip.is_empty() else tr(label)
-		var icon: StringName = entry.get("icon", &"")
-		if icon.is_empty():
-			entries_menu.add_item(shown, _menu_runs.size())
-		else:
-			entries_menu.add_icon_item(AppTheme.icon(icon), shown, _menu_runs.size())
-		var index: int = entries_menu.item_count - 1
-		entries_menu.set_item_disabled(index, disabled)
-		entries_menu.set_item_tooltip(index, tooltip)
+		_menu_entries.append(ActionMenu.item(shown, _on_menu_id.bind(_menu_runs.size()),
+			StringName(entry.get("icon", &"")), disabled, tooltip))
 		_menu_runs.append(entry["run"])
 		_menu_labels.append(label)
+	_menu.fill(_menu_entries)
 	_menu_button.visible = not entries.is_empty()
 	get_ok_button().theme_type_variation = &"SplitPrimaryButton" if not entries.is_empty() else &"PrimaryButton"
 
@@ -249,7 +246,7 @@ func set_ok_icon(icon: Texture2D) -> void:
 
 
 ## The ▾ joined to OK (for tests).
-func menu_button() -> MenuButton:
+func menu_button() -> Button:
 	return _menu_button
 
 
@@ -260,12 +257,23 @@ func menu_labels() -> PackedStringArray:
 
 ## Runs the ▾ entry labelled `label`, as a click would. Returns whether it ran.
 func press_menu(label: String) -> bool:
-	var entries_menu: PopupMenu = _menu_button.get_popup()
-	for i: int in entries_menu.item_count:
-		if _menu_labels[i] == label and not entries_menu.is_item_disabled(i):
-			_on_menu_id(entries_menu.get_item_id(i))
+	for i: int in _menu_labels.size():
+		if _menu_labels[i] == label and not _menu.is_item_disabled(i):
+			_on_menu_id(i)
 			return true
 	return false
+
+
+## The ▾ entries' menu (for tests and screenshots).
+func entries_menu() -> ActionMenu:
+	return _menu
+
+
+func _open_menu() -> void:
+	_menu.fill(_menu_entries)
+	var rect: Rect2 = _menu_button.get_global_rect()
+	var below: Vector2 = Vector2(rect.position.x, rect.end.y) * get_content_scale_factor()
+	_menu.open_at(Vector2(position) + below)
 
 
 ## Checks the values again (after the form's state changed from outside).

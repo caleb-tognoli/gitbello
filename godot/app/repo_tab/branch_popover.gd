@@ -352,7 +352,7 @@ func _add_ref(parent: TreeItem, ref: Dictionary) -> void:
 	if elsewhere:
 		tooltip += "\n" + tr("Checked out in %s") % worktree
 	elif not _merging and not bool(ref["is_head"]):
-		tooltip += "\n" + tr("%s: open in a new worktree") % Shortcuts.display("Alt+Enter")
+		tooltip += "\n" + tr("Open in new worktree") + TooltipCard.SHORTCUT_SEPARATOR + "Alt+Enter"
 	item.set_tooltip_text(0, tooltip)
 	item.set_icon(0, AppTheme.icon(&"StatusSuccess" if bool(ref["is_head"])
 			else &"GitWorktree" if elsewhere else &"GitBranch"))

@@ -74,7 +74,7 @@ func _notification(what: int) -> void:
 				if child is AcceptDialog:
 					var output: TextEdit = child.get_node_or_null("ErrorDetails") as TextEdit
 					if output != null:
-						output.tooltip_text = tr("Select text to copy; use %s to select all.") % Shortcuts.display("Ctrl+A")
+						output.tooltip_text = TooltipCard.text_for(tr("Select all"), "Ctrl+A")
 
 
 func _queue_layout() -> void:
@@ -112,7 +112,7 @@ func show_toast(title: String, message: String, details: String = "", fixes: Arr
 		var more: Button = Button.new()
 		more.name = "Details"
 		more.icon = AppTheme.icon(&"Info")
-		more.tooltip_text = tr("Show error details")
+		more.tooltip_text = tr("Details")
 		more.theme_type_variation = &"ToolbarButton"
 		more.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		more.pressed.connect(func() -> void: _show_details(title, details))
@@ -417,7 +417,7 @@ func _show_details(title: String, details: String) -> void:
 	output.editable = false
 	output.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	output.text = details
-	output.tooltip_text = tr("Select text to copy; use %s to select all.") % Shortcuts.display("Ctrl+A")
+	output.tooltip_text = TooltipCard.text_for(tr("Select all"), "Ctrl+A")
 	output.gui_input.connect(func(event: InputEvent) -> void:
 		if event.is_action_pressed(&"ui_cancel"):
 			output.accept_event()

@@ -40,7 +40,7 @@ func run() -> void:
 	for text: String in Actions.get_action(&"file_history.blame").default_shortcuts:
 		expect(Actions.conflicts(&"file_history.blame", text).is_empty(), "default %s of Blame clashes" % text)
 	expect(not Actions.is_enabled(&"blame.before"), "nothing to blame before without a blame")
-	expect_eq(Actions.get_action(&"blame.before").reason.call(), tr("No blame is open."), "and it says why")
+	expect_eq(Actions.get_action(&"blame.before").reason.call(), tr("No blame open"), "and it says why")
 	Core.set_blame_ignore_whitespace(false)
 	Core.set_blame_detect_moves(false)
 
@@ -109,8 +109,9 @@ func run() -> void:
 	expect(Actions.is_enabled(&"file_history.copy_hash") and Actions.is_enabled(&"file_history.show_in_history"),
 			"the commit's actions are on")
 	blame.context_menu_requested.emit(9, Vector2(40.0, 190.0))
-	for label: String in ["Blame before this commit", "Show changes", "Open in History", "Copy commit hash"]:
-		expect(_menu_has(view.blame_menu(), tr(label)), "the blame's menu has %s" % label)
+	for id: StringName in [&"blame.before", &"blame.show_changes", &"file_history.show_in_history",
+			&"file_history.copy_hash"]:
+		expect(id in view.blame_menu().action_ids(), "the blame's menu has %s" % id)
 	view.blame_menu().hide()
 	_click_gutter(blame, 9)
 	expect(await wait_until(func() -> bool: return view.blame_focus().is_empty()), "a second click lets go of it")
@@ -119,7 +120,7 @@ func run() -> void:
 	# Uncommitted lines have no commit to show; before them is the last commit.
 	blame.go_to_line(21)
 	expect(not Actions.is_enabled(&"blame.show_changes"), "no changes to show for a line that is not committed")
-	expect_eq(Actions.get_action(&"blame.show_changes").reason.call(), tr("This line is not committed yet."),
+	expect_eq(Actions.get_action(&"blame.show_changes").reason.call(), tr("Line not committed yet"),
 			"it says why")
 	expect(view.target_commit().is_empty(), "nor a hash to copy")
 	expect(Actions.run_action(&"blame.before"), "Blame before runs on an uncommitted line")
@@ -150,7 +151,7 @@ func run() -> void:
 			"a version without the focused commit's lines lets go of it")
 	expect(list.marked.is_empty(), "and of its mark")
 	expect(not Actions.is_enabled(&"blame.before"), "the commit that added the file has nothing before it")
-	expect_eq(Actions.get_action(&"blame.before").reason.call(), tr("This commit added the file."), "it says why")
+	expect_eq(Actions.get_action(&"blame.before").reason.call(), tr("Added in this commit"), "it says why")
 
 	# Show changes: back to History on the line's commit.
 	expect(Actions.run_action(&"blame.show_changes"), "Show changes runs")

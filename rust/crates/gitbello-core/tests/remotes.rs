@@ -107,3 +107,45 @@ fn refs_carry_their_commit_date() {
         .expect("main");
     assert_eq!(main.committed_at, Some(expected));
 }
+
+#[test]
+fn web_pages_follow_the_remote_a_ref_is_on() {
+    use gitbello_core::web_links::WebHost;
+    let repo = TestRepo::init();
+    let oid = repo.commit("src/a b.txt", "a\n", "first");
+    repo.add_remote();
+    repo.branch("local-only");
+    repo.git(&["tag", "v1"]);
+    let (mut rt, key) = open(&repo);
+    settle(&mut rt, &key);
+    // A remote at a local path has no web page.
+    let local = rt.repo(&key).expect("open").commit_web_page(&oid, None);
+    assert_eq!(local, None);
+
+    let set = RefOp::SetRemoteUrl {
+        name: "origin".into(),
+        url: "git@github.com:owner/repo.git".into(),
+    };
+    ok(&mut rt, &key, |rt| rt.ref_op(&key, set));
+    let repo_state = rt.repo(&key).expect("open");
+    let page = |name: &str| repo_state.ref_web_page(name).map(|(_, url)| url);
+    let base = "https://github.com/owner/repo";
+    assert_eq!(page("refs/heads/main"), Some(format!("{base}/tree/main")));
+    assert_eq!(
+        page("refs/remotes/origin/main"),
+        Some(format!("{base}/tree/main"))
+    );
+    assert_eq!(page("refs/heads/local-only"), None, "never pushed");
+    assert_eq!(
+        page("refs/tags/v1"),
+        Some(format!("{base}/releases/tag/v1"))
+    );
+    assert_eq!(
+        repo_state.commit_web_page(&oid, None),
+        Some((WebHost::GitHub, format!("{base}/commit/{oid}")))
+    );
+    assert_eq!(
+        repo_state.commit_web_page(&oid, Some("src/a b.txt")),
+        Some((WebHost::GitHub, format!("{base}/blob/{oid}/src/a%20b.txt")))
+    );
+}

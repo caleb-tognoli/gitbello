@@ -100,7 +100,7 @@ func _check_popover() -> void:
 	expect_eq(new_chip.text, "New files", "chips show their label")
 
 	# Shortcuts in the tooltips.
-	expect_eq(rows.choice_button("compact").tooltip_text, "Compact rows (%s)" % Actions.shortcut_label(&"test.options_compact"),
+	expect_eq(rows.choice_button("compact").tooltip_text, TooltipCard.text_for("Compact rows", Actions.shortcut_text(&"test.options_compact")),
 			"a segment's tooltip has its action's shortcut")
 	expect_eq(rows.choice_button("detailed").tooltip_text, "Detailed", "without a tooltip or action it is the label")
 

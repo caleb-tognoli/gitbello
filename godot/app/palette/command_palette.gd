@@ -6,33 +6,15 @@ extends PanelContainer
 
 signal closed()
 
+## Shorter forms of disabled reasons for the palette's narrow column; other
+## reasons show as they are.
 const DISABLED_HINTS: Dictionary[String, String] = {
-	"Open a repository first.": "Open a repository",
 	"No repository": "Open a repository",
-	"This repository has no shelves.": "No shelves",
-	"Select a changed file first.": "Select a changed file",
-	"No changed files are listed.": "No changed files",
-	"Check files first.": "No checked files",
-	"Search the history first.": "Search History",
-	"There is no discard to undo.": "Nothing to undo",
-	"Select a shelf in the Shelves view first.": "Select a shelf",
-	"Select a shelved file first.": "Select a shelved file",
-	"There is no shelf discard to undo.": "Nothing to undo",
-	"No changes were left on this branch.": "No changes left here",
-	"This repository has no remote. Add one with Repository → Remotes…": "Add a remote",
-	"The current branch does not follow a remote branch.": "No upstream branch",
-	"There is no branch checked out.": "No branch checked out",
-	"There is no commit to start a branch from yet.": "No commits yet",
-	"There is no remote to follow.": "No remote branches",
-	"Select the current HEAD commit in History to amend it.": "Select HEAD in History",
-	"There are no other worktrees.": "No other worktrees",
-	"No worktree folder is missing.": "No missing worktrees",
-	"The last commit changed. Start amend again.": "HEAD changed—restart amend",
+	"No remote (Repository → Remotes…)": "Add a remote",
 	"Finish the operation in progress first": "Finish current operation",
 	"Loading the commit message": "Loading message",
 	"Resolve conflicts first": "Resolve conflicts",
 	"Reading the changes": "Reading changes",
-	"There is no commit to amend": "No commits yet",
 }
 
 ## Extra entries from the shell: `{label, detail, run: Callable}`.

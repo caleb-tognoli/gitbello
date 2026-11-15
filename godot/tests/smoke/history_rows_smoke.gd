@@ -228,13 +228,13 @@ func _check_chips(list: CommitList, history: HistoryView, page: RepoTab) -> void
 	var ref_menu: PopupMenu = page.context_menu()
 	expect(ref_menu.visible and ref_menu.get_parent() == popover, "the menu opens over the popover")
 	expect(popover.visible, "which stays open under the menu")
-	expect("Push tag" in page.menu_labels(), "the fixture's tag gets its menu: %s" % [page.menu_labels()])
+	expect(&"tag.push" in page.menu_ids(), "the fixture's tag gets its menu: %s" % [page.menu_ids()])
 	page.close_menu()
 	await get_tree().process_frame
 	expect(popover.visible, "closing the menu leaves the popover")
 	popover.choose(3)
 	await get_tree().process_frame
-	expect(page.press_menu(Actions.get_action(&"compare.with_current").label), "an entry runs from the menu")
+	expect(page.press_menu_id(&"compare.with_current"), "an entry runs from the menu")
 	expect(not popover.visible, "running an entry closes the popover")
 	await get_tree().process_frame
 	expect(ref_menu.get_parent() != popover, "and the menu goes back to its view")

@@ -209,7 +209,7 @@ func block_reason() -> String:
 		return tr("No repository")
 	if _amending:
 		if _amend_head != String(session.status().get("oid", "")):
-			return tr("The last commit changed. Start amend again.")
+			return tr("HEAD changed: restart amend")
 		if _message_job >= 0:
 			return tr("Loading the commit message")
 		if not session.operation().is_empty():
@@ -293,13 +293,12 @@ func update_state() -> void:
 		_commit_button.text = tr("Amending…") if _amending else tr("Committing…")
 	else:
 		_commit_button.text = button_text()
-	var shortcut: String = Actions.shortcut_label(&"changes.commit")
 	var why: String = block_reason() if _job < 0 else ""
-	var detail: String = button_text()
-	if _amending and session != null:
-		detail += tr(" with %d included file(s)") % session.picked_count()
-	_commit_button.tooltip_text = why if not why.is_empty() \
-			else (detail + (" (%s)" % shortcut if not shortcut.is_empty() else ""))
+	var fact: String = why
+	if why.is_empty() and _amending and session != null:
+		fact = tr("%d included file(s)") % session.picked_count()
+	_commit_button.tooltip_text = TooltipCard.text_for(button_text(), Actions.shortcut_text(&"changes.commit"),
+			PackedStringArray([fact]))
 	_reason.text = why
 	_reason.visible = not why.is_empty() and mode in ["merge", "cherry_pick"]
 

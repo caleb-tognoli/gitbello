@@ -50,9 +50,18 @@ func run() -> void:
 	expect_eq(read_file(gitignore), "/notes.txt\n", "it is anchored in the root .gitignore")
 	expect(session.change_index(".gitignore") >= 0, ".gitignore shows as a change")
 	expect(Actions.is_enabled(&"changes.undo_ignore"), "the rule can be undone")
-	Actions.run_action(&"changes.undo_ignore")
+	# Edit → Undo takes back the newest file-level change: this rule.
+	expect(await wait_until(func() -> bool:
+			return Actions.get_action(&"edit.undo").menu_label == tr("Undo ignore rule")),
+			"Edit → Undo names the rule: %s" % Actions.get_action(&"edit.undo").menu_label)
+	expect_eq(Actions.shortcut_label(&"changes.undo_ignore"), Shortcuts.display("Ctrl+Z"),
+			"the rule's own Undo shows Ctrl+Z while it is the newest")
+	list.grab_focus()
+	press("Ctrl+Z")
 	expect(await wait_until(func() -> bool: return session.change_index("notes.txt") >= 0),
-			"Undo brings notes.txt back")
+			"Ctrl+Z brings notes.txt back")
+	expect(await wait_until(func() -> bool: return session.newest_undo() == ""), "nothing is left to undo")
+	expect_eq(Actions.get_action(&"edit.undo").menu_label, tr("Undo"), "Edit → Undo is plain again")
 	expect(not FileAccess.file_exists(gitignore), "Undo removes the .gitignore it created")
 
 	# A tracked file: core refuses the quick rule and the dialog opens on it.

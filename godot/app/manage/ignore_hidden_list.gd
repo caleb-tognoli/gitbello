@@ -127,9 +127,9 @@ func _get_tooltip(at_position: Vector2) -> String:
 		return ""
 	var tip: String = String(data["path"]) + ("/" if bool(data["is_dir"]) else "")
 	if bool(data["tracked"]):
-		tip += "\n" + tr("Tracked: the rule matches it, but git keeps tracking it until you stop tracking it.")
+		tip += "\n" + tr("Tracked: still committed until you stop tracking it")
 	elif bool(data["is_dir"]):
-		tip += "\n" + tr("Everything in this folder is ignored.")
+		tip += "\n" + tr("Whole folder ignored")
 	return tip
 
 

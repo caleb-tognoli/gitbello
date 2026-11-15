@@ -22,7 +22,17 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"app.keyboard_shortcuts": &"Keyboard",
 	&"app.settings": &"Tools",
 	&"app.about": &"Info",
+	&"app.open_config_folder": &"Folder",
 	&"home.open": &"Home",
+	&"home.row_open": &"Folder",
+	&"home.row_pin": &"Pin",
+	&"home.row_unpin": &"Pin",
+	&"home.row_rename": &"Rename",
+	&"home.row_relocate": &"Load",
+	&"home.row_show": &"Folder",
+	&"home.row_terminal": &"Terminal",
+	&"home.row_copy_path": &"ActionCopy",
+	&"home.row_remove": &"Remove",
 	&"repo.clone": &"GitRemote",
 	&"repo.add_existing": &"Folder",
 	&"repo.scan": &"Search",
@@ -62,8 +72,9 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"changes.focus_message": &"GitCommit",
 	&"changes.commit": &"GitCommit",
 	&"changes.discard": &"Remove",
+	&"edit.undo": &"Undo",
 	&"changes.undo_discard": &"Undo",
-	&"changes.restore_line_endings": &"Undo",
+	&"changes.restore_line_endings": &"LineEndings",
 	&"changes.ignore": &"GitIgnore",
 	&"changes.ignore_file": &"GitIgnore",
 	&"changes.ignore_extension": &"GitIgnore",
@@ -79,34 +90,34 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"view.shelves": &"GitShelf",
 	&"view.compare": &"GitCompare",
 	&"branch.compare": &"GitCompare",
-	&"compare.with_current": &"GitCompare",
+	&"compare.with_current": &"GitBranch",
 	&"compare.with": &"GitCompare",
-	&"commit.compare_working": &"GitCompare",
+	&"commit.compare_working": &"FileModified",
 	&"commit.compare_with": &"GitCompare",
 	&"history.compare_selected": &"GitCompare",
 	&"compare.close": &"Close",
 	&"compare.swap": &"Swap",
 	&"compare.recent": &"History",
-	&"compare.restore_left": &"Undo",
-	&"compare.restore_right": &"Undo",
-	&"compare.cherry_pick": &"GitCommit",
+	&"compare.restore_left": &"Restore",
+	&"compare.restore_right": &"Restore",
+	&"compare.cherry_pick": &"GitCherryPick",
 	&"compare.copy_hash": &"ActionCopy",
 	&"compare.all_changes": &"FileList",
 	&"view.file_history": &"FileHistory",
 	&"file_history.open": &"FileHistory",
 	&"file_history.close": &"Close",
 	&"file_history.compare_versions": &"GitCompare",
-	&"file_history.restore": &"Undo",
+	&"file_history.restore": &"Restore",
 	&"file_history.open_version": &"ExternalLink",
 	&"file_history.show_in_history": &"History",
 	&"file_history.copy_hash": &"ActionCopy",
-	&"file_history.blame": &"User",
+	&"file_history.blame": &"Blame",
 	&"blame.before": &"History",
 	&"blame.show_changes": &"FileHistory",
-	&"shelf.restore": &"Undo",
-	&"shelf.restore_file": &"Undo",
+	&"shelf.restore": &"Restore",
+	&"shelf.restore_file": &"Restore",
 	&"shelf.discard_file": &"Remove",
-	&"shelf.restore_left": &"Undo",
+	&"shelf.restore_left": &"Restore",
 	&"shelf.rename": &"Rename",
 	&"shelf.discard": &"Remove",
 	&"shelf.undo_discard": &"Undo",
@@ -115,13 +126,13 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"sync.pull": &"GitPull",
 	&"sync.pull_merge": &"GitMerge",
 	&"sync.pull_rebase": &"GitRebase",
-	&"sync.pull_ff_only": &"GitPull",
+	&"sync.pull_ff_only": &"GitFastForward",
 	&"sync.push": &"GitPush",
 	&"sync.force_push": &"StatusWarning",
 	&"sync.cancel": &"Close",
 	&"branch.switch": &"GitBranch",
 	&"branch.checkout": &"GitBranch",
-	&"branch.new": &"GitBranch",
+	&"branch.new": &"GitBranchAdd",
 	&"branch.rename": &"Rename",
 	&"branch.delete": &"Remove",
 	&"branch.delete_remote": &"Remove",
@@ -130,9 +141,9 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"tag.push": &"GitPush",
 	&"tag.delete": &"Remove",
 	&"changes.cancel_amend": &"Close",
-	&"commit.amend": &"Rename",
-	&"commit.checkout": &"GitCommit",
-	&"commit.copy_hash": &"ActionCopy",
+	&"commit.amend": &"GitAmend",
+	&"commit.checkout": &"GitCheckout",
+	&"commit.copy_hash": &"Hash",
 	&"commit.merge": &"GitMerge",
 	&"commit.undo": &"Undo",
 	&"branch.merge": &"GitMerge",
@@ -143,18 +154,116 @@ const ICONS: Dictionary[StringName, StringName] = {
 	&"conflict.next": &"ChevronDown",
 	&"conflict.previous": &"ChevronUp",
 	&"conflict.reopen": &"GitConflict",
-	&"task.new": &"GitWorktree",
+	&"task.new": &"Add",
 	&"branch.new_worktree": &"GitWorktree",
 	&"commit.new_worktree": &"GitWorktree",
 	&"worktree.setup": &"Tools",
 	&"worktree.open": &"GitWorktree",
 	&"worktree.cleanup": &"Clear",
-	&"worktree.prune": &"Clear",
+	&"worktree.prune": &"Scissors",
 	&"worktree.remove": &"Remove",
 	&"worktree.open_terminal": &"Terminal",
 	&"worktree.show_in_file_manager": &"Folder",
 	&"worktree.copy_path": &"ActionCopy",
 	&"worktree.lock": &"Lock",
+	&"app.quit": &"Power",
+	&"app.report_issue": &"Bug",
+	&"app.whats_new": &"Sparkle",
+	&"branch.copy_name": &"ActionCopy",
+	&"diff.copy_path": &"ActionCopy",
+	&"commit.cherry_pick": &"GitCherryPick",
+	&"commit.copy_message": &"TextFile",
+	&"commit.open_web": &"Globe",
+	&"branch.open_web": &"Globe",
+	&"diff.open_web": &"Globe",
+	&"diff.select_all": &"SelectAll",
+	&"diff.toggle_minimap": &"Minimap",
+	&"diff.next_change": &"ChevronDown",
+	&"diff.previous_change": &"ChevronUp",
+	&"history.toggle_compact": &"RowsOneLine",
+	&"operation.skip": &"Skip",
+	&"repo.init": &"FolderAdd",
+	&"worktree.unlock": &"Unlock",
+	&"changes.include_all": &"CommitIncluded",
+	&"changes.exclude_all": &"CommitExcluded",
+	&"shelf.filter_branches": &"Filter",
+}
+
+## Short labels for menus and tooltip cards (`Action.menu_label`), where the
+## menu or the object already says what the action works on. The palette and
+## Settings → Keyboard keep the full label. English keys, translated. Inside
+## a family (Compare ▸, Open ▸) the menu gives its own labels instead.
+const MENU_LABELS: Dictionary[StringName, String] = {
+	&"app.keyboard_shortcuts": "Shortcuts…",
+	&"app.about": "About",
+	&"repo.clone": "Clone…",
+	&"repo.add_existing": "Open…",
+	&"repo.scan": "Scan folder…",
+	&"repo.create": "New repository…",
+	&"view.toggle_git_log": "Git log",
+	&"view.find": "Find",
+	&"diff.cycle_mode": "Next mode",
+	&"diff.toggle_whole_file": "Whole file",
+	&"diff.toggle_minimap": "Minimap",
+	&"history.toggle_graph": "Graph",
+	&"history.next_match": "Next match",
+	&"history.previous_match": "Previous match",
+	&"history.current_branch": "Current branch",
+	&"history.all_branches": "All branches",
+	&"history.go_to_current_commit": "Current commit",
+	&"history.go_to_parent": "Parent commit",
+	&"changes.undo_discard": "Undo discard",
+	&"changes.undo_ignore": "Undo ignore rule",
+	&"changes.ignore_hint": "Ignore folder",
+	&"changes.clear_filters": "Clear filters",
+	&"shelf.restore": "Restore",
+	&"shelf.rename": "Rename",
+	&"shelf.discard": "Discard…",
+	&"shelf.restore_file": "Restore",
+	&"shelf.discard_file": "Discard",
+	&"shelf.undo_discard": "Undo shelf discard",
+	&"shelf.restore_left": "Restore left changes",
+	&"sync.cancel": "Cancel",
+	&"operation.abort": "Abort…",
+	&"operation.continue": "Continue",
+	&"operation.skip": "Skip commit",
+	&"operation.open_resolver": "Resolve conflicts",
+	&"conflict.undo": "Undo choice",
+	&"conflict.use_ours": "Use ours",
+	&"conflict.use_theirs": "Use theirs",
+	&"conflict.use_both": "Use both, ours first",
+	&"conflict.use_both_reversed": "Use both, theirs first",
+	&"conflict.file_ours": "Use ours for file",
+	&"conflict.file_theirs": "Use theirs for file",
+	&"branch.switch": "Switch…",
+	&"branch.rename": "Rename…",
+	&"branch.delete": "Delete…",
+	&"branch.delete_remote": "Delete…",
+	&"tag.push": "Push",
+	&"tag.delete": "Delete…",
+	&"commit.checkout": "Check out…",
+	&"commit.cherry_pick": "Cherry-pick…",
+	&"commit.copy_hash": "Copy hash",
+	&"commit.copy_short_hash": "Copy short hash",
+	&"commit.copy_subject": "Copy subject",
+	&"commit.copy_message": "Copy message",
+	&"branch.copy_name": "Copy name",
+	&"diff.copy_path": "Copy path",
+	&"commit.merge": "Merge / Rebase…",
+	&"commit.undo": "Undo last",
+	&"task.new": "New…",
+	&"worktree.setup": "Setup…",
+	&"commit.new_worktree": "New worktree…",
+	&"worktree.cleanup": "Clean up…",
+	&"worktree.prune": "Prune",
+	&"file_history.open_version": "Open",
+	&"file_history.show_in_history": "Show in History",
+	&"file_history.copy_hash": "Copy hash",
+	&"compare.copy_hash": "Copy hash",
+	&"compare.cherry_pick": "Cherry-pick…",
+	&"compare.restore_left": "Restore from left",
+	&"compare.restore_right": "Restore from right",
+	&"blame.before": "Blame before",
 }
 
 ## Where an action's shortcut works: `GLOBAL` anywhere, the others in one part
@@ -220,9 +329,41 @@ class Action:
 	## action has none of its own. Alt+3 shows the third view of the switch,
 	## whichever it is.
 	var shortcut_from: Callable = Callable()
+	## Returns whether the action applies here at all; menus hide it when not
+	## (greyed is for `enabled`: it applies, but cannot run now). An invalid
+	## Callable means it always applies.
+	var visible: Callable = Callable()
+	var _menu_label: String = ""
+	## The short label menus and tooltip cards show, where the menu or button
+	## already names the object ("Delete…" in a branch's menu); `label` when
+	## unset. The palette and Settings → Keyboard keep `label`.
+	var menu_label: String:
+		get:
+			if dynamic_label.is_valid():
+				var now: String = String(dynamic_label.call())
+				if not now.is_empty():
+					return tr(now)
+			return tr(_menu_label) if not _menu_label.is_empty() else label
+		set(value): _menu_label = value
+	## Returns the menu label right now ("Undo discard" for Edit → Undo), or ""
+	## for `menu_label`'s usual one. An invalid Callable means it never changes.
+	var dynamic_label: Callable = Callable()
+	## Returns whether the action is on: menus show it as a check (or a radio
+	## item with `radio`). An invalid Callable means it is not checkable.
+	var checked: Callable = Callable()
+	var radio: bool = false
 
 	func is_enabled() -> bool:
 		return not enabled.is_valid() or bool(enabled.call())
+
+	func is_visible() -> bool:
+		return not visible.is_valid() or bool(visible.call())
+
+	func is_checkable() -> bool:
+		return checked.is_valid()
+
+	func is_checked() -> bool:
+		return checked.is_valid() and bool(checked.call())
 
 	## Why the action cannot run now, or "" when it can (or nobody said).
 	func disabled_reason() -> String:
@@ -259,6 +400,7 @@ func register(id: StringName, label: String, category: String, run: Callable,
 	action.run = run
 	action.enabled = enabled
 	action.default_shortcuts = default_shortcuts
+	action.menu_label = MENU_LABELS.get(id, "")
 	_actions[id] = action
 	_parsed.erase(id)
 	actions_changed.emit()
@@ -325,6 +467,27 @@ func is_enabled(id: StringName) -> bool:
 	return action != null and action.is_enabled()
 
 
+## Whether `id` exists and applies here (see `Action.visible`).
+func is_visible(id: StringName) -> bool:
+	var action: Action = _actions.get(id)
+	return action != null and action.is_visible()
+
+
+## Sets when `id` applies (`Action.visible`); unknown ids are ignored.
+func set_visible(id: StringName, visible: Callable) -> void:
+	var action: Action = _actions.get(id)
+	if action != null:
+		action.visible = visible
+
+
+## Makes `id` a check (or radio) item in menus (`Action.checked`).
+func set_checked(id: StringName, checked: Callable, radio: bool = false) -> void:
+	var action: Action = _actions.get(id)
+	if action != null:
+		action.checked = checked
+		action.radio = radio
+
+
 ## Runs `id` if it exists and is enabled. Returns whether it ran. `origin` is
 ## the control that started it, if any (see `origin()`).
 func run_action(id: StringName, source: Control = null) -> bool:
@@ -350,15 +513,15 @@ func disabled_reason(id: StringName) -> String:
 	return action.disabled_reason() if action != null else ""
 
 
-## `Label (Shortcut)`, plus why it is disabled when it is: for tooltips.
-func tooltip(id: StringName) -> String:
+## Tooltip text for `id`'s button (a `TooltipCard`): its short label, its
+## shortcut as key caps and, when disabled, why (left out with `with_reason`
+## false, for a tooltip set once that would keep a stale reason).
+func tooltip(id: StringName, with_reason: bool = true) -> String:
 	var action: Action = _actions.get(id)
 	if action == null:
 		return ""
-	var shortcut: String = shortcut_label(id)
-	var text: String = action.label if shortcut.is_empty() else "%s (%s)" % [action.label, shortcut]
-	var why: String = action.disabled_reason()
-	return text if why.is_empty() else "%s\n%s" % [text, why]
+	var why: String = action.disabled_reason() if with_reason else ""
+	return TooltipCard.text_for(action.menu_label, shortcut_text(id), PackedStringArray([why]))
 
 
 ## Effective shortcuts: the user's override, else the defaults.
@@ -379,6 +542,12 @@ func shown_shortcuts(id: StringName) -> PackedStringArray:
 		return list
 	var from: StringName = action.shortcut_from.call()
 	return shortcuts(from) if from != &"" else list
+
+
+## First shortcut that runs `id` (canonical, for `TooltipCard`), or "".
+func shortcut_text(id: StringName) -> String:
+	var list: PackedStringArray = shown_shortcuts(id)
+	return list[0] if not list.is_empty() else ""
 
 
 ## First shortcut that runs `id` for display, or "".

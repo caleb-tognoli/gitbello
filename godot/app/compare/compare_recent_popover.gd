@@ -49,7 +49,7 @@ func fill(recent: Array[Dictionary]) -> void:
 		row.focus_mode = Control.FOCUS_ALL
 		row.icon = AppTheme.icon(&"GitCompare")
 		row.text = CompareRecentPopover.label(entry)
-		row.tooltip_text = tr("Open this comparison again")
+		row.tooltip_text = tr("Open again")
 		row.set_meta(&"recent", entry)
 		row.pressed.connect(func() -> void:
 			hide()

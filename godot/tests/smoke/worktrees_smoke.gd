@@ -71,7 +71,7 @@ func run() -> void:
 	expect_eq(login_row.get_text(1), "", "with no in-worktree badge")
 	popover.menu_requested.emit(login, Vector2.ZERO)
 	await get_tree().process_frame
-	expect("Delete branch…" in page.menu_labels(), "a branch in a worktree can be deleted: %s" % [page.menu_labels()])
+	expect(&"branch.delete" in page.menu_ids(), "a branch in a worktree can be deleted: %s" % [page.menu_ids()])
 	page.close_menu()
 	popover.branch_chosen.emit(login)
 	popover.hide()
@@ -81,6 +81,33 @@ func run() -> void:
 	expect(strip.chips()[1].selected, "its chip is selected")
 	strip.chips()[0].chosen.emit()
 	expect(page.active_view() == view, "a click on the first chip goes back")
+
+	# A chip's Branch ▸ is the menu of the branch checked out there, acting
+	# on that branch; the worktree's own items still act on the worktree.
+	strip.worktree_menu_requested.emit(strip.chips()[1].worktree, Vector2.ZERO)
+	await get_tree().process_frame
+	var branch_menu: ActionMenu = page.context_menu().submenu("Branch")
+	var chip_menu: ActionMenu = page.context_menu()
+	expect_eq(chip_menu.top_labels(), PackedStringArray(["Open in", "Copy path", "Branch", "Lock…", "Delete…"]),
+			"the chip's menu: its own items, Branch ▸, then Lock beside Delete")
+	expect(chip_menu.item_count == 7 and chip_menu.is_item_separator(2) and chip_menu.is_item_separator(4),
+			"Branch ▸ in a group of its own")
+	if branch_menu != null:
+		expect(&"branch.rename" in branch_menu.action_ids() and &"branch.copy_name" in branch_menu.action_ids(),
+				"with the branch's items: %s" % [branch_menu.action_ids()])
+		expect(&"worktree.copy_path" in page.menu_ids() and not &"worktree.copy_path" in branch_menu.action_ids(),
+				"beside the worktree's own")
+		expect(branch_menu.press_id(&"branch.rename"), "Rename runs from Branch ▸")
+		var rename_form: FormDialog = page.ops().form()
+		expect(await wait_until(func() -> bool: return rename_form.visible), "Rename opens")
+		expect_eq((rename_form.field("name") as LineEdit).text, "feature/login", "on the chip's branch")
+		rename_form.hide()
+	expect(page.ref_target().is_empty(), "the menu's target is cleared once it ran")
+	var main_wt: Dictionary = strip.chips()[0].worktree
+	strip.worktree_menu_requested.emit(main_wt, Vector2.ZERO)
+	await get_tree().process_frame
+	expect(page.context_menu().submenu("Branch") != null, "the current worktree's chip has Branch ▸ too")
+	page.close_menu()
 
 	# Ctrl+T: New worktree. With no name the branches are listed to check
 	# out; a new name offers Create first, and the folder preview follows it.
@@ -581,7 +608,7 @@ func _overflow_presentation() -> void:
 		for detail: String in ["/fixture/conflict", "2 changed files", "1 conflicted file", "Merge in progress", "Locked: keep for review"]:
 			expect(tip.contains(detail), "combined tooltip includes " + detail)
 		expect(String(listed[3]["tooltip"]).contains("1 commit ahead") and String(listed[3]["tooltip"]).contains("2 commits behind"), "sync detail")
-		expect(String(listed[5]["tooltip"]).contains("The folder is missing."), "missing explained")
+		expect(String(listed[5]["tooltip"]).contains("Folder missing"), "missing explained")
 		expect(listed[5]["changes"] == "" and not String(listed[5]["tooltip"]).contains("No local changes"), "unknown is not shown as clean")
 		expect_eq(list.target_index(), 3, "with no filter, Enter would choose the shown worktree")
 		list.set_filter("DIRT")
@@ -686,7 +713,7 @@ func _test_chip_tooltips() -> void:
 	wt.merge({"prunable": true, "changed": 3}, true)
 	chip.set_worktree(wt)
 	expect_eq(chip.texts()["marker"], "StatusWarning", "a missing folder has the warning marker")
-	expect(chip.tooltip_text.ends_with("C:/test/repo-login\nThe folder is missing."), "missing folder takes precedence over status")
+	expect(chip.tooltip_text.ends_with("C:/test/repo-login\nFolder missing"), "missing folder takes precedence over status")
 	_expect_card(chip, [&"StatusWarning"])
 	wt.erase("short_name")
 	chip.set_worktree(wt)
