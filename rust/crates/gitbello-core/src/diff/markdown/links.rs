@@ -154,8 +154,8 @@ mod tests {
             file("docs/guide/img/a b.png", None)
         );
         assert_eq!(
-            resolve_link(doc, "../PLAN.md#Milestones"),
-            file("docs/PLAN.md", Some("milestones"))
+            resolve_link(doc, "../UX.md#Shelves"),
+            file("docs/UX.md", Some("shelves"))
         );
         assert_eq!(
             resolve_link(doc, "/src/lib.rs?raw=1"),

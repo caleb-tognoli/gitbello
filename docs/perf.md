@@ -1,13 +1,13 @@
 # Performance log
 
 Graph benchmarks recorded with `cargo xtask bench-graph <repo> [--ui] --record`.
-Benchmarks only read the repository. Targets are in PLAN §3.9.
+Benchmarks only read the repository. Targets are in ARCHITECTURE.md §3.9.
 
-## M1 summary (2026-10-24, git/git, 85,790 commits)
+## History graph summary (2026-10-24, git/git, 85,790 commits)
 
 Machine: Windows 11, 20 threads, NVIDIA RTX 4070, 170 Hz display. git 2.53.0, Godot 4.7.1, Rust 1.99.1.
 
-| Target (PLAN §3.9) | Result | Status |
+| Target (ARCHITECTURE.md §3.9) | Result | Status |
 |---|---|---|
 | Full index < 2 s | 0.81 s (0.94 s with commit-graph) | met |
 | First screen < 300 ms | 98–105 ms with a commit-graph file; 630–645 ms without | met only with commit-graph (see below) |
@@ -17,7 +17,7 @@ Machine: Windows 11, 20 threads, NVIDIA RTX 4070, 170 Hz display. git 2.53.0, Go
 
 Other numbers: a 50-row slice (lanes replayed from the nearest checkpoint plus commit fields) takes 44 µs on average and 124 µs at most in core. The UI fetches 160 rows per window in 2.3 ms on average. The app's private memory is ~171 MB with git/git loaded.
 
-**First screen without a commit-graph.** `git log --topo-order` has to walk the whole history before it prints the first commit unless `.git/objects/info/commit-graph` exists. A fresh `git clone` doesn't write one, but `git gc`, `git maintenance` and `fetch.writeCommitGraph` do. gitbello can't make git stream sooner. Options are in the M1 review.
+**First screen without a commit-graph.** `git log --topo-order` has to walk the whole history before it prints the first commit unless `.git/objects/info/commit-graph` exists. A fresh `git clone` doesn't write one, but `git gc`, `git maintenance` and `fetch.writeCommitGraph` do. gitbello can't make git stream sooner; writing a commit-graph after clone is an idea on the board.
 
 **Lane width.** git/git's `--all` history keeps up to 164 lanes open at once: maint and seen merges of topics forked from old bases. That's the real topology. The UI draws at most `GraphView/constants/max_lanes` (24) and clips the rest.
 
@@ -75,7 +75,7 @@ string memory   4.12 MiB
 50-row slice    avg 44.2 us, max 209.7 us (400 samples)
 ```
 
-## M4a — diffs and change lists
+## Diffs and change lists
 
 Debug build of `gitbello-cli` (core at opt-level 2), Windows, git 2.53.0, temp repo.
 `gitbello-cli diff <root> <file> [--full]` and `GITBELLO_LOG=1 gitbello-cli status <root>`.
@@ -90,7 +90,7 @@ status, 10,000 untracked files              42 ms
 The change lists and the diff view fetch only a window around the visible rows
 (`change_rows`, `diff_lines`), so list length does not change frame cost.
 
-## M4b — diff view rendering
+## Diff view rendering
 
 `godot --path godot res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path>`
 (windowed, debug gdext, RTX 4070, 144 Hz display). Temp repo with a
@@ -109,7 +109,7 @@ Line staging round trip (core test `random_selections_stage_exactly_what_was_pic
 about 0.35 s per round including fixture commits.
 
 
-## M7.5 — Home
+## Home
 
 `gitbello-cli home-bench <folder> [--depth N] [--max N]` (read-only) scans a
 folder the way Scan folder… does, then reads up to 50 summaries through the
@@ -129,7 +129,7 @@ summary  13 of 13 in 872 ms, first after 93 ms, 134 ms each
 Home only asks for the rows and cards on screen, a screenful at a time, and
 each status arrives on its own, so the first rows fill in within ~100 ms.
 
-## M6.5 P5 — history search
+## History search
 
 `gitbello-cli graph-bench <repo>` (read-only) searches the loaded index the way
 one search job does. git/git, 85,790 commits, git 2.53.0, release build (the
@@ -146,7 +146,7 @@ search chunk    max 0.30 ms per 4096 rows (read lock held)
 A whole search fits in a frame, and loading or the UI's slice reads wait at
 most one chunk for the read lock.
 
-## M7.6 — diff minimap
+## Diff minimap
 
 `godot --path godot res://tests/perf/diff_bench.tscn -- --repo=<root> --file=<path> [--no-minimap]`
 (windowed, debug gdext). Temp repo with a 50,000-line Rust file, every line
@@ -167,7 +167,7 @@ textures; the minimap adds about 1.4 ms a frame while paging through this
 worst case, whose 40 ms frames come from fetching and drawing 30 fully
 changed, highlighted rows a page.
 
-M7.6 P3 step B (same file and command, windowed): tiles now draw the
+After the changed-word tint and whole-file strip (same file and command, windowed): tiles now draw the
 changed words of paired lines, and the strip and its positions map the
 whole file.
 
@@ -182,7 +182,9 @@ paging, frame time             p50 43.4 ms with the minimap, 43.3 ms without
 Word ranges cost about 0.2 to 0.3 ms a tile. They are computed only for
 tiles: computing them for every row of the overview took it to 66 ms.
 
-## M7.13 P7 — quieter colours
+The syntax highlighting runs below were taken in stages, called P1 … P7 in their text: P1 the framework, P2 more languages, P3 web and data languages, P4 more scripting languages, P5a line states, P5b mixed-language files, P6 readable colours, P7 quieter colours.
+
+## Syntax highlighting: quieter colours
 
 Share of a file's visible characters drawn in a colour (not plain text),
 release `gitbello-cli highlight` over this repository's files (samples
@@ -212,7 +214,7 @@ JSON went from 85% to 57% coloured, TOML 87% to 58%, YAML 77% to 52%, XML
 85% to 59%, Godot resources 91% to 51%, code 2–12 points less (the function
 names). Lexing time is unchanged: the data lexers push fewer tokens.
 
-## M7.13 P6 — readable colours per background
+## Syntax highlighting: readable colours per background
 
 Tables (`AppTheme.syntax_color_tables`, headless, debug gdext): the first
 build of a background's table, made readable for the 39 kinds plus plain
@@ -234,7 +236,7 @@ unified fetch 300 rows, p50    1716 / 1706 / 1735 / 1709  1710 / 1695 / 1710 / 1
 paging frame p99               48.5 / 47.2 / 48.5 / 49.8  50.1 / 49.2 / 50.2 / 49.4 ms
 ```
 
-## M7.13 P5b — mixed-language files
+## Syntax highlighting: mixed-language files
 
 Lexing, release `gitbello-cli highlight-bench` as in P1. On the P5a
 samples, this branch and the P5a commit (built from `git archive`) timed
@@ -278,7 +280,7 @@ minimap tile split, p50         751 /  747 us     760 /  794 us
 paging frame p99               60.8 / 49.8 ms    51.6 / 51.0 ms
 ```
 
-## M7.13 P5a — line states
+## Syntax highlighting: line states
 
 Lexing, release `gitbello-cli highlight-bench` as in P1: 30.3 µs per 100
 lines over the 42 samples, which grew multi-line cases (P4: 28.8). The new
@@ -304,7 +306,7 @@ minimap tile split, p50         743 /  715 us     756 /  745 us
 paging frame p99               47.2 / 47.3 ms    46.3 / 47.8 ms
 ```
 
-## M7.13 P4 — more scripting languages
+## Syntax highlighting: more scripting languages
 
 Lexing, release `gitbello-cli highlight-bench` as in P1. The six new
 samples:
@@ -338,7 +340,7 @@ minimap tile split, p50         728 /  733 us     733 /  724 us
 paging frame p99               48.3 / 48.1 ms    48.2 / 48.3 ms
 ```
 
-## M7.13 P3 — web and data languages
+## Syntax highlighting: web and data languages
 
 Lexing, release `gitbello-cli highlight-bench` as in P1: 26.4 µs per 100
 lines over the 36 samples (P2: 27.0 over 24). Budget: 1 ms per 100 lines,
@@ -381,7 +383,7 @@ fetches were 5% and the tiles 4 to 7% slower. Lexing the borrowed text
 brought the fetches back level; the tiles stay 1 to 5% slower (they also
 validate each line's UTF-8 twice).
 
-## M7.13 P2 — more languages
+## Syntax highlighting: more languages
 
 Lexing, release `gitbello-cli highlight-bench` as in P1. The Spec lexer looks
 words up in tables built once per language (an FNV hash map, and which ASCII
@@ -436,7 +438,7 @@ paging frame, p50 / p99        6.96 / 43 ms      7.00 / 48 ms
 Before the tables, with the word lists scanned and a `String` allocated per
 word, the tiles were 8% (unified) and 11% (split) slower than P1.
 
-## M7.13 P1 — syntax highlighting
+## Syntax highlighting: the framework
 
 Lexing, release `gitbello-cli highlight-bench` over the core samples
 (200 rounds; the long line is the sample's code lines joined up to the
@@ -476,7 +478,7 @@ paging frame, p50 / p99        6.97 / 47 ms      6.97 / 46 ms
 The differences are within run-to-run noise (tiles +3 to 5%, fetches
 either way).
 
-## M7.8 P2 — image diffs
+## Image diffs
 
 `res://tests/perf/image_bench.tscn -- --repo=<root> --file=big.png,photo.jpg`
 (windowed, Windows 11, Compatibility renderer) on a throwaway repo where both
@@ -503,7 +505,7 @@ mipmaps made on the worker, one texture uploads a frame, and the full image
 uploads only when zoomed in past the preview (uploading a full 4096² texture
 took 31–39 ms, and both sides landed in one frame: 85–119 ms before).
 
-## M7.10 — co-authors in the graph load
+## Co-authors in the graph load
 
 2026-11-07, git/git (fresh clone, 86,059 commits, 238 `Co-authored-by`
 trailers), git 2.53.0, release `gitbello-cli graph-bench`, three runs each.
@@ -522,7 +524,7 @@ old format, 980 to 1033 ms with the trailers and 1077 to 1167 ms with the
 whole body (`%b`). Co-authors are stored only for the rows that have them
 (three `u32` vectors), so the index does not grow per commit.
 
-## M8a — file history
+## File history
 
 2026-11-10, git/git (82,797 commits), git 2.43.0, Linux, 4 cores, release
 `gitbello-cli file-history <root> <file> --time`, warm, three runs each.
@@ -560,7 +562,7 @@ another walk.
   not come back in the runs above, cold or warm; the machine was most
   likely still busy, but the cause was not measured.
 
-## M8b — blame
+## Blame
 
 2026-11-11, git/git (82,797 commits), git 2.43.0, Linux, 4 cores, release
 `gitbello-cli blame <root> <file> --rev HEAD --time`, warm, three runs each.
@@ -587,5 +589,5 @@ the rest is git's walk, streamed into the gutter as it goes
   10 ms, the blame in 1.22 to 1.41 s.
 - **One outlier.** The first run after `cargo build --release` took 1.8 s
   to the text, 2.8 s to the first block and 24.4 s to the end. It did not
-  come back in the eleven runs that followed; as M8a's, the machine was
+  come back in the eleven runs that followed; as for file history, the machine was
   most likely still busy, and the cause was not measured.

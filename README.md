@@ -119,8 +119,8 @@ cargo xtask smoke    # headless Godot smoke tests
 - `godot/`: the Godot project (typed GDScript UI)
 - `packaging/`: the Windows installer and the Linux launcher
 
-The design and roadmap are in [docs/PLAN.md](docs/PLAN.md); contributor rules are in
-[AGENTS.md](AGENTS.md).
+How it is built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the workflows in
+[docs/UX.md](docs/UX.md); contributor rules are in [AGENTS.md](AGENTS.md).
 
 ## License
 

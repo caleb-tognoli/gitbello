@@ -1,13 +1,13 @@
 # Ignore rules
 
-Status: scope settled with Caleb on 2026-11-02 (§6), interface (a) approved the same day; (a) implemented on 2026-11-06 (see "As built" in §4). §4.5 (b) is provisional.
+How ignoring files works: the reasoning behind it (§1, §6), the UX (§2), undo (§3) and the interface with what was built (§4).
 
 Two parts:
 
 1. **Ignore from Changes.** Right-click a file in Changes and ignore it: the file, its extension, or one of its folders. Write the rule to `.gitignore` (shared) or `.git/info/exclude` (only on this computer). If the file is already tracked, the same flow can also untrack it.
 2. **Ignore rules viewer.** Repository → Ignore rules… lists every rule that applies to the repository, where it comes from, and what each line hides right now.
 
-## 1. Review of the proposal (Q&A)
+## 1. Background
 
 **Q: See the current gitignore, and what each line hides locally. Is that feasible and cheap?**
 Yes, with two git commands and no new dependency:
@@ -35,7 +35,7 @@ Yes, but "remove completely" can mean three different things, and only the first
 | Meaning | Git | Proposal |
 |---|---|---|
 | Stop tracking from the next commit and keep the file on disk | `git rm --cached -r -- <paths>` | **Yes.** A checkbox in the dialog ("Also stop tracking 3 files that match"). On by default only when the rule is shared |
-| Keep it tracked but stop showing my local edits (local config files) | `git update-index --skip-worktree` | **Later, as its own action.** This is usually what people want for `config.local.json`. It is not ignoring, so it needs its own label and a way to list and reverse it |
+| Keep it tracked but stop showing my local edits (local config files) | `git update-index --skip-worktree` | **Not built yet; wanted as its own action.** This is usually what people want for `config.local.json`. It is not ignoring, so it needs its own label and a way to list and reverse it |
 | Purge it from all history (secrets, huge binaries) | `git filter-repo` and a force push | **No.** It rewrites history and is out of scope. If the file looks like a secret, the dialog says the file is still in history and the key should be rotated |
 
 The untrack warning has to be explicit. After you commit and push, **anyone who pulls has the file deleted from their disk**, because to them it is a tracked file being removed. That is fine for build output and dangerous for a config file. The dialog says so whenever it untracks.
@@ -91,22 +91,22 @@ A dialog like Remotes… and Tags… (`godot/app/manage/`):
 - **Left:** the sources: root `.gitignore`, nested `.gitignore` files, `info/exclude` ("This computer"), and the global file ("All your repositories", read-only by default). Each shows how many paths it hides.
 - **Middle:** the lines of the chosen source. Comments are dimmed, `!` negations are marked, each rule shows a count ("hides 2 folders, 31 files"), and rules that match nothing are flagged as unused. Tracked files that match a rule appear as a warning chip on that line ("4 tracked files match"), with **Stop tracking…**.
 - **Right:** what the selected line hides, as a virtual list fetched in slices (golden rule 6). Folders stay collapsed.
-- **Actions:** Remove rule (undoable), Open file in editor, Copy pattern. Editing lines in place can come later, once M8's editable working copy exists.
+- **Actions:** Remove rule (undoable), Open file in editor, Copy pattern. Lines are not edited in place.
 
-### Additions worth considering
+### Additions (1–3 built)
 
 1. **"Show ignored files"** in the Changes filter menu. It lists ignored files greyed out, each with the rule that hides it ("ignored by .gitignore:12 `*.log`"). This makes "Why isn't my file showing up?" answerable. Right-clicking one offers **Stop ignoring**: remove the line when it matches exactly that path, otherwise add a `!` negation, with the parent-folder warning.
 2. **Ignore templates** in the viewer: "Add rules for Godot / Rust / Node / macOS…" from the same templates Create repository already uses (`library_ops.gd`), showing only the lines that are missing.
 3. **Home or status hint.** When many untracked files sit under one folder (`node_modules/`, `target/`, `.godot/`), the Changes empty or offer bar suggests "Ignore folder `target/`?". Cheap, and it covers the most common first-day annoyance.
-4. **Skip-worktree** ("Keep tracked, ignore my local edits"), listed in the viewer under its own section so it is never hidden state. Separate follow-up (see the table above).
+4. **Skip-worktree** ("Keep tracked, ignore my local edits"), listed in the viewer under its own section so it is never hidden state. Not built yet (see the table above).
 
 ## 3. Undo
 
 - **Rule added:** core keeps the target file's bytes from before the write. Undo restores them only if the file is unchanged since (same bytes as after our write). Otherwise it removes our exact lines when it can find them, and refuses with an explanation when it can't.
 - **Untracked:** Undo puts back the index entries saved before `rm --cached` (`update-index --index-info`), so staged content returns exactly, and then undoes the rule.
-- Same per-repository stack and toast as `undo_discard` until M9's operation log replaces both.
+- Same per-repository stack and toast as `undo_discard`; Edit → Undo takes back whichever is newest.
 
-## 4. Interface (for approval)
+## 4. Interface
 
 All parsing, pattern generation, preview and file writing live in `gitbello-core` (golden rule 1). gdext forwards calls and GDScript only shows the results.
 
@@ -242,7 +242,7 @@ GDScript's part:
 - Translates the warning codes.
 - For a quick entry, calls `add_ignore_rule(…, "refuse")` directly. On a `tracked_matches` failure it opens the dialog prefilled with that rule instead of showing an error toast.
 
-### As built (a), 2026-11-06
+### As built (a)
 
 Differences from the tables above:
 - `ignore_suggestions` is the pure `ignore::suggestions`, called by gdext directly (it needs no repository state); there is no `Runtime` wrapper.
@@ -257,7 +257,7 @@ UI: `godot/app/changes/ignore_ops.gd` (`IgnoreOps`: quick rules, the dialog on `
 
 ### 4.5 Viewer interface (b)
 
-The plan as written before (b) started; "As built (b)" below lists what changed.
+The interface as designed; "As built (b)" below lists what changed.
 
 - `load_ignore_rules(key) -> JobId`, then event `IgnoreRulesLoaded`.
 - `ignore_sources(key)`: `{kind: root|nested|local|global, path, writable, hidden_count}`.
@@ -270,7 +270,7 @@ The plan as written before (b) started; "As built (b)" below lists what changed.
   - `global_excludes_file`: `config --path core.excludesFile`, falling back to the XDG default.
 - "Show ignored files" adds an `ignored` option to `set_change_filter` and an `ignored_by` field (`source:line pattern`) to `change_rows`.
 
-### As built (b), 2026-11-07
+### As built (b)
 
 Core (`gitbello-core/src/ignore/rules.rs`, pure and unit-tested): `IgnoreRules::build` joins the sources' contents, `ls-files --directory` and `check-ignore -v` into sources (`root`, `nested`, `local`, `global`), their lines (`rule`, `negation`, `comment`, `blank`, each with what it hides, the tracked files it matches and the files it brings back) and an index from each ignored path to its line. `unignore` decides how Stop ignoring works, `template_missing` gives a template's missing lines, `folder_hint` picks the folder for the hint.
 
@@ -283,22 +283,22 @@ Differences from §4.5:
 - Remove rule checks the line's text before writing and keeps the file's BOM and line endings; Undo refuses (`stale`) when the file changed after the removal.
 - A write to the global file refreshes every open repository; a write to `info/exclude` refreshes the repository's other worktrees.
 - "Show ignored files" is the `ignored` option of the change filter. Ignored rows come last, muted, without a checkbox (they are never committed, discarded, shelved or ignored again), with "Ignored by <file>, line <n>: <pattern>" as their tooltip. An ignored folder is one row (`build/`) and shows no diff. A path that is also a change (a file just untracked, or one Stop ignoring brought back before the rules reload) is listed once, as the change.
-- The viewer (compact, after review on 2026-11-07): a row of chips, one per source, styled like the worktree strip (icon, short name, how many paths it hides, a warning when a rule matches tracked files); middle-click opens the file, right-click offers Open file and Show in file manager. Under a divider, the toolbar (Add with its ▾, Remove, and Stop tracking… only for a rule matching tracked files) above the numbered lines, and beside them what the selected rule hides: a one-line recap with icons ("2 files · 1 tracked") over the paths. Nothing shows without a rule selected. What a line does is in its tooltip. The viewer is not exclusive, so the Ignore dialog and the Stop tracking confirmation open over it.
-- Add opens the Ignore form on an empty pattern; its ▾ lists the templates under "Templates", and one opens the form with the lines the root `.gitignore` lacks (chosen over a Template choice in the form, 2026-11-07).
+- The viewer: a row of chips, one per source, styled like the worktree strip (icon, short name, how many paths it hides, a warning when a rule matches tracked files); middle-click opens the file, right-click offers Open file and Show in file manager. Under a divider, the toolbar (Add with its ▾, Remove, and Stop tracking… only for a rule matching tracked files) above the numbered lines, and beside them what the selected rule hides: a one-line recap with icons ("2 files · 1 tracked") over the paths. Nothing shows without a rule selected. What a line does is in its tooltip. The viewer is not exclusive, so the Ignore dialog and the Stop tracking confirmation open over it.
+- Add opens the Ignore form on an empty pattern; its ▾ lists the templates under "Templates", and one opens the form with the lines the root `.gitignore` lacks.
 - An edit in the Ignore form drops the preview still loading for the text before it (it used to land as current and could disable Ignore).
 - Names: the Ignore dialog's Where and the viewer's chips say "This repository" / "My computer" / "Global setting" (`.gitignore`, `info/exclude`, the global file; icons `GitIgnore`, `User`, `Tools`), with the full meaning in tooltips. The Where choice "Global setting" hides the file choice and leaves untrack off. The preview says nothing while it loads or when no changed file matches.
 - The folder hint is one button above the Changes list ("Ignore node_modules/", what the folder holds in its tooltip) and a close button whose menu offers "Don't suggest node_modules/ again" (per repository and folder: `ignore_hint_kept/<folder hash>` = 1 in `Core.repo_ui_state`, which stores ints) or "Never suggest folders to ignore" (the `ignore_hint` setting, back on in Settings → General). It shows for a known output folder (`.godot`, `node_modules`, `target`, `build`, `bin`, `obj`, `dist`, …), or for any folder holding at least 50 new files and more than half of the changes.
 
 UI: `godot/app/manage/ignore_rules_dialog.gd` (`IgnoreRulesDialog`), `ignore_source_chip.gd` and `ignore_hidden_list.gd`; actions `repo.ignore_rules`, `changes.stop_ignoring` and `changes.ignore_hint`.
 
-### 4.6 Interface decisions (2026-11-02)
+### 4.6 Interface decisions
 
 1. **The preview checks the candidate rule alone.** A later `!` negation elsewhere can make it over-count. Changes shows the real result once the rule is written.
 2. **No matcher crate.** Matching uses `git ls-files -x`, debounced. Preview timings go in `docs/perf.md`.
 3. **Quick entries let core decide.** `add_ignore_rule(…, RefuseIfTracked)` fails with `tracked_matches`, and the UI opens the dialog. There is no preview round trip.
 4. **The commit include happens after the status refresh.** The brief flicker of the `.gitignore` row is accepted.
 
-## 5. Verification
+## 5. Tests
 
 - **Core unit tests:** suggestions for every level, with escaping (`#`, `!`, spaces, brackets, trailing spaces), non-ASCII and space-containing paths, and multi-select. Parse captured `check-ignore -v -z` output, including a negation match and the unattributed parent folders `--directory` emits.
 - **Real temp repos:** nested `.gitignore` plus `info/exclude` plus a global file set through a scratch `core.excludesFile`; rule attribution per line; collapsed folders; preview matching the result after writing; untrack keeping the file on disk and staging the deletion; undo in both cases, including refusal after an outside edit; a rule added from a linked worktree landing in the common `info/exclude`; CRLF files keeping CRLF.
@@ -307,12 +307,12 @@ UI: `godot/app/manage/ignore_rules_dialog.gd` (`IgnoreRulesDialog`), `ignore_sou
 - **Screenshots:** a `tests/visual/ignore_screenshots.tscn` covering the menu, the dialog in both themes, and the viewer, on throwaway fixtures.
 - Strings in `gitbello.csv` (EN and IT). `cargo xtask check`.
 
-## 6. Decisions (2026-11-02)
+## 6. Decisions
 
-1. **Milestone:** M7.7, in two parts. **(a)** Ignore from Changes, the dialog and untrack. **(b)** The rules viewer, "Show ignored files", templates and the folder hint.
+1. **Two parts:** **(a)** Ignore from Changes, the dialog and untrack. **(b)** The rules viewer, "Show ignored files", templates and the folder hint.
 2. **Quick entries** write to the shared root `.gitignore` without the dialog. The last target used in the dialog is remembered per repository.
 3. **Untrack checkbox:** on by default for shared rules, off for local ones.
 4. **Nested `.gitignore`:** the root by default. A nested file can be chosen in the dialog, with the pattern rewritten relative to it.
 5. **Global excludes file:** read-only in (a), and a writable third target ("All my repositories") in (b).
-6. **Skip-worktree:** yes, as a follow-up after (b). It gets its own action and is listed in the viewer.
+6. **Skip-worktree:** wanted, with its own action and listed in the viewer; not built yet.
 7. **After untracking:** `.gitignore` and the removed files are included in the commit together. The user writes and makes the commit.
