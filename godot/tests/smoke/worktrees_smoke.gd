@@ -752,7 +752,8 @@ func _menu_for(page: RepoTab, session: RepoSession, folder: String, label: Strin
 	if not await wait_until(func() -> bool: return not _worktree(session, folder).is_empty()):
 		return false
 	page.strip().worktree_menu_requested.emit(_worktree(session, folder), Vector2.ZERO)
-	return page.press_menu(label)
+	# The Branch submenu has a Delete… of its own, listed before the worktree's.
+	return page.press_menu_id(&"worktree.remove") if label == "Delete…" else page.press_menu(label)
 
 
 static func _worktree(session: RepoSession, folder: String) -> Dictionary:

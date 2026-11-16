@@ -82,10 +82,9 @@ func _squashed(page: RepoTab, session: RepoSession, form: FormDialog) -> void:
 	# read (slow runners list the worktree first).
 	expect(await wait_until(func() -> bool: return String(_worktree(session, "wt-squashed").get("branch", "")) == "squashed"),
 			"the worktree's branch is read: %s" % _worktree(session, "wt-squashed"))
-	expect(await _menu_for(page, session, "wt-squashed", "Delete…"), "the menu offers delete")
+	expect(await _menu_for(page, session, "wt-squashed"), "the menu offers delete")
 	expect(await wait_until(func() -> bool: return form.visible and form.field("delete_branch") != null),
-			"the dialog opens with the branch: visible %s, title %s, fields %s, menu %s" % [form.visible, form.title,
-			form._fields.keys(), page.menu_labels()])
+			"the dialog opens with the branch: %s, fields %s" % [form.title, form._fields.keys()])
 	if form.field("delete_branch") == null:
 		form.hide()
 		return
@@ -97,7 +96,7 @@ func _squashed(page: RepoTab, session: RepoSession, form: FormDialog) -> void:
 
 
 func _detached(page: RepoTab, session: RepoSession, form: FormDialog, repo: String) -> void:
-	expect(await _menu_for(page, session, "wt-detached", "Delete…"), "a detached worktree can be deleted")
+	expect(await _menu_for(page, session, "wt-detached"), "a detached worktree can be deleted")
 	expect(await wait_until(func() -> bool: return form.visible and form.field("keep") != null),
 			"keeping its commits is offered")
 	var keep: CheckBox = form.field("keep") as CheckBox
@@ -131,7 +130,7 @@ func _detached(page: RepoTab, session: RepoSession, form: FormDialog, repo: Stri
 
 
 func _rebasing(page: RepoTab, session: RepoSession, form: FormDialog) -> void:
-	expect(await _menu_for(page, session, "wt-rebasing", "Delete…"), "a rebasing worktree can be deleted")
+	expect(await _menu_for(page, session, "wt-rebasing"), "a rebasing worktree can be deleted")
 	expect(await wait_until(func() -> bool: return form.visible and form.field("delete_branch") != null),
 			"its branch is offered")
 	var branch: CheckBox = form.field("delete_branch") as CheckBox
@@ -184,11 +183,13 @@ func _commit(dir: String, message: String, empty: bool = false) -> void:
 	_git(dir, args)
 
 
-func _menu_for(page: RepoTab, session: RepoSession, folder: String, label: String) -> bool:
+## Opens `folder`'s worktree menu and runs Delete… there (by id: its Branch
+## submenu has a Delete… of its own, listed first).
+func _menu_for(page: RepoTab, session: RepoSession, folder: String) -> bool:
 	if not await wait_until(func() -> bool: return not _worktree(session, folder).is_empty()):
 		return false
 	page.strip().worktree_menu_requested.emit(_worktree(session, folder), Vector2.ZERO)
-	return page.press_menu(label)
+	return page.press_menu_id(&"worktree.remove")
 
 
 static func _worktree(session: RepoSession, folder: String) -> Dictionary:
