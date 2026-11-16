@@ -1459,6 +1459,20 @@ impl RepoSession {
         self.read(|s| to_i64(s.picked_count())).unwrap_or(0)
     }
 
+    /// What the next commit takes, for the commit button: `{total, picked,
+    /// partly, hidden}` (files that can be picked, files picked, picked in
+    /// part, picked but hidden by the filter).
+    #[func]
+    fn pick_summary(&self) -> VarDictionary {
+        let summary = self.read(RepoState::pick_summary).unwrap_or_default();
+        let mut out = VarDictionary::new();
+        out.set("total", to_i64(summary.total));
+        out.set("picked", to_i64(summary.picked));
+        out.set("partly", to_i64(summary.partly));
+        out.set("hidden", to_i64(summary.hidden));
+        out
+    }
+
     /// Includes or excludes whole files in the commit. `selection_changed`
     /// follows on the next poll. Returns whether any file had a pick.
     #[func]

@@ -52,13 +52,23 @@ func run() -> void:
 	expect_eq(list.row_count(), 1, "the filter ignores case")
 	expect_eq(list.path_at(0), "notes.txt", "only notes.txt matches")
 	expect_eq(view.list_header().text(), "1 of 2 changed files", "the header says how many are shown")
+	var box: CommitBox = view.commit_box()
+	expect_eq(box.button_text(), "Commit 2 files (1 hidden) to main", "the button counts picked files the filter hides")
 	view.pick_all(false)
+	expect(await wait_until(func() -> bool: return box.button_text() == "Commit 1 of 2 files (1 hidden) to main"),
+			"a hidden picked file still counts: %s" % box.button_text())
 	expect(await wait_until(func() -> bool: return session.picked_count() == 1),
 			"check-all leaves out the shown file only: %d" % session.picked_count())
 	expect(await wait_until(func() -> bool: return view.check_all().state == "none"),
 			"check-all shows the shown files' state: %s" % view.check_all().state)
 	view.pick_all(true)
 	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "check-all includes it again")
+	filter.set_text(".TXT")
+	await get_tree().process_frame
+	expect_eq(view.list_header().text(), "2 changed files", "a filter matching every file leaves the plain count")
+	expect_eq(box.button_text(), "Commit to main", "nothing hidden, nothing left out: no count")
+	filter.set_text("NOTES")
+	await get_tree().process_frame
 	type_text("zzz")
 	await get_tree().process_frame
 	expect_eq(view.list_header().text(), "0 of 2 changed files", "nothing matches")
@@ -149,19 +159,20 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return _diff_has(diff, "local edit")), "diff of app.txt shows the local edit")
 
 	# Space leaves out the highlighted file; the button follows.
-	var box: CommitBox = view.commit_box()
 	press("Down")
 	expect_eq(list.path_at(list.cursor), "notes.txt", "cursor on notes.txt")
 	press("Space")
 	expect(await wait_until(func() -> bool: return session.picked_count() == 1), "Space left out notes.txt")
 	expect(await wait_until(func() -> bool: return view.check_all().state == "partial"), "check-all shows partial")
-	expect_eq(box.button_text(), "Commit 1 file to main", "the button counts the included files")
+	expect_eq(box.button_text(), "Commit 1 of 2 files to main", "the button counts a partial commit")
+	expect_eq(box.button_text(false), "Commit 1 of 2 files", "without the branch when it does not fit")
 	press("Ctrl+Shift+U")
 	expect(await wait_until(func() -> bool: return session.picked_count() == 0), "Ctrl+Shift+U leaves out everything")
 	expect_eq(box.block_reason(), "Nothing included", "the button says why it is disabled")
 	press("Ctrl+Shift+S")
 	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "Ctrl+Shift+S includes everything")
 	expect_eq(box.block_reason(), "Write a summary", "a summary is still needed")
+	expect_eq(box.button_text(), "Commit to main", "every file whole: no count")
 
 	# Past 50 characters the summary shows its length, warning past 72, and
 	# never blocks the commit.

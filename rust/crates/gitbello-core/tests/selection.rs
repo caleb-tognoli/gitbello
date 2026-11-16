@@ -7,7 +7,7 @@ use crate::support;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use gitbello_core::changes::{FilePick, PickState};
+use gitbello_core::changes::{ChangeFilter, FilePick, PickState, PickSummary};
 use gitbello_core::diff::{FileDiff, LineKind};
 use gitbello_core::git::GitErrorKind;
 use gitbello_core::runtime::Runtime;
@@ -167,6 +167,100 @@ fn commits_part_of_a_file_and_keeps_the_rest() {
     assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "");
     assert_eq!(repo.git(&["status", "--porcelain"]), "M f.txt");
     assert_eq!(state(&rt, &key, "f.txt"), PickState::All);
+}
+
+#[test]
+fn summary_counts_left_out_partly_picked_and_hidden_files() {
+    let repo = TestRepo::init();
+    repo.commit(
+        "f.txt",
+        "1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+",
+        "base",
+    );
+    repo.write(
+        "f.txt",
+        "1
+two
+3
+4
+5
+6
+7
+8
+9
+ten
+",
+    );
+    repo.write(
+        "src/a.rs", "a
+",
+    );
+    repo.write(
+        "src/b.rs", "b
+",
+    );
+    let (mut rt, key) = open(&repo);
+    let summary = |rt: &Runtime| rt.repo(&key).expect("open").pick_summary();
+    let whole = PickSummary {
+        total: 3,
+        picked: 3,
+        ..PickSummary::default()
+    };
+    assert_eq!(summary(&rt), whole);
+
+    // Some lines of f.txt left out: still picked, but only partly.
+    let diff = show(&mut rt, &key, "f.txt");
+    rt.pick_lines(&key, &[line(&diff, LineKind::Added, "ten")], false);
+    assert_eq!(summary(&rt), PickSummary { partly: 1, ..whole });
+
+    // A file left out.
+    rt.pick_files(&key, &paths(&["src/b.rs"]), false);
+    let partial = PickSummary {
+        picked: 2,
+        partly: 1,
+        ..whole
+    };
+    assert_eq!(summary(&rt), partial);
+
+    // The filter hides f.txt, picked: counted as hidden. src/b.rs is hidden
+    // too, but left out, so it does not count.
+    rt.set_change_filter(
+        &key,
+        ChangeFilter {
+            text: "src/a".into(),
+            ..ChangeFilter::default()
+        },
+    );
+    assert_eq!(
+        summary(&rt),
+        PickSummary {
+            hidden: 1,
+            ..partial
+        }
+    );
+    // A filter showing every file hides nothing.
+    rt.set_change_filter(
+        &key,
+        ChangeFilter {
+            text: "".into(),
+            modified: true,
+            new: true,
+            ..ChangeFilter::default()
+        },
+    );
+    assert_eq!(summary(&rt), partial);
+    rt.set_change_filter(&key, ChangeFilter::default());
+    assert_eq!(summary(&rt), partial);
 }
 
 #[test]

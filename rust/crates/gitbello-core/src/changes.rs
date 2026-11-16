@@ -336,6 +336,20 @@ impl FilePick {
     }
 }
 
+/// What the next commit takes, for the commit button: "Commit 2 of 5 files
+/// (1 partly, 3 hidden) to main".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PickSummary {
+    /// Files that can be picked (conflicted and ignored ones have no checkbox).
+    pub total: usize,
+    /// Files the commit takes something of.
+    pub picked: usize,
+    /// Picked files the commit takes only part of (some lines, or as staged).
+    pub partly: usize,
+    /// Picked files the Changes filter hides.
+    pub hidden: usize,
+}
+
 /// `All` or `None` when every state is, else `Partial` (`None` for no states).
 fn combined(mut states: impl Iterator<Item = PickState>) -> PickState {
     let Some(first) = states.next() else {
@@ -441,6 +455,27 @@ impl Selection {
             .values()
             .filter(|e| e.pick != FilePick::Excluded)
             .count()
+    }
+
+    /// What the next commit takes, for the commit button. `shown` says
+    /// whether the Changes filter shows a path.
+    pub fn summary(&self, mut shown: impl FnMut(&Path) -> bool) -> PickSummary {
+        let mut summary = PickSummary {
+            total: self.files.len(),
+            ..PickSummary::default()
+        };
+        for (path, entry) in &self.files {
+            match entry.pick.state() {
+                PickState::None => continue,
+                PickState::Partial => summary.partly += 1,
+                PickState::All => {}
+            }
+            summary.picked += 1;
+            if !shown(path) {
+                summary.hidden += 1;
+            }
+        }
+        summary
     }
 
     /// Includes or excludes whole files. Returns whether any had an entry.

@@ -56,6 +56,14 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
   a resize applies everywhere at once. The first sizes come from the most recently opened
   repository's.
 
+### Commit button
+- The commit button reads "Commit to main" when the commit takes every file, and counts
+  files only when that says something new: "Commit 2 of 5 files to main" when some are
+  left out, "(1 partly)" when some take only part of their lines and "(3 hidden)" when
+  the filter hides picked files. Save amended commit counts the same way. A label too
+  long for the button drops "to main" first.
+- A Changes filter that matches every file no longer reads "5 of 5 changed files".
+
 ### Loading and empty states
 - A panel loading for the first time shows one smooth spinner in the accent colour in the
   middle with a short caption, with no seconds counter. One reloading shows a thin accent

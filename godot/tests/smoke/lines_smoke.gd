@@ -49,6 +49,8 @@ func run() -> void:
 	expect_eq(diff.row_pick(0), "partial", "the hunk header shows a partial pick")
 	expect(await wait_until(func() -> bool: return String(list.row(0).get("pick", "")) == "partial"),
 			"README.md's checkbox is partial")
+	expect_eq(view.commit_box().button_text(), "Commit 3 files (1 partly) to main",
+			"the button says a file is committed in part")
 
 	# The hunk header toggles its whole hunk: all in, then back to the pick.
 	press("Up")
@@ -75,7 +77,7 @@ func run() -> void:
 	press("Space")
 	expect(await wait_until(func() -> bool: return session.picked_count() == 1), "Space left out notes.txt")
 	var box: CommitBox = view.commit_box()
-	expect_eq(box.button_text(), "Commit 1 file to main", "the button says what it commits")
+	expect_eq(box.button_text(), "Commit 1 of 3 files (1 partly) to main", "the button says what it commits")
 	press("Ctrl+Shift+M")
 	type_text("Add line a")
 	expect(await wait_until(func() -> bool: return box.can_commit()), "ready to commit: %s" % box.block_reason())

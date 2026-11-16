@@ -71,6 +71,9 @@ func _ready() -> void:
 	_body.text_changed.connect(update_state)
 	_cancel_amend.pressed.connect(func() -> void: Actions.run_action(&"changes.cancel_amend", _cancel_amend))
 	_commit_button.pressed.connect(commit)
+	_commit_button.resized.connect(func() -> void:
+		if _job < 0:
+			_commit_button.text = _fitted_button_text())
 	_amend_hint.theme_type_variation = &"DimLabel"
 	_amend_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_amend_header.add_sibling(_amend_hint)
@@ -242,23 +245,82 @@ func block_reason() -> String:
 	return ""
 
 
-## What the button commits: "Commit 2 files to main", "Save amended commit",
-## "Commit merge into main"...
-func button_text() -> String:
+## What the button commits: "Commit to main" when it takes every file whole
+## and shown, else "Commit 2 of 5 files (1 partly, 3 hidden) to main";
+## "Save amended commit (2 of 5 files)", "Commit merge into main"...
+## `with_branch` false leaves out "to main" (when the text does not fit).
+func button_text(with_branch: bool = true) -> String:
 	var mode: String = session.commit_mode() if session != null else "normal"
 	if mode == "merge":
 		var into: String = session.current_branch()
-		return tr("Commit merge into %s") % into if not into.is_empty() else tr("Commit merge")
+		return tr("Commit merge into %s") % into if with_branch and not into.is_empty() else tr("Commit merge")
 	if mode == "cherry_pick":
 		return tr("Commit cherry-pick") if session.operation() == "cherry_pick" else tr("Commit revert")
+	var counts: Dictionary = session.pick_summary() if session != null else {}
 	if _amending:
-		return tr("Save amended commit")
-	var count: int = session.picked_count() if session != null else 0
-	var files: String = tr("1 file") if count == 1 else tr("%d files") % count
-	var branch: String = session.current_branch() if session != null else ""
+		var parts: PackedStringArray = _count_parts(counts)
+		return tr("Save amended commit") if parts.is_empty() 				else tr("Save amended commit (%s)") % ", ".join(parts)
+	var files: String = count_text(counts)
+	var branch: String = session.current_branch() if session != null and with_branch else ""
 	if branch.is_empty():
-		return tr("Commit") if count == 0 else tr("Commit %s") % files
-	return tr("Commit to %s") % branch if count == 0 else tr("Commit %s to %s") % [files, branch]
+		return tr("Commit") if files.is_empty() else tr("Commit %s") % files
+	return tr("Commit to %s") % branch if files.is_empty() else tr("Commit %s to %s") % [files, branch]
+
+
+## "2 of 5 files (1 partly, 3 hidden)" from `RepoSession.pick_summary()`, or
+## "" when the commit takes every file whole and shown (or nothing).
+static func count_text(counts: Dictionary) -> String:
+	var parts: PackedStringArray = _count_parts(counts)
+	if parts.is_empty():
+		return ""
+	var files: String = parts[0]
+	parts.remove_at(0)
+	return files if parts.is_empty() else "%s (%s)" % [files, ", ".join(parts)]
+
+
+## ["2 of 5 files", "1 partly", "3 hidden"], each only when it says something
+## the check boxes in view do not; [] when nothing is picked.
+static func _count_parts(counts: Dictionary) -> PackedStringArray:
+	var total: int = int(counts.get("total", 0))
+	var picked: int = int(counts.get("picked", 0))
+	var partly: int = int(counts.get("partly", 0))
+	var hidden_count: int = int(counts.get("hidden", 0))
+	var parts: PackedStringArray = []
+	if picked == 0 or (picked == total and partly == 0 and hidden_count == 0):
+		return parts
+	if picked < total:
+		parts.append(String(TranslationServer.translate("%d of %d files")) % [picked, total])
+	else:
+		parts.append(String(TranslationServer.translate("1 file")) if picked == 1
+				else String(TranslationServer.translate("%d files")) % picked)
+	if partly > 0:
+		parts.append(String(TranslationServer.translate("%d partly")) % partly)
+	if hidden_count > 0:
+		parts.append(String(TranslationServer.translate("1 hidden")) if hidden_count == 1
+				else String(TranslationServer.translate("%d hidden")) % hidden_count)
+	return parts
+
+
+## The button's text, without "to <branch>" when the whole text does not fit
+## (the counts matter more; the branch shows in the branch button). The
+## button trims what is still too long with an ellipsis.
+func _fitted_button_text() -> String:
+	var full: String = button_text()
+	var short: String = button_text(false)
+	return full if full == short or _fits_button(full) else short
+
+
+func _fits_button(text: String) -> bool:
+	var font: Font = _commit_button.get_theme_font(&"font")
+	var font_size: int = _commit_button.get_theme_font_size(&"font_size")
+	var room: float = _commit_button.size.x - _commit_button.get_theme_stylebox(&"normal").get_minimum_size().x
+	if _commit_button.icon != null:
+		var icon_width: float = float(_commit_button.icon.get_width())
+		var max_width: int = _commit_button.get_theme_constant(&"icon_max_width")
+		if max_width > 0:
+			icon_width = minf(icon_width, float(max_width))
+		room -= icon_width + float(_commit_button.get_theme_constant(&"h_separation"))
+	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= room
 
 
 ## The reason shown under the button, or "".
@@ -311,7 +373,7 @@ func update_state() -> void:
 	if _job >= 0:
 		_commit_button.text = tr("Amending…") if _amending else tr("Committing…")
 	else:
-		_commit_button.text = button_text()
+		_commit_button.text = _fitted_button_text()
 	var why: String = block_reason() if _job < 0 else ""
 	var fact: String = why
 	if why.is_empty() and _amending and session != null:

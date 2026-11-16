@@ -893,7 +893,7 @@ static func _describe(paths: PackedStringArray) -> String:
 	return paths[0].get_file() if paths.size() == 1 else TranslationServer.translate("%d files") % paths.size()
 
 
-## "N changed files" ("2 of N" while filtered), the check-all box (dimmed
+## "N changed files" ("2 of N" while the filter hides some), the check-all box (dimmed
 ## while a merge or cherry-pick decides what is committed) and, during an
 ## operation with conflicts, "1 of 2 resolved"; under the filter, hidden
 ## without changes (the empty state beside the list says so).
@@ -905,7 +905,7 @@ func _update_header() -> void:
 	_filter_bar.visible = (count > 0 or _filter.is_active()) and not _shelves_mode
 	_list_header.visible = count > 0 and not _shelves_mode
 	var text: String = ListHeader.count_text(count, "changed file")
-	var header: String = tr("%d of %s") % [shown, text] if filtered else text
+	var header: String = tr("%d of %s") % [shown, text] if filtered and shown != count else text
 	if ignored > 0:
 		header = tr("%s, %d ignored") % [header, ignored]
 	_list_header.set_text(header)
@@ -948,6 +948,8 @@ func _apply_filter() -> void:
 	session.set_change_filter(_filter.text(), _filter.options())
 	_list.reload()
 	_update_header()
+	# The button counts picked files the filter hides.
+	_commit_box.update_state()
 	if _list.cursor < 0 and not _showing_shelf:
 		_clear_diff()
 

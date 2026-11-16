@@ -1355,3 +1355,8 @@ keys,en,it
 "Branch lines beside the commits","Branch lines beside the commits","Linee dei rami accanto ai commit"
 "Unknown revision: %s","Unknown revision: %s","Revisione sconosciuta: %s"
 "Setup…","Setup…","Preparazione…"
+"%d of %d files","%d of %d files","%d di %d file"
+"%d partly","%d partly","%d in parte"
+"1 hidden","1 hidden","1 nascosto"
+"%d hidden","%d hidden","%d nascosti"
+"Save amended commit (%s)","Save amended commit (%s)","Salva commit modificato (%s)"

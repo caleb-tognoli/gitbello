@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::backend::{
     CliBackend, GitBackend, IndexWrite, PatchGuard, ShelfChange, CONTENT_MERGE_LIMIT,
 };
-use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
+use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, PickSummary, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
 use crate::diff::markdown::{self, Folds, ImageRef, MarkdownDiff, MarkdownImage, PreviewLayout};
@@ -1216,6 +1216,25 @@ impl RepoState {
             ),
             _ => self.selection.overall_state(),
         }
+    }
+
+    /// What the next commit takes, for the commit button. While a merge or
+    /// cherry-pick decides what is committed, every picked file counts as
+    /// whole and shown (the button names the operation instead).
+    pub fn pick_summary(&self) -> PickSummary {
+        if self.commit_mode().locks_picks() {
+            let picked = self.picked_count();
+            return PickSummary {
+                total: picked,
+                picked,
+                ..PickSummary::default()
+            };
+        }
+        if !self.change_filter.is_active() {
+            return self.selection.summary(|_| true);
+        }
+        let shown: HashSet<PathBuf> = self.shown_paths().into_iter().collect();
+        self.selection.summary(|path| shown.contains(path))
     }
 
     /// Paths of the checked files shown (all or part of them picked),
