@@ -283,7 +283,9 @@ func run() -> void:
 			"a toast says so: %s" % [toasts.toast_texts()])
 	expect(toasts.press_fix("Undo", "one-click"), "with Undo: %s" % [toasts.fix_labels()])
 	expect(await wait_until(func() -> bool: return session.worktrees().size() == 3), "Undo removed the worktree")
-	expect(not DirAccess.dir_exists_absolute(one_path), "and its folder")
+	# Windows finishes deleting a folder once the last handle on it (the
+	# watcher's) closes, which can be after the list is read again.
+	expect(await wait_until(func() -> bool: return not DirAccess.dir_exists_absolute(one_path)), "and its folder")
 	expect(_has_branch(session, "one-click"), "the branch it only checked out stays")
 	expect(await wait_until(func() -> bool: return Paths.same(page.active_view().worktree_path(), repo)),
 			"the first worktree shows again")

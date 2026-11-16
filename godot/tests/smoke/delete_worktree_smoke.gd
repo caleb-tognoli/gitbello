@@ -84,7 +84,8 @@ func _squashed(page: RepoTab, session: RepoSession, form: FormDialog) -> void:
 			"the worktree's branch is read: %s" % _worktree(session, "wt-squashed"))
 	expect(await _menu_for(page, session, "wt-squashed", "Delete…"), "the menu offers delete")
 	expect(await wait_until(func() -> bool: return form.visible and form.field("delete_branch") != null),
-			"the dialog opens with the branch: %s" % _worktree(session, "wt-squashed"))
+			"the dialog opens with the branch: visible %s, title %s, fields %s, menu %s" % [form.visible, form.title,
+			form._fields.keys(), page.menu_labels()])
 	if form.field("delete_branch") == null:
 		form.hide()
 		return
