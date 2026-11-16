@@ -50,8 +50,13 @@ func run() -> void:
 	page.show_view(WorktreeView.View.HISTORY)
 	var history: HistoryView = page.history()
 	expect(await wait_until(func() -> bool: return history.commit_list().cursor >= 0), "History selects a commit")
-	await get_tree().process_frame
 	var header: CommitHeader = history.details().header()
+	# The long message below must not be replaced by the commit's own when its
+	# details land late (slow runners).
+	expect(await wait_until(func() -> bool:
+		return (header.commit_oid() == history.commit_list().hash_at(history.commit_list().cursor)
+				and not header.summary_text().is_empty())), "the selected commit's details load")
+	await get_tree().process_frame
 	var message: RichTextLabel = header.find_child("Body", true, false) as RichTextLabel
 	expect(message != null, "the commit details have a message")
 	if message != null:
@@ -98,7 +103,9 @@ func _expect_scrolls(auto: AutoScroll, target: Control, offset: Callable, what: 
 			"a middle click autoscrolls %s (target: %s, under the mouse: %s)" % [what, auto.target(),
 					_path(get_viewport().gui_get_hovered_control())])
 	_move(at + Vector2(0.0, 80.0))
-	expect(await wait_until(func() -> bool: return float(offset.call()) > 0.0, 3000), "moving down scrolls %s" % what)
+	expect(await wait_until(func() -> bool: return float(offset.call()) > 0.0, 3000),
+			"moving down scrolls %s (active %s, target %s, still overflows %s)" % [what, auto.is_active(),
+					auto.target(), AutoScroll.scroll_axes(target).y == 1])
 	auto.stop()
 
 

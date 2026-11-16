@@ -34,11 +34,13 @@ func run() -> void:
 	await get_tree().process_frame
 	plain = _toasts.show_success("Saved")
 	undo = _toasts.show_success("Discarded", func() -> void: pass)
-	await _wait(1.2)
-	expect(not is_instance_valid(plain), "ordinary success expires first")
+	# Expiries are waited for, not slept past: frames on a slow runner can
+	# outlast the fade's margin.
+	expect(await wait_until(_freed(plain), EXPIRY_MSEC),
+			"ordinary success expires first")
 	expect(is_instance_valid(undo), "Undo survives the ordinary lifetime")
-	await _wait(1.0)
-	expect(not is_instance_valid(undo), "unattended Undo expires at its own lifetime")
+	expect(await wait_until(_freed(undo), EXPIRY_MSEC),
+			"unattended Undo expires at its own lifetime")
 
 	undo = _toasts.show_success("Discarded", func() -> void: pass)
 	await _wait(0.3)
@@ -68,8 +70,8 @@ func run() -> void:
 	expect(not timer.paused, "releasing focus without a replacement resumes time")
 	await _wait(0.4)
 	expect(timer.time_left < remaining - 0.2, "remaining time resumes instead of resetting")
-	await _wait(1.5)
-	expect(not is_instance_valid(undo), "resumed remaining time eventually expires")
+	expect(await wait_until(_freed(undo), EXPIRY_MSEC),
+			"resumed remaining time eventually expires")
 
 	plain = _toasts.show_success("Hover")
 	await _wait(0.3)
@@ -81,14 +83,17 @@ func run() -> void:
 	expect(is_instance_valid(plain), "hover protects ordinary successes")
 	expect(absf(timer.time_left - remaining) < 0.1, "hover preserves remaining time")
 	_mouse(Vector2(10, 80))
-	await _wait(0.9)
-	expect(not is_instance_valid(plain), "leaving hover resumes only remaining time")
+	var left: int = Time.get_ticks_msec()
+	expect(await wait_until(_freed(plain), EXPIRY_MSEC),
+			"leaving hover resumes the remaining time")
+	expect(Time.get_ticks_msec() - left < 1000, "only the remaining time, not a new second")
 
 	plain = _toasts.show_success("Unrelated")
 	undo = _toasts.show_success("Focused", func() -> void: pass)
 	_undo(undo).grab_focus()
-	await _wait(1.2)
-	expect(not is_instance_valid(plain) and is_instance_valid(undo), "another toast's focus does not stop expiry")
+	expect(await wait_until(_freed(plain), EXPIRY_MSEC),
+			"another toast's focus does not stop expiry")
+	expect(is_instance_valid(undo), "the focused one stays")
 	undo.queue_free()
 	await get_tree().process_frame
 	var calls: Array[int] = [0]
@@ -105,11 +110,12 @@ func run() -> void:
 	var progress: PanelContainer = _toasts.show_progress("Working")
 	await _wait(2.2)
 	expect_eq(calls[0], 1, "old timers cannot invoke actions again")
-	expect_eq(_toasts.toast_count(), 2, "only error and progress remain")
+	expect(await wait_until(func() -> bool: return _toasts.toast_count() == 2, EXPIRY_MSEC),
+			"only error and progress remain: %d" % _toasts.toast_count())
 	_toasts.finish_progress(progress, "Finished")
 	await get_tree().process_frame
-	await _wait(1.2)
-	expect_eq(_toasts.toast_count(), 1, "progress result uses ordinary expiry")
+	expect(await wait_until(func() -> bool: return _toasts.toast_count() == 1, EXPIRY_MSEC),
+			"progress result uses ordinary expiry")
 	progress = _toasts.show_progress("Discarding")
 	_toasts.finish_progress(progress, "Discarded", func() -> void: calls[0] += 1)
 	await get_tree().process_frame
@@ -153,6 +159,10 @@ func _undo(panel: PanelContainer) -> Button:
 	return null
 
 
+## How long an expiry may take on a slow runner (the lifetimes here are 1-2 s).
+const EXPIRY_MSEC: int = 5000
+
+
 func _wait(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 
@@ -165,3 +175,9 @@ func _mouse(at: Vector2) -> void:
 	Input.parse_input_event(motion)
 	Input.flush_buffered_events()
 
+
+## Whether `node` is gone, without the lambda holding it (a freed capture is
+## an error).
+func _freed(node: Object) -> Callable:
+	var ref: WeakRef = weakref(node)
+	return func() -> bool: return ref.get_ref() == null

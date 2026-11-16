@@ -68,14 +68,14 @@ func run() -> void:
 	# frames can take on a slow runner.
 	await get_tree().process_frame
 	expect_eq(toasts.toast_texts(), PackedStringArray(["Done", "Later error"]), "progress result preserves its position")
-	await get_tree().create_timer(1.2).timeout
-	expect_eq(toasts.toast_texts(), PackedStringArray(["Later error"]), "ordinary success still expires but errors remain")
+	expect(await wait_until(func() -> bool: return toasts.toast_texts() == PackedStringArray(["Later error"]), 5000),
+			"ordinary success still expires but errors remain: %s" % toasts.toast_texts())
 	var exposed: PanelContainer = toasts.show_success("Visible Undo", func() -> void: pass)
 	await _settle()
 	expect(not (exposed.find_children("*", "Timer", true, false)[0] as Timer).paused,
 			"a fully exposed unattended Undo is not capacity-paused")
-	await get_tree().create_timer(1.2).timeout
-	expect(not is_instance_valid(exposed), "an exposed Undo resumes normal expiration")
+	expect(await wait_until(_freed(exposed), 5000),
+			"an exposed Undo resumes normal expiration")
 	for panel: Node in stack.get_children():
 		panel.queue_free()
 	await _settle()
@@ -107,3 +107,10 @@ func run() -> void:
 func _settle() -> void:
 	for frame: int in 12:
 		await get_tree().process_frame
+
+
+## Whether `node` is gone, without the lambda holding it (a freed capture is
+## an error).
+func _freed(node: Object) -> Callable:
+	var ref: WeakRef = weakref(node)
+	return func() -> bool: return ref.get_ref() == null
