@@ -11,6 +11,9 @@ const BASE_DPI: float = 96.0
 static var light: bool = false
 ## The accent colour of the theme applied last.
 static var accent: Color = AppTheme.DEFAULT_ACCENT
+## The added and removed line colours of the theme applied last.
+static var _added: Color = Color.TRANSPARENT
+static var _removed: Color = Color.TRANSPARENT
 
 
 ## Whether `choice` (`system`, `light` or `dark`) means the light theme.
@@ -37,12 +40,27 @@ static func configured_accent() -> Color:
 	return Color.from_string(text, AppTheme.DEFAULT_ACCENT) if not text.is_empty() else AppTheme.DEFAULT_ACCENT
 
 
+## Applies the configured theme only when it differs from the one applied
+## last (the OS switched light/dark). Called when the app gets focus: a rebuild
+## there would race the menu a right-click on the unfocused window opens, which
+## then shows empty.
+static func refresh(root: Node) -> bool:
+	if (is_light(Core.theme_choice()) == light and configured_accent() == accent
+			and configured_color(&"added_color") == _added
+			and configured_color(&"removed_color") == _removed):
+		return false
+	apply(root)
+	return true
+
+
 ## Builds the configured theme into the project theme (an empty resource in
 ## project.godot), so every control and window uses it whatever its parents
 ## are (themes do not pass through plain Node parents), then tells them.
 static func apply(root: Node) -> void:
 	light = is_light(Core.theme_choice())
 	accent = configured_accent()
+	_added = configured_color(&"added_color")
+	_removed = configured_color(&"removed_color")
 	var project_theme: Theme = ThemeDB.get_project_theme()
 	if project_theme == null:
 		push_error("gui/theme/custom is not set: the theme cannot be applied")
@@ -51,8 +69,7 @@ static func apply(root: Node) -> void:
 	# the replacement theme (including shelf headings during a live switch).
 	var previous: Theme = project_theme.duplicate() as Theme
 	project_theme.clear()
-	project_theme.merge_with(AppTheme.build(light, accent, configured_color(&"added_color"),
-			configured_color(&"removed_color")))
+	project_theme.merge_with(AppTheme.build(light, accent, _added, _removed))
 	# What Windows fills newly exposed window area with until the next frame
 	# (while the border is dragged), instead of Godot's default grey.
 	RenderingServer.set_default_clear_color(AppTheme.palette(light, accent).background)

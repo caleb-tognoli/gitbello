@@ -195,6 +195,13 @@ func run() -> void:
 	Actions.run_action(&"view.theme_dark")
 	expect(not ThemeManager.light, "dark theme applied")
 	Actions.run_action(&"view.theme_system")
+	# Focus in with the OS theme unchanged leaves the theme alone: a rebuild
+	# there blanked the menu a right-click on the unfocused window opened.
+	var styles: StyleBox = ThemeDB.get_project_theme().get_stylebox(&"panel", &"PopupMenu")
+	expect(not ThemeManager.refresh(main), "an unchanged theme is not rebuilt")
+	main.notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	expect(ThemeDB.get_project_theme().get_stylebox(&"panel", &"PopupMenu") == styles,
+			"focus in keeps the menus' theme")
 
 	# Restore on launch: a fresh shell reopens the saved tabs.
 	main.queue_free()

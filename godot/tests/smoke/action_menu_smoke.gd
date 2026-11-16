@@ -92,6 +92,16 @@ func run() -> void:
 	expect_eq(menu.fill([&"test.menu_c"]), 0, "nothing shows")
 	expect(not menu.open([&"test.menu_c"], Vector2.ZERO), "and the menu does not open")
 
+	# An opened menu redraws for a moment (a first frame Windows did not show
+	# left it blank), then stops.
+	expect(menu.open([&"test.menu_a"], Vector2.ZERO), "the menu opens")
+	expect(menu.is_redrawing(), "a menu just opened redraws")
+	var deadline: int = Time.get_ticks_msec() + ActionMenu.REDRAW_MS + 100
+	while Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	expect(not menu.is_redrawing(), "and stops after a moment")
+	menu.hide()
+
 	for id: StringName in [&"test.menu_a", &"test.menu_b", &"test.menu_c", &"test.menu_d", &"test.menu_e"]:
 		Actions.unregister(id)
 	menu.queue_free()

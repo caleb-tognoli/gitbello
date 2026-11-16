@@ -160,7 +160,7 @@ func _notification(what: int) -> void:
 		if active != null and active.session != null:
 			Core.focus_in(active.session)
 		if Core.theme_choice() == "system":
-			ThemeManager.apply(self)
+			ThemeManager.refresh(self)
 	elif what == NOTIFICATION_THEME_CHANGED and is_node_ready():
 		_apply_theme()
 		_update_tab_icons()
@@ -1601,7 +1601,7 @@ func _set_theme(choice: String) -> void:
 
 func _on_system_theme_changed() -> void:
 	if Core.theme_choice() == "system":
-		ThemeManager.apply(self)
+		ThemeManager.refresh(self)
 
 
 func _show_about() -> void:

@@ -31,6 +31,12 @@ signal chosen(id: StringName)
 ## between menus with it).
 signal menu_key(event: InputEvent)
 
+## How long a menu keeps redrawing after it opens. A menu opened by the click
+## that brings the app to the front can be shown by Windows after its first
+## frame was drawn, and low processor mode draws nothing more until something
+## changes: it stayed blank.
+const REDRAW_MS: int = 300
+
 ## Runs the chosen action itself. Off, only `chosen` is emitted and the owner
 ## runs it (to set up what the action acts on first).
 var auto_run: bool = true
@@ -53,10 +59,32 @@ var _ids: Array[StringName] = []
 ## Item id -> Callable for plain and dynamic items.
 var _runs: Array[Callable] = []
 var _subs: Array[ActionMenu] = []
+## Ticks until which the open menu redraws every frame (see `REDRAW_MS`).
+var _redraw_until: int = 0
 
 
 func _init() -> void:
 	id_pressed.connect(_on_id)
+	set_process(false)
+
+
+func _process(_delta: float) -> void:
+	if not visible or Time.get_ticks_msec() > _redraw_until:
+		set_process(false)
+		return
+	_redraw(self)
+
+
+## Whether the menu is still redrawing after opening (for tests).
+func is_redrawing() -> bool:
+	return is_processing()
+
+
+static func _redraw(node: Node) -> void:
+	for child: Node in node.get_children(true):
+		if child is CanvasItem:
+			(child as CanvasItem).queue_redraw()
+		_redraw(child)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -125,6 +153,8 @@ func open_at(at: Vector2) -> void:
 	position = Vector2i(at)
 	reset_size()
 	popup()
+	_redraw_until = Time.get_ticks_msec() + REDRAW_MS
+	set_process(true)
 
 
 ## The action ids shown, in order, submenus included (for tests).

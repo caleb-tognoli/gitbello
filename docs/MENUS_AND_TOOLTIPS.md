@@ -16,6 +16,7 @@ Every user-facing operation is an action in `ActionRegistry` (golden rule 10). M
 - **Order:** primary action → create (New branch…, New tag…) → families → destructive last, behind a separator.
 - **Titles** only where the target is not obvious: a labelled separator naming it on menus from graph ref chips, multi-selections ("3 files") and the worktree list.
 - **Shortcuts** show in every menu.
+- **Drawing:** a menu opened with `open_at` redraws every frame for `REDRAW_MS` (300 ms). On Windows the right-click that brings the app to the front can show the menu's window after its only frame was drawn (low processor mode), which left it blank.
 - **Icons:** nearly every item has one where it is specific; no repeats inside a family, no forced matches (left without: the conflict side choices, Short hash, Subject, Pull with ▸). Checkable items show the check mark and the icon. The menu bar's submenus take theirs from `AppMenuBar.SUB_ICONS`.
 
 ## Menu bar
