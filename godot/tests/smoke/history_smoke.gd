@@ -192,7 +192,8 @@ func _check_search_ui(history: HistoryView, list: CommitList, details: CommitDet
 			"the selected commit is the second match: %s" % history.status_text())
 	expect(history.match_buttons().all(func(b: Button) -> bool: return b.visible), "the match buttons show while searching")
 	var strip: MarkStrip = list.match_strip()
-	expect(strip.visible, "the strip of matches shows")
+	# The strip follows the search's progress, which can land after the count.
+	expect(await wait_until(func() -> bool: return strip.visible), "the strip of matches shows")
 	await get_tree().process_frame
 	expect(strip.position.x + strip.size.x <= list.size.x and strip.position.x >= list.content_width(),
 			"it sits beside the scroll bar, outside the rows (%s)" % strip.position)

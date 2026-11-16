@@ -703,6 +703,11 @@ fn cancelling_a_running_job_sets_its_token() {
     assert!(scheduler.cancel(job));
     let seen = wait_final(&events, &[job]);
     assert_eq!(seen.last().map(|e| &e.kind), Some(&EventKind::Cancelled));
+    // The final event goes out just before the job leaves the running set.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while scheduler.cancel(job) && Instant::now() < deadline {
+        sleep(Duration::from_millis(1));
+    }
     assert!(!scheduler.cancel(job), "finished jobs are unknown");
 }
 

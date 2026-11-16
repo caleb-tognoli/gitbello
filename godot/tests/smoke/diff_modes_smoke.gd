@@ -39,7 +39,7 @@ func run() -> void:
 	expect(panel.mode() == "split" and panel.view().side_by_side, "it opens in the saved mode")
 	expect(panel.mode_button("split").button_pressed and not panel.mode_button("unified").button_pressed,
 			"the saved mode's button is chosen")
-	expect(panel.mode_button("split").tooltip_text.contains(Shortcuts.display("Ctrl+Shift+D")), "the tooltip names the cycle shortcut")
+	expect(panel.mode_button("split").tooltip_text.contains("Ctrl+Shift+D"), "the tooltip names the cycle shortcut (canonical; the card shows Cmd on macOS)")
 	expect(Actions.is_enabled(&"diff.cycle_mode"), "the cycle action is enabled")
 
 	# A new text file offers unified only: no picker, no saving.

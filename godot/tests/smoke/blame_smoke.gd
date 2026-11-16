@@ -57,7 +57,7 @@ func run() -> void:
 	expect_eq(page.view, WorktreeView.View.FILE, "the File history view shows")
 	expect(view.is_blame(), "with Blame on")
 	expect(view.blame_button().button_pressed, "the bar's switch says so")
-	expect(view.blame_button().tooltip_text.contains(Shortcuts.display("Ctrl+Alt+B")), "its tooltip names the shortcut")
+	expect(view.blame_button().tooltip_text.contains("Ctrl+Alt+B"), "its tooltip names the shortcut (canonical; the card shows Cmd on macOS)")
 	expect(await _blamed(session, view), "the blame loads")
 	expect(await wait_until(func() -> bool:
 		var history: Dictionary = session.file_history_info()

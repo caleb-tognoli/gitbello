@@ -315,6 +315,9 @@ func run() -> void:
 	press("Ctrl+Shift+A")
 	expect(await wait_until(func() -> bool: return box.summary() == "Add notes"), "HEAD message loads again")
 	box.set_message("Add notes (amended)", "Body line")
+	# The amend's files load after its message (late watcher events re-read
+	# them on slow runners); a press before that does nothing.
+	expect(await wait_until(func() -> bool: return box.can_commit()), "the amend is ready: %s" % box.block_reason())
 	press("Ctrl+Enter")
 	expect(not Actions.is_enabled(&"changes.cancel_amend"), "Cancel is unavailable during submission")
 	committed = await wait_until(func() -> bool: return not box.is_busy() and not box.is_amend())
@@ -335,7 +338,8 @@ func run() -> void:
 	page.show_view(WorktreeView.View.HISTORY)
 	history.commit_list().select_only(0)
 	Actions.run_action(&"commit.amend")
-	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)"), "amend loads with checked changes")
+	expect(await wait_until(func() -> bool: return box.summary() == "Add notes (amended)" and box.can_commit()),
+			"amend loads with checked changes: %s" % box.block_reason())
 	expect(box.commit(), "amend submits the checked file")
 	expect(await wait_until(func() -> bool: return not box.is_amend() and not box.is_busy() and session.change_count() == 1),
 			"amend leaves only the excluded file")

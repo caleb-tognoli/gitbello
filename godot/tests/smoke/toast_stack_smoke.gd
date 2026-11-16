@@ -64,7 +64,9 @@ func run() -> void:
 	var completed: PanelContainer = toasts.show_progress("Working")
 	toasts.show_toast("Later error", "Keep the original order")
 	toasts.finish_progress(completed, "Done")
-	await _settle()
+	# One frame, not `_settle()`: "Done" lives one second here, which twelve
+	# frames can take on a slow runner.
+	await get_tree().process_frame
 	expect_eq(toasts.toast_texts(), PackedStringArray(["Done", "Later error"]), "progress result preserves its position")
 	await get_tree().create_timer(1.2).timeout
 	expect_eq(toasts.toast_texts(), PackedStringArray(["Later error"]), "ordinary success still expires but errors remain")

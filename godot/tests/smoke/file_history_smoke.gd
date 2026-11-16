@@ -412,7 +412,8 @@ func _ctrl_click(list: FileHistoryList, row: int) -> void:
 	var click: InputEventMouseButton = InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
-	click.ctrl_pressed = true
+	# Ctrl, or Cmd on macOS, matching is_command_or_control_pressed().
+	click.command_or_control_autoremap = true
 	click.position = Vector2(20.0, list.row_top(row) + list.row_extent(row) * 0.5 - list.scroll_offset())
 	list._gui_input(click)
 

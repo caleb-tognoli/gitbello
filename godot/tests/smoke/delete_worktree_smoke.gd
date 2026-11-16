@@ -78,9 +78,16 @@ func _click(window: Window, at: Vector2) -> void:
 
 
 func _squashed(page: RepoTab, session: RepoSession, form: FormDialog) -> void:
+	# The dialog offers the branch the listed worktree has; wait for it to be
+	# read (slow runners list the worktree first).
+	expect(await wait_until(func() -> bool: return String(_worktree(session, "wt-squashed").get("branch", "")) == "squashed"),
+			"the worktree's branch is read: %s" % _worktree(session, "wt-squashed"))
 	expect(await _menu_for(page, session, "wt-squashed", "Delete…"), "the menu offers delete")
 	expect(await wait_until(func() -> bool: return form.visible and form.field("delete_branch") != null),
-			"the dialog opens with the branch")
+			"the dialog opens with the branch: %s" % _worktree(session, "wt-squashed"))
+	if form.field("delete_branch") == null:
+		form.hide()
+		return
 	var branch: CheckBox = form.field("delete_branch") as CheckBox
 	expect(await wait_until(func() -> bool: return branch.button_pressed), "a squash-merged branch ticks itself")
 	expect_eq(form.item_facts("delete_branch"), PackedStringArray(["squash-merged"]),
