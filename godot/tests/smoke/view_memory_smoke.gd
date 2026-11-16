@@ -19,9 +19,9 @@ func run() -> void:
 				and not second.session.shelves().is_empty() and second.worktrees().size() == 2), "both repositories load")
 	expect_eq(second.view, WorktreeView.View.HISTORY, "a fresh launch starts on History")
 
-	main.tab_bar().current_tab = 0
+	_show_tab(main, first)
 	first.show_view(WorktreeView.View.CHANGES)
-	main.tab_bar().current_tab = 1
+	_show_tab(main, second)
 	expect_eq(second.view, WorktreeView.View.CHANGES, "another tab shows the view chosen in the last one")
 
 	second.show_view(WorktreeView.View.SHELVES)
@@ -33,7 +33,7 @@ func run() -> void:
 	second.show_view(WorktreeView.View.HISTORY)
 	expect(second.select_chip(0), "the main worktree shows again")
 	expect_eq(second.view, WorktreeView.View.HISTORY, "the main worktree follows the linked one's choice")
-	main.tab_bar().current_tab = 0
+	_show_tab(main, first)
 	expect_eq(first.view, WorktreeView.View.HISTORY, "and so does the first tab")
 
 	# A view switched in a hidden worktree does not change the choice.
@@ -42,7 +42,7 @@ func run() -> void:
 
 	# Alt+Page Down/Up go round the shown buttons (no comparison: Compare is
 	# skipped), even from the commit list, which uses Page Down itself.
-	main.tab_bar().current_tab = 1
+	_show_tab(main, second)
 	second.history().commit_list().grab_focus()
 	var cursor: int = second.history().commit_list().cursor
 	var order: Array[WorktreeView.View] = [WorktreeView.View.SHELVES, WorktreeView.View.CHANGES,
@@ -82,3 +82,12 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## Selects `page`'s tab, wherever it is.
+func _show_tab(main: Main, page: RepoTab) -> void:
+	for i: int in main.tab_count():
+		if main.page_at(i) == page:
+			main.tab_bar().current_tab = i
+			return
+	expect(false, "%s has a tab" % page.title())

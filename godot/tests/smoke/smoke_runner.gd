@@ -35,11 +35,13 @@ func _ready() -> void:
 		add_child(test)
 		ran += 1
 		# Every test starts like a fresh launch, with an empty library (Home
-		# would load a summary of every repository the tests before added).
+		# would load a summary of every repository the tests before added)
+		# and no tabs to restore (they would come before the test's own).
 		WorktreeView.shared_view = WorktreeView.View.HISTORY
 		Engine.time_scale = 1.0
 		for row: Dictionary in Core.library_rows():
 			Core.library_remove(str(row.path))
+		Core.save_tabs(PackedStringArray(), -1)
 		var started: int = Time.get_ticks_msec()
 		await test.run()
 		for failure: String in test.failures:
