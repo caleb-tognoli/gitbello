@@ -4,7 +4,32 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 (`workspace.package.version`), `godot/project.godot` (`application/config/version`) and
 `godot/export_presets.cfg`, and shown in Help > About.
 
-## Unreleased
+## 1.2.0
+
+### Markdown diffs
+- Markdown files get a Preview mode beside Unified and Side by side: the rendered file
+  with each block marked added, removed or changed, its pictures and links read from the
+  repository, and the changes marked in its scroll strip.
+- Preview shows each changed block with a block of context on each side and its
+  section's heading; other unchanged blocks fold into gaps that open five blocks a click.
+  Whole file and F7/Shift+F7 work there too, and a heading link inside a gap opens it.
+
+### Syntax highlighting
+- Hand-written lexers for 39 language families replace the generic tokenizer: C, C++, C#,
+  Java, Kotlin, Swift and shaders apart, plus HTML, XML, CSS/SCSS/LESS, SQL, CSV/TSV (one
+  colour per column), .env, ignore files, Lua, Ruby, PHP, Batch and more.
+- Functions, constants, builtin types, escapes and doc comments get their own colours;
+  string interpolation, HTML's scripts and styles, and Dockerfile and Makefile shell lines
+  are coloured as the language they hold.
+- Files without a known name or extension are recognised by their shebang. Highlighting
+  shows everywhere code is drawn: diffs, the blame, the conflict resolver and the minimap.
+
+### Profile pictures
+- Avatars show the person's profile picture, looked up through GitHub (noreply addresses,
+  then their pushed commits), GitLab, Gravatar and Libravatar, in the background and
+  cached for 30 days. Requests carry only the email. Initials show meanwhile, offline or
+  with pictures off.
+- Settings → Interface: Show profile pictures, and which sources to ask.
 
 ### File history
 - File history (Ctrl+Shift+H, or a file's menu in Changes, History, Compare and
@@ -39,6 +64,9 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 - The text shows at once and the gutter fills as git reports the lines.
 
 ### Compare
+- The "Show full difference" line is gone: "Only on <left>" has an Include pill instead.
+  Off, All changes is since the fork and the left side's commits are dimmed; on, it is the
+  full difference.
 - A path in double quotes in the files' filter shows only the file at exactly that path.
   File history's Compare versions uses it, so files whose path merely contains the file's
   no longer show.
@@ -55,6 +83,56 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
   width) are the same in every tab and worktree, so switching does not move a divider;
   a resize applies everywhere at once. The first sizes come from the most recently opened
   repository's.
+
+### History
+- Rows show the current branch by name and fold the other branches and tags into one chip
+  per kind with a count; the refs popover lists a chip's refs with their full names, and
+  stays open while a ref's menu is shown. The details list every ref up to six.
+- Short hashes always show 7 characters.
+
+### Branch list
+- The branch list (Ctrl+B) is one flat list with a filter: Recent (the current branch and
+  the last ones checked out in any worktree), then Local and Remote, each branch once with
+  its ahead/behind pills. A short list drops the headers.
+
+### New worktree
+- One New worktree dialog (Ctrl+T) for every case: the branch field searches local and
+  remote branches or offers + Create <name>, with From, the folder and Run setup.
+- Open in new worktree, on a branch's menu (or Alt+Enter in the branch list), makes the
+  worktree at once in the template folder, with an Undo toast; offline it falls back to
+  the last fetch and says so. History's commit menu has New worktree here….
+- Worktree setup… keeps commands to run in a new worktree; a failed setup says so in a
+  toast.
+- The worktree strip scrolls with ‹ › buttons when its chips don't fit, and the worktree
+  list works like the branch list.
+
+### Sync and force push
+- A branch rewritten by your own amend, rebase or reset shows Force push ↑M ↓N with a
+  warning icon instead of Sync, confirmed in words for the rewrite; shared branch names
+  (main, develop, release/*…) keep Sync.
+- Force pushes use a lease pinned to where the last fetch saw the remote branch, so a
+  background fetch cannot let one overwrite commits nobody looked at.
+- Sync's ▾ offers Fetch, Pull and merge, Pull and rebase, Push and Force push…, each with
+  its icon and shortcut.
+
+### Merge and rebase
+- The merge dialog is restyled, with icons for each strategy, folding Conflicts and
+  Commits sections, and Rebase beside Merge, Squash and Fast-forward: a check shows the
+  commits it would replay first, and an undo strip takes it back.
+
+### Menus and tooltips
+- One menu per object and an eight-menu bar; every item has its own icon. Edit → Undo
+  takes back the newest file change, Copy ▸ gathers what can be copied, and Open on
+  <host> opens commits, branches and files on the remote's website.
+- A worktree's menu has a Branch submenu.
+- Tooltips are cards with the shortcut as key caps, and disabled items say why in a
+  short fragment.
+
+### Filters
+- Filter options open from a sliders button beside each filter field, with a count of
+  the options on and Clear: Changes (included, excluded, new, modified, deleted, line
+  endings only, ignored), History (branches, rows, graph), File history, Blame and the
+  shelves' branches.
 
 ### Commit button
 - The commit button reads "Commit to main" when the commit takes every file, and counts
@@ -112,6 +190,18 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
   folder says how many commits on no branch go with it.
 - Clicking right on a row's check box toggles it (it used to toggle twice); Space toggles
   a focused row.
+
+### Fixes and polish
+- The commit summary shows its length past 50 characters, amber past 72.
+- A toast's Undo closes once its change is taken back elsewhere.
+- K scrolls the focused list back to its selected row.
+- Scrolling closes tooltip cards until the mouse rests; middle-click autoscroll works on
+  whatever scrolls under the mouse, in every window.
+- The taskbar flashes when a job over about 3 seconds ends while gitbello is in the
+  background.
+- Create and Initialize fill in Initial branch from git's init.defaultBranch.
+- A clone writes a commit-graph in the background, so its history loads faster.
+- Context menus no longer open empty when a right-click brings gitbello to the front.
 
 ## 1.1.0
 
