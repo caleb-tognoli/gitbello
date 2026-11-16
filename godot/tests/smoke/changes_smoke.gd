@@ -163,6 +163,25 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.picked_count() == 2), "Ctrl+Shift+S includes everything")
 	expect_eq(box.block_reason(), "Write a summary", "a summary is still needed")
 
+	# Past 50 characters the summary shows its length, warning past 72, and
+	# never blocks the commit.
+	var count: Label = box.summary_count()
+	box.set_message("a".repeat(50), "")
+	expect(not count.visible, "50 characters show no count")
+	box.set_message("a".repeat(51), "")
+	expect(count.visible and count.text == "51", "51 characters show the count")
+	expect_eq(count.theme_type_variation, &"CommitSummaryCount", "51 characters: muted count")
+	box.set_message("a".repeat(72), "")
+	expect_eq(count.theme_type_variation, &"CommitSummaryCount", "72 characters: still muted")
+	box.set_message("é".repeat(73), "")
+	expect(count.text == "73", "the count is in characters, not bytes")
+	expect_eq(count.theme_type_variation, &"CommitSummaryCountLong", "73 characters: warning count")
+	expect(count.get_theme_color(&"font_color") != box.get_theme_color(&"font_color", &"DimLabel"),
+			"the warning count has its own colour")
+	expect(box.can_commit(), "a long summary can still be committed")
+	box.set_message("", "")
+	expect(not count.visible, "an empty summary hides the count")
+
 	# The checkboxes are the only multi-file selection: Ctrl/Shift clicks and
 	# Shift+arrows keep one row highlighted, a checkbox click highlights its row.
 	_click(list, 0, false, true)

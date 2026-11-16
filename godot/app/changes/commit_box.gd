@@ -7,12 +7,18 @@ extends VBoxContainer
 ## starts with git's message, amend mode is unavailable, the button says what it
 ## finishes and, while it cannot, why under it ("Resolve login.rs first").
 ## Under the button, the undo strip offers the last unpushed commit (UX.md).
+## Past 50 characters the summary shows its length at its right edge, in the
+## warning colour past 72; it never blocks committing.
 
 ## A commit or amend finished successfully.
 signal committed()
 
 const THEME_TYPE: StringName = &"CommitBox"
 const COMMIT_LABEL: String = "commit"
+## Summaries longer than this show their character count.
+const SUMMARY_COUNT_FROM: int = 50
+## Summaries longer than this show it in the warning colour.
+const SUMMARY_LONG_FROM: int = 72
 
 var session: RepoSession = null:
 	set = set_session
@@ -40,6 +46,7 @@ var _undo_strip: HBoxContainer = HBoxContainer.new()
 var _undo_icon: TextureRect = TextureRect.new()
 var _undo_label: Label = Label.new()
 var _undo_button: Button = Button.new()
+var _summary_count: Label = Label.new()
 
 @onready var _summary: LineEdit = %Summary
 @onready var _body: TextEdit = %Body
@@ -51,6 +58,12 @@ var _undo_button: Button = Button.new()
 
 
 func _ready() -> void:
+	_summary_count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_summary_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_summary_count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_summary_count.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	_summary_count.hide()
+	_summary.add_child(_summary_count)
 	_apply_theme()
 	_commit_button.icon = Actions.icon(&"changes.commit")
 	_summary.text_changed.connect(func(_t: String) -> void: update_state())
@@ -140,6 +153,11 @@ func set_message(summary_text: String, body_text: String) -> void:
 func suggest_message(summary_text: String, body_text: String) -> void:
 	if _summary.text.strip_edges().is_empty() and _body.text.strip_edges().is_empty():
 		set_message(summary_text, body_text)
+
+
+## The summary's character count (for tests): shown past 50 characters.
+func summary_count() -> Label:
+	return _summary_count
 
 
 ## The undo strip (for tests): shown, with what it says.
@@ -286,6 +304,7 @@ func update_state() -> void:
 	_summary.editable = editable
 	_body.editable = editable
 	_fill_operation_message(mode)
+	_update_summary_count()
 	_update_undo_strip()
 	_commit_button.disabled = not can_commit()
 	_commit_button.icon = AppTheme.icon(&"GitMerge") if mode == "merge" else Actions.icon(&"changes.commit")
@@ -362,6 +381,23 @@ func _clear_filled_message() -> void:
 		set_message("", "")
 
 
+## "58" at the summary's right edge past 50 characters, in the warning colour
+## past 72; the field makes room for it while it shows.
+func _update_summary_count() -> void:
+	var length: int = _summary.text.length()
+	var shown: bool = length > SUMMARY_COUNT_FROM
+	_summary_count.visible = shown
+	var field: StringName = &"CommitSummaryCounted" if shown else &""
+	if _summary.theme_type_variation != field:
+		_summary.theme_type_variation = field
+	if not shown:
+		return
+	_summary_count.text = str(length)
+	var count: StringName = &"CommitSummaryCountLong" if length > SUMMARY_LONG_FROM else &"CommitSummaryCount"
+	if _summary_count.theme_type_variation != count:
+		_summary_count.theme_type_variation = count
+
+
 ## The last unpushed commit: a commit or merge icon, its subject and Undo;
 ## after a rebase made here, the rebase ("Rebased topic onto main").
 func _update_undo_strip() -> void:
@@ -426,3 +462,7 @@ func _show_error(error: Dictionary) -> void:
 func _apply_theme() -> void:
 	_body.custom_minimum_size.y = float(get_theme_constant(&"body_height", THEME_TYPE))
 	_output.custom_minimum_size.y = float(get_theme_constant(&"output_height", THEME_TYPE))
+	# The count sits in the room the counted field adds inside its right margin.
+	var margin: float = get_theme_stylebox(&"normal", &"LineEdit").get_margin(SIDE_RIGHT)
+	_summary_count.offset_right = -margin
+	_summary_count.offset_left = -margin - float(get_theme_constant(&"count_room", THEME_TYPE))

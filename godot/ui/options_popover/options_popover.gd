@@ -170,7 +170,6 @@ func add_chips(label: String, chips: Array[Dictionary]) -> void:
 func add_checks(rows: Array[Dictionary]) -> void:
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	AutoScroll.enable(scroll)
 	var list: VBoxContainer = VBoxContainer.new()
 	list.theme_type_variation = &"OptionsChecks"
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL

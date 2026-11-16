@@ -252,6 +252,11 @@ pub trait GitBackend: Send + Sync {
         progress: ProgressSink,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+    /// Writes the commit-graph file of `repo` for all reachable commits, with
+    /// changed-path filters (faster history, file history and blame).
+    fn write_commit_graph(&self, repo: &Path, cancel: &CancelToken) -> Result<(), GitError>;
+    /// git's global `init.defaultBranch`, or `None` when it is not set.
+    fn global_default_branch(&self, cancel: &CancelToken) -> Result<Option<String>, GitError>;
     /// The first of HEAD's root commits (in name order), or `None` on an
     /// unborn branch.
     fn root_commit(&self, repo: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError>;
@@ -1710,6 +1715,34 @@ impl GitBackend for CliBackend {
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    fn write_commit_graph(&self, repo: &Path, cancel: &CancelToken) -> Result<(), GitError> {
+        self.runner
+            .write(repo)
+            .args(["commit-graph", "write", "--reachable", "--changed-paths"])
+            .cancel_token(cancel)
+            .run()
+            .map(drop)
+    }
+
+    fn global_default_branch(&self, cancel: &CancelToken) -> Result<Option<String>, GitError> {
+        // `--global` reads no repository's config; any existing folder will do.
+        let result = self
+            .runner
+            .read(&std::env::temp_dir())
+            .args(["config", "--global", "--get", "init.defaultBranch"])
+            .cancel_token(cancel)
+            .run();
+        match result {
+            Ok(out) => {
+                let name = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+                Ok((!name.is_empty()).then_some(name))
+            }
+            // Not set (or no global config file).
+            Err(err) if err.exit_code == Some(1) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn root_commit(&self, repo: &Path, cancel: &CancelToken) -> Result<Option<String>, GitError> {

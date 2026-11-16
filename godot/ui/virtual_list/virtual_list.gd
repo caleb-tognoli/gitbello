@@ -4,9 +4,9 @@ extends Control
 ##
 ## Subclasses override `_get_row_count()`, `_draw_row()` and optionally
 ## `_prepare_rows()`, then call `refresh()` when the row count changes.
-## Handles scrolling (with middle-click autoscroll, see `AutoScroll`), keyboard
-## navigation, multi-select (Ctrl/Shift, unless `multi_select` is off) and
-## context-menu requests.
+## Handles scrolling (middle-click autoscroll drives it through `scroll_axes()`
+## and `scroll_by()`, see `AutoScroll`), keyboard navigation, multi-select
+## (Ctrl/Shift, unless `multi_select` is off) and context-menu requests.
 ##
 ## Rows are `row_height()` tall. A subclass with a few rows of other heights
 ## overrides `row_top()`, `row_extent()`, `row_at_offset()` and
@@ -29,6 +29,9 @@ var draws_unfocused_cursor: bool = false
 ## Ctrl/Shift clicks, Shift+arrows and Ctrl+A highlight several rows (off for a
 ## list that keeps one highlighted row).
 var multi_select: bool = true
+## `list.reveal_selection` (K) scrolls it back to its selected row (off for a
+## list whose selection is not rows to go back to, such as a diff's lines).
+var reveals_selection: bool = true
 ## Show the scroll bar when the rows overflow (off for a subclass that draws
 ## its own scroll column; the bar still holds the offset).
 var shows_scroll_bar: bool = true:
@@ -53,7 +56,6 @@ func _ready() -> void:
 	_scroll_bar.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
 	_scroll_bar.value_changed.connect(_on_scroll_changed)
 	resized.connect(_update_scroll_range)
-	AutoScroll.enable(self)
 	refresh()
 
 
@@ -162,6 +164,46 @@ func scroll_to_row(row: int) -> void:
 		set_scroll_offset(top)
 	elif bottom > scroll_offset() + size.y:
 		set_scroll_offset(bottom - size.y)
+
+
+## The row `reveal_selection` scrolls to: the cursor when it is selected, else
+## the first selected row; -1 when nothing is selected.
+func selection_row() -> int:
+	if _selected.is_empty():
+		return -1
+	if _selected.has(cursor):
+		return cursor
+	return selected_rows()[0]
+
+
+## Scrolls the selected row (`selection_row`) to the middle of the list;
+## false when nothing is selected.
+func reveal_selection() -> bool:
+	var row: int = selection_row()
+	if row < 0:
+		return false
+	set_scroll_offset(row_top(row) + row_extent(row) / 2.0 - size.y / 2.0)
+	return true
+
+
+## The list `list.reveal_selection` (K) scrolls when `focus` has the
+## keyboard focus: `focus` itself when it is a `VirtualList` that
+## `reveals_selection` or an `ItemList`, with a selected row; else null (a text
+## field keeps K for typing).
+static func revealable(focus: Control) -> Control:
+	var list: VirtualList = focus as VirtualList
+	if list != null:
+		return list if list.reveals_selection and list.selection_row() >= 0 else null
+	var items: ItemList = focus as ItemList
+	return items if items != null and items.is_anything_selected() else null
+
+
+## Scrolls `list` (from `revealable`) back to its selected row.
+static func reveal_in(list: Control) -> void:
+	if list is VirtualList:
+		(list as VirtualList).reveal_selection()
+	elif list is ItemList:
+		(list as ItemList).ensure_current_is_visible()
 
 
 func is_selected(row: int) -> bool:
@@ -332,4 +374,6 @@ func _update_scroll_range() -> void:
 
 
 func _on_scroll_changed(_value: float) -> void:
+	# Rows move under the mouse: a tooltip would describe another one.
+	TooltipCard.dismiss_under(self)
 	queue_redraw()

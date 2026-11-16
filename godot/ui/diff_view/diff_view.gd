@@ -204,6 +204,7 @@ var _picks: PickPainter = PickPainter.new()
 func _init() -> void:
 	super()
 	draws_selection = false
+	reveals_selection = false
 
 
 func _ready() -> void:

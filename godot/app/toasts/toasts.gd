@@ -10,7 +10,9 @@ extends VBoxContainer
 ##   operation can really be undone. Callers show one only when it offers an
 ##   action or nothing else on screen shows the result;
 ## - progress (`show_progress`): a job started without a button to show it,
-##   turned into its result by `finish_progress`.
+##   turned into its result by `finish_progress`. One that ran longer than
+##   `attention_msec` and ends (done or failed) while the app is in the
+##   background flashes its taskbar button (`request_attention`).
 
 const THEME_TYPE: StringName = &"Toasts"
 ## The same error for the same repository is shown at most once in this window.
@@ -26,6 +28,11 @@ var fix_provider: Callable = Callable()
 ## `func(repo_path: String, error: Dictionary) -> bool`: true when the error
 ## is followed up elsewhere (a dialog) and needs no toast.
 var error_filter: Callable = Callable()
+## Progress toasts running longer than this ask for attention when they end
+## in the background.
+var attention_msec: int = 3000
+## Asks the OS for attention (flashes the taskbar button); tests replace it.
+var request_attention: Callable = func() -> void: DisplayServer.window_request_attention()
 
 var _recent: Dictionary[String, int] = {}
 var _scroll: ScrollContainer = ScrollContainer.new()
@@ -35,6 +42,10 @@ var _layout_queued: bool = false
 ## Turns the spinners of progress toasts while there are any.
 var _spin: Timer = Timer.new()
 var _frame: int = 0
+## When each progress toast was shown (ticks in msec).
+var _progress_started: Dictionary[PanelContainer, int] = {}
+## Whether one of the app's windows has focus.
+var _app_focused: bool = true
 
 
 func _ready() -> void:
@@ -42,7 +53,6 @@ func _ready() -> void:
 	alignment = BoxContainer.ALIGNMENT_END
 	_scroll.name = "Scroll"
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	AutoScroll.enable(_scroll)
 	_scroll.follow_focus = true
 	add_child(_scroll)
 	_stack.name = "Stack"
@@ -57,6 +67,7 @@ func _ready() -> void:
 	_stack.child_exiting_tree.connect(func(_node: Node) -> void: _queue_layout())
 	(get_parent() as Control).resized.connect(_queue_layout)
 	Core.git_error.connect(_on_git_error)
+	_app_focused = DisplayServer.window_is_focused()
 	_spin.wait_time = BigButton.SPIN_SECONDS
 	_spin.timeout.connect(_turn_spinners)
 	add_child(_spin)
@@ -64,6 +75,8 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_app_focused = what == NOTIFICATION_APPLICATION_FOCUS_IN
 	if what in [NOTIFICATION_THEME_CHANGED, NOTIFICATION_TRANSLATION_CHANGED] and is_node_ready():
 		_queue_layout()
 		if what == NOTIFICATION_THEME_CHANGED:
@@ -153,6 +166,7 @@ func show_progress(text: String, cancel: Callable = Callable()) -> PanelContaine
 		var actions: Array[Dictionary] = [{"label": "Cancel", "run": cancel}]
 		_add_actions(panel, actions)
 	_add(panel)
+	_progress_started[panel] = Time.get_ticks_msec()
 	if _spin.is_stopped():
 		_spin.start()
 	return panel
@@ -169,19 +183,30 @@ func update_progress(panel: PanelContainer, text: String, percent: int) -> void:
 
 ## Ends a progress toast: with `text`, it becomes a success toast (and goes
 ## after a few seconds), with `undo` as in `show_success`; without, it closes
-## (errors get their own toast).
-func finish_progress(panel: PanelContainer, text: String = "", undo: Callable = Callable()) -> void:
+## (errors get their own toast). Returns the success toast, or null.
+func finish_progress(panel: PanelContainer, text: String = "", undo: Callable = Callable()) -> PanelContainer:
 	if not is_instance_valid(panel):
-		return
+		return null
+	var started: int = _progress_started.get(panel, Time.get_ticks_msec())
+	_progress_started.erase(panel)
+	if not _app_focused and Time.get_ticks_msec() - started > attention_msec:
+		request_attention.call()
 	if text.is_empty():
 		panel.queue_free()
-		return
+		return null
 	var at: int = panel.get_index()
 	panel.queue_free()
 	var done: PanelContainer = show_success(text, undo)
 	# The progress card was already showing: no second fade in.
 	done.modulate.a = 1.0
 	_stack.move_child(done, at)
+	return done
+
+
+## Closes toast `panel` (an Undo whose change was taken back elsewhere).
+func close_toast(panel: PanelContainer) -> void:
+	if is_instance_valid(panel) and panel.get_parent() == _stack:
+		panel.queue_free()
 
 
 func toast_count() -> int:

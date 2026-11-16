@@ -1160,6 +1160,21 @@ static func _add_changes(theme: Theme, p: Palette) -> void:
 	theme.set_constant(&"separation", &"ChangesView", 6)
 	theme.set_constant(&"body_height", &"CommitBox", 96)
 	theme.set_constant(&"output_height", &"CommitBox", 120)
+	# The summary's character count past 50 (muted) and 72 (warning), inside
+	# the field's right edge; the field leaves room for it while it shows.
+	var count_room: int = 30
+	theme.set_constant(&"count_room", &"CommitBox", count_room)
+	_variation(theme, &"CommitSummaryCounted", &"LineEdit")
+	for state: StringName in [&"normal", &"focus", &"read_only"]:
+		var counted: StyleBox = theme.get_stylebox(state, &"LineEdit").duplicate() as StyleBox
+		counted.content_margin_right += count_room
+		theme.set_stylebox(state, &"CommitSummaryCounted", counted)
+	_variation(theme, &"CommitSummaryCount", &"Label")
+	theme.set_color(&"font_color", &"CommitSummaryCount", p.text_muted)
+	theme.set_font_size(&"font_size", &"CommitSummaryCount", 11)
+	_variation(theme, &"CommitSummaryCountLong", &"CommitSummaryCount")
+	theme.set_color(&"font_color", &"CommitSummaryCountLong", p.modified)
+	theme.set_font_size(&"font_size", &"CommitSummaryCountLong", 11)
 	theme.set_color(&"path_color", &"ChangeList", p.text)
 	theme.set_color(&"dir_color", &"ChangeList", p.text_muted)
 	for entry: Array in [[&"added", p.added], [&"modified", p.modified], [&"deleted", p.removed],

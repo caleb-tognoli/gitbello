@@ -115,6 +115,28 @@ func run() -> void:
 	await get_tree().process_frame
 	expect(_toasts.press_fix("Undo"), "a progress result keeps its Undo")
 	expect_eq(calls[0], 2, "the progress result's Undo runs")
+
+	# A long progress toast ending in the background asks for attention.
+	var asked: Array[int] = [0]
+	_toasts.request_attention = func() -> void: asked[0] += 1
+	_toasts.attention_msec = 100
+	_toasts.notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
+	progress = _toasts.show_progress("Quick")
+	_toasts.finish_progress(progress, "Quick done")
+	expect_eq(asked[0], 0, "a short job does not ask for attention")
+	progress = _toasts.show_progress("Fetching")
+	await _wait(1.0)
+	_toasts.finish_progress(progress, "Fetched")
+	expect_eq(asked[0], 1, "a long job done in the background asks for attention")
+	progress = _toasts.show_progress("Pushing")
+	await _wait(1.0)
+	_toasts.finish_progress(progress)
+	expect_eq(asked[0], 2, "so does a long job that failed")
+	_toasts.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	progress = _toasts.show_progress("Pulling")
+	await _wait(1.0)
+	_toasts.finish_progress(progress, "Pulled")
+	expect_eq(asked[0], 2, "a long job ending while the app has focus does not")
 	_root.queue_free()
 	await get_tree().process_frame
 

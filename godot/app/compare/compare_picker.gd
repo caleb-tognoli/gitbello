@@ -48,7 +48,6 @@ func _ready() -> void:
 	_tree.gui_input.connect(_on_tree_input)
 	box.add_child(_tree)
 	_names = BranchNameLayer.new(_tree)
-	AutoScroll.enable(_tree)
 
 
 func _notification(what: int) -> void:

@@ -8,7 +8,10 @@ extends Node
 ##   and turns into the result;
 ## - a success ends with a short toast only when it offers Undo or nothing
 ##   on screen shows the result (callers pass no `done` text otherwise);
-##   errors get their own toast from `Core.git_error`.
+##   errors get their own toast from `Core.git_error`;
+## - a success toast's Undo is tied to the undo entry its job pushed: the
+##   toast closes as soon as that entry is undone (Edit → Undo or any other
+##   path) or dropped.
 ## It also knows which repositories are busy (for the tab spinner) and when
 ## each was last fetched.
 
@@ -67,6 +70,9 @@ var _running: Dictionary[RepoSession, Dictionary] = {}
 var _tracked: Array[Tracked] = []
 ## Unix time of the last successful fetch, per repository path.
 var _fetched: Dictionary[String, int] = {}
+## Success toasts whose Undo takes back an undo entry: `{panel, session, job}`,
+## where `job` pushed the entry (`RepoSession.undo_live`).
+var _undo_toasts: Array[Dictionary] = []
 
 
 ## Follows the jobs of `session` until it leaves the tree.
@@ -146,6 +152,8 @@ func _on_started(id: int, label: String, session: RepoSession) -> void:
 	if VERBS.has(label):
 		(_running[session] as Dictionary)[id] = label
 		busy_changed.emit(session)
+	# Undoing pops the entry before its job starts.
+	_close_undone(session)
 
 
 func _on_progress(id: int, _label: String, percent: int, text: String, session: RepoSession) -> void:
@@ -165,10 +173,14 @@ func _on_finished(id: int, label: String, ok: bool, _error: Dictionary, session:
 	if ok and (label == "fetch" or label == "auto-fetch"):
 		_fetched[session.repo_path()] = int(Time.get_unix_time_from_system())
 	_end(session, id, ok)
+	# A job's result can pop an entry (a shelf's undo) or push one over a
+	# stack's cap.
+	_close_undone(session)
 
 
 func _on_cancelled(id: int, _label: String, session: RepoSession) -> void:
 	_end(session, id, false)
+	_close_undone(session)
 
 
 func _end(session: RepoSession, id: int, ok: bool) -> void:
@@ -181,21 +193,37 @@ func _end(session: RepoSession, id: int, ok: bool) -> void:
 	if item.origin != null and is_instance_valid(item.origin):
 		_set_busy(item.origin, false, "", -1, "")
 	var text: String = item.done if ok else ""
+	var shown: PanelContainer = null
 	if item.toast != null:
-		toasts.finish_progress(item.toast, text, item.undo)
+		shown = toasts.finish_progress(item.toast, text, item.undo)
 	elif not text.is_empty() and toasts != null:
-		toasts.show_success(text, item.undo)
+		shown = toasts.show_success(text, item.undo)
+	if shown != null and item.undo.is_valid() and session.undo_live(id):
+		_undo_toasts.append({"panel": shown, "session": session, "job": id})
 	if item.then.is_valid():
 		item.then.call(ok)
 
 
 func _forget(session: RepoSession) -> void:
 	_running.erase(session)
+	_undo_toasts.assign(_undo_toasts.filter(func(tie: Dictionary) -> bool: return tie["session"] != session))
 	for item: Tracked in _tracked.duplicate():
 		if item.session == session:
 			_tracked.erase(item)
 			if item.toast != null and toasts != null:
 				toasts.finish_progress(item.toast)
+
+
+## Closes the Undo toasts of `session` whose undo entry is gone, and forgets
+## toasts already closed.
+func _close_undone(session: RepoSession) -> void:
+	for tie: Dictionary in _undo_toasts.duplicate():
+		# Closed toasts are freed: check before casting.
+		if not is_instance_valid(tie["panel"]) or (tie["panel"] as Node).is_queued_for_deletion():
+			_undo_toasts.erase(tie)
+		elif tie["session"] == session and not session.undo_live(int(tie["job"])):
+			_undo_toasts.erase(tie)
+			toasts.close_toast(tie["panel"] as PanelContainer)
 
 
 func _find(session: RepoSession, id: int) -> Tracked:

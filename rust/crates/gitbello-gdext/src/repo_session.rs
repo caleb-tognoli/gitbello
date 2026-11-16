@@ -433,6 +433,14 @@ impl RepoSession {
             .unwrap_or_default()
     }
 
+    /// Whether the undo entry pushed by job `job`'s result is still on its
+    /// stack: false once it was undone (by Edit → Undo or otherwise) or
+    /// dropped, and for a job that pushed none.
+    #[func]
+    fn undo_live(&self, job: i64) -> bool {
+        u64::try_from(job).is_ok_and(|job| self.read(|s| s.undo_live(job)).unwrap_or(false))
+    }
+
     /// Local then remote branches: `{name, short_name, commit, is_head,
     /// upstream, ahead, behind, gone, worktree, committed_at, checked_out_at,
     /// kind}` (kind `branch` or `remote`; `committed_at` and `checked_out_at`,

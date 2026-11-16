@@ -1,52 +1,8 @@
-# gitbello
+@CONTRIBUTING.md
 
-A fast, open-source, cross-platform Git GUI focused on working across many repositories and worktrees. It is meant to replace GitHub Desktop and Fork for daily use.
+# gitbello: rules for AI coding agents
 
-- **App/UI:** Godot 4 (latest stable 4.x, pinned), typed GDScript, used as a thin view layer.
-- **Core:** Rust, exposed to Godot through GDExtension using the `godot` crate (gdext).
-- **Git:** the system `git` executable (CLI) behind a backend trait. `gix` may replace hot read paths later.
-- **Targets:** Windows, Linux, macOS.
-
-How it is built is in `docs/ARCHITECTURE.md` and how the workflows behave in `docs/UX.md`; features have their own docs in `docs/` (listed at the end of ARCHITECTURE.md). Read the ones a task touches before starting it. Pending work is tracked on Caleb's ideas board (a claude.ai Artifact kept with the `/ideas` skill), not in the repository.
-
-## Repository layout
-
-```
-gitbello/
-├─ AGENTS.md
-├─ docs/                      # ARCHITECTURE.md, UX.md, feature docs, perf.md
-├─ rust/
-│  ├─ Cargo.toml              # workspace
-│  ├─ crates/
-│  │  ├─ gitbello-core/       # pure Rust. NO godot dependency.
-│  │  ├─ gitbello-gdext/      # cdylib: thin Godot bindings over core
-│  │  └─ gitbello-cli/        # dev-only headless harness for core
-│  └─ xtask/                  # build/copy/run tasks (cargo xtask ...)
-├─ godot/
-│  ├─ project.godot
-│  ├─ gitbello.gdextension
-│  ├─ bin/                    # built native libs (gitignored)
-│  ├─ app/                    # scenes + scripts, grouped by feature
-│  ├─ ui/                     # reusable controls (virtual list, graph, diff view)
-│  └─ themes/icons/           # SVG icons (Godot editor set + git icons), recoloured per theme
-└─ .github/workflows/ci.yml
-```
-
-## Commands
-
-```
-cargo xtask build            # build gdext (debug) and copy into godot/bin
-cargo xtask build --release
-cargo xtask run              # build + launch Godot project
-cargo xtask test             # cargo test for the whole workspace
-cargo xtask check            # fmt --check + clippy -D warnings + test
-cargo xtask smoke [--only <name>]   # headless Godot smoke scripts (or those matching <name>)
-cargo xtask bench-graph <repo> [--ui] [--record]   # graph load + scroll benchmark (read-only)
-```
-
-Releases: bump the version in `rust/Cargo.toml`, `godot/project.godot` and `godot/export_presets.cfg`, add its `CHANGELOG.md` section, then push a `v<version>` tag. `.github/workflows/release.yml` builds every platform and the Windows installer (`packaging/`) and attaches them to a draft release.
-
-Run `cargo xtask check` before declaring any task done.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first (imported above): it has the project overview, setup, commands, tests, conventions, commit style and pull request flow. This file adds the rules for agents.
 
 ## Golden rules
 
@@ -64,8 +20,9 @@ Run `cargo xtask check` before declaring any task done.
 ## Working agreement
 
 - Work on one task at a time. Do not start the next one without approval.
-- Keep the docs in `docs/` true to the code: when a feature changes, update its doc in the same change. Docs describe what is built, not plans.
+- Pending work is tracked on Caleb's ideas board (a claude.ai Artifact kept with the `/ideas` skill), not in the repository.
 - Ask before adding a new crate or Godot addon, changing the architecture in ARCHITECTURE.md, or changing public interfaces between core, gdext and GDScript.
+- Run `cargo xtask check` before declaring any task done.
 - At the end of a task, stop and post a review summary covering:
   - what was built
   - how it was tested
@@ -73,18 +30,7 @@ Run `cargo xtask check` before declaring any task done.
   - a manual test script for Caleb (step-by-step UI checks, since you cannot see the UI)
   - proposed follow-ups
 - If a task turns out much larger than planned, stop and propose a split instead of pushing through.
-- Commit in small, focused commits using Conventional Commits (`feat(core): ...`, `fix(ui): ...`).
 - Commits are Caleb's alone: no `Co-Authored-By` or other AI attribution trailers in commit messages or PR descriptions.
-
-## Conventions
-
-- **Rust:** edition 2021+, `rustfmt` defaults, `clippy -D warnings`. Use `thiserror` for errors in core and `anyhow` only in xtask and cli. No `unwrap()` outside tests.
-- **GDScript:** `snake_case` files and functions, `PascalCase` classes (`class_name`). One scene per feature component. Signals for upward communication, method calls for downward.
-- **Theming:** no hardcoded colors or sizes in scenes. Use the theme and its type variations. The theme is built at runtime by `godot/app/theme/app_theme.gd` (one palette per theme plus the user's accent colour); add colours, sizes and variations there. Icons are SVGs in `godot/themes/icons/` drawn in the Godot editor's greys (`#e0e0e0`) and imported as `DPITexture` (copy an existing `.svg.import`), so the light theme can recolour them; get them with `AppTheme.icon(&"Name")`. Keep `godot/themes/icons/LICENSES.md` up to date.
-- **Localization:** every fixed user-facing string uses English as its translation key in `godot/localization/gitbello.csv` (English and Italian columns). Display it with `tr()`/`TranslationServer.translate()` and refresh dynamic controls on `NOTIFICATION_TRANSLATION_CHANGED`. Do not translate paths, refs, user content, Git commands/progress or raw stderr. `godot/app/localization/l10n.gd` applies the persisted language choice.
-- **Godot project settings** that must stay on: low processor mode, HiDPI, native file dialogs. See ARCHITECTURE §3.7.
-- **Cross-platform:** use `gitbello_core::paths` for config and data dirs, keep paths as `PathBuf` in core, and test path handling with spaces and non-ASCII characters.
-- **Dependencies:** keep them few. Avoid crates that pull `windows-sys` 0.61+ (or other `raw-dylib` imports): the local windows-gnu toolchain cannot build them. `winapi-util` is pinned to 0.1.9 in `Cargo.lock` for this reason; don't `cargo update` it.
 
 ## Verifying work without seeing the UI
 
@@ -95,6 +41,7 @@ Run `cargo xtask check` before declaring any task done.
 - `res://tests/visual/history_screenshots.tscn -- --fixtures=<CLI fixture dir> --out=<dir>` captures Current branch and All branches in dark/light themes. It fetches the fixture's local remote; use throwaway CLI fixtures and `GITBELLO_CONFIG=<fixtures>/config.toml` only.
 - `res://tests/visual/worktree_row_screenshots.tscn -- --repo=<worktree of a throwaway repo with several worktrees> --out=<dir>` captures the worktree strip in both themes, hovered chips with their tooltip cards, the hovered worktree icon and the worktree list (open, filtered, no match, a hovered footer action, light; Prune shows when a worktree folder is missing) (read-only).
 - `res://tests/visual/scroll_row_screenshots.tscn -- --repo=<throwaway repo with many worktrees> --ignore-repo=<throwaway repo with many .gitignore files> --out=<dir>` captures the scrolling chip rows (`ScrollRow`) with 2x crops: the worktree strip wide, then narrow at the start, with › hovered, after ›, halfway, at the end and light; then Ignore rules with more files than fit (read-only; scratch `GITBELLO_CONFIG`).
+- `res://tests/visual/scrolling_screenshots.tscn -- --repo=<repo built by tests/visual/scrolling_prep.sh <new dir>> --out=<dir>` walks scrolling in numbered shots: a worktree chip's tooltip closed when the strip scrolls under the resting mouse, back after a move and rest, closed by what autoscroll does as it starts and by the wheel; middle-click autoscroll in the commit description, the hook output, History's commit message and the Markdown preview; K bringing History's and Changes' selections back and typing in the search field; the light theme. Each shot prints the open tooltip. A list row's tooltip never shows there (it reads the OS cursor, far from the off-screen window). It saves the Markdown mode: scratch `GITBELLO_CONFIG` only; read-only on the repository.
 - `res://tests/visual/new_worktree_screenshots.tscn -- --repo=<CLI fixture repo-10> --out=<dir>` walks New worktree (Ctrl+T) in numbered shots with 2x crops: no name, a new name, a remote match and Down onto Create, a local branch, one checked out in a worktree, a long name, the From list (typed commit, filter), a taken folder with Run setup, the folder field, the created worktree, then the light theme. It adds refs, files, a setup and a worktree: throwaway fixtures only, with `GITBELLO_CONFIG` set to a scratch file.
 - `res://tests/visual/worktree_one_click_screenshots.tscn -- --repo=<CLI fixture repo-10> --out=<dir>` walks the one-click worktree entry points in numbered shots: a branch's menu, Open in new worktree with its Undo toast, Undo, an offline one click (the toast names the last fetch), History's commit menu and New worktree here…, the worktree list with no match and Enter, Worktree setup… (empty, filled), a failed setup's toast, and the light theme. It adds refs and worktrees and moves the fixture's remote away for a moment: throwaway fixtures only, with `GITBELLO_CONFIG` and `GIT_CONFIG_GLOBAL` set to the fixture's.
 - `res://tests/visual/worktree_in_use_screenshots.tscn -- --repo=<CLI fixture repo-10> --out=<dir>` (Windows) deletes worktrees while a program runs from one and while a terminal sits in another: the in-use and folder-left toasts, their details and Try again. Adds and deletes worktrees: throwaway fixtures only, with `GITBELLO_CONFIG=<fixtures>/config.toml`.
@@ -134,7 +81,7 @@ Run `cargo xtask check` before declaring any task done.
 - `res://tests/visual/blame_screenshots.tscn -- --repo=<repo built by tests/visual/blame_prep.sh <new dir>> --out=<dir>` captures Blame in numbered shots: a focused commit in both themes, then the working copy, a commit's details, the blame's menu, the options, Blame before this commit across a rename, Show changes, Changes' menu and the minimum window width (read-only on the repository; it saves the blame options: scratch `GITBELLO_CONFIG` only).
 - `gitbello-cli blame <root> <file> [--rev <rev>] [-w] [-M] [--lines a..b] [--time]` prints who last changed each line; `--time` prints the time to the text, to the first block and to the end (read-only).
 - `res://tests/visual/sync_button_screenshots.tscn -- --fixtures=<CLI fixture dir> --out=<dir>` captures the Sync button (push, menu, busy, sync) and the ahead/behind pills in the branch list, chip tooltip, "No local changes" and Home. It fetches `repo-8` and expects `repo-1` without changes (stash them first): throwaway CLI fixtures and `GITBELLO_CONFIG=<fixtures>/config.toml` only.
-- `res://tests/visual/toast_flow_screenshots.tscn -- --repo=<CLI fixture repo-8> --out=<dir>` walks the toast rules in numbered shots: a commit (no toast), a discard (Undo), Copy hash, a fetch's progress, an error with a fix, the light theme and a burst. It commits, discards and fetches: throwaway fixtures only, with `GITBELLO_CONFIG=<fixtures>/config.toml`. Keep the fixture path short on Windows (the fixture's remote hits the path limit under deep temp folders).
+- `res://tests/visual/toast_flow_screenshots.tscn -- --repo=<CLI fixture repo-8> --out=<dir>` walks the toast rules in numbered shots: a commit (no toast), a discard (Undo), Copy hash, a fetch's progress, an error with a fix, the light theme, a burst, two discards whose Undo toasts close as Edit → Undo takes each back, and a fetch ending in the background (it prints the attention request instead of flashing the taskbar). It commits, discards and fetches: throwaway fixtures only, with `GITBELLO_CONFIG=<fixtures>/config.toml`. Keep the fixture path short on Windows (the fixture's remote hits the path limit under deep temp folders).
 - `res://tests/visual/ignore_screenshots.tscn -- --repo=<CLI fixture repo> --out=<dir>` captures the files' menu with its Ignore submenu, the Ignore dialog (folder rule with its preview, the rule choices, a tracked file with the untrack choice, light theme) and the list and toast after untracking. It writes build output, adds rules and untracks `app.txt`: throwaway fixtures only, with `GITBELLO_CONFIG=<fixtures>/config.toml`.
 - `res://tests/visual/ignore_rules_screenshots.tscn -- --work=<empty dir> --out=<dir>` walks the ignore rules viewer, "Show ignored files" and the folder hint in numbered shots, actions included: the folder hint, its close menu and Ignore; Repository → Ignore rules… on each source chip, a chip's menu, Add rules from a template, Stop tracking, Remove rule, the light theme; "Show ignored files" with Stop ignoring; the Ignore dialog's Where choices and a global rule. It builds a repository in `<work>` and sets `core.excludesFile`: launch with `GITBELLO_CONFIG` and `GIT_CONFIG_GLOBAL` set to scratch files (it quits without the latter).
 - `res://tests/visual/history_rows_screenshots.tscn -- --repo=<throwaway repo with co-authored commits, branches and tags, two at one commit> --out=<dir>` captures the two-line history rows in both themes, a selected row with co-authors, the details of the commit with the most refs (with a counted chip's popover when it has more than six), a row's counted-chip refs popover and that popover with a ref's menu over it, compact rows and the minimum window width; `--row-heights=46,50,…` instead captures the two-line rows at each height in both themes, to compare paddings (read-only; set `GITBELLO_CONFIG` to a scratch file, it saves the row setting).
@@ -144,6 +91,7 @@ Run `cargo xtask check` before declaring any task done.
 - `res://tests/visual/options_popover_screenshots.tscn -- --out=<dir>` captures `OptionsPopover` (defaults, filters on with Clear, a focused segment, with 2x crops) and the theme's check boxes, radio buttons, switches and menu checks, dark then light (no repository; builds the theme itself, writes no settings).
 - `res://tests/visual/options_app_screenshots.tscn -- --fixtures=<dir of `gitbello-cli fixture <dir> --repos 1 --history`, its history repo prepared by `tests/visual/options_app_prep.sh <dir>/history`> --out=<dir>` captures the options popovers in the app, dark then light: Changes' (defaults, two filters on, the badge), History's (defaults, All and Compact), File history's rows and Blame's with an option on; then the shelves' branch filter (all, one branch off), a keyboard-focused chip, a hovered segment's tooltip, Changes' and History's in Italian and History's at the minimum window size, each with a 2x crop (the prep adds shelves; the script saves the row, graph and blame settings: throwaway fixtures and a scratch `GITBELLO_CONFIG` only).
 - `res://tests/visual/menus_screenshots.tscn -- --repo=<CLI fixture repo-1> --out=<dir>` captures the menus built by `ActionMenu`: each menu bar menu, History's commit menu on HEAD and an older commit, a branch's (with Compare ▸ beside it), the current branch's and a tag's menus, a graph label's (titled), a worktree chip's (with Open in ▸, then Branch ▸), the Changes list's menu on one and two files, Sync, Home's Add and row menus and the light theme, and prints every item with why greyed ones are disabled (read-only; scratch `GITBELLO_CONFIG`).
+- `res://tests/visual/commit_box_screenshots.tscn -- --repo=<CLI fixture repo-1> --out=<dir>` captures the commit summary's character count in numbered shots with 2x crops of the commit box: under 50 characters (no count), 59 (muted), 88 (warning) and unfocused, dark then light (read-only; scratch `GITBELLO_CONFIG`).
 - `res://tests/visual/undo_web_screenshots.tscn -- --repo=<CLI fixture repo-1> --out=<dir>` walks Edit → Undo, Copy ▸ and Open on <host> in numbered shots: Edit with nothing to undo, after a discard (and the Changes list's menu), after an ignore rule and after Ctrl+Z, History's commit menu with Copy ▸, a pushed and a local branch's menus, a tag's, a commit file's, the menu bar's Commit menu, Edit in Italian and the light theme. It discards a file, adds an ignore rule (undone) and points `origin` at github.com for the run: throwaway fixtures and a scratch `GITBELLO_CONFIG` only.
 - `res://tests/visual/tooltip_screenshots.tscn -- --repo=<CLI fixture repo-1> --out=<dir>` hovers controls for real (pushed mouse moves; windowed) and shoots their tooltip cards in numbered shots: the view switch, the branch and Sync buttons, the greyed commit button, a diff's mode and whole-file buttons, a worktree chip, History's next-match button, the palette's disabled reasons (undo, conflict, compare, shelf), then the light theme; each shot prints the card's lines (read-only; scratch `GITBELLO_CONFIG`). Headless Godot shows no tooltips, so `tooltip_card_smoke` checks the hook on a hand-built popup.
 - Performance claims need numbers. Log timings and memory, and include them in the review summary.

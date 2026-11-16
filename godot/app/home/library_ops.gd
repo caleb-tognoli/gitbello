@@ -15,6 +15,8 @@ signal clone_finished(path: String)
 const FORM: PackedScene = preload("res://ui/form_dialog/form_dialog.tscn")
 ## `.gitignore` choice meaning none.
 const NO_TEMPLATE: String = "None"
+## Label of the job that writes a new clone's commit-graph (silent unless it fails).
+const COMMIT_GRAPH_LABEL: String = "write commit-graph"
 
 ## Where toasts go (set by the shell).
 var toasts: Toasts = null
@@ -39,6 +41,11 @@ var _checks: Dictionary[int, Callable] = {}
 var _clone_destination_edited: bool = false
 ## The folder a clone goes in while its destination follows the URL.
 var _clone_parent: String = ""
+## The Initial branch the open Create or Initialize form was given, while a
+## fresh read of git's `init.defaultBranch` may still replace it; "" otherwise.
+var _branch_prefill: String = ""
+## That read's job, or -1.
+var _default_branch_job: int = -1
 
 
 func _ready() -> void:
@@ -49,6 +56,7 @@ func _ready() -> void:
 	Core.repository_job_progress.connect(_on_job_progress)
 	Core.repository_job_finished.connect(_on_job_finished)
 	Core.repository_job_cancelled.connect(_on_job_cancelled)
+	_default_branch_job = Core.load_default_branch()
 
 
 func form() -> FormDialog:
@@ -73,6 +81,7 @@ func clone(url: String = "", destination: String = "") -> void:
 		if looks_like_git_url(clipboard):
 			url = clipboard
 	_clone_destination_edited = not destination.is_empty()
+	_branch_prefill = ""
 	_clone_parent = default_clone_folder()
 	_form.begin("Clone repository", "Clone", _start_clone)
 	_form.hide_on_submit = true
@@ -178,7 +187,7 @@ func create() -> void:
 	_form.hide_on_submit = false
 	_form.add_line("name", "Name")
 	_form.add_folder("location", "Location", default_clone_folder())
-	_form.add_line("branch", "Initial branch", "main", true)
+	_add_branch_field()
 	_add_starter_fields()
 	_form.add_note("With a .gitignore or a README, the first commit is made for you.")
 	_add_status()
@@ -191,12 +200,32 @@ func init_folder(path: String = "") -> void:
 	_form.begin("Initialize folder", "Initialize", _start_create.bind(true))
 	_form.hide_on_submit = false
 	_form.add_folder("location", "Folder", path)
-	_form.add_line("branch", "Initial branch", "main", true)
+	_add_branch_field()
 	_add_starter_fields()
 	_form.add_check("first_commit", "Commit the files that are there", true)
 	_add_status()
 	_form.validator = _validate_create.bind(true)
 	_form.open()
+
+
+## Initial branch, prefilled from git's global `init.defaultBranch` (else
+## "main"), read again in case it changed since.
+func _add_branch_field() -> void:
+	_branch_prefill = Core.default_branch()
+	_form.add_line("branch", "Initial branch", _branch_prefill, true)
+	_default_branch_job = Core.load_default_branch()
+
+
+## A fresh `init.defaultBranch` replaces the prefill unless it was edited.
+func _on_default_branch_loaded() -> void:
+	var line: LineEdit = _form.field("branch") as LineEdit
+	var branch: String = Core.default_branch()
+	if _branch_prefill.is_empty() or line == null or line.text != _branch_prefill:
+		return
+	_branch_prefill = branch
+	if branch != line.text:
+		line.text = branch
+		_form.revalidate()
 
 
 func running() -> bool:
@@ -468,6 +497,15 @@ func _toast_error(title_text: String, message: String) -> void:
 		toasts.show_toast(title_text, message)
 
 
+## The commit-graph written after a clone failed (the clone itself is fine).
+func _toast_commit_graph_error(path: String, error: Dictionary) -> void:
+	if toasts == null:
+		return
+	var title: String = "%s: %s" % [path.replace("\\", "/").get_file(), tr("Cannot write the commit-graph")]
+	var details: String = "git %s\n\n%s" % [String(error.get("command", "")), String(error.get("stderr", ""))]
+	toasts.show_toast(title, String(error.get("message", "")), details)
+
+
 func _on_job_progress(job: int, _path: String, _label: String, percent: int, text: String) -> void:
 	if _clones.has(job):
 		_clones[job]["percent"] = percent
@@ -478,7 +516,15 @@ func _on_job_progress(job: int, _path: String, _label: String, percent: int, tex
 		_progress.value = maxf(0.0, float(percent))
 
 
-func _on_job_finished(job: int, path: String, _label: String, ok: bool, error: Dictionary) -> void:
+func _on_job_finished(job: int, path: String, label: String, ok: bool, error: Dictionary) -> void:
+	if job == _default_branch_job:
+		_default_branch_job = -1
+		_on_default_branch_loaded()
+		return
+	if label == COMMIT_GRAPH_LABEL:
+		if not ok:
+			_toast_commit_graph_error(path, error)
+		return
 	if _checks.has(job):
 		var done: Callable = _checks[job]
 		_checks.erase(job)
@@ -508,6 +554,8 @@ func _on_job_finished(job: int, path: String, _label: String, ok: bool, error: D
 
 
 func _on_job_cancelled(job: int, _path: String, _label: String) -> void:
+	if job == _default_branch_job:
+		_default_branch_job = -1
 	_checks.erase(job)
 	if _clones.erase(job):
 		clones_changed.emit()

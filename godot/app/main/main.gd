@@ -53,6 +53,7 @@ func _ready() -> void:
 	window.content_scale_factor = ThemeManager.ui_scale(window)
 	ThemeManager.apply(self)
 	TooltipCard.install(get_tree())
+	AutoScroll.install(get_tree())
 	if DisplayServer.has_method(&"set_system_theme_change_callback"):
 		DisplayServer.set_system_theme_change_callback(_on_system_theme_changed)
 	window.files_dropped.connect(_on_files_dropped)
@@ -799,6 +800,11 @@ func _register_change_actions() -> void:
 				return bool(history_ready.call()) and not (focus is LineEdit or focus is TextEdit) \
 						and current_page().history().can_go_to_current_commit())
 	current_commit.hidden = true
+	var reveal_selection: ActionRegistry.Action = Actions.register(&"list.reveal_selection", "Scroll to selected row",
+			"View", func() -> void: VirtualList.reveal_in(VirtualList.revealable(get_viewport().gui_get_focus_owner())),
+			PackedStringArray(["K"]),
+			func() -> bool: return VirtualList.revealable(get_viewport().gui_get_focus_owner()) != null)
+	reveal_selection.hidden = true
 	Actions.register(&"changes.show_file", "Show in file manager", "Changes",
 			func() -> void: changes.call().show_file(), PackedStringArray(), has_file, no_file)
 	Actions.register(&"changes.copy_path", "Copy path", "Changes",

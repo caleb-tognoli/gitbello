@@ -1,8 +1,8 @@
 extends SmokeTest
 ## Middle-click autoscroll (`AutoScroll`): sticky and hold modes, the dead
 ## zone, what stops it, unscrollable targets, a ScrollContainer sideways, a
-## worktree chip keeping its own middle click, and trees, item lists and
-## text edits.
+## worktree chip keeping its own middle click, trees, item lists, text edits
+## and rich text labels, and an instance in every window without opting in.
 
 
 class RowList:
@@ -28,7 +28,7 @@ func run() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var auto: AutoScroll = AutoScroll.of(get_viewport())
-	expect(auto != null, "a VirtualList adds the window's AutoScroll")
+	expect(auto != null, "the window has its AutoScroll without any control enabling it")
 	if auto == null:
 		return
 	expect_eq(AutoScroll.scroll_axes(list), Vector2i(0, 1), "a long list scrolls vertically only")
@@ -40,6 +40,8 @@ func run() -> void:
 	_test_unscrollable(auto, list)
 	await _test_scroll_container(auto, list)
 	await _test_bar_controls(auto, list)
+	await _test_fitting_rich_text(auto, list)
+	_test_windows()
 	list.queue_free()
 
 
@@ -128,7 +130,6 @@ func _test_scroll_container(auto: AutoScroll, list: RowList) -> void:
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
-	AutoScroll.enable(scroll)
 	add_child(scroll)
 	scroll.position = Vector2(0, 300)
 	scroll.size = Vector2(300, 40)
@@ -170,8 +171,8 @@ func _test_scroll_container(auto: AutoScroll, list: RowList) -> void:
 	list.show()
 
 
-## A Tree, an ItemList and a TextEdit scroll through their bars; a text edit
-## that pastes the primary selection keeps its middle click.
+## A Tree, an ItemList, a TextEdit and a RichTextLabel scroll through their
+## bars; a text edit that pastes the primary selection keeps its middle click.
 func _test_bar_controls(auto: AutoScroll, list: RowList) -> void:
 	list.hide()
 	var tree: Tree = Tree.new()
@@ -189,22 +190,26 @@ func _test_bar_controls(auto: AutoScroll, list: RowList) -> void:
 	text.text = "
 ".join(lines)
 	text.middle_mouse_paste_enabled = false
+	var rich: RichTextLabel = RichTextLabel.new()
+	rich.text = "
+".join(lines)
 	var bars: Callable = func(control: Control) -> float:
 		if control is TextEdit:
 			return (control as TextEdit).scroll_vertical
+		if control is RichTextLabel:
+			return (control as RichTextLabel).get_v_scroll_bar().value
 		if control is ItemList:
 			return (control as ItemList).get_v_scroll_bar().value
 		for child: Node in control.get_children(true):
 			if child is VScrollBar:
 				return (child as VScrollBar).value
 		return -1.0
-	for control: Control in [tree, items, text]:
-		AutoScroll.enable(control)
+	for control: Control in [tree, items, text, rich]:
 		add_child(control)
 		control.position = Vector2(0, 0)
 		control.size = Vector2(300, 200)
-	for control: Control in [tree, items, text]:
-		for other: Control in [tree, items, text]:
+	for control: Control in [tree, items, text, rich]:
+		for other: Control in [tree, items, text, rich]:
 			other.visible = other == control
 		await get_tree().process_frame
 		await get_tree().process_frame
@@ -225,9 +230,57 @@ func _test_bar_controls(auto: AutoScroll, list: RowList) -> void:
 	expect_eq(auto.is_active(), not DisplayServer.has_feature(DisplayServer.FEATURE_CLIPBOARD_PRIMARY),
 			"a text edit keeps its middle-click paste only where there is a primary selection")
 	auto.stop()
-	for control: Control in [tree, items, text]:
+	for control: Control in [tree, items, text, rich]:
 		control.queue_free()
 	list.show()
+
+
+## A rich text label that fits its content (as in the Markdown preview) leaves
+## the scrolling to the container around it.
+func _test_fitting_rich_text(auto: AutoScroll, list: RowList) -> void:
+	list.hide()
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	add_child(scroll)
+	scroll.position = Vector2(0, 0)
+	scroll.size = Vector2(300, 200)
+	var rich: RichTextLabel = RichTextLabel.new()
+	rich.fit_content = true
+	rich.scroll_active = false
+	rich.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var lines: PackedStringArray = PackedStringArray()
+	for i: int in 100:
+		lines.append("Paragraph %d" % i)
+	rich.text = "
+".join(lines)
+	scroll.add_child(rich)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	expect_eq(AutoScroll.scroll_axes(rich), Vector2i.ZERO, "a rich text label that fits its content does not scroll itself")
+	_move(Vector2(150, 50))
+	_button(MOUSE_BUTTON_MIDDLE, true)
+	_button(MOUSE_BUTTON_MIDDLE, false)
+	expect(auto.is_active() and auto.target() == scroll, "a middle click on it autoscrolls the container around it")
+	_move(Vector2(150, 150))
+	expect(await wait_until(func() -> bool: return scroll.scroll_vertical > 0, 3000), "moving down scrolls the container")
+	auto.stop()
+	scroll.queue_free()
+	list.show()
+
+
+## Every window gets an instance when it is added; menus and tooltips do not.
+func _test_windows() -> void:
+	var window: Window = Window.new()
+	window.visible = false
+	add_child(window)
+	expect(AutoScroll.of(window) != null, "a window added later gets its own AutoScroll")
+	expect(AutoScroll.of(window) != AutoScroll.of(get_viewport()), "each window has its own")
+	var menu: PopupMenu = PopupMenu.new()
+	add_child(menu)
+	expect(AutoScroll.of(menu) == null, "a menu gets none")
+	window.queue_free()
+	menu.queue_free()
 
 
 func _start_sticky(auto: AutoScroll, at: Vector2) -> void:

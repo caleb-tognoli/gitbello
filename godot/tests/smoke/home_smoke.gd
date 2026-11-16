@@ -133,6 +133,8 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return _in_library(fixtures.path_join("repo-4")) and not _in_library(moved)),
 			"Change location points the entry at the repository")
 
+	await _check_default_branch(ops)
+
 	# Create with a template opens the new repository.
 	ops.create()
 	var form: FormDialog = ops.form()
@@ -196,6 +198,9 @@ func run() -> void:
 		return main.current_page() != null and Paths.same(main.current_page().repo_path(), cloned)),
 			"a clone started from Home opens there")
 	expect(ops.clones().is_empty(), "the clone's row goes when it ends")
+	expect(await wait_until(func() -> bool:
+		return FileAccess.file_exists(cloned.path_join(".git/objects/info/commit-graph"))),
+			"a clone gets a commit-graph")
 	ops.clone(fixtures.path_join("no such source"), fixtures.path_join("home failed clone"))
 	expect(ops.form().submit(), "a clone of a missing source starts")
 	expect(await wait_until(func() -> bool:
@@ -208,6 +213,41 @@ func run() -> void:
 		main.close_tab(0)
 	main.queue_free()
 	await get_tree().process_frame
+
+
+## Create and Initialize prefill Initial branch from git's global
+## `init.defaultBranch` (the smoke run's scratch `GIT_CONFIG_GLOBAL`), else main.
+func _check_default_branch(ops: LibraryOps) -> void:
+	var global: String = OS.get_environment("GIT_CONFIG_GLOBAL")
+	expect(not global.is_empty(), "the smoke run sets GIT_CONFIG_GLOBAL")
+	var before: String = FileAccess.get_file_as_string(global)
+	ops.create()
+	var branch: LineEdit = ops.form().field("branch") as LineEdit
+	expect(await wait_until(func() -> bool: return ops._default_branch_job == -1), "the default branch is read")
+	expect_eq(branch.text, "main", "without init.defaultBranch Create suggests main")
+	var file: FileAccess = FileAccess.open(global, FileAccess.WRITE)
+	file.store_string(before + "
+[init]
+	defaultBranch = trunk
+")
+	file.close()
+	ops.init_folder()
+	branch = ops.form().field("branch") as LineEdit
+	expect(await wait_until(func() -> bool: return branch.text == "trunk"),
+			"Initialize picks up init.defaultBranch while the form is open")
+	ops.create()
+	branch = ops.form().field("branch") as LineEdit
+	expect_eq(branch.text, "trunk", "the next form starts from the value read last")
+	branch.text = "edited"
+	file = FileAccess.open(global, FileAccess.WRITE)
+	file.store_string(before)
+	file.close()
+	ops.create()
+	branch = ops.form().field("branch") as LineEdit
+	branch.text = "typed"
+	expect(await wait_until(func() -> bool: return ops._default_branch_job == -1), "the default branch is read again")
+	expect_eq(branch.text, "typed", "a fresh read never replaces a typed branch")
+	ops.form().hide()
 
 
 ## Job progress in the form and in clone rows: indeterminate until git gives

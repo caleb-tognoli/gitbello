@@ -38,7 +38,6 @@ func _ready() -> void:
 	_tree.item_activated.connect(func() -> void: _choose(_tree.get_selected()))
 	_tree.gui_input.connect(_on_tree_input)
 	box.add_child(_tree)
-	AutoScroll.enable(_tree)
 	_empty.theme_type_variation = &"DimLabel"
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

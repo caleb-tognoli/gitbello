@@ -167,7 +167,6 @@ func _ready() -> void:
 	_message.scroll_fit_content_height = true
 	_message.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_message.text_changed.connect(_fit_later)
-	AutoScroll.enable(_message)
 	_box.add_child(_message)
 	_conflicts.folded_changed.connect(_fit_later)
 	_box.add_child(_conflicts)

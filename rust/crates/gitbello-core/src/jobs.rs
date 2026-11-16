@@ -302,6 +302,8 @@ pub enum JobOutput {
     /// The file Open hands to the default app (a working copy, or a version
     /// written for it).
     Version(PathBuf),
+    /// git's global `init.defaultBranch`, or `None` when it is not set.
+    DefaultBranch(Option<String>),
     /// Jobs whose effect is elsewhere (writes, graph loads).
     Done,
 }

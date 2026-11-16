@@ -63,7 +63,6 @@ func _ready() -> void:
 			_target.grab_focus())
 	_box.add_child(_filter)
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	AutoScroll.enable(_scroll)
 	_box.add_child(_scroll)
 	_rows.theme_type_variation = &"WorktreeListRows"
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL

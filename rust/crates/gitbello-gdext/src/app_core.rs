@@ -17,7 +17,9 @@ use gitbello_core::new_repo::{
 };
 use gitbello_core::ops::{branch_prefix_error, ref_name_error, PullMode};
 use gitbello_core::paths;
-use gitbello_core::runtime::{DiffSlot, JobState, Runtime, RuntimeEvent, REPOSITORY_JOB_LABELS};
+use gitbello_core::runtime::{
+    DiffSlot, JobState, Runtime, RuntimeEvent, FALLBACK_DEFAULT_BRANCH, REPOSITORY_JOB_LABELS,
+};
 use gitbello_core::ui_state::{self, UiState};
 
 /// UI state list of a repository's recent comparisons.
@@ -533,7 +535,11 @@ impl AppCore {
         };
         let text = |key: &str| options.get(key).map(|v| v.to_string()).unwrap_or_default();
         let branch = text("initial_branch");
-        let mut create = CreateOptions::new(if branch.is_empty() { "main" } else { &branch });
+        let mut create = CreateOptions::new(if branch.is_empty() {
+            FALLBACK_DEFAULT_BRANCH
+        } else {
+            &branch
+        });
         let template = text("gitignore");
         create.gitignore = (!template.is_empty()).then_some(template);
         create.readme = flag("readme");
@@ -542,6 +548,21 @@ impl AppCore {
         job_id(runtime_cell::with(|rt| {
             rt.create_repository(Path::new(&path.to_string()), create)
         }))
+    }
+
+    /// The initial branch Create and Initialize suggest: git's global
+    /// `init.defaultBranch` as last read (`load_default_branch`), or "main".
+    #[func]
+    fn default_branch(&self) -> GString {
+        runtime_cell::with(|rt| gstr(rt.default_branch()))
+            .unwrap_or_else(|| gstr(FALLBACK_DEFAULT_BRANCH))
+    }
+
+    /// Reads git's global `init.defaultBranch` on a worker thread; returns
+    /// the job id (`repository_job_finished` says when `default_branch` has it).
+    #[func]
+    fn load_default_branch(&mut self) -> i64 {
+        job_id(runtime_cell::with(|rt| rt.load_default_branch()))
     }
 
     /// Clones a repository on a worker thread; returns its job id.

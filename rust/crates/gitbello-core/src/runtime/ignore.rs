@@ -448,7 +448,7 @@ impl Runtime {
             state.ignore.undo.push(undo.as_ref().clone());
             let excess = state.ignore.undo.len().saturating_sub(MAX_IGNORE_UNDO);
             state.ignore.undo.drain(..excess);
-            state.undo_pushed(UndoKind::IgnoreRule);
+            state.undo_pushed(UndoKind::IgnoreRule, job);
         }
         false
     }

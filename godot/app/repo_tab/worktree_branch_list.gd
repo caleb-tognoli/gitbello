@@ -30,7 +30,6 @@ func _ready() -> void:
 	item_activated.connect(func() -> void:
 		if not choice().is_empty():
 			activated.emit())
-	AutoScroll.enable(self)
 
 
 func _notification(what: int) -> void:

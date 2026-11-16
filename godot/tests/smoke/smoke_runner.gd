@@ -9,6 +9,8 @@ const SKIP_DIRS: PackedStringArray = [".godot", "bin"]
 
 
 func _ready() -> void:
+	# As in the app (main.gd): every window autoscrolls.
+	AutoScroll.install(get_tree())
 	var failures: PackedStringArray = PackedStringArray()
 	for path: String in _find_files("res://", ".gd"):
 		var script: GDScript = load(path) as GDScript

@@ -1,8 +1,11 @@
 extends Node
 ## Drives the toast rules through the real app and saves one screenshot per
 ## step: a commit (no toast), a discard (Undo toast), Copy hash, a fetch from
-## the palette (progress), an error with a fix and Details, the light theme
-## and a burst in a small window. Commits, discards and fetches in `--repo`:
+## the palette (progress), an error with a fix and Details, the light theme,
+## a burst in a small window, two discards whose Undo toasts close as Edit →
+## Undo takes each back, and a long fetch ending in the background (it logs
+## the attention request instead of flashing the taskbar). Commits, discards
+## and fetches in `--repo`:
 ## a throwaway CLI fixture with a remote (`repo-8`) only, with
 ## `GITBELLO_CONFIG` set to a scratch file.
 ## `-- --repo=<fixture repo> --out=<dir>`
@@ -16,6 +19,7 @@ var _step: int = 0
 
 
 func _ready() -> void:
+	DisplayServer.window_set_position(Vector2i(-10000, -10000))
 	_run.call_deferred()
 
 
@@ -92,6 +96,44 @@ func _run() -> void:
 				"Local changes would be overwritten. Commit or shelve the changes before switching branches.")
 	await _shot("burst-small-window", "toasts: %d" % toasts.toast_count())
 	_clear(toasts)
+	root.size = Vector2i(1280, 800)
+
+	# Two discards, two Undo toasts; Edit → Undo closes the one it takes back.
+	var before: int = session.change_count()
+	_write(repo.path_join("toast-demo.txt"), "first\nedited\n")
+	_write(repo.path_join("toast-new.txt"), "new\n")
+	await _until(func() -> bool: return session.change_count() == before + 2)
+	view._discard_paths(PackedStringArray(["toast-demo.txt"]))
+	view.confirm_dialog().get_ok_button().pressed.emit()
+	await _until(func() -> bool: return toasts.fix_labels().size() == 1 and session.change_count() == before + 1)
+	view._discard_paths(PackedStringArray(["toast-new.txt"]))
+	view.confirm_dialog().get_ok_button().pressed.emit()
+	await _until(func() -> bool: return toasts.fix_labels().size() == 2 and session.change_count() == before)
+	await _wait(0.5)
+	await _shot("two-undo-toasts", "toasts: %s, Edit → Undo: %s" % [toasts.toast_texts(),
+			Actions.get_action(&"edit.undo").menu_label])
+	Actions.run_action(&"edit.undo")
+	await _until(func() -> bool: return toasts.fix_labels().size() == 1 and session.change_count() == before + 1)
+	await _shot("edit-undo-closes-its-toast", "toasts: %s, changes: %d" % [toasts.toast_texts(), session.change_count()])
+	Actions.run_action(&"edit.undo")
+	await _until(func() -> bool: return toasts.toast_count() == 0 and session.change_count() == before + 2)
+	await _shot("edit-undo-closes-the-other", "toasts: %d, changes: %d" % [toasts.toast_count(), session.change_count()])
+
+	# A fetch that ends while the app is in the background asks for attention
+	# (threshold lowered: a fixture fetch is quick).
+	var asked: Array[int] = [0]
+	toasts.request_attention = func() -> void: asked[0] += 1
+	toasts.attention_msec = 0
+	toasts.notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
+	page.ops().fetch()
+	await _frames(2)
+	await _until(func() -> bool: return toasts.toast_count() == 0)
+	await _shot("fetch-in-background", "attention requested %d time(s)" % asked[0])
+	toasts.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	page.ops().fetch()
+	await _frames(2)
+	await _until(func() -> bool: return toasts.toast_count() == 0)
+	print("ATTENTION after a focused fetch: %d" % asked[0])
 	get_tree().quit(0)
 
 

@@ -375,3 +375,33 @@ fn edit_undo_takes_back_the_newest_file_level_change() {
         "int main; // edited\n"
     );
 }
+
+#[test]
+fn an_undo_entry_stays_tied_to_the_job_that_pushed_it() {
+    let repo = project();
+    repo.write("src/main.c", "int main; // edited\n");
+    let (mut rt, key) = open(&repo);
+    let live = |rt: &Runtime, job: Option<u64>| {
+        rt.repo(&key)
+            .is_some_and(|s| job.is_some_and(|j| s.undo_live(j)))
+    };
+
+    let discard = rt.discard_files(&key, vec![PathBuf::from("src/main.c")]);
+    succeed(&mut rt, &key, discard);
+    let rule = rt.add_ignore_rule(&key, shared("*.log"), Untrack::Keep);
+    succeed(&mut rt, &key, rule);
+    assert!(live(&rt, discard));
+    assert!(live(&rt, rule));
+
+    // Edit → Undo takes the rule back: its entry goes, the discard's stays.
+    let job = rt.undo_ignore(&key);
+    assert!(!live(&rt, rule), "popped as soon as the undo starts");
+    succeed(&mut rt, &key, job);
+    assert!(live(&rt, discard));
+    // The undo job itself pushed no entry.
+    assert!(!live(&rt, job));
+
+    let job = rt.undo_discard(&key);
+    assert!(!live(&rt, discard));
+    succeed(&mut rt, &key, job);
+}

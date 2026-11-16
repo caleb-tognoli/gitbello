@@ -105,6 +105,10 @@ pub const OPEN_JOB_LABEL: &str = "open repository";
 pub const CREATE_REPOSITORY_JOB_LABEL: &str = "create repository";
 pub const CLONE_REPOSITORY_JOB_LABEL: &str = "clone repository";
 pub const INIT_REPOSITORY_JOB_LABEL: &str = "initialize folder";
+/// Writes a new clone's commit-graph file (after the clone has reported).
+pub const COMMIT_GRAPH_JOB_LABEL: &str = "write commit-graph";
+/// Reads git's global `init.defaultBranch` (see [`Runtime::default_branch`]).
+pub const DEFAULT_BRANCH_JOB_LABEL: &str = "read default branch";
 /// Labels of the Home jobs (UX.md Home).
 pub const SCAN_JOB_LABEL: &str = "scan for repositories";
 pub const LOCATION_JOB_LABEL: &str = "check location";
@@ -115,9 +119,15 @@ pub const REPOSITORY_JOB_LABELS: &[&str] = &[
     CREATE_REPOSITORY_JOB_LABEL,
     CLONE_REPOSITORY_JOB_LABEL,
     INIT_REPOSITORY_JOB_LABEL,
+    COMMIT_GRAPH_JOB_LABEL,
+    DEFAULT_BRANCH_JOB_LABEL,
     SCAN_JOB_LABEL,
     LOCATION_JOB_LABEL,
 ];
+
+/// The initial branch of new repositories when git's global
+/// `init.defaultBranch` is not set.
+pub const FALLBACK_DEFAULT_BRANCH: &str = "main";
 
 /// Labels of the jobs the changes panel runs.
 pub const DIFF_JOB_LABEL: &str = "load diff";
@@ -257,6 +267,7 @@ fn job_policy(label: &str) -> Option<(JobPriority, bool)> {
         | HEAD_MESSAGE_JOB_LABEL
         | SHELF_FILES_JOB_LABEL
         | LOCATION_JOB_LABEL
+        | DEFAULT_BRANCH_JOB_LABEL
         | CLEANUP_SCAN_JOB_LABEL
         | FETCH_JOB_LABEL
         | BLAME_VERSION_JOB_LABEL
@@ -1402,10 +1413,17 @@ impl RepoState {
         }
     }
 
-    /// Records an undo entry of `kind` just pushed, forgetting entries the
-    /// stacks dropped on their own.
-    pub(crate) fn undo_pushed(&mut self, kind: UndoKind) {
-        self.undo_order.pushed(kind);
+    /// Whether the undo entry pushed by `job`'s result is still on its stack:
+    /// false once it was undone (by Edit → Undo or otherwise) or dropped, and
+    /// for a job that pushed none.
+    pub fn undo_live(&self, job: JobId) -> bool {
+        self.undo_order.is_live(job, |kind| self.undo_len(kind))
+    }
+
+    /// Records an undo entry of `kind` just pushed by `job`'s result,
+    /// forgetting entries the stacks dropped on their own.
+    pub(crate) fn undo_pushed(&mut self, kind: UndoKind, job: JobId) {
+        self.undo_order.pushed(kind, job);
         let lens = UndoKind::ALL.map(|k| self.undo_len(k));
         self.undo_order.trim(|k| lens[k.index()]);
     }
@@ -1876,6 +1894,8 @@ pub struct Runtime {
     summary_running: usize,
     scans: HashMap<JobId, Vec<ScanHit>>,
     locations: HashMap<JobId, LocationCheck>,
+    /// git's global `init.defaultBranch` as last read, or the fallback.
+    default_branch: String,
     /// Folders (normalized) of removed worktrees that git could not fully
     /// delete; removing one again deletes the rest.
     leftover_worktrees: Arc<Mutex<HashSet<PathBuf>>>,
@@ -1942,6 +1962,7 @@ impl Runtime {
             summary_running: 0,
             scans: HashMap::new(),
             locations: HashMap::new(),
+            default_branch: FALLBACK_DEFAULT_BRANCH.to_owned(),
             leftover_worktrees: Arc::default(),
             fetch_timeout: FETCH_TIMEOUT,
             versions_dir: crate::paths::versions_dir(),
@@ -2059,6 +2080,42 @@ impl Runtime {
                     .map(|()| JobOutput::Done)
             },
         ))
+    }
+
+    /// The initial branch Create and Initialize suggest: git's global
+    /// `init.defaultBranch` as last read by [`Self::load_default_branch`],
+    /// else [`FALLBACK_DEFAULT_BRANCH`].
+    pub fn default_branch(&self) -> &str {
+        &self.default_branch
+    }
+
+    /// Reads git's global `init.defaultBranch` in the background; when the
+    /// job finishes, [`Self::default_branch`] has it.
+    pub fn load_default_branch(&mut self) -> JobId {
+        self.scheduler.submit(JobSpec::read(
+            std::env::temp_dir(),
+            DEFAULT_BRANCH_JOB_LABEL,
+            |ctx| {
+                ctx.backend()
+                    .global_default_branch(ctx.cancel_token())
+                    .map(JobOutput::DefaultBranch)
+            },
+        ))
+    }
+
+    /// Writes the commit-graph file of a new clone, so its first history,
+    /// file history and blame loads are fast. A background job nobody waits
+    /// on; it only adds a file under `objects/info`, so it runs as a read and
+    /// never holds up opening the clone.
+    fn write_commit_graph(&mut self, repo: &Path) -> JobId {
+        self.scheduler.submit(
+            JobSpec::read(repo, COMMIT_GRAPH_JOB_LABEL, |ctx| {
+                ctx.backend()
+                    .write_commit_graph(ctx.repo(), ctx.cancel_token())
+                    .map(|()| JobOutput::Done)
+            })
+            .with_priority(JobPriority::Background),
+        )
     }
 
     // --- Repository library (UX.md Home) --------------------------------
@@ -3884,6 +3941,11 @@ impl Runtime {
                     self.locations.insert(job, *check);
                     JobState::Finished(None)
                 }
+                EventKind::Finished(Ok(JobOutput::DefaultBranch(name))) => {
+                    self.default_branch =
+                        name.unwrap_or_else(|| FALLBACK_DEFAULT_BRANCH.to_owned());
+                    JobState::Finished(None)
+                }
                 EventKind::Finished(Ok(_))
                     if [
                         CREATE_REPOSITORY_JOB_LABEL,
@@ -3894,6 +3956,9 @@ impl Runtime {
                 {
                     self.library_add(&repo);
                     out.append(&mut self.pending);
+                    if label == CLONE_REPOSITORY_JOB_LABEL {
+                        self.write_commit_graph(&repo);
+                    }
                     JobState::Finished(None)
                 }
                 EventKind::Finished(result) => JobState::Finished(result.err()),
@@ -4217,7 +4282,7 @@ impl Runtime {
             });
             let excess = state.conflict_undo.len().saturating_sub(MAX_CONFLICT_UNDO);
             state.conflict_undo.drain(..excess);
-            state.undo_pushed(UndoKind::ConflictChoice);
+            state.undo_pushed(UndoKind::ConflictChoice, job);
         }
         if let EventKind::Finished(Ok(JobOutput::CommitUndone(message))) = &kind {
             out.push(RuntimeEvent::CommitUndone {
@@ -4381,12 +4446,12 @@ impl Runtime {
                 new_oid: None,
                 subject: subject.clone(),
             });
-            state.undo_pushed(UndoKind::ShelfDiscard);
+            state.undo_pushed(UndoKind::ShelfDiscard, job);
         }
         if let EventKind::Finished(Ok(JobOutput::ShelfChanged { change, remember })) = &kind {
             if *remember {
                 state.dropped_shelves.push(change.clone());
-                state.undo_pushed(UndoKind::ShelfDiscard);
+                state.undo_pushed(UndoKind::ShelfDiscard, job);
             }
         }
         if let EventKind::Finished(Ok(JobOutput::ShelfUndone(change))) = &kind {
@@ -4489,7 +4554,7 @@ impl Runtime {
                 state.discards.push(backups.clone());
                 let excess = state.discards.len().saturating_sub(MAX_DISCARD_UNDO);
                 state.discards.drain(..excess);
-                state.undo_pushed(UndoKind::Discard);
+                state.undo_pushed(UndoKind::Discard, job);
             }
         }
         let state = match kind {
@@ -4790,7 +4855,8 @@ fn apply_refresh(state: &mut RepoState, output: JobOutput) {
         | JobOutput::BranchRestored(_)
         | JobOutput::WorktreeCreated(_)
         | JobOutput::WorktreeSetupDone(_)
-        | JobOutput::WorktreeUndone(_) => {}
+        | JobOutput::WorktreeUndone(_)
+        | JobOutput::DefaultBranch(_) => {}
         JobOutput::ShelfChanged { .. } | JobOutput::ShelfUndone(_) => {}
     }
 }

@@ -161,6 +161,12 @@ impl GitBackend for FakeBackend {
     ) -> Result<(), GitError> {
         Ok(())
     }
+    fn write_commit_graph(&self, _: &Path, _: &CancelToken) -> Result<(), GitError> {
+        Ok(())
+    }
+    fn global_default_branch(&self, _: &CancelToken) -> Result<Option<String>, GitError> {
+        Ok(None)
+    }
     fn root_commit(&self, _: &Path, _: &CancelToken) -> Result<Option<String>, GitError> {
         Ok(None)
     }

@@ -76,11 +76,13 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	AutoScroll.enable(_scroll)
 	resized.connect(_update)
 	_content.minimum_size_changed.connect(_update)
 	var bar: HScrollBar = _scroll.get_h_scroll_bar()
-	bar.value_changed.connect(func(_value: float) -> void: _update_arrows())
+	bar.value_changed.connect(func(_value: float) -> void:
+		# Chips move under the mouse: a tooltip would describe another one.
+		TooltipCard.dismiss_under(self)
+		_update_arrows())
 	bar.changed.connect(_update_arrows)
 	get_viewport().gui_focus_changed.connect(_on_focus_changed)
 	_update()

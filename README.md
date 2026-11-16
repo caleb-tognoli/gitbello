@@ -120,7 +120,8 @@ cargo xtask smoke    # headless Godot smoke tests
 - `packaging/`: the Windows installer and the Linux launcher
 
 How it is built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the workflows in
-[docs/UX.md](docs/UX.md); contributor rules are in [AGENTS.md](AGENTS.md).
+[docs/UX.md](docs/UX.md); how to build, test and contribute is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

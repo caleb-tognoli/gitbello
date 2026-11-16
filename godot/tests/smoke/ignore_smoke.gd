@@ -50,6 +50,11 @@ func run() -> void:
 	expect_eq(read_file(gitignore), "/notes.txt\n", "it is anchored in the root .gitignore")
 	expect(session.change_index(".gitignore") >= 0, ".gitignore shows as a change")
 	expect(Actions.is_enabled(&"changes.undo_ignore"), "the rule can be undone")
+	var toasts: Toasts = main.toasts()
+	expect(await wait_until(func() -> bool: return tr("Undo") in toasts.fix_labels()),
+			"the rule's toast offers Undo: %s" % [toasts.fix_labels()])
+	# An Undo toast of something else (not an undo entry) is left alone.
+	var other: PanelContainer = toasts.show_success("Unrelated", func() -> void: pass)
 	# Edit → Undo takes back the newest file-level change: this rule.
 	expect(await wait_until(func() -> bool:
 			return Actions.get_action(&"edit.undo").menu_label == tr("Undo ignore rule")),
@@ -61,6 +66,10 @@ func run() -> void:
 	expect(await wait_until(func() -> bool: return session.change_index("notes.txt") >= 0),
 			"Ctrl+Z brings notes.txt back")
 	expect(await wait_until(func() -> bool: return session.newest_undo() == ""), "nothing is left to undo")
+	expect(await wait_until(func() -> bool: return Array(toasts.fix_labels()).count(tr("Undo")) == 1),
+			"Ctrl+Z closes the rule's Undo toast: %s" % [toasts.toast_texts()])
+	expect(is_instance_valid(other) and not other.is_queued_for_deletion(), "the unrelated Undo toast stays")
+	toasts.close_toast(other)
 	expect_eq(Actions.get_action(&"edit.undo").menu_label, tr("Undo"), "Edit → Undo is plain again")
 	expect(not FileAccess.file_exists(gitignore), "Undo removes the .gitignore it created")
 

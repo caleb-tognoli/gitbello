@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something gitbello could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: How it could work in gitbello. Where would you find it, and what would you click or press?
+    validations:
+      required: true
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: Other tools
+      description: How you do it today, with git or another client, if that helps explain it.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself (see CONTRIBUTING.md).

@@ -1,7 +1,8 @@
 class_name AutoScroll
 extends CanvasLayer
 ## Browser-style middle-click autoscroll for every `VirtualList`,
-## `ScrollContainer`, `Tree`, `ItemList` and `TextEdit` in a window.
+## `ScrollContainer`, `Tree`, `ItemList`, `TextEdit` and `RichTextLabel` in
+## every window.
 ##
 ## A quick middle click (released within `STICKY_MSEC` without leaving the
 ## dead zone) keeps scrolling until the next click or key; holding the button
@@ -18,8 +19,8 @@ extends CanvasLayer
 ## runs).
 ## Controls with a middle click of their own join `OWN_MIDDLE_CLICK`; line
 ## edits keep theirs, and so do text edits that paste the primary selection
-## on a middle click (Linux). Call `enable(control)` for each scrollable: it
-## adds the window's instance when there is none yet.
+## on a middle click (Linux). `install(tree)` adds an instance to every window
+## of the tree, now and as windows are added: no control has to opt in.
 
 const THEME_TYPE: StringName = &"AutoScroll"
 ## Controls in this group (and their children) keep their middle click.
@@ -51,19 +52,38 @@ var _cursor: DisplayServer.CursorShape = DisplayServer.CURSOR_ARROW
 var _marker: Control = Control.new()
 
 
-## Makes middle-click autoscroll work in `control`'s window.
-static func enable(control: Control) -> void:
-	if control.is_inside_tree():
-		_ensure(control.get_viewport())
-	control.tree_entered.connect(func() -> void: _ensure(control.get_viewport()))
+## Makes middle-click autoscroll work in every window of `tree`: the root
+## and each window in it get an instance, and so does every window added
+## later (menus and tooltips excepted: they never scroll this way).
+static func install(tree: SceneTree) -> void:
+	if tree.node_added.is_connected(_on_node_added):
+		return
+	tree.node_added.connect(_on_node_added)
+	_ensure(tree.root)
+	for node: Node in tree.root.find_children("*", "Window", true, false):
+		_on_node_added(node)
 
 
-## The instance of `viewport`'s window, or null before `enable`.
+static func _on_node_added(node: Node) -> void:
+	var window: Window = node as Window
+	if window == null or window is PopupMenu or window.theme_type_variation == &"TooltipPanel":
+		return
+	_ensure(window)
+
+
+## The instance of `viewport`'s window, or null before `install`.
 static func of(viewport: Viewport) -> AutoScroll:
 	if viewport == null or not viewport.has_meta(META):
 		return null
 	var node: Object = viewport.get_meta(META)
 	return node as AutoScroll if is_instance_valid(node) else null
+
+
+## The mouse in `viewport`'s coordinates, from the last mouse event its
+## window read (the viewport's own idea where there is no instance).
+static func mouse_position(viewport: Viewport) -> Vector2:
+	var node: AutoScroll = of(viewport)
+	return node._mouse if node != null else viewport.get_mouse_position()
 
 
 static func _ensure(viewport: Viewport) -> void:
@@ -234,6 +254,8 @@ func _begin(control: Control, axes: Vector2i) -> void:
 	_moved = false
 	_carry = Vector2.ZERO
 	set_process(true)
+	# No tooltips while it runs: it swallows the motion that would show one.
+	TooltipCard.dismiss(get_viewport())
 	_marker.queue_redraw()
 	_set_cursor(DisplayServer.CURSOR_MOVE if axes == Vector2i.ONE
 			else DisplayServer.CURSOR_VSIZE if axes.y == 1 else DisplayServer.CURSOR_HSIZE)
@@ -265,16 +287,21 @@ static func scroll_axes(control: Control) -> Vector2i:
 			1 if bars[1] != null and bars[1].visible and _can_scroll(bars[1]) else 0)
 
 
-## The horizontal and vertical scroll bars of a `Tree`, `ItemList` or
-## `TextEdit` (null where it has none).
+## The horizontal and vertical scroll bars of a `Tree`, `ItemList`,
+## `TextEdit` or `RichTextLabel` (null where it has none).
 static func _bars(control: Control) -> Array[ScrollBar]:
 	var bars: Array[ScrollBar] = [null, null]
 	var text: TextEdit = control as TextEdit
 	var items: ItemList = control as ItemList
+	var rich: RichTextLabel = control as RichTextLabel
 	if text != null:
 		bars = [text.get_h_scroll_bar(), text.get_v_scroll_bar()]
 	elif items != null:
 		bars = [null, items.get_v_scroll_bar()]
+	elif rich != null:
+		# One that fits its content (`fit_content`, `scroll_active` off) hides
+		# its bar and leaves the scrolling to a container around it.
+		bars = [null, rich.get_v_scroll_bar() if rich.scroll_active else null]
 	elif control is Tree:
 		# A tree keeps its bars as internal children.
 		for child: Node in control.get_children(true):

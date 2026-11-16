@@ -12,6 +12,10 @@ extends VBoxContainer
 
 ## Separates a line's text from its shortcut in tooltip text.
 const SHORTCUT_SEPARATOR: String = "\t"
+## On a viewport while its `dismiss` is pending.
+const DISMISS_META: StringName = &"tooltip_dismiss"
+## Where the dismissing gesture lands: outside every control.
+const DISMISS_AT: Vector2 = Vector2(-100_000.0, -100_000.0)
 
 
 func _init() -> void:
@@ -120,6 +124,42 @@ static func _label(text: String, variation: StringName) -> Label:
 	label.theme_type_variation = variation
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return label
+
+
+## Closes `viewport`'s open tooltip and drops the one waiting to show, as a
+## scroll does: rows move under a mouse at rest. The next tooltip shows once
+## the mouse moves and rests again. Calls in one frame make one dismissal.
+##
+## Godot keeps the tooltip to itself (no script call closes it), but drops it
+## on every gesture event: a pan gesture of nothing, far outside every
+## control, reaches no control and scrolls nothing.
+static func dismiss(viewport: Viewport) -> void:
+	if viewport == null or viewport.has_meta(DISMISS_META):
+		return
+	viewport.set_meta(DISMISS_META, true)
+	# Not inside the input event being handled now (push_input would reset
+	# whether it was handled).
+	_push_dismiss.call_deferred(viewport)
+
+
+## `dismiss`, when the mouse is over `control`: what it shows moved under
+## the mouse. A control scrolling elsewhere (a diff loading, a list
+## reloading) leaves the tooltip the mouse waits for alone.
+static func dismiss_under(control: Control) -> void:
+	var viewport: Viewport = control.get_viewport()
+	if viewport != null and control.is_visible_in_tree() 			and control.get_global_rect().has_point(AutoScroll.mouse_position(viewport)):
+		dismiss(viewport)
+
+
+static func _push_dismiss(viewport: Viewport) -> void:
+	if not is_instance_valid(viewport):
+		return
+	viewport.remove_meta(DISMISS_META)
+	if not viewport.is_inside_tree():
+		return
+	var gesture: InputEventPanGesture = InputEventPanGesture.new()
+	gesture.position = DISMISS_AT
+	viewport.push_input(gesture, true)
 
 
 ## Makes every plain tooltip in `tree` whose text `wants_card` a card: the
