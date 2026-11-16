@@ -10,7 +10,7 @@ use gitbello_core::compare::{
 use gitbello_core::diff::eol::{EndingSummary, FinalNewline, Marker};
 use gitbello_core::diff::image::{ImageSides, SideImage};
 use gitbello_core::diff::markdown::{
-    self, BlockKind, Content, LinkTarget, ListMarker, MarkdownDiff,
+    self, BlockKind, Content, LinkTarget, ListMarker, MarkdownDiff, PreviewLayout, PreviewRow,
 };
 use gitbello_core::diff::{
     changed_ranges, display_text,
@@ -1103,7 +1103,11 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
             if let Some(preview) = state.markdown() {
                 info.set(
                     "markdown",
-                    &markdown_info(preview, state.markdown_images_ready()),
+                    &markdown_info(
+                        preview,
+                        state.preview_layout(),
+                        state.markdown_images_ready(),
+                    ),
                 );
             }
         }
@@ -1111,15 +1115,23 @@ pub fn diff_info(state: Option<&DiffState>) -> VarDictionary {
     info
 }
 
-/// `{blocks, changes, too_large, limit, images, images_ready}` of a
-/// Markdown preview: its block count, the indices of the changed blocks,
-/// whether a side was too large to preview, the size limit in bytes, how
-/// many repository pictures it shows and whether they were read.
-pub fn markdown_info(preview: &MarkdownDiff, images_ready: bool) -> VarDictionary {
-    let changes: PackedInt64Array = preview.changes().into_iter().map(to_i64).collect();
+/// `{blocks, total, changes, can_expand, too_large, limit, images,
+/// images_ready}` of a Markdown preview: its row count (blocks shown and gap
+/// rows, see [`markdown_blocks`]), the document's block count, the row
+/// indices of the changed blocks, whether gaps hide some blocks, whether a
+/// side was too large to preview, the size limit in bytes, how many
+/// repository pictures it shows and whether they were read.
+pub fn markdown_info(
+    preview: &MarkdownDiff,
+    layout: &PreviewLayout,
+    images_ready: bool,
+) -> VarDictionary {
+    let changes: PackedInt64Array = layout.changes(preview).into_iter().map(to_i64).collect();
     vdict! {
-        "blocks" => to_i64(preview.blocks.len()),
+        "blocks" => to_i64(layout.rows().len()),
+        "total" => to_i64(preview.blocks.len()),
         "changes" => &changes,
+        "can_expand" => layout.has_hidden(),
         "too_large" => preview.too_large,
         "limit" => to_i64(markdown::MAX_MARKDOWN_BYTES),
         "images" => to_i64(preview.images.len()),
@@ -1127,7 +1139,11 @@ pub fn markdown_info(preview: &MarkdownDiff, images_ready: bool) -> VarDictionar
     }
 }
 
-/// Blocks `start..start + count` of a Markdown preview, each `{kind, level,
+/// Rows `start..start + count` of a Markdown preview as `layout` shows it.
+/// A gap row is `{kind: "gap", gap, hidden, expand, anchors}`: the blocks
+/// it folds away, its expanders (`up`, `down`, `both` or `all`, for
+/// `RepoSession.expand_markdown`) and the anchors of the headings it hides.
+/// A block is `{kind, level,
 /// quote, indent, marker, number, checked, change, anchor}` plus, by kind,
 /// `spans` (paragraph, heading), `info` and `lines` (code: `{text, change,
 /// syntax}`, `syntax` as in `diff_lines`), or `aligns` and `rows` (table:
@@ -1140,7 +1156,12 @@ pub fn markdown_info(preview: &MarkdownDiff, images_ready: bool) -> VarDictionar
 /// heading after `#` and `image` the index of its picture
 /// (`RepoSession.markdown_image`, -1 for none). Every `change` is `same`,
 /// `added`, `removed` or `changed`.
-pub fn markdown_blocks(preview: &MarkdownDiff, start: usize, count: usize) -> Array<VarDictionary> {
+pub fn markdown_blocks(
+    preview: &MarkdownDiff,
+    layout: &PreviewLayout,
+    start: usize,
+    count: usize,
+) -> Array<VarDictionary> {
     let spans_array = |index: usize, spans: &[markdown::Span]| -> Array<VarDictionary> {
         spans
             .iter()
@@ -1170,77 +1191,101 @@ pub fn markdown_blocks(preview: &MarkdownDiff, start: usize, count: usize) -> Ar
             })
             .collect()
     };
-    preview
-        .blocks
+    let block_dict = |index: usize, shown: &markdown::ShownBlock| -> VarDictionary {
+        let block = &shown.block;
+        let (marker, number, checked) = match block.marker {
+            None => ("", 0, false),
+            Some(ListMarker::Bullet) => ("bullet", 0, false),
+            Some(ListMarker::Ordered(n)) => ("ordered", i64::try_from(n).unwrap_or(0), false),
+            Some(ListMarker::Task(done)) => ("task", 0, done),
+        };
+        let level = match block.kind {
+            BlockKind::Heading(level) => i64::from(level),
+            _ => 0,
+        };
+        let mut out = vdict! {
+            "kind" => block.kind.id(),
+            "level" => level,
+            "quote" => i64::from(block.quote),
+            "indent" => i64::from(block.indent),
+            "marker" => marker,
+            "number" => number,
+            "checked" => checked,
+            "change" => shown.change.id(),
+            "anchor" => &gstr(shown.anchor.as_deref().unwrap_or("")),
+        };
+        match &block.content {
+            Content::Text(spans) => out.set("spans", &spans_array(index, spans)),
+            Content::Code { info, lines } => {
+                let lines: Array<VarDictionary> = lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        let mut syntax = PackedInt32Array::new();
+                        for token in shown.syntax.get(i).map_or(&[][..], Vec::as_slice) {
+                            syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
+                            syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
+                            syntax.push(token.kind.id());
+                        }
+                        vdict! {
+                            "text" => &gstr(&line.text),
+                            "change" => line.change.id(),
+                            "syntax" => &syntax,
+                        }
+                    })
+                    .collect();
+                out.set("info", &gstr(info));
+                out.set("lines", &lines);
+            }
+            Content::Table { aligns, rows } => {
+                let aligns: PackedStringArray = aligns.iter().map(|a| gstr(a.id())).collect();
+                let rows: Array<VarDictionary> = rows
+                    .iter()
+                    .map(|row| {
+                        let cells: VarArray = row
+                            .cells
+                            .iter()
+                            .map(|c| spans_array(index, c).to_variant())
+                            .collect();
+                        vdict! { "cells" => &cells, "change" => row.change.id() }
+                    })
+                    .collect();
+                out.set("aligns", &aligns);
+                out.set("rows", &rows);
+            }
+            Content::None => {}
+        }
+        out
+    };
+    layout
+        .rows()
         .iter()
-        .enumerate()
         .skip(start)
         .take(count)
-        .map(|(index, shown)| {
-            let block = &shown.block;
-            let (marker, number, checked) = match block.marker {
-                None => ("", 0, false),
-                Some(ListMarker::Bullet) => ("bullet", 0, false),
-                Some(ListMarker::Ordered(n)) => ("ordered", i64::try_from(n).unwrap_or(0), false),
-                Some(ListMarker::Task(done)) => ("task", 0, done),
-            };
-            let level = match block.kind {
-                BlockKind::Heading(level) => i64::from(level),
-                _ => 0,
-            };
-            let mut out = vdict! {
-                "kind" => block.kind.id(),
-                "level" => level,
-                "quote" => i64::from(block.quote),
-                "indent" => i64::from(block.indent),
-                "marker" => marker,
-                "number" => number,
-                "checked" => checked,
-                "change" => shown.change.id(),
-                "anchor" => &gstr(shown.anchor.as_deref().unwrap_or("")),
-            };
-            match &block.content {
-                Content::Text(spans) => out.set("spans", &spans_array(index, spans)),
-                Content::Code { info, lines } => {
-                    let lines: Array<VarDictionary> = lines
-                        .iter()
-                        .enumerate()
-                        .map(|(i, line)| {
-                            let mut syntax = PackedInt32Array::new();
-                            for token in shown.syntax.get(i).map_or(&[][..], Vec::as_slice) {
-                                syntax.push(i32::try_from(token.start).unwrap_or(i32::MAX));
-                                syntax.push(i32::try_from(token.end).unwrap_or(i32::MAX));
-                                syntax.push(token.kind.id());
-                            }
-                            vdict! {
-                                "text" => &gstr(&line.text),
-                                "change" => line.change.id(),
-                                "syntax" => &syntax,
-                            }
-                        })
-                        .collect();
-                    out.set("info", &gstr(info));
-                    out.set("lines", &lines);
-                }
-                Content::Table { aligns, rows } => {
-                    let aligns: PackedStringArray = aligns.iter().map(|a| gstr(a.id())).collect();
-                    let rows: Array<VarDictionary> = rows
-                        .iter()
-                        .map(|row| {
-                            let cells: VarArray = row
-                                .cells
-                                .iter()
-                                .map(|c| spans_array(index, c).to_variant())
-                                .collect();
-                            vdict! { "cells" => &cells, "change" => row.change.id() }
-                        })
-                        .collect();
-                    out.set("aligns", &aligns);
-                    out.set("rows", &rows);
-                }
-                Content::None => {}
+        .filter_map(|row| match row {
+            PreviewRow::Block(index) => Some(block_dict(*index, preview.blocks.get(*index)?)),
+            PreviewRow::Gap {
+                gap,
+                first,
+                hidden,
+                expanders,
+            } => {
+                let anchors: PackedStringArray = preview
+                    .blocks
+                    .iter()
+                    .skip(*first)
+                    .take(*hidden)
+                    .filter_map(|b| b.anchor.as_deref())
+                    .map(gstr)
+                    .collect();
+                Some(vdict! {
+                    "kind" => "gap",
+                    "gap" => to_i64(*gap),
+                    "hidden" => to_i64(*hidden),
+                    "expand" => expanders.id(),
+                    "anchors" => &anchors,
+                })
             }
-            out
         })
         .collect()
 }

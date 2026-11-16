@@ -145,7 +145,10 @@ func _ready() -> void:
 	_diff_panel.set_markdown_source(func(start: int, count: int) -> Array:
 		return session.markdown_blocks("changes", start, count) if session != null else [],
 		func(index: int) -> Dictionary:
-			return session.markdown_image("changes", index) if session != null else {})
+			return session.markdown_image("changes", index) if session != null else {},
+		func(gap: int, how: String) -> void:
+			if session != null:
+				session.expand_markdown("changes", gap, how))
 	_diff_panel.file_link_requested.connect(func(path: String) -> void:
 		if session != null and not DiffPanel.show_linked_file(_list, session.toplevel(), path):
 			if feedback != null and feedback.toasts != null:

@@ -531,13 +531,15 @@ func can_jump_in_preview() -> bool:
 	return is_visible_in_tree() and _markdown.visible and not _markdown.changes().is_empty()
 
 
-## Where a Markdown preview's blocks come from: `func(start: int, count:
-## int) -> Array` (`RepoSession.markdown_blocks` of the panel's slot), and
-## its pictures: `func(index: int) -> Dictionary` (`RepoSession.
-## markdown_image`).
-func set_markdown_source(source: Callable, image_source: Callable) -> void:
+## Where a Markdown preview's rows come from: `func(start: int, count:
+## int) -> Array` (`RepoSession.markdown_blocks` of the panel's slot), its
+## pictures: `func(index: int) -> Dictionary` (`RepoSession.
+## markdown_image`), and what opens its gaps: `func(gap: int, how: String)`
+## (`RepoSession.expand_markdown`).
+func set_markdown_source(source: Callable, image_source: Callable, expander: Callable = Callable()) -> void:
 	_markdown.source = source
 	_markdown.image_source = image_source
+	_markdown.expander = expander
 
 
 ## A preview's link to `path` (repository-relative) in `toplevel`: selects
@@ -940,8 +942,10 @@ func _hide_images() -> void:
 ## A Markdown file's Preview: its blocks, or why there are none.
 func _show_markdown(markdown: Dictionary, keep: bool) -> void:
 	_view.show_lines(0, 0, false)
-	_show_whole_button(false, false)
+	var whole: bool = bool(_info.get("whole", false))
+	_show_whole_button(bool(markdown.get("can_expand", false)) or whole, whole)
 	if markdown.is_empty() or bool(markdown.get("too_large", false)) or int(markdown.get("blocks", 0)) == 0:
+		_show_whole_button(false, false)
 		_hide_markdown()
 		_view.hide()
 		if markdown.is_empty():

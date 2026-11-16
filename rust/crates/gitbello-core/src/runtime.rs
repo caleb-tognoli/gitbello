@@ -19,7 +19,7 @@ use crate::backend::{
 use crate::changes::{self, ChangeFilter, ChangeList, FilePick, PickState, Selection};
 use crate::config::{Config, ConfigError};
 use crate::diff::image::{self, ImageSides, MAX_IMAGE_BYTES};
-use crate::diff::markdown::{self, ImageRef, MarkdownDiff, MarkdownImage};
+use crate::diff::markdown::{self, Folds, ImageRef, MarkdownDiff, MarkdownImage, PreviewLayout};
 use crate::diff::version::{self, VersionSide};
 use crate::diff::{
     build_patch, display_text, CommitSide, DiffContent, DiffKind, DiffLayout, DiffTarget, Expand,
@@ -1649,6 +1649,9 @@ pub struct DiffState {
     images: Option<ImageSides>,
     /// The preview of a Markdown file, both sides compared.
     markdown: Option<Arc<MarkdownDiff>>,
+    /// Which of the preview's gaps the user opened, and the rows it shows.
+    folds: Folds,
+    preview: PreviewLayout,
     /// The preview's pictures, read after the diff: the generation they
     /// were read for, which they are and their bytes.
     markdown_images: Option<MarkdownImages>,
@@ -1685,6 +1688,8 @@ impl DiffState {
             layout: DiffLayout::default(),
             images: None,
             markdown: None,
+            folds: Folds::default(),
+            preview: PreviewLayout::default(),
             markdown_images: None,
             images_job: None,
             syntax: Syntax::plain(),
@@ -1735,6 +1740,11 @@ impl DiffState {
     /// [`markdown::read_sides`]).
     pub fn markdown(&self) -> Option<&MarkdownDiff> {
         self.markdown.as_deref()
+    }
+
+    /// The rows the preview shows: its blocks with the folded gaps.
+    pub fn preview_layout(&self) -> &PreviewLayout {
+        &self.preview
     }
 
     /// Picture `index` of the preview ([`MarkdownDiff::images`]), once read;
@@ -1813,6 +1823,16 @@ impl DiffState {
         self.layout = match &self.diff {
             Some(diff) => DiffLayout::build(diff, &self.expansion, self.old.as_deref()),
             None => DiffLayout::default(),
+        };
+        self.relayout_preview();
+    }
+
+    fn relayout_preview(&mut self) {
+        self.preview = match &self.markdown {
+            Some(markdown) => {
+                PreviewLayout::build(markdown, &self.folds, self.expansion.is_whole())
+            }
+            None => PreviewLayout::default(),
         };
     }
 
@@ -2318,6 +2338,8 @@ impl Runtime {
             next.layout = keep.layout;
             next.images = keep.images;
             next.markdown = keep.markdown;
+            next.folds = keep.folds;
+            next.preview = keep.preview;
             next.markdown_images = keep.markdown_images;
         }
         *current = Some(next);
@@ -2332,9 +2354,40 @@ impl Runtime {
         self.change_expansion(key, slot, |e| e.expand(gap, how));
     }
 
-    /// Shows every line of the file in a diff, or only the hunks again.
+    /// Shows every line of the file in a diff, or only the hunks again
+    /// (in the Markdown preview: every block, or the changed ones with
+    /// their gaps closed).
     pub fn show_whole_diff(&mut self, key: &Path, slot: DiffSlot, whole: bool) {
+        if let Some(diff) = self
+            .repos
+            .get_mut(key)
+            .and_then(|state| state.slot_mut(slot).as_mut())
+        {
+            diff.folds.clear();
+        }
         self.change_expansion(key, slot, |e| e.set_whole(whole));
+    }
+
+    /// Opens part of gap `gap` of a Markdown diff's preview (see
+    /// [`markdown::PreviewRow::Gap`]); [`RuntimeEvent::DiffChanged`]
+    /// follows.
+    pub fn expand_markdown(&mut self, key: &Path, slot: DiffSlot, gap: usize, how: Expand) {
+        let Some(diff) = self
+            .repos
+            .get_mut(key)
+            .and_then(|state| state.slot_mut(slot).as_mut())
+        else {
+            return;
+        };
+        if diff.markdown.is_none() {
+            return;
+        }
+        diff.folds.expand(gap, how);
+        diff.relayout_preview();
+        self.pending.push(RuntimeEvent::DiffChanged {
+            repo: key.to_path_buf(),
+            slot,
+        });
     }
 
     fn change_expansion(

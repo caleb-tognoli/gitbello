@@ -2,7 +2,9 @@ extends SmokeTest
 ## The Markdown diff's Preview mode on the CLI's `markdown` fixture: a
 ## Markdown file offers unified, split and preview (an untracked one unified
 ## and preview, a text file neither), Preview draws the document with its
-## changed blocks and words, is saved for Markdown only, F7 moves between the
+## changed blocks and words, folds the unchanged blocks far from a change
+## into gaps (opened by their buttons, a heading link or Whole file), is
+## saved for Markdown only, F7 moves between the
 ## changes, code is coloured by the syntax system, the repository's picture
 ## is drawn (a missing and a web one stay text), a heading link scrolls and a
 ## file link selects that file, the scroll strip marks every change and
@@ -47,6 +49,38 @@ func run() -> void:
 	expect_eq(Core.diff_mode("markdown"), "preview", "Preview is saved for Markdown")
 	expect_eq(Core.diff_mode("text"), text_mode, "the text mode stays")
 	expect(preview.visible and not panel.view().visible, "Preview replaces the lines")
+
+	# Folded: each change with a block of context and its section's heading;
+	# items 4-6 and the five blocks after the last change hide in gaps.
+	var folded: Dictionary = session.diff_info().get("markdown", {})
+	expect_eq(int(folded.get("total", 0)), 19, "the document has 19 blocks")
+	expect_eq(int(folded.get("blocks", 0)), 13, "eleven blocks and two gaps show")
+	expect(bool(folded.get("can_expand", false)), "some blocks are folded")
+	expect_eq(preview.block_count(), 13, "every row is fetched")
+	expect_eq(preview.gap_rows(), PackedInt64Array([4, 12]), "a gap between the changes and one at the end")
+	expect_eq(preview.changes(), PackedInt64Array([2, 6, 7, 10]), "the changed rows")
+	expect_eq(preview.gap_label(4), tr("%d blocks hidden") % 3, "the first gap hides three items")
+	expect_eq(preview.gap_label(12), tr("%d blocks hidden") % 5, "the last hides five blocks")
+	expect(await wait_until(func() -> bool: return preview.built_count() == 13), "every row is built")
+	expect_eq((preview.block_control(4).find_children("*", "Button", true, false) as Array).size(), 1,
+			"a small gap opens at once")
+	expect(not preview.press_expander(4, "up"), "and has no step buttons")
+	expect(panel.whole_file_button().visible and not panel.whole_file_button().button_pressed,
+			"Whole file shows in Preview")
+	expect(panel.can_toggle_whole_file(), "Whole file can be turned on")
+	panel.toggle_whole_file()
+	expect(await wait_until(func() -> bool: return preview.block_count() == 19), "Whole file shows every block")
+	expect(preview.gap_rows().is_empty() and panel.whole_file_button().button_pressed, "with no gaps")
+	panel.toggle_whole_file()
+	expect(await wait_until(func() -> bool: return preview.block_count() == 13), "turned off, the gaps fold again")
+	expect(preview.scroll_to_anchor("logo"), "a link to the folded Logo heading")
+	expect(await wait_until(func() -> bool: return preview.block_count() == 17), "opens the gap it is in")
+	expect(await wait_until(func() -> bool: return preview.scroll_vertical > 0), "and scrolls to it")
+	preview.scroll_vertical = 0
+	expect(preview.press_expander(4, "all"), "the first gap's button")
+	expect(await wait_until(func() -> bool: return preview.block_count() == 19), "opens the three items")
+	expect(not bool((session.diff_info().get("markdown", {}) as Dictionary).get("can_expand", true)), "nothing is folded")
+
 	var info: Dictionary = session.diff_info()
 	var markdown: Dictionary = info.get("markdown", {})
 	expect_eq(int(markdown.get("blocks", 0)), 19, "the preview has 19 blocks")
@@ -142,7 +176,7 @@ func run() -> void:
 			marked.append("%s:%s" % [part["change"], part["text"]])
 	expect_eq(marked, PackedStringArray(["added:only ", "removed:shows", "added:draws"]), "the quote's changed words")
 	expect(preview.block_text(9).contains("shows") and preview.block_text(9).contains("draws"), "both words show in the quote")
-	expect(not panel.whole_file_button().visible, "no whole-file button in Preview")
+	expect(not panel.whole_file_button().visible, "no whole-file button once every gap is open")
 	expect(not panel.can_toggle_whole_file(), "nothing to expand")
 	await get_tree().process_frame
 	expect(preview.block_control(0).size.y > preview.block_control(1).size.y * 0.8, "the title is drawn large")

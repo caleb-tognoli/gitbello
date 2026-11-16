@@ -10,12 +10,14 @@ use std::path::{Path, PathBuf};
 
 use gitbello_core::backend::{CliBackend, GitBackend};
 use gitbello_core::diff::image::ImageFormat;
+use gitbello_core::diff::markdown::PreviewRow;
 use gitbello_core::diff::markdown::{
     read_images, read_sides, Change, Content, ImageRef, MarkdownDiff, MAX_MARKDOWN_BYTES,
 };
 use gitbello_core::diff::viewer::{offered, Viewer};
-use gitbello_core::diff::{CommitSide, DiffKind, DiffTarget};
+use gitbello_core::diff::{CommitSide, DiffKind, DiffTarget, Expand};
 use gitbello_core::git::CancelToken;
+use gitbello_core::runtime::DiffSlot;
 use support::rt::{open, poll_until};
 use support::TestRepo;
 
@@ -151,6 +153,79 @@ fn the_runtime_loads_the_preview_with_the_diff() {
     assert_eq!(state.markdown().unwrap().changes(), vec![1, 4]);
     let offered = offered(state.diff().unwrap(), Path::new("README.md"));
     assert_eq!(offered.viewer, Viewer::Markdown);
+}
+
+/// Gap rows of the Changes diff's preview, as `(gap, hidden)`.
+fn preview_gaps(rt: &gitbello_core::runtime::Runtime, key: &Path) -> Vec<(usize, usize)> {
+    let state = rt.repo(key).expect("the repo").diff().expect("a diff");
+    state
+        .preview_layout()
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            PreviewRow::Gap { gap, hidden, .. } => Some((*gap, *hidden)),
+            PreviewRow::Block(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_preview_folds_unchanged_blocks_until_opened() {
+    let repo = TestRepo::init();
+    let doc = |edit: &str| -> String {
+        (0..30)
+            .map(|i| match i {
+                15 => format!(
+                    "paragraph {i} {edit}
+
+"
+                ),
+                _ => format!(
+                    "paragraph {i}
+
+"
+                ),
+            })
+            .collect()
+    };
+    commit_text(&repo, "README.md", &doc("old"), "add");
+    put(&repo, "README.md", &doc("new"));
+    let (mut rt, key) = open(&repo);
+    rt.select_change(&key, Path::new("README.md"), false);
+    poll_until(&mut rt, |rt, _| {
+        rt.repo(&key)
+            .and_then(|s| s.diff())
+            .is_some_and(|d| !d.is_loading() && d.markdown().is_some())
+    });
+    // Blocks 14..=16 show, 0..14 and 17..30 fold.
+    assert_eq!(preview_gaps(&rt, &key), vec![(0, 14), (1, 13)]);
+
+    rt.expand_markdown(&key, DiffSlot::Changes, 1, Expand::Down);
+    assert_eq!(preview_gaps(&rt, &key), vec![(0, 14), (1, 8)]);
+
+    // An edit elsewhere in the file reloads it with the gap kept open.
+    put(&repo, "README.md", &doc("newer"));
+    rt.refresh(&key, gitbello_core::jobs::RefreshSet::all());
+    poll_until(&mut rt, |rt, _| {
+        rt.repo(&key)
+            .and_then(|s| s.diff())
+            .and_then(|d| d.markdown())
+            .is_some_and(|m| {
+                m.blocks
+                    .iter()
+                    .any(|b| format!("{:?}", b.block).contains("newer"))
+            })
+    });
+    assert_eq!(preview_gaps(&rt, &key), vec![(0, 14), (1, 8)]);
+
+    // The whole file shows every block, and closes the gaps when turned off.
+    rt.show_whole_diff(&key, DiffSlot::Changes, true);
+    poll_until(&mut rt, |rt, _| preview_gaps(rt, &key).is_empty());
+    let state = rt.repo(&key).unwrap().diff().unwrap();
+    assert_eq!(state.preview_layout().rows().len(), 30);
+    rt.show_whole_diff(&key, DiffSlot::Changes, false);
+    poll_until(&mut rt, |rt, _| !preview_gaps(rt, &key).is_empty());
+    assert_eq!(preview_gaps(&rt, &key), vec![(0, 14), (1, 13)]);
 }
 
 const PNG_A: &[u8] = b"\x89PNG\r\n\x1a\nfirst";

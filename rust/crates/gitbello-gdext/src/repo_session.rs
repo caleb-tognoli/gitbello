@@ -2219,7 +2219,7 @@ impl RepoSession {
         .unwrap_or_default()
     }
 
-    /// Blocks `start..start + count` of the Markdown preview of the diff in
+    /// Rows `start..start + count` of the Markdown preview of the diff in
     /// `slot` (`changes`, `commit`, `compare` or `file`); see
     /// `convert::markdown_blocks`. Empty without a preview.
     #[func]
@@ -2231,8 +2231,14 @@ impl RepoSession {
             if let (DiffSlot::Changes, Some(_)) = (slot, s.conflict()) {
                 return None;
             }
-            let preview = slot_diff(s, slot)?.markdown()?;
-            Some(convert::markdown_blocks(preview, start, count))
+            let diff = slot_diff(s, slot)?;
+            let preview = diff.markdown()?;
+            Some(convert::markdown_blocks(
+                preview,
+                diff.preview_layout(),
+                start,
+                count,
+            ))
         })
         .flatten()
         .unwrap_or_default()
@@ -2284,7 +2290,20 @@ impl RepoSession {
         runtime_cell::with(|rt| rt.expand_diff(&self.key, slot, gap, how));
     }
 
-    /// Shows every line of the file in a diff, or only its hunks again.
+    /// Opens part of gap `gap` of the Markdown preview in `slot` (`how` is
+    /// `up`, `down` or `all`, from a gap row's `expand`). The diff's changed
+    /// signal follows.
+    #[func]
+    fn expand_markdown(&self, slot: GString, gap: i64, how: GString) {
+        let (Some(how), Ok(gap)) = (Expand::from_id(&how.to_string()), usize::try_from(gap)) else {
+            return;
+        };
+        let slot = parse_slot(&slot);
+        runtime_cell::with(|rt| rt.expand_markdown(&self.key, slot, gap, how));
+    }
+
+    /// Shows every line of the file in a diff, or only its hunks again
+    /// (every block of a Markdown preview, or the changed ones).
     #[func]
     fn show_whole_diff(&self, slot: GString, whole: bool) {
         let slot = parse_slot(&slot);

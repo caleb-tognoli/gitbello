@@ -21,6 +21,12 @@ extends ScrollContainer
 ## the repository emits `file_link_clicked`. Its scroll column is a
 ## `MarkdownStrip` with every changed block marked, placed beside it by
 ## `attach_strip` (a ScrollContainer lays out all its children).
+##
+## Core folds the unchanged blocks far from a change into gap rows (`kind`
+## `gap`, see `convert::markdown_blocks`): each says how many blocks it
+## hides and has buttons (`expand`: `up`, `down`, `both` or `all`) that call
+## `expander` with its `gap`. A link to a heading inside a gap opens that gap
+## and scrolls there once the rows come back.
 
 ## A link to a repository file was clicked: its path and the heading after
 ## `#` (empty for none).
@@ -52,10 +58,25 @@ const PICTURE_CACHE: int = 96
 const MARK_ADDED: int = 1
 const MARK_REMOVED: int = 2
 const MARK_CHANGED: int = 3
+## The buttons of a gap row's `expand`, left to right, their icons and tips.
+const EXPANDERS: Dictionary[String, Array] = {
+	"up": ["up"], "down": ["down"], "both": ["up", "down"], "all": ["all"],
+}
+const EXPANDER_ICONS: Dictionary[String, StringName] = {
+	"up": &"ExpandUp", "down": &"ExpandDown", "all": &"ExpandAll",
+}
+const EXPANDER_TIPS: Dictionary[String, String] = {
+	"up": "More blocks above",
+	"down": "More blocks below",
+	"all": "All hidden blocks",
+}
 
-## `func(start: int, count: int) -> Array` of block dictionaries (see
-## `convert::markdown_blocks`).
+## `func(start: int, count: int) -> Array` of row dictionaries, blocks and
+## gaps (see `convert::markdown_blocks`).
 var source: Callable = Callable()
+## `func(gap: int, how: String)`: opens part of a gap (`RepoSession.
+## expand_markdown`); gap rows have no buttons without it.
+var expander: Callable = Callable()
 ## `func(index: int) -> Dictionary`: picture `index` as `{format, bytes, id}`
 ## (`RepoSession.markdown_image`), empty while it is read.
 var image_source: Callable = Callable()
@@ -73,6 +94,9 @@ var _changes: PackedInt64Array = PackedInt64Array()
 var _current: int = -1
 var _follow_block: int = -1
 var _follow_frames: int = 0
+## A heading the last link pointed to inside a gap: scrolled to once the
+## gap opened.
+var _pending_anchor: String = ""
 ## Whether core read the pictures of the blocks shown.
 var _images_ready: bool = true
 ## Picture ids by index, for the blocks shown.
@@ -113,6 +137,10 @@ func _exit_tree() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and not _blocks.is_empty():
+		_drop_controls(0)
+		_build_some()
+		set_process(_built < _blocks.size() or _follow_frames > 0)
 	if what == NOTIFICATION_THEME_CHANGED:
 		place_strip()
 		# The override below notifies again: only set it when it changes.
@@ -160,6 +188,7 @@ func show_blocks(count: int, changed_blocks: PackedInt64Array, keep: bool, image
 		_current = -1
 		_follow_block = -1
 		_follow_frames = 0
+		_pending_anchor = ""
 		scroll_vertical = 0
 	_drop_controls(same)
 	_blocks = data
@@ -167,6 +196,10 @@ func show_blocks(count: int, changed_blocks: PackedInt64Array, keep: bool, image
 	set_process(_built < _blocks.size() or _follow_frames > 0)
 	_show_strip()
 	_strip.queue_redraw()
+	if not _pending_anchor.is_empty():
+		var anchor: String = _pending_anchor
+		_pending_anchor = ""
+		scroll_to_anchor(anchor)
 
 
 ## Removes every block.
@@ -177,6 +210,7 @@ func clear() -> void:
 	_current = -1
 	_follow_block = -1
 	_follow_frames = 0
+	_pending_anchor = ""
 	_ids.clear()
 	_show_strip()
 	set_process(false)
@@ -246,18 +280,61 @@ func block_picture_count(index: int) -> int:
 	return count
 
 
-## Scrolls to the heading whose anchor is `anchor` (as GitHub makes them).
-## Returns whether there is one.
+## Scrolls to the heading whose anchor is `anchor` (as GitHub makes them);
+## one inside a gap opens the gap first. Returns whether there is one.
 func scroll_to_anchor(anchor: String) -> bool:
+	if anchor.is_empty():
+		return false
 	for index: int in _blocks.size():
-		if String(_blocks[index].get("anchor", "")) == anchor and not anchor.is_empty():
+		var row: Dictionary = _blocks[index]
+		if String(row.get("anchor", "")) == anchor and String(row.get("kind", "")) != "gap":
 			_build_until(index)
 			_follow_block = index
 			_follow_frames = FOLLOW_FRAMES
 			_follow()
 			set_process(true)
 			return true
+	for row: Dictionary in _blocks:
+		if String(row.get("kind", "")) != "gap" or not expander.is_valid():
+			continue
+		var anchors: PackedStringArray = row.get("anchors", PackedStringArray())
+		if anchor in anchors:
+			_pending_anchor = anchor
+			expander.call(int(row.get("gap", -1)), "all")
+			return true
 	return false
+
+
+## The gap rows' indices (tests).
+func gap_rows() -> PackedInt64Array:
+	var out: PackedInt64Array = PackedInt64Array()
+	for index: int in _blocks.size():
+		if String(_blocks[index].get("kind", "")) == "gap":
+			out.append(index)
+	return out
+
+
+## Clicks expander `how` of gap row `index`, as the mouse would. Returns
+## whether the row has it.
+func press_expander(index: int, how: String) -> bool:
+	if index < 0 or index >= _blocks.size() or not expander.is_valid():
+		return false
+	var row: Dictionary = _blocks[index]
+	if String(row.get("kind", "")) != "gap" or not how in EXPANDERS.get(String(row.get("expand", "")), []):
+		return false
+	expander.call(int(row.get("gap", -1)), how)
+	return true
+
+
+## What gap row `index` says: how many blocks it hides ("" for a block).
+func gap_label(index: int) -> String:
+	if index < 0 or index >= _blocks.size() or String(_blocks[index].get("kind", "")) != "gap":
+		return ""
+	return _hidden_text(int(_blocks[index].get("hidden", 0)))
+
+
+func _hidden_text(count: int) -> String:
+	return tr("1 block hidden") if count == 1 else tr("%d blocks hidden") % count
 
 
 ## The text of block `index` as shown, changed words included (tests).
@@ -410,6 +487,8 @@ func _block_box(change: String, top: float, bottom: float) -> StyleBoxFlat:
 
 func _make_block(block: Dictionary) -> Control:
 	var kind: String = String(block.get("kind", "paragraph"))
+	if kind == "gap":
+		return _make_gap(block)
 	var level: int = int(block.get("level", 0))
 	var quote: int = int(block.get("quote", 0))
 	var indent: int = int(block.get("indent", 0))
@@ -443,6 +522,47 @@ func _make_block(block: Dictionary) -> Control:
 	if quote > 0 or underline:
 		panel.draw.connect(_draw_block_marks.bind(panel, quote, underline, box))
 	return panel
+
+
+## A gap row: its expander buttons and how many blocks it hides, on the
+## text diff's hunk header background.
+func _make_gap(row: Dictionary) -> Control:
+	var half: int = roundi(float(get_theme_constant(&"gap", THEME_TYPE)) / 2.0)
+	var wrapper: MarginContainer = MarginContainer.new()
+	wrapper.mouse_filter = Control.MOUSE_FILTER_PASS
+	wrapper.add_theme_constant_override(&"margin_top", half)
+	wrapper.add_theme_constant_override(&"margin_bottom", half)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var box: StyleBoxFlat = StyleBoxFlat.new()
+	box.bg_color = _diff_color(&"hunk_bg")
+	box.set_corner_radius_all(4)
+	box.content_margin_left = 4.0
+	box.content_margin_right = 10.0
+	box.content_margin_top = 2.0
+	box.content_margin_bottom = 2.0
+	panel.add_theme_stylebox_override(&"panel", box)
+	wrapper.add_child(panel)
+	var line: HBoxContainer = HBoxContainer.new()
+	line.add_theme_constant_override(&"separation", 2)
+	panel.add_child(line)
+	var gap_index: int = int(row.get("gap", -1))
+	if expander.is_valid():
+		for how: String in EXPANDERS.get(String(row.get("expand", "")), []):
+			var button: Button = Button.new()
+			button.theme_type_variation = &"DetailsIconButton"
+			button.icon = AppTheme.icon(EXPANDER_ICONS[how])
+			button.focus_mode = Control.FOCUS_NONE
+			button.tooltip_text = tr(EXPANDER_TIPS[how])
+			button.pressed.connect(func() -> void: expander.call(gap_index, how))
+			line.add_child(button)
+	var label: Label = Label.new()
+	label.text = _hidden_text(int(row.get("hidden", 0)))
+	label.add_theme_color_override(&"font_color", _diff_color(&"hunk_color"))
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(label)
+	return wrapper
 
 
 ## A quote's bars down the whole block (so a quote's blocks join up) and the

@@ -1,10 +1,11 @@
 extends Node
 ## The Markdown diff's Preview mode, in numbered shots per theme: README.md
 ## of the CLI's `markdown` fixture in Changes (Unified with the picker, then
-## Preview at the top, scrolled to the second change with F7 and to the
-## Logo heading with its picture, each with a 2x crop of the header's right
-## end and, in Preview, a 3x crop of the scroll strip with the text beside
-## it), the untracked docs/guide.md in
+## Preview folded at the top with a 2x crop of its first gap, the last gap
+## opened by its button, Whole file on, folded again and scrolled to the
+## second change with F7, and the Logo heading's link opening its gap, each
+## with a 2x crop of the header's right end and, in Preview, a 3x crop of
+## the scroll strip with the text beside it), the untracked docs/guide.md in
 ## Preview, and History's commit that edited the readme. Pass
 ## --repo=<the fixture's markdown repo> --out=<directory> and set
 ## GITBELLO_CONFIG to a scratch config before launching windowed. It saves
@@ -50,14 +51,31 @@ func _ready() -> void:
 		var panel: DiffPanel = changes.diff_panel()
 		await _shot("readme-unified-" + theme, panel)
 		panel.choose_mode("preview")
-		await _shot("readme-preview-" + theme, panel)
+		var preview: MarkdownDiffView = panel.markdown_view()
+		if not await _wait(func() -> bool: return preview.gap_rows().size() == 2):
+			return
+		await _shot("readme-preview-" + theme, panel, preview.block_control(int(preview.gap_rows()[0])))
+		var last: int = int(preview.gap_rows()[1])
+		preview.scroll_vertical = 100000
+		preview.press_expander(last, "down")
+		if not await _wait(func() -> bool: return preview.gap_rows().size() == 1):
+			return
+		preview.scroll_vertical = 100000
+		await _shot("readme-last-gap-opened-" + theme, panel)
+		panel.toggle_whole_file()
+		if not await _wait(func() -> bool: return preview.gap_rows().is_empty() and preview.block_count() == 19):
+			return
+		preview.scroll_vertical = 0
+		await _shot("readme-whole-file-" + theme, panel)
+		panel.toggle_whole_file()
+		if not await _wait(func() -> bool: return preview.gap_rows().size() == 2):
+			return
 		Actions.run_action(&"diff.next_change")
 		await _frames(10)
 		Actions.run_action(&"diff.next_change")
 		await _shot("readme-preview-second-change-" + theme, panel)
-		var preview: MarkdownDiffView = panel.markdown_view()
 		preview.scroll_to_anchor("logo")
-		if not await _wait(func() -> bool: return preview.block_picture_count(17) == 1):
+		if not await _wait(func() -> bool: return _pictures(preview) == 1):
 			return
 		await _shot("readme-pictures-" + theme, panel)
 		if not await _select(changes, session, "docs/guide.md"):
@@ -105,13 +123,22 @@ func _wait(predicate: Callable) -> bool:
 	return true
 
 
+## Pictures drawn by every row built.
+func _pictures(preview: MarkdownDiffView) -> int:
+	var count: int = 0
+	for index: int in preview.built_count():
+		count += preview.block_picture_count(index)
+	return count
+
+
 func _frames(count: int) -> void:
 	for frame: int in count:
 		await get_tree().process_frame
 
 
-## The window, then a 2x crop of `panel`'s header's right end.
-func _shot(file_name: String, panel: DiffPanel) -> void:
+## The window, then a 2x crop of `panel`'s header's right end (and of
+## `focus`, when given).
+func _shot(file_name: String, panel: DiffPanel, focus: Control = null) -> void:
 	await _frames(30)
 	var image: Image = get_viewport().get_texture().get_image()
 	var stem: String = "%02d-%s" % [_step, file_name]
@@ -125,6 +152,13 @@ func _shot(file_name: String, panel: DiffPanel) -> void:
 	var crop: Image = image.get_region(rect)
 	crop.resize(crop.get_width() * 2, crop.get_height() * 2, Image.INTERPOLATE_NEAREST)
 	crop.save_png(_out.path_join(stem + "-header.png"))
+	if focus != null:
+		var box: Rect2 = focus.get_global_rect().grow(6.0)
+		var focus_rect: Rect2i = Rect2i(Rect2(box.position * scale, box.size * scale))
+		focus_rect = focus_rect.intersection(Rect2i(Vector2i.ZERO, image.get_size()))
+		var part: Image = image.get_region(focus_rect)
+		part.resize(part.get_width() * 2, part.get_height() * 2, Image.INTERPOLATE_NEAREST)
+		part.save_png(_out.path_join(stem + "-focus.png"))
 	var preview: MarkdownDiffView = panel.markdown_view()
 	if preview.is_visible_in_tree():
 		var strip: Rect2 = preview.scroll_strip().get_global_rect()

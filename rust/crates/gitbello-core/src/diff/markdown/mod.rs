@@ -7,6 +7,7 @@
 
 mod blocks;
 mod compare;
+pub mod fold;
 mod images;
 mod inline;
 pub mod links;
@@ -18,6 +19,7 @@ use std::sync::Arc;
 
 pub use blocks::parse;
 pub use compare::compare;
+pub use fold::{Folds, PreviewLayout, PreviewRow};
 pub use images::{read_images, ImageRef, MarkdownImage, MAX_IMAGES, MAX_PICTURE_BYTES};
 pub use links::{resolve_link, Anchors, LinkTarget};
 
