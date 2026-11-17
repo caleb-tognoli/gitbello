@@ -33,6 +33,7 @@ use crate::highlight::hints::HINT_LINES;
 use crate::highlight::{
     detect, line_text, DiffStates, LineState, LineStates, StatesStatus, Syntax,
 };
+use crate::history_edit::{Rewritable, RewriteAction, RewriteBlock, RewriteDone};
 use crate::in_use::{processes_using, ProcessUse};
 use crate::jobs::{
     Event, EventKind, JobId, JobOutput, JobPriority, JobScheduler, JobSpec, RefreshKind, RefreshSet,
@@ -175,6 +176,8 @@ pub const MERGE_JOB_LABEL: &str = "merge";
 pub const REBASE_CHECK_JOB_LABEL: &str = "check rebase";
 pub const REBASE_JOB_LABEL: &str = "rebase";
 pub const UNDO_REBASE_JOB_LABEL: &str = "undo rebase";
+/// Label of history edits (reword, squash, fixup, move, drop).
+pub const EDIT_HISTORY_JOB_LABEL: &str = "edit history";
 pub const CONTINUE_JOB_LABEL: &str = "continue";
 pub const SKIP_JOB_LABEL: &str = "skip";
 pub const CONFLICT_JOB_LABEL: &str = "load conflict";
@@ -222,6 +225,7 @@ const REFRESH_ON_FAILURE: &[&str] = &[
     MERGE_JOB_LABEL,
     REBASE_JOB_LABEL,
     UNDO_REBASE_JOB_LABEL,
+    EDIT_HISTORY_JOB_LABEL,
     CONTINUE_JOB_LABEL,
     SKIP_JOB_LABEL,
     RESOLVE_JOB_LABEL,
@@ -1053,11 +1057,45 @@ impl RepoState {
 
     /// The rebase the undo strip offers: the last one made here, while HEAD
     /// is still its result and not pushed.
+    ///
+    /// A history edit's result may be a pushed commit (dropping HEAD): it is
+    /// offered until the branch's upstream moves (a push).
     pub fn rebase_undo(&self) -> Option<&RebaseUndo> {
         let undo = self.last_rebase.as_ref()?;
-        let commit = self.undoable_commit()?;
-        (commit.oid == undo.after && self.current_branch() == Some(undo.branch.as_str()))
+        if self.current_branch() != Some(undo.branch.as_str()) {
+            return None;
+        }
+        if self.undoable_commit().is_some_and(|c| c.oid == undo.after) {
+            return Some(undo);
+        }
+        let head = self.status.as_ref()?.oid.as_deref()?;
+        let rewrite = undo.rewrite.as_ref()?;
+        (self.operation.is_none()
+            && head == undo.after
+            && self.head_info.oid.as_deref() == Some(head)
+            && self.head_info.upstream_oid == rewrite.upstream)
             .then_some(undo)
+    }
+
+    /// The commits history editing can rewrite, while HEAD is still where
+    /// they were read.
+    pub fn rewritable(&self) -> Option<&Rewritable> {
+        let list = &self.head_info.rewritable;
+        let head = self.status.as_ref()?.oid.as_deref()?;
+        (self.operation.is_none() && self.current_branch().is_some() && list.head == head)
+            .then_some(list)
+    }
+
+    /// What `action` on `oid` would rewrite, `(commits, pushed)`, or why it
+    /// cannot run. `oid` must be in HEAD.
+    pub fn rewrite_reach(
+        &self,
+        oid: &str,
+        action: &RewriteAction,
+    ) -> Result<(usize, usize), RewriteBlock> {
+        self.rewritable()
+            .ok_or(RewriteBlock::NoBranch)?
+            .reach(oid, action)
     }
 
     /// The commit the undo strip offers (HEAD, unpushed, on a branch, with
@@ -3432,6 +3470,66 @@ impl Runtime {
                             onto,
                             before,
                             after,
+                            rewrite: None,
+                        }))
+                    }
+                    _ => JobOutput::Done,
+                })
+            },
+        )))
+    }
+
+    /// Runs `action` on commit `oid` of the current branch as an
+    /// interactive rebase (local changes stashed around it). A clean edit
+    /// can be undone like a rebase ([`RepoState::rebase_undo`]); conflicts
+    /// leave the rebase in progress for the banner. `None` when it cannot
+    /// run ([`RepoState::rewrite_reach`]). Label [`EDIT_HISTORY_JOB_LABEL`].
+    pub fn rewrite_history(&self, key: &Path, oid: &str, action: RewriteAction) -> Option<JobId> {
+        let toplevel = self.toplevel_of(key)?;
+        let state = self.repos.get(key)?;
+        let list = state.rewritable()?;
+        let branch = state.current_branch()?.to_owned();
+        let plan = list.plan(oid, &action).ok()?;
+        let subject = match &action {
+            RewriteAction::Reword(message) | RewriteAction::Squash(message) => {
+                crate::changes::split_message(message).0
+            }
+            _ => list.commit(oid)?.subject.clone(),
+        };
+        let done = RewriteDone {
+            kind: action.kind(),
+            subject,
+            upstream: state.head_info.upstream_oid.clone(),
+        };
+        let onto = plan
+            .base
+            .as_deref()
+            .map_or_else(|| "root".to_owned(), |b| b.chars().take(7).collect());
+        let expected = list.head.clone();
+        Some(self.scheduler.submit(JobSpec::write(
+            key,
+            EDIT_HISTORY_JOB_LABEL,
+            RefreshSet::all(),
+            move |ctx| {
+                let (backend, cancel) = (ctx.backend(), ctx.cancel_token());
+                let before = backend.resolve(&toplevel, "HEAD", cancel)?;
+                if before.as_deref() != Some(expected.as_str()) {
+                    return Err(GitError::new(
+                        "rebase",
+                        GitErrorKind::Stale,
+                        "HEAD moved; refresh and try again",
+                    ));
+                }
+                backend.rewrite_history(&toplevel, &plan, cancel)?;
+                let after = backend.resolve(&toplevel, "HEAD", &CancelToken::new())?;
+                Ok(match (before, after) {
+                    (Some(before), Some(after)) if before != after => {
+                        JobOutput::Rebased(Box::new(RebaseUndo {
+                            branch,
+                            onto,
+                            before,
+                            after,
+                            rewrite: Some(done),
                         }))
                     }
                     _ => JobOutput::Done,

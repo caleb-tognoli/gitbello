@@ -16,6 +16,15 @@ const VIEW_SHORTCUTS: int = 5
 const RECENT_MENU: int = 12
 ## Where Help → What's new and Report an issue go.
 const PROJECT_URL: String = "https://github.com/caleb-tognoli/gitbello"
+## Why a history edit cannot run, by `RepoSession.rewrite_check` reason.
+const REWRITE_BLOCKS: Dictionary[String, String] = {
+	"no_branch": "No branch checked out",
+	"past_merge": "A merge commit follows; edit after it",
+	"on_base": "Already on the default branch",
+	"too_far": "Too far back to edit",
+	"no_parent": "The commit below cannot be edited",
+	"at_head": "Already the newest commit",
+}
 
 var _pages: Array[RepoTab] = []
 var _current: int = -1
@@ -1097,7 +1106,47 @@ func _register_branch_actions() -> void:
 			func() -> void: ops.call().copy_hash(String(target_commit.call()["hash"])),
 			PackedStringArray(),
 			func() -> bool: return not target_commit.call().is_empty())
+	_register_rewrite(is_ready, ops, commit)
 	_register_copy_and_web(is_ready, ref, commit)
+
+
+## History editing (UX.md History editing): Rewrite ▸ in History's commit
+## menu. Each action is greyed with its reason where it cannot run.
+func _register_rewrite(is_ready: Callable, ops: Callable, commit: Callable) -> void:
+	for entry: Array in [[&"commit.reword", "Reword commit…", "reword", PackedStringArray()],
+			[&"commit.squash", "Squash commit down…", "squash", PackedStringArray()],
+			[&"commit.move_up", "Move commit up", "move_up", PackedStringArray(["Ctrl+Alt+Up"])],
+			[&"commit.move_down", "Move commit down", "move_down", PackedStringArray(["Ctrl+Alt+Down"])],
+			[&"commit.drop", "Drop commit…", "drop", PackedStringArray()]]:
+		var action: String = entry[2]
+		var check: Callable = func() -> Dictionary: return _rewrite_check(is_ready, commit, action)
+		Actions.register(entry[0], entry[1], "History",
+				func() -> void: ops.call().rewrite_commit(commit.call(), action), entry[3],
+				func() -> bool: return bool(check.call().get("ok", false)))
+		Actions.get_action(entry[0]).reason = func() -> String: return String(check.call().get("why", ""))
+
+
+## `RepoSession.rewrite_check` for the menu's commit, with `why` (English,
+## translated where shown) when it cannot run.
+func _rewrite_check(is_ready: Callable, commit: Callable, action: String) -> Dictionary:
+	var target: Dictionary = commit.call()
+	if not is_ready.call() or target.is_empty():
+		return {"why": "Select a commit in History"}
+	var session: RepoSession = current_page().session
+	if not session.operation().is_empty():
+		return {"why": "Finish the operation in progress first"}
+	if session.current_branch().is_empty():
+		return {"why": "No branch checked out"}
+	if not bool(target.get("in_head", true)):
+		return {"why": TranslationServer.translate("Not on %s") % session.current_branch()}
+	if _feedback.is_busy(session):
+		return {"why": "Wait for the running operation"}
+	var check: Dictionary = session.rewrite_check(String(target["hash"]), action)
+	if bool(check.get("ok", false)):
+		return check
+	var why: String = REWRITE_BLOCKS.get(String(check.get("reason", "")), "Cannot edit this commit")
+	check["why"] = why
+	return check
 
 
 ## Copy ▸ and Open on <host> for a commit, a branch or tag, and the

@@ -10,6 +10,7 @@ use gitbello_core::diff::minimap::{
 use gitbello_core::diff::version::VersionSide;
 use gitbello_core::diff::{Expand, PatchMode};
 use gitbello_core::graph::{to_hex, LoadState};
+use gitbello_core::history_edit::{self, RewriteAction, RewriteBlock};
 use gitbello_core::ignore::{self, Untrack};
 use gitbello_core::jobs::{JobId, RefreshSet};
 use gitbello_core::merge::{BlockChoice, FileChoice, MergeMode, UndoMode};
@@ -908,6 +909,90 @@ impl RepoSession {
     #[func]
     fn undo_rebase(&self) -> i64 {
         job_id(runtime_cell::with(|rt| rt.undo_rebase(&self.key)).flatten())
+    }
+
+    /// Whether history edit `action` (`reword`, `squash`, `fixup`, `drop`,
+    /// `move_up`, `move_down`) can run on commit `oid` of the current
+    /// branch: `{ok, reason, commits, pushed, confirm}`. `reason` (when not
+    /// ok) is `no_branch`, `past_merge`, `on_base`, `too_far`, `no_parent`
+    /// or `at_head`; `commits` and `pushed` count what it rewrites, and
+    /// `confirm` says it should ask first. The caller checks that the
+    /// commit is in HEAD (`in_head`).
+    #[func]
+    fn rewrite_check(&self, oid: GString, action: GString) -> VarDictionary {
+        // The message does not change what can run.
+        let Some(action) = RewriteAction::from_id(&action.to_string(), "-") else {
+            return VarDictionary::new();
+        };
+        let oid = oid.to_string();
+        let reach = self
+            .read(|s| s.rewrite_reach(&oid, &action))
+            .unwrap_or(Err(RewriteBlock::NoBranch));
+        match reach {
+            Ok((commits, pushed)) => vdict! {
+                "ok" => true,
+                "reason" => "",
+                "commits" => convert::to_i64(commits),
+                "pushed" => convert::to_i64(pushed),
+                "confirm" => history_edit::needs_confirm(commits, pushed),
+            },
+            Err(block) => vdict! {
+                "ok" => false,
+                "reason" => block.id(),
+                "commits" => 0,
+                "pushed" => 0,
+                "confirm" => false,
+            },
+        }
+    }
+
+    /// The messages of commit `oid` and of its parent for the reword and
+    /// squash dialogs: `{summary, body, parent, parent_summary, parent_body}`
+    /// (`parent`: the first parent's hash, empty for a root commit);
+    /// empty when `oid` cannot be edited.
+    #[func]
+    fn rewrite_messages(&self, oid: GString) -> VarDictionary {
+        let oid = oid.to_string();
+        self.read(|s| {
+            let list = s.rewritable()?;
+            let i = list.index(&oid)?;
+            let commit = &list.commits[i];
+            let parent = list.commits.get(i + 1);
+            Some(vdict! {
+                "summary" => &gstr(&commit.subject),
+                "body" => &gstr(&commit.body),
+                "parent" => &gstr(commit.parent.as_deref().unwrap_or_default()),
+                "parent_summary" => &gstr(parent.map_or("", |p| p.subject.as_str())),
+                "parent_body" => &gstr(parent.map_or("", |p| p.body.as_str())),
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    /// Runs history edit `action` on commit `oid` (see `rewrite_check`);
+    /// reword and squash take the new message. Label `edit history`; a
+    /// clean edit can be undone (`undoable_commit().rewrite`), conflicts
+    /// fail with the `conflict` kind and leave the rebase in progress.
+    #[func]
+    fn rewrite_history(
+        &self,
+        oid: GString,
+        action: GString,
+        summary: GString,
+        body: GString,
+    ) -> i64 {
+        let (summary, body) = (summary.to_string(), body.to_string());
+        let message = if body.trim().is_empty() {
+            summary.trim().to_owned()
+        } else {
+            format!("{}\n\n{}", summary.trim(), body.trim_end())
+        };
+        let Some(action) = RewriteAction::from_id(&action.to_string(), &message) else {
+            return -1;
+        };
+        let oid = oid.to_string();
+        job_id(runtime_cell::with(|rt| rt.rewrite_history(&self.key, &oid, action)).flatten())
     }
 
     /// See `convert::operation_info`; empty with no operation in progress.

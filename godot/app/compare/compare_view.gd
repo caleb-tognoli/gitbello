@@ -721,11 +721,11 @@ func _show_actions(menu: ActionMenu, ids: Array, at: Vector2, labels: Dictionary
 func _update_bar() -> void:
 	if not is_node_ready():
 		return
-	_swap_button.icon = AppTheme.icon(&"Swap")
+	_swap_button.icon = Actions.icon(&"compare.swap")
 	_swap_button.disabled = not can_swap()
 	_swap_button.tooltip_text = Actions.tooltip(&"compare.swap") if can_swap() \
 			else tr("Working copy stays on the right")
-	_recent_button.icon = AppTheme.icon(&"History")
+	_recent_button.icon = Actions.icon(&"compare.recent")
 	_recent_button.tooltip_text = Actions.tooltip(&"compare.recent")
 	_show_side(_left_button, "left")
 	_show_side(_right_button, "right")

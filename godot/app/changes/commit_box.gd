@@ -13,6 +13,11 @@ extends VBoxContainer
 ## A commit or amend finished successfully.
 signal committed()
 
+## The undo strip after a history edit made here (`%s`: the commit's subject).
+const REWRITE_DONE: Dictionary[String, String] = {
+	"reword": "Reworded “%s”", "squash": "Squashed “%s”",
+	"move_up": "Moved “%s” up", "move_down": "Moved “%s” down", "drop": "Dropped “%s”",
+}
 const THEME_TYPE: StringName = &"CommitBox"
 const COMMIT_LABEL: String = "commit"
 ## Summaries longer than this show their character count.
@@ -469,8 +474,14 @@ func _update_undo_strip() -> void:
 		return
 	var merge: bool = bool(commit_info.get("merge", false))
 	var onto: String = String(commit_info.get("rebase_onto", ""))
+	var rewrite: String = String(commit_info.get("rewrite", ""))
 	_undo_icon.texture = AppTheme.icon(&"GitRebase" if not onto.is_empty() else &"GitMerge" if merge else &"GitCommit")
-	_undo_label.text = String(commit_info["subject"]) if onto.is_empty() 			else tr("Rebased %s onto %s") % [session.current_branch(), onto]
+	if not rewrite.is_empty():
+		_undo_label.text = tr(REWRITE_DONE.get(rewrite, "Edited “%s”")) % String(commit_info.get("rewrite_subject", ""))
+	elif onto.is_empty():
+		_undo_label.text = String(commit_info["subject"])
+	else:
+		_undo_label.text = tr("Rebased %s onto %s") % [session.current_branch(), onto]
 	_undo_label.tooltip_text = _undo_label.text
 	_undo_button.tooltip_text = Actions.tooltip(&"commit.undo")
 

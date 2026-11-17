@@ -35,6 +35,7 @@ const VERBS: Dictionary[String, String] = {
 	"merge": "Merging",
 	"rebase": "Rebasing",
 	"undo rebase": "Undoing the rebase",
+	"edit history": "Editing history",
 	"continue": "Continuing",
 	"skip": "Skipping the commit",
 	"undo commit": "Undoing the commit",

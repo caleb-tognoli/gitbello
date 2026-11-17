@@ -60,7 +60,7 @@ func _notification(what: int) -> void:
 
 
 ## Shows `title`, `hint` and one button per entry of `actions`:
-## `{id: StringName, label: String (else the action's), icon: StringName}`,
+## `{id: StringName, label: String (else the action's), icon: StringName (else the action's)}`,
 ## plus `ahead`/`behind` for commit counts in pills at the button's right.
 ## Disabled actions are left out.
 func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> void:
@@ -72,6 +72,8 @@ func show_state(heading: String, hint: String, actions: Array[Dictionary]) -> vo
 		if action == null or not action.is_enabled():
 			continue
 		var button: Button = add_button(String(entry.get("label", action.label)), entry.get("icon", &""), Callable())
+		if button.icon == null:
+			button.icon = Actions.icon(id)
 		button.pressed.connect(func() -> void: Actions.run_action(id, button))
 		button.tooltip_text = Actions.tooltip(id)
 		if entry.has("ahead") or entry.has("behind"):

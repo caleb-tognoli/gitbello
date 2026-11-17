@@ -32,7 +32,7 @@ func _ready() -> void:
 	box.add_child(_tree)
 	var row: HBoxContainer = HBoxContainer.new()
 	box.add_child(row)
-	for entry: Array in [["new", "Tag HEAD…", &"Add"], ["push", "Push", &"GitPush"], ["delete", "Delete…", &"Remove"]]:
+	for entry: Array in [["new", "Tag HEAD…", &"GitTag"], ["push", "Push", &"GitPush"], ["delete", "Delete…", &"Remove"]]:
 		var button: Button = Button.new()
 		button.text = tr(entry[1])
 		button.icon = AppTheme.icon(entry[2])

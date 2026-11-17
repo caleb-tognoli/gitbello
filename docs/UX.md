@@ -125,7 +125,7 @@ The panes switch between **Changes**, **History**, **Shelves**, **Compare** and 
 
 ## Operation banner
 
-While a merge, rebase or cherry-pick is in progress, a full-width banner sits under the Branch/Sync row: "Merging feature/login into main · 2 of 3 conflicts left" (cherry-pick: "Cherry-picking abc1234 'subject'"; rebase: "Rebasing fix onto main · commit 2 of 5"). It is the only red element in the UI, and the chip shows a marker too. Buttons:
+While a merge, rebase or cherry-pick is in progress, a full-width banner sits under the Branch/Sync row: "Merging feature/login into main · 2 of 3 conflicts left" (cherry-pick: "Cherry-picking abc1234 'subject'"; rebase: "Rebasing fix onto main · commit 2 of 5"; an interactive rebase, which history edits run as: "Editing history of fix"). It is the only red element in the UI, and the chip shows a marker too. Buttons:
 - **Continue**, disabled until no conflict is left. Merge and cherry-pick: the same as the commit box's button. Rebase: `rebase --continue` with no editor.
 - **Skip** (rebase only).
 - **Abort**, always confirmed; the confirmation says how many resolved files go back.
@@ -156,6 +156,7 @@ One list of changed files with checkboxes: [x] included in the commit, [ ] left 
 Under the commit button: "<subject> · committed 3 min ago · Undo" for HEAD while it is unpushed (not on its upstream; with no upstream, not on any remote branch). It is hidden during an operation.
 - **Undo:** `reset --mixed <first parent>` after checking that HEAD is still that commit. The commit's changes join the local changes and its message fills an empty commit box. The next unpushed commit then shows, so several commits can be undone in a row into one set of changes. The first commit of a branch makes the branch unborn again (`update-ref -d`).
 - **Undoing a merge commit** asks first: **Undo, keep changes** (everything merged becomes local changes and the merge is lost) or **Remove merge** (`reset --keep <first parent>`: the merged changes are not brought back, since they are still on the other branch; local changes are kept).
+- **Undoing a history edit:** after a clean edit made here (see History editing), the strip says what it did ("Reworded “Fix it”", "Squashed “x”", "Dropped “x”", "Moved “x” up") and Undo moves the branch back the same way. It shows while HEAD is the edit's result and the upstream has not moved since (dropping HEAD can leave a pushed commit at HEAD).
 - **Undoing a rebase:** after a clean rebase made here, while HEAD is still its result and unpushed, the strip reads "Rebased topic onto main" and Undo moves the branch back (`reset --keep <before>`, after checking HEAD); local changes are kept.
 - Fast-forwarded commits show as ordinary commits.
 
@@ -218,6 +219,17 @@ One dialog, which first reads what the branch would lose (`load_branch_delete_in
 - **Finishing a merge or cherry-pick in Changes.** The commit box is prefilled from `MERGE_MSG` (a cherry-pick keeps the original author) and reads "Commit merge into main" / "Commit cherry-pick". The checkboxes are locked: the commit takes the index (git's result plus resolved files), so local changes that were there before the merge stay out. During a rebase the commit box is disabled ("Use Continue in the banner"). A squash merge is not an operation: its staged result is committed like any other change, with a message built from the squashed commits' subjects prefilled.
 - **Cherry-pick** from the graph's commit menu (a merge against its first parent) or several commits from Compare ([COMPARE.md](COMPARE.md)).
 
+## History editing
+
+One-shot edits of a commit of the current branch, each run at once as an interactive rebase whose todo gitbello writes (`app/repo_tab/repo_ops.gd` `rewrite_commit`, core `history_edit.rs`). A planner view for several steps at once is not built.
+- **Entry points:** **Rewrite ▸** in History's commit menu (`Menus.rewrite_commit`): Reword… (`commit.reword`), Squash down… (`commit.squash`: into the commit below), Move up (`commit.move_up`, Ctrl+Alt+Up), Move down (`commit.move_down`, Ctrl+Alt+Down) and Drop… (`commit.drop`); also the palette. Up is newer, as History lists them. Reword has no default shortcut (F2 is Rename branch…).
+- **What can be edited** (`HeadInfo::rewritable`, read with HEAD's info): the current branch's commits from HEAD back along first parents, up to the first merge commit, the root, 1,000 commits, or the default branch (`origin/HEAD`, else `main`/`master`: its remote and local branch). On the default branch itself every commit of HEAD counts. Each item is greyed with its reason otherwise: "Not on main" (another branch's commit), "A merge commit follows; edit after it", "Already on the default branch", "Too far back to edit", "The commit below cannot be edited" (squash down and move down need it), "Already the newest commit" (move up on HEAD), "No branch checked out", "Finish the operation in progress first".
+- **Messages:** Reword and Squash open a dialog with Summary and Description, prefilled with the commit's message (Squash down: the summary of the commit below, then its description and the squashed commit's message); an empty summary cannot be saved and Ctrl+Enter saves.
+- **Confirmation:** only when the edit rewrites a pushed commit (not on the upstream; with none, on no remote branch) or more than 50 commits: "Rewrites 3 commits (2 pushed); you will need to force push." Sync then offers the force push (Rewritten). Otherwise the edit runs at once.
+- **Running:** `rebase -i --autostash --no-autosquash --no-update-refs <parent of the oldest commit it touches>` (`--root` from the root) with `-c merge.conflictStyle=zdiff3`, `GIT_SEQUENCE_EDITOR` copying the prepared todo (`<git dir>/gitbello-rewrite/todo`: `pick`, `fixup` and `drop` lines). A new message is set by an `exec git commit --amend --allow-empty --no-verify -q -F <file>` line after the commit's `pick` (reword) or `fixup` (squash down). Local changes are stashed around it and come back; untracked files stay. It blocks the worktree (overlay).
+- **Conflicts:** the rebase stops for the banner ("Editing history of topic", Continue, Skip, Abort) and Changes opens on the resolver.
+- **Undo:** the undo commit strip (see above).
+
 ## Conflict resolver
 
 It lives in the Changes view: conflicted files are listed first, and selecting one shows the resolver in the diff pane. Unified or Side by side follows the diff's text mode.
@@ -275,6 +287,7 @@ Every shortcut is rebindable in Settings → Keyboard ([MENUS_AND_TOOLTIPS.md](M
 | Alt+Down | the focused field's options popover |
 | Ctrl+Enter | commit |
 | Ctrl+Shift+A | amend |
+| Ctrl+Alt+Up / Ctrl+Alt+Down | move the History commit up / down (history editing) |
 | Ctrl+Z | Edit → Undo (the newest file-level undo) |
 | Ctrl+Shift+Y | Sync |
 | Ctrl+Shift+B | Merge / Rebase… |

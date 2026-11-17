@@ -1,22 +1,30 @@
 //! The merge workflows' git calls (UX.md): merge preview and merge,
 //! the operation in progress, conflicted files, and undoing a commit.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::{run_with_paths, unexpected, CliBackend};
 use crate::git::{CancelToken, GitError, GitErrorKind};
+use crate::history_edit::{
+    parse_rewritable, sh_quote, Rewritable, RewritePlan, REWRITABLE_LIMIT, REWRITABLE_LOG_FORMAT,
+};
 use crate::merge::{
     default_merge_message, parse_merge_tree, parse_preview_commits, parse_undoable,
     read_operation_details, ConflictFile, ConflictKind, ConflictOp, HeadInfo, MergeMode,
     MergePreview, OperationDetails, RebaseCheck, RebaseStop, UndoMode, PREVIEW_COMMITS,
     PREVIEW_LOG_FORMAT, REBASE_CHECK_LIMIT, UNDOABLE_LOG_FORMAT,
 };
-use crate::repo::{detect_operation, git_path, Operation};
+use crate::repo::{detect_operation, git_path, Operation, Ref};
+use crate::worktrees::default_base;
 
 /// Name of the merge message file under the worktree's git dir.
 const MERGE_MESSAGE_FILE: &str = "gitbello-merge-msg";
+
+/// Folder under the worktree's git dir with a history edit's todo and messages.
+const REWRITE_DIR: &str = "gitbello-rewrite";
 
 /// Commits outside HEAD read for the graph's `in_head`; more are not read.
 const NOT_IN_HEAD_LIMIT: usize = 200_000;
@@ -331,6 +339,56 @@ impl CliBackend {
             .cancel_token(cancel)
             .run()
             .map(drop)
+    }
+
+    pub(super) fn rewrite_history_impl(
+        &self,
+        toplevel: &Path,
+        plan: &RewritePlan,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        let io = |err| io_error("rebase", err);
+        let git_dir = self.read(
+            toplevel,
+            &["rev-parse", "--path-format=absolute", "--git-dir"],
+            cancel,
+        )?;
+        let dir = PathBuf::from(git_dir.stdout_text().trim()).join(REWRITE_DIR);
+        // Left from an earlier edit that stopped on conflicts.
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).map_err(io)?;
+        let message_file = |n: usize| dir.join(format!("message-{n}"));
+        for (n, message) in plan.messages().enumerate() {
+            fs::write(message_file(n), message).map_err(io)?;
+        }
+        let todo = dir.join("todo");
+        let text = plan.todo(|n| message_file(n).to_string_lossy().into_owned());
+        fs::write(&todo, text).map_err(io)?;
+        // git runs the sequence editor through a shell with the todo's path.
+        let editor = format!("cp {}", sh_quote(&todo.to_string_lossy()));
+        let mut args = vec![
+            "-c",
+            "merge.conflictStyle=zdiff3",
+            "rebase",
+            "-i",
+            "--autostash",
+            "--no-autosquash",
+            "--no-update-refs",
+        ];
+        args.push(plan.base.as_deref().unwrap_or("--root"));
+        let result = self
+            .runner
+            .write(toplevel)
+            .env("GIT_SEQUENCE_EDITOR", editor)
+            .args(args)
+            .cancel_token(cancel)
+            .run()
+            .map(drop);
+        // A rebase stopped on conflicts still reads the messages.
+        if result.is_ok() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+        result
     }
 
     pub(super) fn merge_impl(
@@ -697,9 +755,14 @@ impl CliBackend {
             .filter(|l| l.len() >= 40)
             .map(str::to_owned)
             .collect();
+        let rewritable = match branch {
+            Some(branch) => self.rewritable(repo, &refs, branch, &head, &outgoing, cancel)?,
+            None => Rewritable::default(),
+        };
         Ok(HeadInfo {
             undoable,
             not_in_head,
+            rewritable,
             oid: Some(head),
             upstream,
             upstream_gone,
@@ -707,6 +770,59 @@ impl CliBackend {
             outgoing,
             rewritten,
         })
+    }
+
+    /// The commits of `branch` (checked out at `head`) history editing can
+    /// rewrite: back to the first merge, the root or the default branch
+    /// (all of HEAD's history when `branch` is the default branch).
+    fn rewritable(
+        &self,
+        repo: &Path,
+        refs: &[Ref],
+        branch: &Ref,
+        head: &str,
+        outgoing: &HashSet<String>,
+        cancel: &CancelToken,
+    ) -> Result<Rewritable, GitError> {
+        let remote = branch
+            .upstream
+            .as_deref()
+            .and_then(|u| u.strip_prefix("refs/remotes/"))
+            .and_then(|u| u.split('/').next())
+            .unwrap_or("origin");
+        let mut excluded: Vec<String> = Vec::new();
+        if let Some(base) = default_base(refs, Some(remote)) {
+            let local = base
+                .strip_prefix(&format!("{remote}/"))
+                .unwrap_or(&base)
+                .to_owned();
+            if branch.short_name != local {
+                for name in [
+                    format!("refs/remotes/{base}"),
+                    format!("refs/heads/{local}"),
+                ] {
+                    if refs.iter().any(|r| r.name == name) {
+                        excluded.push(name);
+                    }
+                }
+            }
+        }
+        let limit = format!("-n{}", REWRITABLE_LIMIT + 1);
+        let mut args = vec![
+            "log",
+            "-z",
+            "--first-parent",
+            REWRITABLE_LOG_FORMAT,
+            &limit,
+            head,
+        ];
+        if !excluded.is_empty() {
+            args.push("--not");
+            args.extend(excluded.iter().map(String::as_str));
+        }
+        args.push("--");
+        let log = self.read(repo, &args, cancel)?;
+        Ok(parse_rewritable(&log.stdout, head, outgoing))
     }
 
     /// See [`HeadInfo::rewritten`]. `branch` is the full ref name.

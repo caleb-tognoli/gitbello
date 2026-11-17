@@ -37,6 +37,7 @@ const BLOCKING: Dictionary[String, String] = {
 	"merge": "Merging",
 	"rebase": "Rebasing",
 	"undo rebase": "Undoing the rebase",
+	"edit history": "Editing history",
 	"continue": "Continuing",
 	"skip": "Skipping the commit",
 	"undo commit": "Undoing the commit",
@@ -1114,7 +1115,10 @@ func _update_banner() -> void:
 		"revert":
 			text = tr("Reverting %s") % ShortHash.of(oid)
 		"rebase":
-			text = tr("Rebasing %s onto %s") % [head if not head.is_empty() else "HEAD", _onto_name(oid)]
+			if bool(info.get("interactive", false)):
+				text = tr("Editing history of %s") % (head if not head.is_empty() else "HEAD")
+			else:
+				text = tr("Rebasing %s onto %s") % [head if not head.is_empty() else "HEAD", _onto_name(oid)]
 	var steps: int = int(info.get("steps", 0)) if operation == "rebase" else 0
 	_banner_step.visible = steps > 0
 	_banner_step.text = "%d / %d" % [int(info.get("step", 0)), steps] if steps > 0 else ""

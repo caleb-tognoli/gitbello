@@ -452,6 +452,21 @@ pub trait GitBackend: Send + Sync {
         before: &str,
         cancel: &CancelToken,
     ) -> Result<(), GitError>;
+    /// Runs `plan` as an interactive rebase with local changes stashed
+    /// around it (`--autostash`). Conflicts fail with
+    /// [`GitErrorKind::Conflict`] and leave the rebase in progress.
+    fn rewrite_history(
+        &self,
+        _toplevel: &Path,
+        _plan: &crate::history_edit::RewritePlan,
+        _cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        Err(GitError::new(
+            "rebase",
+            GitErrorKind::Other,
+            "history editing is not supported here",
+        ))
+    }
     /// The operation in progress with the banner's details, if any.
     fn operation_details(
         &self,
@@ -2352,6 +2367,15 @@ impl GitBackend for CliBackend {
         cancel: &CancelToken,
     ) -> Result<(), GitError> {
         self.undo_rebase_impl(toplevel, after, before, cancel)
+    }
+
+    fn rewrite_history(
+        &self,
+        toplevel: &Path,
+        plan: &crate::history_edit::RewritePlan,
+        cancel: &CancelToken,
+    ) -> Result<(), GitError> {
+        self.rewrite_history_impl(toplevel, plan, cancel)
     }
 
     fn operation_details(

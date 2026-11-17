@@ -987,23 +987,41 @@ pub fn operation_info(state: &RepoState) -> VarDictionary {
         "steps" => i64::from(steps),
         "message" => &gstr(&details.message),
         "commit_mode" => state.commit_mode().id(),
+        // `rebase -i`, which history edits run as.
+        "interactive" => matches!(details.kind, Operation::Rebase { interactive: true }),
     }
 }
 
 /// `{oid, subject, body, time, merge, rebase_onto}`, or empty when nothing
 /// can be undone; `rebase_onto` names what HEAD was just rebased onto here
 /// (Undo then undoes the rebase), else it is empty.
+///
+/// After a history edit made here, `rewrite` is what it did (`reword`,
+/// `squash`, `fixup`, `drop`, `move_up`, `move_down`; else empty) and
+/// `rewrite_subject` the edited commit's subject; Undo undoes the edit.
 pub fn undoable_commit(state: &RepoState) -> VarDictionary {
-    let Some(commit) = state.undoable_commit() else {
-        return VarDictionary::new();
+    let undo = state.rebase_undo();
+    let rewrite = undo.and_then(|u| u.rewrite.as_ref());
+    let (oid, subject, body, time, merge) = match (state.undoable_commit(), undo) {
+        (Some(c), _) => (
+            c.oid.as_str(),
+            c.subject.as_str(),
+            c.body.as_str(),
+            c.time,
+            c.is_merge(),
+        ),
+        (None, Some(u)) => (u.after.as_str(), "", "", 0, false),
+        (None, None) => return VarDictionary::new(),
     };
     vdict! {
-        "oid" => &gstr(&commit.oid),
-        "subject" => &gstr(&commit.subject),
-        "body" => &gstr(&commit.body),
-        "time" => commit.time,
-        "merge" => commit.is_merge(),
-        "rebase_onto" => &gstr(state.rebase_undo().map_or("", |u| u.onto.as_str())),
+        "oid" => &gstr(oid),
+        "subject" => &gstr(subject),
+        "body" => &gstr(body),
+        "time" => time,
+        "merge" => merge,
+        "rebase_onto" => &gstr(undo.map_or("", |u| u.onto.as_str())),
+        "rewrite" => rewrite.map_or("", |r| r.kind.id()),
+        "rewrite_subject" => &gstr(rewrite.map_or("", |r| r.subject.as_str())),
     }
 }
 

@@ -125,7 +125,7 @@ func has_body() -> bool:
 
 ## Shows "Compare commits" while two commits are selected.
 func show_pair_action(shown: bool) -> void:
-	_pair_button.icon = AppTheme.icon(&"GitCompare")
+	_pair_button.icon = Actions.icon(&"history.compare_selected")
 	_pair_button.visible = shown
 
 

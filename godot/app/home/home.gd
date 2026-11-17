@@ -753,10 +753,10 @@ func refresh_texts() -> void:
 	_empty.set_logo(AppTheme.logo())
 	_empty.show_state("No repositories yet",
 			"Clone one, add a folder you already have, or create a new one. You can also drop a folder here.", [
-		{"id": &"repo.clone", "icon": &"GitFetch"},
-		{"id": &"repo.add_existing", "icon": &"FolderAdd"},
-		{"id": &"repo.create", "icon": &"Add"},
-		{"id": &"repo.scan", "icon": &"Search"},
+		{"id": &"repo.clone"},
+		{"id": &"repo.add_existing"},
+		{"id": &"repo.create"},
+		{"id": &"repo.scan"},
 	])
 	var first: Button = _empty.first_button()
 	if first != null:

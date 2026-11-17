@@ -271,10 +271,11 @@ fn smoke(args: &[String]) -> Result<()> {
         .join(format!("gitbello-cli{}", env::consts::EXE_SUFFIX));
     let mut fixture = Command::new(cli);
     // repo-1..5 for the shell test, repo-6 for the commit cycle, repo-7 for
-    // lines, repo-8 for sync, repo-9 for branches and tags, repo-10 for worktrees.
+    // lines, repo-8 for sync, repo-9 for branches and tags, repo-10 for worktrees,
+    // repo-17 for history editing.
     fixture.arg("fixture").arg(&fixtures).args([
         "--repos",
-        "16",
+        "17",
         "--images",
         "--eol",
         "--syntax",

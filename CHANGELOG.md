@@ -4,6 +4,22 @@ All notable changes to gitbello. The version is set in `rust/Cargo.toml`
 (`workspace.package.version`), `godot/project.godot` (`application/config/version`) and
 `godot/export_presets.cfg`, and shown in Help > About.
 
+## Unreleased
+
+### History editing
+- History's commit menu has Rewrite ▸: Reword…, Squash down… (into the commit below),
+  Move up and Move down (Ctrl+Alt+Up / Ctrl+Alt+Down) and Drop… for a commit of the current
+  branch. Each runs at once as a rebase with no editor, keeping local changes; one that
+  cannot run is greyed with why (a merge commit follows, it is on the default branch, ...).
+- Rewriting pushed commits, or more than 50, asks first and says a force push follows.
+- Conflicts stop in the banner ("Editing history of topic") with Continue, Skip and Abort;
+  a clean edit can be undone from the undo strip ("Dropped “x” · Undo").
+- Ctrl+Enter in a dialog's text field submits the dialog.
+
+### Icons
+- An operation shows the same icon everywhere: Clone, Open repository, New worktree,
+  New branch, Tag and the Copy ▸ items now match between menus, buttons and empty states.
+
 ## 1.2.0
 
 ### Markdown diffs

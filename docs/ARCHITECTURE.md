@@ -15,12 +15,12 @@ gitbello is a lightweight, native-feeling Git GUI for people who juggle many rep
 
 ### In scope
 
-File, hunk and line selection for commits · commit and amend · fetch, pull and push · branches · tags · stash (as shelves) · history graph and search · diff viewer (text, Markdown preview, images) · blame and file history · Compare · conflict resolver · merge, rebase and cherry-pick · worktrees (chip strip, one-click creation with setup, cleanup) · ignore rules · repository library (Home) · command palette · live status badges and auto-fetch.
+File, hunk and line selection for commits · commit and amend · fetch, pull and push · branches · tags · stash (as shelves) · history graph and search · diff viewer (text, Markdown preview, images) · blame and file history · Compare · conflict resolver · merge, rebase and cherry-pick · history editing (reword, squash down, move, drop) · worktrees (chip strip, one-click creation with setup, cleanup) · ignore rules · repository library (Home) · command palette · live status badges and auto-fetch.
 
 ### Out of scope
 
 - Hosting integrations (GitHub, GitLab, …): gitbello is pure git. The exceptions are avatar lookups ([HISTORY.md](HISTORY.md#avatars)) and "Open on <host>" links, which only build URLs.
-- Interactive rebase (simple history editing is an idea on the board).
+- A full interactive rebase planner (several edits in one run); one-shot history edits are built.
 - Submodule and LFS management: they work transparently through git and are displayed only.
 - A bundled git and an auto-updater.
 

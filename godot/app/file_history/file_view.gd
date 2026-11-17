@@ -762,7 +762,7 @@ func toggle_blame() -> void:
 ## What depends on Blame: its switch and the diff or the blame.
 func _apply_mode() -> void:
 	_blame_button.text = tr("Blame")
-	_blame_button.icon = AppTheme.icon(&"Blame")
+	_blame_button.icon = Actions.icon(&"file_history.blame")
 	_blame_button.set_pressed_no_signal(_blame)
 	_blame_button.tooltip_text = TooltipCard.text_for(tr("Blame"), Actions.shortcut_text(&"file_history.blame"),
 			PackedStringArray([tr("Who last changed each line")]))

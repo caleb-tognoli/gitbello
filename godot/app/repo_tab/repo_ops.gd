@@ -32,6 +32,20 @@ const MERGE_DIALOG: PackedScene = preload("res://app/merge/merge_dialog.tscn")
 const MERGE_MODES: Dictionary[String, String] = {"merge": "no_ff", "squash": "squash", "ff": "ff_only"}
 ## Choice in the upstream dialog that removes the upstream.
 const NO_UPSTREAM: String = "(none)"
+## History edits: the confirmation's title and button, and what the toast
+## says while one runs (`%s` is the commit's subject).
+const REWRITE_TITLES: Dictionary[String, String] = {
+	"reword": "Reword commit", "squash": "Squash down",
+	"move_up": "Move commit up", "move_down": "Move commit down", "drop": "Drop commit",
+}
+const REWRITE_OK: Dictionary[String, String] = {
+	"reword": "Reword", "squash": "Squash", "move_up": "Move up", "move_down": "Move down",
+	"drop": "Drop",
+}
+const REWRITE_DOING: Dictionary[String, String] = {
+	"reword": "Rewording %s", "squash": "Squashing %s", "move_up": "Moving %s up",
+	"move_down": "Moving %s down", "drop": "Dropping %s",
+}
 ## What the worktree delete says of an operation in progress there.
 ## The command of a worktree setup's errors (core's `SETUP_COMMAND`).
 const SETUP_COMMAND: String = "worktree setup"
@@ -104,6 +118,8 @@ var _merge_dialog: MergeDialog = null
 var _merge_origin: Control = null
 ## Merges started here: job id -> `{target, shown, mode, commits}`.
 var _merges: Dictionary[int, Dictionary] = {}
+## Running history edits: their action.
+var _rewrites: Dictionary[int, String] = {}
 ## Undoing a merge commit: keep its changes (OK) or remove the merge.
 var _undo_merge: ConfirmationDialog = ConfirmationDialog.new()
 var _undo_question: Label = Label.new()
@@ -1104,6 +1120,75 @@ func recreate_with_base(path: String) -> void:
 				_track(session.recreate_conflicts_with_base(path), tr("Recreating %s") % path.get_file()))
 
 
+# --- History editing (UX.md History editing) ---------------------------------
+
+## Runs history edit `action` (`reword`, `squash`, `move_up`,
+## `move_down`, `drop`) on `commit` (`{hash, subject}`) of the current
+## branch. Reword and Squash ask for the message; an edit that rewrites
+## pushed commits, or many, asks first (`RepoSession.rewrite_check`).
+func rewrite_commit(commit: Dictionary, action: String) -> void:
+	var oid: String = String(commit.get("hash", ""))
+	var check: Dictionary = session.rewrite_check(oid, action)
+	if not bool(check.get("ok", false)):
+		return
+	var origin: Control = Actions.origin()
+	if action in ["reword", "squash"]:
+		_ask_rewrite_message(oid, action, check, origin)
+	else:
+		_confirm_rewrite(oid, action, check, String(commit.get("subject", "")), "", "", origin)
+
+
+## The message dialog of Reword and Squash down, prefilled with the
+## commit's message (Squash down: the one below's, then the commit's).
+func _ask_rewrite_message(oid: String, action: String, check: Dictionary, origin: Control) -> void:
+	var messages: Dictionary = session.rewrite_messages(oid)
+	var summary: String = String(messages.get("summary", ""))
+	var body: String = String(messages.get("body", ""))
+	var subject: String = summary
+	if action == "squash":
+		var parts: PackedStringArray = PackedStringArray()
+		for part: String in [String(messages.get("parent_body", "")), summary, body]:
+			if not part.strip_edges().is_empty():
+				parts.append(part.strip_edges())
+		summary = String(messages.get("parent_summary", ""))
+		body = "\n\n".join(parts)
+	var squash: bool = action == "squash"
+	_begin_form("rewrite", "Squash down" if squash else "Reword commit", "Squash" if squash else "Reword",
+			func(values: Dictionary) -> void:
+				_confirm_rewrite(oid, action, check, subject, String(values["summary"]), String(values["body"]), origin))
+	_form.add_line("summary", "Summary", summary)
+	_form.add_text("body", "Description", body)
+	_form.validator = func(values: Dictionary) -> String:
+		return "Enter a summary." if String(values.get("summary", "")).strip_edges().is_empty() else ""
+	_form.open()
+
+
+## Asks first when the edit rewrites pushed commits or many; then runs it.
+func _confirm_rewrite(oid: String, action: String, check: Dictionary, subject: String, summary: String,
+		body: String, origin: Control) -> void:
+	var run: Callable = func() -> void: _run_rewrite(oid, action, subject, summary, body, origin)
+	var commits: int = int(check.get("commits", 0))
+	var pushed: int = int(check.get("pushed", 0))
+	if not bool(check.get("confirm", false)):
+		run.call()
+		return
+	var text: String = tr("Rewrites %s.") % _commits(commits)
+	if pushed > 0:
+		text = tr("Rewrites %s (%d pushed); you will need to force push.") % [_commits(commits), pushed]
+	_ask(REWRITE_TITLES.get(action, "Edit history"), text, REWRITE_OK.get(action, "Rewrite"), run, action == "drop")
+
+
+func _run_rewrite(oid: String, action: String, subject: String, summary: String, body: String,
+		origin: Control) -> void:
+	var job: int = session.rewrite_history(oid, action, summary, body)
+	if job >= 0:
+		_rewrites[job] = action
+	var shown: String = summary if not summary.is_empty() else subject
+	var doing: String = tr(REWRITE_DOING.get(action, "Editing history")) % shown if not shown.is_empty() \
+			else tr("Editing history")
+	_track(job, doing, "", Callable(), origin)
+
+
 # --- Undo commit (UX.md Undo commit strip) ----------------------------------
 
 ## Undoes the commit the strip offers: its changes become local changes.
@@ -1927,6 +2012,10 @@ func _on_job_finished(job: int, _label: String, ok: bool, error: Dictionary) -> 
 			changes_requested.emit(false)
 		elif not ok and kind == "conflict":
 			# The banner says what is left to resolve.
+			changes_requested.emit(true)
+	elif _rewrites.has(job):
+		_rewrites.erase(job)
+		if not ok and kind == "conflict":
 			changes_requested.emit(true)
 
 

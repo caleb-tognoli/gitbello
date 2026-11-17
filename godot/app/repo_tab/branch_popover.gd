@@ -99,7 +99,7 @@ func _ready() -> void:
 	box.add_child(_empty)
 	var footer: HBoxContainer = HBoxContainer.new()
 	_new_button.text = tr("New branch…")
-	_new_button.icon = AppTheme.icon(&"Add")
+	_new_button.icon = Actions.icon(&"branch.new")
 	_new_button.theme_type_variation = &"ToolbarButton"
 	_new_button.pressed.connect(func() -> void:
 		hide()

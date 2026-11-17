@@ -642,10 +642,19 @@ func add_text(key: String, label: String, value: String = "", placeholder: Strin
 	text.placeholder_text = tr(placeholder)
 	text.custom_minimum_size.y = float(get_theme_constant(&"text_height", THEME_TYPE))
 	text.text_changed.connect(_touch.bind(key))
+	text.gui_input.connect(_on_text_input.bind(text))
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_box.add_child(text)
 	_fields[key] = text
 	return text
+
+
+## Ctrl+Enter in a text field submits the form, as in the commit box.
+func _on_text_input(event: InputEvent, text: TextEdit) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key != null and key.pressed and key.is_command_or_control_pressed() 			and key.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+		text.accept_event()
+		submit()
 
 
 ## A colour: swatches for `presets` and a picker for any other. Its value is

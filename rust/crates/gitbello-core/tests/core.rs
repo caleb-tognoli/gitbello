@@ -23,6 +23,7 @@ mod graph_load;
 mod graph_search;
 mod highlight;
 mod history;
+mod history_edit;
 mod ignore;
 mod ignore_rules;
 mod image_diffs;

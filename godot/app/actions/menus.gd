@@ -43,7 +43,7 @@ static func worktree(branch_scope: Callable = Callable()) -> Array:
 ## A commit's menu in History.
 static func commit() -> Array:
 	return [&"history.compare_selected", &"", &"commit.checkout", &"commit.cherry_pick", &"commit.merge",
-		&"commit.amend", &"", &"branch.new", &"tag.new", &"commit.new_worktree", &"", compare_commit(), copy_commit(), &"commit.open_web"]
+		&"commit.amend", rewrite_commit(), &"", &"branch.new", &"tag.new", &"commit.new_worktree", &"", compare_commit(), copy_commit(), &"commit.open_web"]
 
 
 ## A changed file's menu in Changes (`ignore` is the Ignore ▸ submenu, or
@@ -102,6 +102,15 @@ static func compare_ref() -> Dictionary:
 static func compare_commit() -> Dictionary:
 	return ActionMenu.family(_t("Compare"), [&"commit.compare_working", &"commit.compare_with"], {
 		&"commit.compare_working": _t("With working copy"), &"commit.compare_with": _t("With…")}, &"GitCompare")
+
+
+## Rewrite ▸ for a commit of the current branch (history editing).
+static func rewrite_commit() -> Dictionary:
+	return ActionMenu.family(_t("Rewrite"), [&"commit.reword", &"commit.squash", &"commit.move_up",
+		&"commit.move_down", &"", &"commit.drop"], {&"commit.reword": _t("Reword…"),
+		&"commit.squash": _t("Squash down…"),
+		&"commit.move_up": _t("Move up"), &"commit.move_down": _t("Move down"), &"commit.drop": _t("Drop…")},
+		&"GitRebase")
 
 
 ## Copy ▸ for a commit.

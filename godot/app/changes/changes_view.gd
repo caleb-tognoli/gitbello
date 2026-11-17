@@ -981,8 +981,8 @@ func _update_empty() -> void:
 	elif ahead > 0:
 		var label: String = "Publish" if bool(badge.get("unpublished", false)) else "Push"
 		actions.append({"id": &"sync.sync", "label": label, "icon": &"GitPush", "ahead": ahead})
-	actions.append({"id": &"repo.open_terminal", "label": "Open terminal", "icon": &"Terminal"})
-	actions.append({"id": &"task.new", "label": "New worktree", "icon": &"GitWorktree"})
+	actions.append({"id": &"repo.open_terminal", "label": "Open terminal"})
+	actions.append({"id": &"task.new", "label": "New worktree"})
 	_empty.set_icon(&"StatusSuccess")
 	_empty.show_state("No local changes", "", actions)
 

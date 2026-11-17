@@ -162,6 +162,8 @@ pub struct RebaseUndo {
     pub onto: String,
     pub before: String,
     pub after: String,
+    /// Set when this was a history edit (reword, drop, ...).
+    pub rewrite: Option<crate::history_edit::RewriteDone>,
 }
 
 /// Commits listed in a preview.
@@ -901,6 +903,8 @@ pub struct HeadInfo {
     /// Commits of branches, remote branches and tags that HEAD lacks (what
     /// "Merge into current" can be offered on).
     pub not_in_head: HashSet<String>,
+    /// The commits of the current branch history editing can rewrite.
+    pub rewritable: crate::history_edit::Rewritable,
 }
 
 /// A write to a conflicted file.

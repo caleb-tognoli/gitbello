@@ -91,7 +91,7 @@ func clone(url: String = "", destination: String = "") -> void:
 	_form.add_line("branch", "Branch", "", true, "The remote's default branch")
 	_form.add_check("submodules", "Clone submodules too")
 	_form.validator = _validate_clone
-	_form.set_ok_icon(AppTheme.icon(&"GitFetch"))
+	_form.set_ok_icon(Actions.icon(&"repo.clone"))
 	_form.open()
 
 
